@@ -48,6 +48,8 @@ jobs:
           flatpak build-bundle repo H7CAD.flatpak io.github.HakanSeven12.H7CAD
 
       - name: Upload bundle to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: H7CAD.flatpak
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} H7CAD.flatpak --clobber --repo ${{ github.repository }}
