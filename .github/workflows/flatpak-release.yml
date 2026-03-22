@@ -3,6 +3,7 @@ name: Flatpak Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   build:
