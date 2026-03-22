@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
+  <!-- Source layer (top, dim) -->
+  <line x1="3" y1="7" x2="21" y2="7" stroke="#888" stroke-width="1.4" stroke-linecap="round"
+        stroke-dasharray="3 2"/>
+  <!-- Target layer (bottom, highlighted) -->
+  <line x1="3" y1="17" x2="21" y2="17" stroke="#4cc9f0" stroke-width="2" stroke-linecap="round"/>
+  <!-- Match arrow (source → target) -->
+  <line x1="12" y1="9"   x2="12" y2="14" stroke="#e0e0e0" stroke-width="1.7" stroke-linecap="round"/>
+  <polyline points="9.5,13 12,15.5 14.5,13"
+            fill="none" stroke="#e0e0e0" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Small object dot on source -->
+  <circle cx="7" cy="7" r="1.8" fill="#888"/>
+  <!-- Small object dot on target (matched) -->
+  <circle cx="7" cy="17" r="1.8" fill="#4cc9f0"/>
+</svg>

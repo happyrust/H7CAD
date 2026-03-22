@@ -1,0 +1,16 @@
+[package]
+name = "H7CAD"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+iced = { version = "0.14", features = ["debug", "image", "svg", "advanced", "canvas"] }
+bytemuck = { version = "1.14", features = ["derive"] }
+glam = { version = "0.27", features = ["bytemuck"] }
+truck-modeling = "0.6"
+truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation"] }
+truck-polymesh = "0.6"
+rfd = "0.15"
+acadrust = "0.3.0"
+open = "5"

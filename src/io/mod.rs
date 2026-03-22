@@ -1,0 +1,121 @@
+// I/O module — open and save CAD documents.
+//
+// All file reading/writing goes through acadrust.
+// Default save format: DWG (AC1032 / R2018+).
+
+use acadrust::io::dwg::DwgReader;
+use acadrust::{CadDocument, DwgWriter, DxfReader, DxfWriter};
+use std::path::{Path, PathBuf};
+
+// ── Open ──────────────────────────────────────────────────────────────────
+
+/// Show a file-open dialog and load the selected DWG or DXF file.
+/// Returns `(filename, path, document)` or an error string.
+pub async fn pick_and_open() -> Result<(String, PathBuf, CadDocument), String> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("Open CAD file")
+        .add_filter("CAD Files", &["dwg", "dxf", "DWG", "DXF"])
+        .add_filter("DWG Files", &["dwg", "DWG"])
+        .add_filter("DXF Files", &["dxf", "DXF"])
+        .add_filter("All Files", &["*"])
+        .pick_file()
+        .await;
+
+    let handle = match handle {
+        Some(h) => h,
+        None => return Err("Cancelled".into()),
+    };
+
+    let path = handle.path().to_path_buf();
+    open_path(path).await
+}
+
+/// Load a CAD file from a known path (used by recent files).
+pub async fn open_path(path: PathBuf) -> Result<(String, PathBuf, CadDocument), String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown".into());
+    let doc = load_file(&path)?;
+    Ok((name, path, doc))
+}
+
+/// Load a DWG or DXF file directly from a path (auto-detect by extension).
+pub fn load_file(path: &Path) -> Result<CadDocument, String> {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "dwg" => {
+            let mut reader = DwgReader::from_file(path).map_err(|e| e.to_string())?;
+            reader.read().map_err(|e| e.to_string())
+        }
+        "dxf" => DxfReader::from_file(path)
+            .map_err(|e| e.to_string())?
+            .read()
+            .map_err(|e| e.to_string()),
+        _ => Err(format!("Unsupported file format: .{ext}")),
+    }
+}
+
+// ── Save dialog ───────────────────────────────────────────────────────────
+
+/// Show a save-file dialog listing all DWG and DXF version filters.
+/// DWG versions appear first; format is auto-detected from the returned extension.
+pub async fn pick_save_path() -> Option<PathBuf> {
+    let dwg_filters: &[(&str, &[&str])] = &[
+        ("DWG Files (2018)", &["dwg"]),
+        ("DWG Files (2013)", &["dwg"]),
+        ("DWG Files (2010)", &["dwg"]),
+        ("DWG Files (2007)", &["dwg"]),
+        ("DWG Files (2004)", &["dwg"]),
+        ("DWG Files (2000)", &["dwg"]),
+        ("DWG Files (R14)", &["dwg"]),
+        ("DWG Files (R13)", &["dwg"]),
+    ];
+    let dxf_filters: &[(&str, &[&str])] = &[
+        ("DXF Files (2018)", &["dxf"]),
+        ("DXF Files (2013)", &["dxf"]),
+        ("DXF Files (2010)", &["dxf"]),
+        ("DXF Files (2007)", &["dxf"]),
+        ("DXF Files (2004)", &["dxf"]),
+        ("DXF Files (2000)", &["dxf"]),
+        ("DXF Files (R14)", &["dxf"]),
+        ("DXF Files (R13)", &["dxf"]),
+    ];
+
+    let mut dlg = rfd::AsyncFileDialog::new()
+        .set_title("Save As")
+        .set_file_name("drawing.dwg");
+    for (label, exts) in dwg_filters.iter().chain(dxf_filters.iter()) {
+        dlg = dlg.add_filter(*label, *exts);
+    }
+    dlg.save_file().await.map(|h| h.path().to_path_buf())
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────
+
+/// Save the document to the given path.
+/// Format is auto-detected from the extension (dwg / dxf).
+pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "dxf" => save_dxf(doc, path),
+        _ => save_dwg(doc, path),
+    }
+}
+
+pub fn save_dwg(doc: &CadDocument, path: &Path) -> Result<(), String> {
+    DwgWriter::write_to_file(path, doc).map_err(|e| e.to_string())
+}
+
+pub fn save_dxf(doc: &CadDocument, path: &Path) -> Result<(), String> {
+    DxfWriter::new(doc)
+        .write_to_file(path)
+        .map_err(|e| e.to_string())
+}

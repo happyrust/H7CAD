@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
+  <!-- Ghost full ellipse (dim, dashed) -->
+  <ellipse cx="12" cy="12" rx="9" ry="5.5"
+           stroke="#606060" stroke-width="1.5" stroke-dasharray="3 2" fill="none"/>
+  <!-- Partial arc t=45° → t=315° (large arc, going left/counterclockwise in SVG) -->
+  <!-- Start: (18.36, 15.89)  End: (18.36, 8.11)  large-arc=1, sweep=0 -->
+  <path d="M 18.36 15.89 A 9 5.5 0 1 0 18.36 8.11"
+        stroke="#e0e0e0" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Start angle dot -->
+  <circle cx="18.36" cy="15.89" r="2"   fill="#4cc9f0"/>
+  <!-- End angle dot -->
+  <circle cx="18.36" cy="8.11"  r="1.5" fill="#4cc9f0"/>
+</svg>

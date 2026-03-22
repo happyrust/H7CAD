@@ -1,0 +1,702 @@
+//! Viewport overlay widgets:
+//!   • info_bar()        — top-left bracket buttons showing view name / style
+//!   • nav_toolbar()     — vertical orbit/pan/zoom buttons on the right
+
+use glam::{Mat4, Vec3};
+use iced::mouse;
+use iced::widget::{button, canvas, column, container, row, text};
+use iced::{Background, Border, Color, Element, Length, Point, Size, Theme};
+
+use crate::scene::object::GripShape;
+use crate::scene::SelectionState;
+use crate::Message;
+
+/// Half-size of the crosshair center square in screen pixels (square = SQ*2 × SQ*2).
+pub const CROSSHAIR_SQ: f32 = 7.5;
+/// Arm length of the crosshair from center — used as the snap aperture radius.
+pub const CROSSHAIR_ARM: f32 = 60.0;
+use crate::snap::SnapType;
+
+// ── Grip marker data ──────────────────────────────────────────────────────
+
+/// Describes one grip to be drawn in the viewport overlay.
+#[derive(Clone, Debug)]
+pub struct GripMarker {
+    /// Screen-space position (viewport-relative pixels).
+    pub pos: Point,
+    /// Explicit marker shape.
+    pub shape: GripShape,
+    /// True → grip is currently being dragged (drawn filled red).
+    pub is_hot: bool,
+}
+
+// ── Info bar ─────────────────────────────────────────────────────────────
+
+pub fn info_bar<'a>(view_name: &'a str, visual_style: &'a str) -> Element<'a, Message> {
+    let bracket = |s: &'a str| -> Element<'a, Message> {
+        container(text(s).size(10).color(Color {
+            r: 0.78,
+            g: 0.78,
+            b: 0.78,
+            a: 1.0,
+        }))
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color {
+                r: 0.10,
+                g: 0.10,
+                b: 0.10,
+                a: 0.75,
+            })),
+            border: Border {
+                color: Color {
+                    r: 0.35,
+                    g: 0.35,
+                    b: 0.35,
+                    a: 1.0,
+                },
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .padding([2, 6])
+        .into()
+    };
+    row![bracket("[-]"), bracket(view_name), bracket(visual_style)]
+        .spacing(0)
+        .into()
+}
+
+// ── Nav toolbar ───────────────────────────────────────────────────────────
+
+pub fn nav_toolbar<'a>() -> Element<'a, Message> {
+    let b = |icon: &'a str, cmd: &'a str| -> Element<'a, Message> {
+        button(text(icon).size(14).color(Color::WHITE))
+            .on_press(Message::Command(cmd.into()))
+            .style(|_: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered => Color {
+                        r: 0.32,
+                        g: 0.32,
+                        b: 0.32,
+                        a: 0.95,
+                    },
+                    button::Status::Pressed => Color {
+                        r: 0.18,
+                        g: 0.42,
+                        b: 0.70,
+                        a: 1.00,
+                    },
+                    _ => Color {
+                        r: 0.20,
+                        g: 0.20,
+                        b: 0.20,
+                        a: 0.85,
+                    },
+                })),
+                border: Border {
+                    color: Color {
+                        r: 0.30,
+                        g: 0.30,
+                        b: 0.30,
+                        a: 1.0,
+                    },
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                text_color: Color::WHITE,
+                shadow: iced::Shadow::default(),
+                snap: false,
+            })
+            .padding([6, 8])
+            .into()
+    };
+    container(
+        column![
+            b("⟳", "3DORBIT"),
+            b("✥", "PAN"),
+            b("⊕", "ZOOMIN"),
+            b("⊖", "ZOOMOUT"),
+            b("⊡", "ZOOMEXTENTS")
+        ]
+        .spacing(2),
+    )
+    .padding(4)
+    .into()
+}
+
+// ── Grid display params ───────────────────────────────────────────────────
+
+/// Which world-space plane the grid is drawn on — switches with camera angle.
+#[derive(Clone, Copy, PartialEq)]
+pub enum GridPlane {
+    /// Horizontal XY plane (Z = 0).  Default top-down view (Z-up).
+    Xy,
+    /// Vertical XZ plane (Y = 0).  Front/back view.
+    Xz,
+    /// Vertical YZ plane (X = 0).  Side view.
+    Yz,
+}
+
+/// Passed to the canvas when the GRID display is active.
+#[derive(Clone)]
+pub struct GridParams {
+    pub view_proj: Mat4,
+    pub bounds: iced::Rectangle,
+    pub plane: GridPlane,
+}
+
+// ── Selection overlay ───────────────────────────────────────────────────
+
+pub fn selection_overlay<'a>(
+    selection: SelectionState,
+    snap: Option<(Point, SnapType)>,
+    grips: Vec<GripMarker>,
+    grid: Option<GridParams>,
+) -> Element<'a, Message> {
+    canvas(SelectionCanvas {
+        selection,
+        snap,
+        grips,
+        grid,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+struct SelectionCanvas {
+    selection: SelectionState,
+    snap: Option<(Point, SnapType)>,
+    grips: Vec<GripMarker>,
+    grid: Option<GridParams>,
+}
+
+impl canvas::Program<Message> for SelectionCanvas {
+    type State = ();
+
+    fn mouse_interaction(
+        &self,
+        _state: &(),
+        bounds: iced::Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if cursor.is_over(bounds) {
+            mouse::Interaction::Crosshair
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        // ── Grid display ──────────────────────────────────────────────────
+        if let Some(ref g) = self.grid {
+            draw_grid(&mut frame, g.view_proj, g.plane, g.bounds);
+        }
+
+        if let (Some(a), Some(b)) = (self.selection.box_anchor, self.selection.box_current) {
+            let (fill, stroke) = if self.selection.box_crossing {
+                (
+                    Color {
+                        r: 0.20,
+                        g: 0.72,
+                        b: 0.44,
+                        a: 0.12,
+                    },
+                    Color {
+                        r: 0.20,
+                        g: 0.72,
+                        b: 0.44,
+                        a: 0.9,
+                    },
+                )
+            } else {
+                (
+                    Color {
+                        r: 0.20,
+                        g: 0.44,
+                        b: 0.72,
+                        a: 0.12,
+                    },
+                    Color {
+                        r: 0.20,
+                        g: 0.44,
+                        b: 0.72,
+                        a: 0.9,
+                    },
+                )
+            };
+            let x0 = a.x.min(b.x);
+            let y0 = a.y.min(b.y);
+            let w = (a.x - b.x).abs();
+            let h = (a.y - b.y).abs();
+            let rect = canvas::Path::rectangle(Point::new(x0, y0), Size::new(w, h));
+            frame.fill(&rect, fill);
+            frame.stroke(
+                &rect,
+                canvas::Stroke {
+                    width: 1.0,
+                    style: canvas::Style::Solid(stroke),
+                    ..Default::default()
+                },
+            );
+        }
+
+        if self.selection.poly_active && self.selection.poly_points.len() > 1 {
+            let (fill, stroke) = if self.selection.poly_crossing {
+                (
+                    Color {
+                        r: 0.20,
+                        g: 0.72,
+                        b: 0.44,
+                        a: 0.12,
+                    },
+                    Color {
+                        r: 0.20,
+                        g: 0.72,
+                        b: 0.44,
+                        a: 0.9,
+                    },
+                )
+            } else {
+                (
+                    Color {
+                        r: 0.20,
+                        g: 0.44,
+                        b: 0.72,
+                        a: 0.12,
+                    },
+                    Color {
+                        r: 0.20,
+                        g: 0.44,
+                        b: 0.72,
+                        a: 0.9,
+                    },
+                )
+            };
+            if let Some(cur) = self.selection.last_move_pos {
+                let start = self.selection.poly_points[0];
+                let fill_path = canvas::Path::new(|p| {
+                    p.move_to(start);
+                    for pt in &self.selection.poly_points[1..] {
+                        p.line_to(*pt);
+                    }
+                    p.line_to(cur);
+                    p.line_to(start);
+                });
+                frame.fill(&fill_path, fill);
+            }
+            let path = canvas::Path::new(|p| {
+                p.move_to(self.selection.poly_points[0]);
+                for pt in &self.selection.poly_points[1..] {
+                    p.line_to(*pt);
+                }
+            });
+            frame.stroke(
+                &path,
+                canvas::Stroke {
+                    width: 1.0,
+                    style: canvas::Style::Solid(stroke),
+                    ..Default::default()
+                },
+            );
+            if let Some(cur) = self.selection.last_move_pos {
+                let start = self.selection.poly_points[0];
+                let last = *self.selection.poly_points.last().unwrap();
+                let preview = canvas::Path::new(|p| {
+                    p.move_to(last);
+                    p.line_to(cur);
+                    p.line_to(start);
+                });
+                frame.stroke(
+                    &preview,
+                    canvas::Stroke {
+                        width: 1.0,
+                        style: canvas::Style::Solid(stroke),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        if let Some(p) = self.selection.context_menu {
+            let w = 140.0;
+            let h = 72.0;
+            let rect = canvas::Path::rectangle(Point::new(p.x, p.y), Size::new(w, h));
+            frame.fill(
+                &rect,
+                Color {
+                    r: 0.12,
+                    g: 0.12,
+                    b: 0.12,
+                    a: 0.95,
+                },
+            );
+            frame.stroke(
+                &rect,
+                canvas::Stroke {
+                    width: 1.0,
+                    style: canvas::Style::Solid(Color {
+                        r: 0.30,
+                        g: 0.30,
+                        b: 0.30,
+                        a: 1.0,
+                    }),
+                    ..Default::default()
+                },
+            );
+            let items = ["Open", "Properties", "Hide"];
+            for (i, item) in items.iter().enumerate() {
+                frame.fill_text(canvas::Text {
+                    content: item.to_string(),
+                    position: Point::new(p.x + 10.0, p.y + 10.0 + i as f32 * 20.0),
+                    color: Color::WHITE,
+                    size: iced::Pixels(11.0),
+                    font: iced::Font::DEFAULT,
+                    align_x: iced::alignment::Horizontal::Left.into(),
+                    align_y: iced::alignment::Vertical::Top.into(),
+                    max_width: f32::INFINITY,
+                    line_height: iced::widget::text::LineHeight::default(),
+                    shaping: iced::widget::text::Shaping::default(),
+                });
+            }
+        }
+
+        // ── Grip markers ──────────────────────────────────────────────────
+        for grip in &self.grips {
+            let sp = grip.pos;
+            let h = crate::scene::grip::GRIP_HALF_PX;
+            let path = match grip.shape {
+                GripShape::Square => canvas::Path::rectangle(
+                    Point::new(sp.x - h, sp.y - h),
+                    Size::new(h * 2.0, h * 2.0),
+                ),
+                GripShape::Diamond => canvas::Path::new(|b| {
+                    b.move_to(Point::new(sp.x, sp.y - h));
+                    b.line_to(Point::new(sp.x + h, sp.y));
+                    b.line_to(Point::new(sp.x, sp.y + h));
+                    b.line_to(Point::new(sp.x - h, sp.y));
+                    b.close();
+                }),
+                GripShape::Triangle => canvas::Path::new(|b| {
+                    b.move_to(Point::new(sp.x, sp.y - h));
+                    b.line_to(Point::new(sp.x + h, sp.y + h));
+                    b.line_to(Point::new(sp.x - h, sp.y + h));
+                    b.close();
+                }),
+            };
+
+            if grip.is_hot {
+                // Hot grip: filled red marker
+                let color = Color {
+                    r: 1.0,
+                    g: 0.15,
+                    b: 0.10,
+                    a: 1.0,
+                };
+                frame.fill(&path, color);
+            } else {
+                // Normal grip: hollow blue marker
+                let color = Color {
+                    r: 0.10,
+                    g: 0.45,
+                    b: 0.90,
+                    a: 1.0,
+                };
+                let stroke = canvas::Stroke {
+                    width: 1.5,
+                    style: canvas::Style::Solid(color),
+                    ..Default::default()
+                };
+                // Fill with semi-transparent background then stroke
+                frame.fill(
+                    &path,
+                    Color {
+                        r: 0.10,
+                        g: 0.10,
+                        b: 0.20,
+                        a: 0.7,
+                    },
+                );
+                frame.stroke(&path, stroke);
+            }
+        }
+
+        // ── Snap marker ───────────────────────────────────────────────────
+        if let Some((sp, snap_type)) = self.snap {
+            let yellow = Color {
+                r: 1.0,
+                g: 0.9,
+                b: 0.1,
+                a: 1.0,
+            };
+            let stroke = canvas::Stroke {
+                width: 1.5,
+                style: canvas::Style::Solid(yellow),
+                ..Default::default()
+            };
+            match snap_type {
+                SnapType::Endpoint => {
+                    let half = 5.0_f32;
+                    let rect = canvas::Path::rectangle(
+                        Point::new(sp.x - half, sp.y - half),
+                        Size::new(half * 2.0, half * 2.0),
+                    );
+                    frame.stroke(&rect, stroke);
+                }
+                SnapType::Midpoint => {
+                    let r = 6.0_f32;
+                    let path = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x, sp.y - r));
+                        b.line_to(Point::new(sp.x + r * 0.866, sp.y + r * 0.5));
+                        b.line_to(Point::new(sp.x - r * 0.866, sp.y + r * 0.5));
+                        b.close();
+                    });
+                    frame.stroke(&path, stroke);
+                }
+                SnapType::Grid => {
+                    let arm = 4.0_f32;
+                    let h = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x - arm, sp.y));
+                        b.line_to(Point::new(sp.x + arm, sp.y));
+                    });
+                    let v = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x, sp.y - arm));
+                        b.line_to(Point::new(sp.x, sp.y + arm));
+                    });
+                    frame.stroke(&h, stroke.clone());
+                    frame.stroke(&v, stroke);
+                }
+                // Other snap types use the same diamond marker.
+                _ => {
+                    let r = 5.0_f32;
+                    let path = canvas::Path::new(|b| {
+                        b.move_to(Point::new(sp.x, sp.y - r));
+                        b.line_to(Point::new(sp.x + r, sp.y));
+                        b.line_to(Point::new(sp.x, sp.y + r));
+                        b.line_to(Point::new(sp.x - r, sp.y));
+                        b.close();
+                    });
+                    frame.stroke(&path, stroke);
+                }
+            }
+        }
+
+        // ── CAD crosshair cursor ──────────────────────────────────────────────
+        if let Some(cp) = self.selection.last_move_pos {
+            let color = Color {
+                r: 0.85,
+                g: 0.85,
+                b: 0.85,
+                a: 0.90,
+            };
+            let stroke = canvas::Stroke {
+                width: 1.0,
+                style: canvas::Style::Solid(color),
+                ..Default::default()
+            };
+            let sq = CROSSHAIR_SQ; // square half-size → 15×15
+            let arm = CROSSHAIR_ARM; // crosshair arm length from center
+
+            // Horizontal arms (start at square edge, end at arm length)
+            let h_left = canvas::Path::new(|b| {
+                b.move_to(Point::new(cp.x - sq, cp.y));
+                b.line_to(Point::new(cp.x - arm, cp.y));
+            });
+            let h_right = canvas::Path::new(|b| {
+                b.move_to(Point::new(cp.x + sq, cp.y));
+                b.line_to(Point::new(cp.x + arm, cp.y));
+            });
+            // Vertical arms
+            let v_top = canvas::Path::new(|b| {
+                b.move_to(Point::new(cp.x, cp.y - sq));
+                b.line_to(Point::new(cp.x, cp.y - arm));
+            });
+            let v_bot = canvas::Path::new(|b| {
+                b.move_to(Point::new(cp.x, cp.y + sq));
+                b.line_to(Point::new(cp.x, cp.y + arm));
+            });
+            // Center square
+            let square = canvas::Path::rectangle(
+                Point::new(cp.x - sq, cp.y - sq),
+                Size::new(sq * 2.0, sq * 2.0),
+            );
+
+            frame.stroke(&h_left, stroke.clone());
+            frame.stroke(&h_right, stroke.clone());
+            frame.stroke(&v_top, stroke.clone());
+            frame.stroke(&v_bot, stroke.clone());
+            frame.stroke(&square, stroke);
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
+
+// ── Grid line drawing ─────────────────────────────────────────────────────
+
+/// Minimum pixel gap between adjacent grid lines before stepping up to next spacing.
+const MIN_GRID_PX: f32 = 20.0;
+
+fn draw_grid(frame: &mut canvas::Frame, vp: Mat4, plane: GridPlane, bounds: iced::Rectangle) {
+    let w2s = |world: Vec3| -> Point {
+        let ndc = vp.project_point3(world);
+        Point::new(
+            (ndc.x + 1.0) * 0.5 * bounds.width,
+            (1.0 - ndc.y) * 0.5 * bounds.height,
+        )
+    };
+
+    // Plane-tangent axes: axis1 and axis2 span the grid plane.
+    let (axis1, axis2) = match plane {
+        GridPlane::Xz => (Vec3::X, Vec3::Z),
+        GridPlane::Xy => (Vec3::X, Vec3::Y),
+        GridPlane::Yz => (Vec3::Y, Vec3::Z),
+    };
+
+    // Adaptive spacing: measure pixels per 1-unit step along each axis,
+    // then find the smallest power-of-5 multiple that gives ≥ MIN_GRID_PX.
+    let o = w2s(Vec3::ZERO);
+    let a1s = w2s(axis1);
+    let a2s = w2s(axis2);
+    let px1 = ((a1s.x - o.x).powi(2) + (a1s.y - o.y).powi(2)).sqrt();
+    let px2 = ((a2s.x - o.x).powi(2) + (a2s.y - o.y).powi(2)).sqrt();
+    let px_per_unit = px1.max(px2);
+    if px_per_unit < 1e-6 {
+        return;
+    }
+
+    let mut s = 1.0_f32;
+    while s * px_per_unit < MIN_GRID_PX {
+        s *= 5.0;
+        if s > 1e9 {
+            return;
+        }
+    }
+
+    // Visible world extent: unproject screen corners (mid-depth approximation)
+    // and project them onto the grid axes.
+    let inv = vp.inverse();
+    let unproject = |sx: f32, sy: f32| -> Vec3 {
+        let ndc_x = (sx / bounds.width) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (sy / bounds.height) * 2.0;
+        inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.5))
+    };
+    let corners = [
+        unproject(0.0, 0.0),
+        unproject(bounds.width, 0.0),
+        unproject(0.0, bounds.height),
+        unproject(bounds.width, bounds.height),
+    ];
+    let range = |ax: Vec3| -> (f32, f32) {
+        let vals: Vec<f32> = corners.iter().map(|p| p.dot(ax)).collect();
+        (
+            vals.iter().cloned().fold(f32::INFINITY, f32::min),
+            vals.iter().cloned().fold(f32::NEG_INFINITY, f32::max),
+        )
+    };
+    let (min1, max1) = range(axis1);
+    let (min2, max2) = range(axis2);
+
+    let n1_s = (min1 / s).floor() as i32 - 1;
+    let n1_e = (max1 / s).ceil() as i32 + 1;
+    let n2_s = (min2 / s).floor() as i32 - 1;
+    let n2_e = (max2 / s).ceil() as i32 + 1;
+    if (n1_e - n1_s) > 500 || (n2_e - n2_s) > 500 {
+        return;
+    }
+
+    let gc = Color {
+        r: 0.28,
+        g: 0.28,
+        b: 0.28,
+        a: 0.7,
+    };
+    let st = canvas::Stroke {
+        width: 0.5,
+        style: canvas::Style::Solid(gc),
+        ..Default::default()
+    };
+
+    // Lines parallel to axis2 (varying axis1 position)
+    for i in n1_s..=n1_e {
+        let v = i as f32 * s;
+        let p0 = w2s(axis1 * v + axis2 * (min2 - s));
+        let p1 = w2s(axis1 * v + axis2 * (max2 + s));
+        frame.stroke(
+            &canvas::Path::new(|b| {
+                b.move_to(p0);
+                b.line_to(p1);
+            }),
+            st.clone(),
+        );
+    }
+    // Lines parallel to axis1 (varying axis2 position)
+    for i in n2_s..=n2_e {
+        let v = i as f32 * s;
+        let p0 = w2s(axis2 * v + axis1 * (min1 - s));
+        let p1 = w2s(axis2 * v + axis1 * (max1 + s));
+        frame.stroke(
+            &canvas::Path::new(|b| {
+                b.move_to(p0);
+                b.line_to(p1);
+            }),
+            st.clone(),
+        );
+    }
+
+    // World-space axes always drawn on top of the grid lines.
+    let extent = (min1.abs().max(max1.abs()).max(min2.abs()).max(max2.abs()) + s) * 1.5;
+    draw_axes(frame, vp, bounds, extent.max(10.0));
+}
+
+// ── Coloured world-space axes ─────────────────────────────────────────────
+
+fn draw_axes(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle, extent: f32) {
+    let w2s = |world: Vec3| -> Point {
+        let ndc = vp.project_point3(world);
+        Point::new(
+            (ndc.x + 1.0) * 0.5 * bounds.width,
+            (1.0 - ndc.y) * 0.5 * bounds.height,
+        )
+    };
+    let e = extent;
+    let axis_stroke = |r: f32, g: f32, b: f32| canvas::Stroke {
+        width: 1.5,
+        style: canvas::Style::Solid(Color { r, g, b, a: 0.85 }),
+        ..Default::default()
+    };
+    // X — red
+    frame.stroke(
+        &canvas::Path::new(|p| {
+            p.move_to(w2s(Vec3::new(-e, 0.0, 0.0)));
+            p.line_to(w2s(Vec3::new(e, 0.0, 0.0)));
+        }),
+        axis_stroke(0.90, 0.20, 0.20),
+    );
+    // Y — green
+    frame.stroke(
+        &canvas::Path::new(|p| {
+            p.move_to(w2s(Vec3::new(0.0, -e, 0.0)));
+            p.line_to(w2s(Vec3::new(0.0, e, 0.0)));
+        }),
+        axis_stroke(0.20, 0.85, 0.20),
+    );
+    // Z — blue
+    frame.stroke(
+        &canvas::Path::new(|p| {
+            p.move_to(w2s(Vec3::new(0.0, 0.0, -e)));
+            p.line_to(w2s(Vec3::new(0.0, 0.0, e)));
+        }),
+        axis_stroke(0.20, 0.40, 0.90),
+    );
+}

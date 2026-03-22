@@ -1,0 +1,458 @@
+pub mod hatch_gpu;
+pub mod mesh_gpu;
+pub mod uniforms;
+pub mod viewcube;
+pub mod wire_gpu;
+
+use iced::wgpu;
+use iced::{Rectangle, Size};
+
+pub use hatch_gpu::HatchGpu;
+pub use mesh_gpu::MeshGpu;
+pub use uniforms::Uniforms;
+pub use viewcube::ViewCubePipeline;
+pub use wire_gpu::WireGpu;
+
+use crate::scene::hatch_model::HatchModel;
+use crate::scene::mesh_model::MeshModel;
+use crate::scene::wire_model::WireModel;
+
+pub struct Pipeline {
+    wire_pipeline: wgpu::RenderPipeline,
+    hatch_pipeline: wgpu::RenderPipeline,
+    mesh_pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+    hatch_bgl1: wgpu::BindGroupLayout,
+    depth_texture_size: Size<u32>,
+    depth_view: wgpu::TextureView,
+    gpu_wires: Vec<WireGpu>,
+    gpu_hatches: Vec<HatchGpu>,
+    gpu_meshes: Vec<MeshGpu>,
+    pub viewcube: ViewCubePipeline,
+}
+
+impl Pipeline {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        // ── Shared frame uniform buffer (view_proj etc.) ───────────────────
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewer.uniform_buffer"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Bind group layout 0 — shared by wire and hatch pipelines.
+        let frame_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewer.frame_bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewer.bind_group"),
+            layout: &frame_bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        // ── Wire pipeline ──────────────────────────────────────────────────
+        let wire_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("wire.pipeline_layout"),
+            bind_group_layouts: &[&frame_bgl],
+            push_constant_ranges: &[],
+        });
+
+        let depth_tex = create_depth_texture(device, Size::new(1, 1));
+        let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let wire_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("wire.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/wire.wgsl"
+            ))),
+        });
+
+        let wire_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wire.pipeline"),
+            layout: Some(&wire_layout),
+            vertex: wgpu::VertexState {
+                module: &wire_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wire_gpu::WireVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &wire_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        // ── Hatch pipeline ─────────────────────────────────────────────────
+        let hatch_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let hatch_bgl1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("hatch.bgl1"),
+            entries: &[hatch_entry(0), hatch_entry(1), hatch_entry(2)],
+        });
+
+        let hatch_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("hatch.pipeline_layout"),
+            bind_group_layouts: &[&frame_bgl, &hatch_bgl1],
+            push_constant_ranges: &[],
+        });
+
+        let hatch_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("hatch.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/hatch.wgsl"
+            ))),
+        });
+
+        let hatch_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("hatch.pipeline"),
+            layout: Some(&hatch_layout),
+            vertex: wgpu::VertexState {
+                module: &hatch_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[hatch_gpu::HatchVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &hatch_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        // ── Mesh pipeline ──────────────────────────────────────────────────
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mesh.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/mesh.wgsl"
+            ))),
+        });
+
+        let mesh_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mesh.pipeline_layout"),
+            bind_group_layouts: &[&frame_bgl],
+            push_constant_ranges: &[],
+        });
+
+        let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mesh.pipeline"),
+            layout: Some(&mesh_layout),
+            vertex: wgpu::VertexState {
+                module: &mesh_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[mesh_gpu::MeshVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &mesh_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let viewcube = ViewCubePipeline::new(device, queue, format);
+
+        Self {
+            wire_pipeline,
+            hatch_pipeline,
+            mesh_pipeline,
+            uniform_buffer,
+            uniform_bind_group,
+            hatch_bgl1,
+            depth_texture_size: Size::new(1, 1),
+            depth_view,
+            gpu_wires: vec![],
+            gpu_hatches: vec![],
+            gpu_meshes: vec![],
+            viewcube,
+        }
+    }
+
+    pub fn upload_wires(&mut self, device: &wgpu::Device, wires: &[WireModel]) {
+        self.gpu_wires = wires.iter().map(|w| WireGpu::new(device, w)).collect();
+    }
+
+    pub fn upload_meshes(&mut self, device: &wgpu::Device, meshes: &[MeshModel]) {
+        self.gpu_meshes = meshes
+            .iter()
+            .filter(|m| !m.indices.is_empty())
+            .map(|m| MeshGpu::new(device, m))
+            .collect();
+    }
+
+    pub fn upload_hatches(&mut self, device: &wgpu::Device, hatches: &[HatchModel]) {
+        self.gpu_hatches = hatches
+            .iter()
+            .filter(|h| h.boundary.len() >= 3)
+            .map(|h| HatchGpu::new(device, h, &self.hatch_bgl1))
+            .collect();
+    }
+
+    pub fn upload_uniforms(&self, queue: &wgpu::Queue, uniforms: &Uniforms) {
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(uniforms));
+    }
+
+    pub fn render(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        clip_bounds: Rectangle<u32>,
+    ) {
+        let vp = clip_bounds;
+
+        // ── Pass 1: hatch fills ────────────────────────────────────────────
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("hatch.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(
+                vp.x as f32,
+                vp.y as f32,
+                vp.width as f32,
+                vp.height as f32,
+                0.0,
+                1.0,
+            );
+            if !self.gpu_hatches.is_empty() {
+                pass.set_pipeline(&self.hatch_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                for hatch in &self.gpu_hatches {
+                    pass.set_bind_group(1, &hatch.bind_group, &[]);
+                    pass.set_vertex_buffer(0, hatch.vertex_buffer.slice(..));
+                    pass.draw(0..6, 0..1);
+                }
+            }
+        }
+
+        // ── Pass 2: solid meshes ───────────────────────────────────────────
+        if !self.gpu_meshes.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mesh.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(
+                vp.x as f32,
+                vp.y as f32,
+                vp.width as f32,
+                vp.height as f32,
+                0.0,
+                1.0,
+            );
+            pass.set_pipeline(&self.mesh_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            for mesh in &self.gpu_meshes {
+                if mesh.index_count > 0 {
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                }
+            }
+        }
+
+        // ── Pass 3: wires ──────────────────────────────────────────────────
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("wire.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(
+                vp.x as f32,
+                vp.y as f32,
+                vp.width as f32,
+                vp.height as f32,
+                0.0,
+                1.0,
+            );
+            pass.set_pipeline(&self.wire_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            for wire in &self.gpu_wires {
+                if wire.vertex_count >= 6 {
+                    pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
+                    pass.draw(0..wire.vertex_count, 0..1);
+                }
+            }
+        }
+    }
+
+    pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {
+        if self.depth_texture_size != size {
+            let tex = create_depth_texture(device, size);
+            self.depth_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+            self.depth_texture_size = size;
+        }
+    }
+}
+
+fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("viewer.depth_texture"),
+        size: wgpu::Extent3d {
+            width: size.width.max(1),
+            height: size.height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
+}
+
+impl iced::widget::shader::Pipeline for Pipeline {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+        Self::new(device, queue, format)
+    }
+}

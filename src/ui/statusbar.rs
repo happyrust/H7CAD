@@ -1,0 +1,407 @@
+//! Bottom status bar — Model/Layout tabs + OSNAP toggle + status info
+
+use iced::widget::tooltip::Position as TipPos;
+use iced::widget::{button, container, row, text, tooltip, Row};
+use iced::{Background, Border, Color, Element, Length, Theme};
+
+use crate::snap::Snapper;
+use crate::Message;
+
+#[derive(Clone, Default)]
+pub struct StatusBar {
+    #[allow(dead_code)]
+    pub coord_display: String,
+}
+
+impl StatusBar {
+    pub fn new() -> Self {
+        Self {
+            coord_display: "MODEL".into(),
+        }
+    }
+
+    pub fn view<'a>(
+        &'a self,
+        snapper: &'a Snapper,
+        popup_open: bool,
+        ortho_mode: bool,
+        polar_mode: bool,
+        show_grid: bool,
+        layouts: Vec<String>,
+        current_layout: String,
+    ) -> Element<'a, Message> {
+        let menu_btn = button(text("≡").size(14).color(ICON_COLOR))
+            .on_press(Message::Command("MENU".into()))
+            .style(|_: &Theme, _| button::Style {
+                background: Some(Background::Color(Color::TRANSPARENT)),
+                ..Default::default()
+            })
+            .padding([2, 8]);
+
+        let add_btn = button(text("+").size(12).color(ICON_COLOR))
+            .on_press(Message::LayoutCreate)
+            .style(|_: &Theme, _| button::Style {
+                background: Some(Background::Color(Color::TRANSPARENT)),
+                ..Default::default()
+            })
+            .padding([3, 7]);
+
+        // ── Right side ────────────────────────────────────────────────────
+        let osnap_active = snapper.is_active();
+        let snap_grid_on = snapper.is_on(crate::snap::SnapType::Grid) && snapper.snap_enabled;
+
+        let space_label = if current_layout == "Model" {
+            "MODEL"
+        } else {
+            "LAYOUT"
+        };
+        let right_status = row![
+            tip(
+                toggle_pill("SNAP", snap_grid_on, Message::ToggleGridSnap),
+                "Snap to Grid\nF9"
+            ),
+            tip(
+                toggle_pill("GRID", show_grid, Message::ToggleGrid),
+                "Show Grid\nF7"
+            ),
+            tip(
+                toggle_pill("ORTHO", ortho_mode, Message::ToggleOrtho),
+                "Orthogonal Mode\nF8"
+            ),
+            tip(
+                toggle_pill("POLAR", polar_mode, Message::TogglePolar),
+                "Polar Tracking (45°)\nF10"
+            ),
+            osnap_btn(osnap_active, snapper.snap_enabled, popup_open),
+            status_pill(space_label),
+            status_pill("1:1"),
+        ]
+        .spacing(2);
+
+        let mut bar = Row::new().align_y(iced::Center).spacing(0);
+        bar = bar.push(menu_btn);
+        for name in layouts {
+            let is_active = name == current_layout;
+            bar = bar.push(space_tab(name, is_active));
+        }
+        bar = bar.push(add_btn);
+        bar = bar.push(iced::widget::Space::new().width(Length::Fill));
+        bar = bar.push(right_status);
+
+        container(bar)
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(BAR_BG)),
+                border: Border {
+                    color: BORDER_COLOR,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .height(26)
+            .padding([0, 4])
+            .into()
+    }
+}
+
+// ── Tooltip helper ────────────────────────────────────────────────────────
+
+fn tip<'a>(content: Element<'a, Message>, label: &'static str) -> Element<'a, Message> {
+    tooltip(
+        content,
+        container(text(label).size(11).color(Color::WHITE))
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(Color {
+                    r: 0.13,
+                    g: 0.13,
+                    b: 0.13,
+                    a: 0.97,
+                })),
+                border: Border {
+                    color: Color {
+                        r: 0.35,
+                        g: 0.35,
+                        b: 0.35,
+                        a: 1.0,
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                text_color: Some(Color::WHITE),
+                ..Default::default()
+            })
+            .padding([4, 8]),
+        TipPos::Top,
+    )
+    .into()
+}
+
+// ── Simple toggle pill ────────────────────────────────────────────────────
+
+fn toggle_pill(label: &'static str, active: bool, msg: Message) -> Element<'static, Message> {
+    button(text(label).size(10).color(if active {
+        OSNAP_ON_TEXT
+    } else {
+        OSNAP_OFF_TEXT
+    }))
+    .on_press(msg)
+    .style(move |_: &Theme, status| button::Style {
+        background: Some(Background::Color(match (active, status) {
+            (true, button::Status::Hovered) => SNAP_ON_HOVER,
+            (true, _) => SNAP_ON_BG,
+            (false, button::Status::Hovered) => SNAP_OFF_HOVER,
+            (false, _) => SNAP_OFF_BG,
+        })),
+        border: Border {
+            color: if active { SNAP_BORDER_ON } else { BORDER_COLOR },
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        text_color: if active {
+            OSNAP_ON_TEXT
+        } else {
+            OSNAP_OFF_TEXT
+        },
+        shadow: iced::Shadow::default(),
+        snap: false,
+    })
+    .padding([2, 6])
+    .into()
+}
+
+// ── OSNAP split button ────────────────────────────────────────────────────
+//
+// Left part  ("⚡ OSNAP"): toggles the global snap on/off.
+// Right part ("▾"):        opens the snap-type dropdown.
+
+fn osnap_btn(active: bool, snap_enabled: bool, open: bool) -> Element<'static, Message> {
+    let bg = match (active || snap_enabled, open) {
+        (true, true) => SNAP_ON_HOVER,
+        (true, false) => SNAP_ON_BG,
+        (false, _) => SNAP_OFF_BG,
+    };
+    let border_color = if open {
+        ACCENT
+    } else if active {
+        SNAP_BORDER_ON
+    } else {
+        BORDER_COLOR
+    };
+    let text_color = if active {
+        OSNAP_ON_TEXT
+    } else {
+        OSNAP_OFF_TEXT
+    };
+
+    let left = button(text("⚡ OSNAP").size(10).color(text_color))
+        .on_press(Message::ToggleSnapEnabled)
+        .style(move |_: &Theme, status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered => {
+                    if active || snap_enabled {
+                        SNAP_ON_HOVER
+                    } else {
+                        SNAP_OFF_HOVER
+                    }
+                }
+                _ => bg,
+            })),
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: iced::border::Radius {
+                    top_left: 2.0,
+                    top_right: 0.0,
+                    bottom_right: 0.0,
+                    bottom_left: 2.0,
+                },
+            },
+            text_color,
+            shadow: iced::Shadow::default(),
+            snap: false,
+        })
+        .padding([2, 6]);
+
+    let right = button(text("▾").size(9).color(text_color))
+        .on_press(Message::ToggleSnapPopup)
+        .style(move |_: &Theme, status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered => {
+                    if active || snap_enabled {
+                        SNAP_ON_HOVER
+                    } else {
+                        SNAP_OFF_HOVER
+                    }
+                }
+                _ => bg,
+            })),
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: iced::border::Radius {
+                    top_left: 0.0,
+                    top_right: 2.0,
+                    bottom_right: 2.0,
+                    bottom_left: 0.0,
+                },
+            },
+            text_color,
+            shadow: iced::Shadow::default(),
+            snap: false,
+        })
+        .padding([2, 4]);
+
+    row![
+        tip(left.into(), "Object Snap: toggle on/off\nF3"),
+        tip(right.into(), "Object Snap settings\nClick ▾"),
+    ]
+    .spacing(0)
+    .into()
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+fn space_tab(label: String, is_active: bool) -> Element<'static, Message> {
+    let msg = Message::LayoutSwitch(label.clone());
+    button(text(label).size(11))
+        .on_press(msg)
+        .style(move |_: &Theme, status| button::Style {
+            background: Some(Background::Color(match (is_active, status) {
+                (true, _) => TAB_ACTIVE,
+                (false, button::Status::Hovered) => TAB_HOVER,
+                _ => Color::TRANSPARENT,
+            })),
+            text_color: if is_active {
+                Color::WHITE
+            } else {
+                Color {
+                    r: 0.65,
+                    g: 0.65,
+                    b: 0.65,
+                    a: 1.0,
+                }
+            },
+            border: Border {
+                color: if is_active {
+                    ACCENT
+                } else {
+                    Color::TRANSPARENT
+                },
+                width: if is_active { 1.0 } else { 0.0 },
+                radius: 2.0.into(),
+            },
+            shadow: iced::Shadow::default(),
+            snap: false,
+        })
+        .padding([3, 10])
+        .into()
+}
+
+fn status_pill(label: &str) -> Element<'_, Message> {
+    container(text(label).size(10).color(Color {
+        r: 0.65,
+        g: 0.65,
+        b: 0.65,
+        a: 1.0,
+    }))
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(PILL_BG)),
+        border: Border {
+            color: BORDER_COLOR,
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        ..Default::default()
+    })
+    .padding([2, 6])
+    .into()
+}
+
+// ── Colours ───────────────────────────────────────────────────────────────
+
+const BAR_BG: Color = Color {
+    r: 0.14,
+    g: 0.14,
+    b: 0.14,
+    a: 1.0,
+};
+const TAB_ACTIVE: Color = Color {
+    r: 0.25,
+    g: 0.25,
+    b: 0.25,
+    a: 1.0,
+};
+const TAB_HOVER: Color = Color {
+    r: 0.20,
+    g: 0.20,
+    b: 0.20,
+    a: 1.0,
+};
+const PILL_BG: Color = Color {
+    r: 0.19,
+    g: 0.19,
+    b: 0.19,
+    a: 1.0,
+};
+const BORDER_COLOR: Color = Color {
+    r: 0.28,
+    g: 0.28,
+    b: 0.28,
+    a: 1.0,
+};
+const ICON_COLOR: Color = Color {
+    r: 0.70,
+    g: 0.70,
+    b: 0.70,
+    a: 1.0,
+};
+const ACCENT: Color = Color {
+    r: 0.20,
+    g: 0.55,
+    b: 0.90,
+    a: 1.0,
+};
+
+const OSNAP_ON_TEXT: Color = Color {
+    r: 0.35,
+    g: 0.75,
+    b: 1.00,
+    a: 1.0,
+};
+const OSNAP_OFF_TEXT: Color = Color {
+    r: 0.42,
+    g: 0.42,
+    b: 0.42,
+    a: 1.0,
+};
+const SNAP_ON_BG: Color = Color {
+    r: 0.10,
+    g: 0.20,
+    b: 0.32,
+    a: 1.0,
+};
+const SNAP_ON_HOVER: Color = Color {
+    r: 0.14,
+    g: 0.27,
+    b: 0.42,
+    a: 1.0,
+};
+const SNAP_BORDER_ON: Color = Color {
+    r: 0.20,
+    g: 0.50,
+    b: 0.85,
+    a: 1.0,
+};
+const SNAP_OFF_BG: Color = Color {
+    r: 0.17,
+    g: 0.17,
+    b: 0.17,
+    a: 1.0,
+};
+const SNAP_OFF_HOVER: Color = Color {
+    r: 0.22,
+    g: 0.22,
+    b: 0.22,
+    a: 1.0,
+};
