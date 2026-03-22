@@ -1,0 +1,250 @@
+// GPU rendering primitives, shader::Program / shader::Primitive impls,
+// and entity render-style helpers for the Scene.
+
+use acadrust::tables::LineType;
+use acadrust::types::{Color as AcadColor, LineWeight};
+use acadrust::EntityType;
+use glam::Mat4;
+use iced::mouse;
+use iced::widget::shader::{self, Viewport};
+use iced::{Event, Rectangle, Size};
+
+use super::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
+use super::pipeline::Pipeline;
+use super::tessellate;
+use super::{HatchModel, MeshModel, Scene, Uniforms, WireModel};
+
+// ── Camera hover state (shader::Program::State) ───────────────────────────
+
+#[derive(Clone, Default)]
+pub struct CameraState {
+    pub hover_region: Option<usize>,
+}
+
+// ── GPU primitive ─────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub struct Primitive {
+    pub(super) wires: Vec<WireModel>,
+    pub(super) hatches: Vec<HatchModel>,
+    pub(super) meshes: Vec<MeshModel>,
+    pub(super) uniforms: Uniforms,
+    /// Camera rotation matrix derived from the quaternion.
+    /// Used by the ViewCube pipeline — no gimbal lock.
+    pub(super) cam_rotation: Mat4,
+    pub(super) hover_region: Option<usize>,
+}
+
+// ── shader::Program impl ──────────────────────────────────────────────────
+
+impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
+    type State = CameraState;
+    type Primitive = Primitive;
+
+    fn draw(
+        &self,
+        state: &Self::State,
+        _cursor: mouse::Cursor,
+        bounds: Rectangle,
+    ) -> Self::Primitive {
+        let cam = self.camera.borrow();
+        self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
+
+        let mut all_wires = self.entity_wires();
+        if let Some(iw) = &self.interim_wire {
+            all_wires.push(iw.clone());
+        }
+        all_wires.extend(self.preview_wires.iter().cloned());
+
+        Primitive {
+            wires: all_wires,
+            hatches: self.synced_hatch_models(),
+            meshes: self.meshes.values().cloned().collect(),
+            uniforms: Uniforms::new(&cam, bounds),
+            cam_rotation: cam.view_rotation_mat(),
+            hover_region: state.hover_region,
+        }
+    }
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<iced::widget::Action<Msg>> {
+        let pos = cursor.position_in(bounds);
+        let cam_rotation = { self.camera.borrow().view_rotation_mat() };
+        if let Some(p) = pos {
+            state.hover_region = hover_id(
+                p.x,
+                p.y,
+                bounds.width,
+                bounds.height,
+                cam_rotation,
+                VIEWCUBE_PX,
+            );
+        } else {
+            state.hover_region = None;
+        }
+        let _ = event;
+        None
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &Self::State,
+        _b: Rectangle,
+        _c: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if state.hover_region.is_some() {
+            return mouse::Interaction::Pointer;
+        }
+        mouse::Interaction::default()
+    }
+}
+
+// ── shader::Primitive impl ────────────────────────────────────────────────
+
+impl shader::Primitive for Primitive {
+    type Pipeline = Pipeline;
+
+    fn prepare(
+        &self,
+        pipeline: &mut Pipeline,
+        device: &iced::wgpu::Device,
+        queue: &iced::wgpu::Queue,
+        _bounds: &Rectangle,
+        viewport: &Viewport,
+    ) {
+        let phys = viewport.physical_size();
+        let size = Size::new(phys.width, phys.height);
+        pipeline.ensure_depth_texture(device, size);
+        pipeline.viewcube.ensure_depth_texture(device, size);
+        pipeline.upload_uniforms(queue, &self.uniforms);
+        pipeline.upload_hatches(device, &self.hatches);
+        pipeline.upload_meshes(device, &self.meshes);
+        pipeline.upload_wires(device, &self.wires);
+        let logical = viewport.logical_size();
+        pipeline.viewcube.upload(
+            queue,
+            self.cam_rotation,
+            logical.width as u32,
+            logical.height as u32,
+            self.hover_region,
+        );
+    }
+
+    fn render(
+        &self,
+        pipeline: &Pipeline,
+        encoder: &mut iced::wgpu::CommandEncoder,
+        target: &iced::wgpu::TextureView,
+        clip: &Rectangle<u32>,
+    ) {
+        pipeline.render(encoder, target, *clip);
+        pipeline.viewcube.render(encoder, target, *clip);
+    }
+}
+
+// ── Render-style helpers (impl Scene) ────────────────────────────────────
+
+impl Scene {
+    pub(super) fn render_style(&self, e: &EntityType) -> ([f32; 4], f32, [f32; 8], f32) {
+        let layer_name = &e.common().layer;
+        let entity_color = {
+            let ec = &e.common().color;
+            let resolved = if *ec == AcadColor::ByLayer {
+                self.document
+                    .layers
+                    .get(layer_name)
+                    .map(|l| &l.color)
+                    .unwrap_or(&AcadColor::WHITE)
+            } else {
+                ec
+            };
+            let [r, g, b, _] = tessellate::aci_to_rgba(resolved);
+            let alpha = 1.0 - e.common().transparency.as_percent() as f32;
+            [r, g, b, alpha]
+        };
+
+        let lt_name = self.resolved_linetype_name(e);
+        let lt_scale = e.common().linetype_scale as f32;
+        let (pattern_length, pattern) =
+            resolve_pattern(&self.document.line_types, lt_name, lt_scale);
+
+        let line_weight_px = {
+            let ew = &e.common().line_weight;
+            let resolved = match ew {
+                LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => self
+                    .document
+                    .layers
+                    .get(layer_name)
+                    .map(|l| &l.line_weight)
+                    .unwrap_or(&LineWeight::Default),
+                _ => ew,
+            };
+            const MM_TO_PX: f32 = 96.0 / 25.4;
+            resolved
+                .millimeters()
+                .map(|mm| (mm as f32 * MM_TO_PX).max(1.0))
+                .unwrap_or(1.0)
+        };
+
+        (entity_color, pattern_length, pattern, line_weight_px)
+    }
+
+    pub(super) fn resolved_linetype_name<'a>(&'a self, e: &'a EntityType) -> &'a str {
+        let elt = &e.common().linetype;
+        if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
+            self.document
+                .layers
+                .get(&e.common().layer)
+                .map(|l| l.line_type.as_str())
+                .unwrap_or("Continuous")
+        } else {
+            elt.as_str()
+        }
+    }
+}
+
+// ── Linetype pattern helper ───────────────────────────────────────────────
+
+pub(super) fn resolve_pattern(
+    table: &acadrust::tables::Table<LineType>,
+    name: &str,
+    scale: f32,
+) -> (f32, [f32; 8]) {
+    let solid = (0.0, [0.0f32; 8]);
+    if name.eq_ignore_ascii_case("continuous")
+        || name.eq_ignore_ascii_case("bylayer")
+        || name.eq_ignore_ascii_case("byblock")
+        || name.is_empty()
+    {
+        return solid;
+    }
+    let lt = match table.get(name) {
+        Some(lt) => lt,
+        None => return solid,
+    };
+    if lt.is_continuous() || lt.elements.is_empty() {
+        return solid;
+    }
+
+    let mut pat = [0.0f32; 8];
+    let mut pat_len = 0.0f32;
+    for (i, el) in lt.elements.iter().take(8).enumerate() {
+        let raw = el.length as f32 * scale;
+        let encoded = if raw == 0.0 {
+            0.01 * scale.max(0.01)
+        } else {
+            raw
+        };
+        pat[i] = encoded;
+        pat_len += encoded.abs();
+    }
+    if pat_len < 1e-6 {
+        return solid;
+    }
+    (pat_len, pat)
+}
