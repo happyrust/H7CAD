@@ -26,6 +26,7 @@
 
   <url type="homepage">https://github.com/HakanSeven12/H7CAD</url>
   <url type="bugtracker">https://github.com/HakanSeven12/H7CAD/issues</url>
+  <url type="vcs-browser">https://github.com/HakanSeven12/H7CAD</url>
 
   <screenshots>
     <screenshot type="default">
@@ -44,7 +45,7 @@
 
   <content_rating type="oars-1.1" />
 
-  <developer id="io.github.HakanSeven12">
+  <developer id="io.github.hakanseven12">
     <name>Hakan Seven</name>
   </developer>
 </component>
