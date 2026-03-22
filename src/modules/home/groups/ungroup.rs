@@ -1,6 +1,17 @@
-// UngroupCommand — selection gathering then dissolve all groups that
-// contain any of the selected handles.
-// Result: CmdResult::DeleteGroups { handles }
+// Ungroup tool — ribbon definition + CadCommand implementation.
+
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "UNGROUP",
+        label: "Ungroup",
+        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/ungroup.svg")),
+        event: ModuleEvent::Command("UNGROUP".to_string()),
+    }
+}
+
+// ── CadCommand implementation ─────────────────────────────────────────────
 
 use acadrust::Handle;
 use glam::Vec3;

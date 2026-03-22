@@ -5,13 +5,6 @@
 // viewport events from main.rs and returns `CmdResult` tokens that tell
 // the host what to do next.
 
-pub mod group;
-pub mod laymatch;
-pub mod matchprop;
-pub mod paste;
-pub mod select;
-pub mod ungroup;
-
 use crate::scene::hatch_model::HatchModel;
 use crate::scene::wire_model::WireModel;
 use acadrust::{EntityType, Handle};

@@ -37,7 +37,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYOFF");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -62,7 +62,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYFRZ");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -87,7 +87,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYLCK");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -110,7 +110,7 @@ impl H7CAD {
             "LAYMCUR" => {
                 let entities = self.tabs[i].scene.selected_entities();
                 if entities.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYMCUR");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -156,7 +156,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYULK");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -177,7 +177,7 @@ impl H7CAD {
             }
 
             "LAYMATCH"|"LAYMCH" => {
-                use crate::command::laymatch::LayMatchCommand;
+                use crate::modules::home::layers::match_layer::LayMatchCommand;
                 let dest: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 let cmd = LayMatchCommand::new(dest);
@@ -186,7 +186,7 @@ impl H7CAD {
             }
 
             "MATCHPROP"|"MA" => {
-                use crate::command::matchprop::MatchPropCommand;
+                use crate::modules::home::properties::match_prop::MatchPropCommand;
                 self.tabs[i].scene.deselect_all();
                 let cmd = MatchPropCommand::new();
                 self.command_line.push_info(&cmd.prompt());
@@ -197,13 +197,13 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i]
                     .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("GROUP");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     let auto_name = super::helpers::next_group_auto_name(&self.tabs[i].scene);
-                    use crate::command::group::GroupCommand;
+                    use crate::modules::home::groups::group::GroupCommand;
                     let cmd = GroupCommand::new(handles, auto_name);
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -214,7 +214,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i]
                     .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::ungroup::UngroupCommand;
+                    use crate::modules::home::groups::ungroup::UngroupCommand;
                     let cmd = UngroupCommand::new();
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -234,7 +234,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i]
                     .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("COPYCLIP");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -256,7 +256,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i]
                     .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("CUTCLIP");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -285,7 +285,7 @@ impl H7CAD {
                     self.command_line.push_error("Clipboard is empty.");
                 } else {
                     let wires = self.tabs[i].scene.wires_for_entities(&self.clipboard);
-                    use crate::command::paste::PasteCommand;
+                    use crate::modules::home::clipboard::paste::PasteCommand;
                     let cmd = PasteCommand::new(wires, self.clipboard_centroid);
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -296,7 +296,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i]
                     .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("BLOCK");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -480,7 +480,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("MOVE");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -497,7 +497,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("COPY");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -514,7 +514,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ROTATE");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -590,7 +590,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("SCALE");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -607,7 +607,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("MIRROR");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -624,7 +624,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ERASE");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -697,7 +697,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("STRETCH");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -727,7 +727,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ARRAYRECT");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -744,7 +744,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ARRAYPOLAR");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -761,7 +761,7 @@ impl H7CAD {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
                 if handles.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ARRAYPATH");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
@@ -798,7 +798,7 @@ impl H7CAD {
                 let entities: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().collect();
                 if entities.is_empty() {
-                    use crate::command::select::SelectObjectsCommand;
+                    use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("EXPLODE");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));

@@ -6,5 +6,5 @@ pub(super) mod layon;
 pub(super) mod laythw;
 pub(super) mod layulk;
 pub(super) mod make_current;
-pub(super) mod match_layer;
+pub mod match_layer;
 pub(super) mod panel;

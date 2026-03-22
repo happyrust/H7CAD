@@ -1,12 +1,14 @@
 // Home module — Draw, Modify, Annotation and Layer tools.
 
-mod clipboard;
+pub mod clipboard;
 pub mod defaults;
 mod donate;
 pub mod draw;
-mod layers;
+pub mod groups;
+pub mod layers;
 pub mod modify;
-mod properties;
+pub mod properties;
+pub mod select;
 
 use crate::modules::{CadModule, RibbonGroup, RibbonItem};
 
@@ -27,9 +29,10 @@ impl CadModule for HomeModule {
         use donate;
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
         use layers::{layfrz, laylck, layoff, layon, laythw, layulk, make_current, match_layer, panel};
+        use groups::{group, ungroup};
         use modify::{
-            array, copy, delete, explode, fillet, group, mirror, offset, rotate, scale, stretch,
-            translate, trim, ungroup,
+            array, copy, delete, explode, fillet, mirror, offset, rotate, scale, stretch,
+            translate, trim,
         };
         use properties::match_prop;
 

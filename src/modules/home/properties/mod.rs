@@ -1,1 +1,1 @@
-pub(super) mod match_prop;
+pub mod match_prop;

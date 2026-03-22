@@ -1,8 +1,17 @@
-// GroupCommand — text-input phase after objects are selected.
-//
-// Receives the pre-selected handles from dispatch_command and asks the user
-// for a group name.  Pressing Enter without typing uses the auto-generated name.
-// Result: CmdResult::CreateGroup { handles, name }
+// Group tool — ribbon definition + CadCommand implementation.
+
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "GROUP",
+        label: "Group",
+        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/group.svg")),
+        event: ModuleEvent::Command("GROUP".to_string()),
+    }
+}
+
+// ── CadCommand implementation ─────────────────────────────────────────────
 
 use acadrust::Handle;
 use glam::Vec3;
