@@ -18,7 +18,7 @@ use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 use crate::modules::registry;
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonItem, ToolDef};
 use crate::ui::properties::{LwItem, LinetypeItem, acad_color_display, color_picker_dropdown, lw_options};
-use crate::Message;
+use crate::app::Message;
 
 // ── Layout constants ───────────────────────────────────────────────────────
 //

@@ -5,7 +5,7 @@ use iced::widget::{button, container, row, text, tooltip, Row};
 use iced::{Background, Border, Color, Element, Length, Theme};
 
 use crate::snap::Snapper;
-use crate::Message;
+use crate::app::Message;
 
 #[derive(Clone, Default)]
 pub struct StatusBar {

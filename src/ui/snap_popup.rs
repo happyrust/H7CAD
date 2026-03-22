@@ -7,7 +7,7 @@ use iced::widget::{button, column, container, mouse_area, row, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::snap::{SnapType, Snapper, ALL_SNAP_MODES};
-use crate::Message;
+use crate::app::Message;
 
 /// Returns a full-screen overlay element:
 ///   - a transparent click-catcher that closes the popup on outside click

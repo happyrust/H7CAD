@@ -1,0 +1,305 @@
+use super::{H7CAD, Message};
+use crate::command::CmdResult;
+use acadrust::Handle;
+use iced::Task;
+
+impl H7CAD {
+    pub(super) fn apply_cmd_result(&mut self, result: CmdResult) -> Task<Message> {
+        let i = self.active_tab;
+        match result {
+            CmdResult::NeedPoint => {
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
+            CmdResult::Preview(wire) => {
+                self.tabs[i].scene.set_preview_wires(vec![wire]);
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
+            CmdResult::InterimWire(wire) => {
+                self.tabs[i].scene.set_interim_wire(wire);
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
+            CmdResult::CommitEntity(entity) => {
+                let label = self.history_label_from_active_cmd(i, "ENTITY");
+                self.push_undo_snapshot(i, label);
+                self.commit_entity(entity);
+                self.tabs[i].dirty = true;
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
+            CmdResult::TransformSelected(handles, transform) => {
+                let label = self.history_label_from_active_cmd(i, "MOVE");
+                self.push_undo_snapshot(i, label);
+                self.tabs[i].scene.transform_entities(&handles, &transform);
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                self.refresh_properties();
+            }
+            CmdResult::CopySelected(handles, transform) => {
+                let label = self.history_label_from_active_cmd(i, "COPY");
+                self.push_undo_snapshot(i, label);
+                let new_handles = self.tabs[i].scene.copy_entities(&handles, &transform);
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.deselect_all();
+                for h in new_handles {
+                    self.tabs[i].scene.select_entity(h, false);
+                }
+                self.tabs[i].scene.clear_preview_wire();
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+                self.refresh_properties();
+            }
+            CmdResult::CommitAndExit(entity) => {
+                let label = self.history_label_from_active_cmd(i, "ENTITY");
+                self.push_undo_snapshot(i, label);
+                self.commit_entity(entity);
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+            }
+            CmdResult::CreateBlock { handles, name, base } => {
+                self.push_undo_snapshot(i, "BLOCK");
+                match self.tabs[i].scene.create_block_from_entities(&handles, &name, base) {
+                    Ok(insert_handle) => {
+                        self.tabs[i].dirty = true;
+                        self.tabs[i].scene.deselect_all();
+                        if !insert_handle.is_null() {
+                            self.tabs[i].scene.select_entity(insert_handle, false);
+                        }
+                        self.tabs[i].scene.clear_preview_wire();
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                        self.command_line
+                            .push_output(&format!("Block \"{name}\" created."));
+                        self.refresh_properties();
+                    }
+                    Err(err) => {
+                        let _ = self.tabs[i].history.undo_stack.pop();
+                        self.command_line.push_error(&err);
+                        let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                        if let Some(p) = prompt {
+                            self.command_line.push_info(&p);
+                        }
+                    }
+                }
+            }
+            CmdResult::CommitHatch(hatch) => {
+                let label = self.history_label_from_active_cmd(i, "HATCH");
+                self.push_undo_snapshot(i, label);
+                let new_handle = self.tabs[i].scene.add_hatch(hatch);
+                if !new_handle.is_null() {
+                    self.tabs[i].scene.select_entity(new_handle, true);
+                }
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                self.refresh_properties();
+            }
+            CmdResult::BatchCopy(handles, transforms) => {
+                let label = self.history_label_from_active_cmd(i, "ARRAY");
+                self.push_undo_snapshot(i, label);
+                let count = transforms.len();
+                for t in &transforms {
+                    self.tabs[i].scene.copy_entities(&handles, t);
+                }
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                self.command_line
+                    .push_output(&format!("ARRAY: {count} copies created."));
+                self.refresh_properties();
+            }
+            CmdResult::ReplaceMany(replacements, additions) => {
+                let label = self.history_label_from_active_cmd(i, "FILLET");
+                self.push_undo_snapshot(i, label);
+                for (handle, entities) in replacements {
+                    self.tabs[i].scene.erase_entities(&[handle]);
+                    for entity in entities {
+                        self.tabs[i].scene.add_entity(entity);
+                    }
+                }
+                for entity in additions {
+                    self.tabs[i].scene.add_entity(entity);
+                }
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.refresh_properties();
+            }
+            CmdResult::ReplaceEntity(handle, new_entities) => {
+                let label = self.history_label_from_active_cmd(i, "TRIM");
+                self.push_undo_snapshot(i, label);
+                self.tabs[i].scene.erase_entities(&[handle]);
+                let new_handles: Vec<acadrust::Handle> = new_entities
+                    .into_iter()
+                    .map(|e| self.tabs[i].scene.add_entity(e))
+                    .collect();
+                if let Some(cmd) = &mut self.tabs[i].active_cmd {
+                    cmd.on_entity_replaced(handle, &new_handles);
+                }
+                self.tabs[i].dirty = true;
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
+            CmdResult::Cancel => {
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+                self.command_line.push_info("Command cancelled.");
+            }
+            CmdResult::Relaunch(cmd, handles) => {
+                self.tabs[i].scene.deselect_all();
+                for h in &handles {
+                    self.tabs[i].scene.select_entity(*h, false);
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                let _ = self.dispatch_command(&cmd);
+            }
+            CmdResult::MatchEntityLayer { dest, src } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                let src_layer = self.tabs[i].scene.document
+                    .get_entity(src)
+                    .map(|e| e.common().layer.clone());
+                if let Some(layer) = src_layer {
+                    self.push_undo_snapshot(i, "LAYMATCH");
+                    for h in &dest {
+                        if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
+                            e.as_entity_mut().set_layer(layer.clone());
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_info(&format!("Layer matched to \"{layer}\"."));
+                    self.sync_ribbon_layers();
+                } else {
+                    self.command_line.push_error("Source object not found.");
+                }
+            }
+            CmdResult::MatchProperties { dest, src } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+
+                let props = self.tabs[i].scene.document.get_entity(src).map(|e| {
+                    let c = e.common();
+                    (c.layer.clone(), c.color, c.linetype.clone(), c.linetype_scale, c.line_weight)
+                });
+
+                if let Some((layer, color, linetype, lt_scale, lw)) = props {
+                    self.push_undo_snapshot(i, "MATCHPROP");
+                    for h in &dest {
+                        if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
+                            e.as_entity_mut().set_layer(layer.clone());
+                            crate::scene::dispatch::apply_color(e, color);
+                            crate::scene::dispatch::apply_line_weight(e, lw);
+                            e.common_mut().linetype = linetype.clone();
+                            e.common_mut().linetype_scale = lt_scale;
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.refresh_properties();
+                    self.command_line.push_info(
+                        &format!("Properties matched to {} object(s).", dest.len())
+                    );
+                } else {
+                    self.command_line.push_error("Source object not found.");
+                }
+            }
+            CmdResult::PasteClipboard { base_pt } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                if self.clipboard.is_empty() {
+                    self.command_line.push_error("Clipboard is empty.");
+                } else {
+                    let delta = base_pt - self.clipboard_centroid;
+                    let translate = crate::command::EntityTransform::Translate(delta);
+                    self.push_undo_snapshot(i, "PASTECLIP");
+                    let count = self.clipboard.len();
+                    let new_handles: Vec<Handle> = self.clipboard.clone()
+                        .into_iter()
+                        .map(|mut entity| {
+                            crate::scene::dispatch::apply_transform(&mut entity, &translate);
+                            entity.common_mut().handle = acadrust::Handle::NULL;
+                            self.tabs[i].scene.add_entity(entity)
+                        })
+                        .filter(|h| !h.is_null())
+                        .collect();
+                    self.tabs[i].scene.deselect_all();
+                    for h in new_handles {
+                        self.tabs[i].scene.select_entity(h, false);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.refresh_properties();
+                    self.command_line.push_info(&format!("{count} object(s) pasted."));
+                }
+            }
+            CmdResult::CreateGroup { handles, name } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.push_undo_snapshot(i, "GROUP");
+                self.tabs[i].scene.create_group(name.clone(), handles);
+                self.tabs[i].dirty = true;
+                self.command_line.push_info(&format!("Group \"{}\" created.", name));
+            }
+            CmdResult::DeleteGroups { handles } => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.push_undo_snapshot(i, "UNGROUP");
+                let count = self.tabs[i].scene.delete_groups_containing(&handles);
+                self.tabs[i].dirty = true;
+                if count > 0 {
+                    self.command_line.push_info(&format!("{} group(s) dissolved.", count));
+                } else {
+                    self.command_line.push_info("No groups found for selected objects.");
+                }
+            }
+        }
+        // Focus the command-line input while a command is active; blur it when the command ends.
+        if self.tabs[i].active_cmd.is_some() {
+            self.focus_cmd_input()
+        } else {
+            self.blur_cmd_input()
+        }
+    }
+
+    /// Restore the tangent snap state that was in effect before the command started.
+    fn restore_pre_cmd_tangent(&mut self) {
+        if let Some(was_on) = self.pre_cmd_tangent.take() {
+            if !was_on {
+                self.snapper.enabled.remove(&crate::snap::SnapType::Tangent);
+            }
+        }
+    }
+}

@@ -1,7 +1,7 @@
 //! Layer Manager — floating window.
 
 use crate::ui::properties::{color_picker_dropdown, LinetypeItem, LwItem, lw_options};
-use crate::Message;
+use crate::app::Message;
 use acadrust::tables::layer::Layer as DocLayer;
 use acadrust::tables::Table;
 use acadrust::types::aci_table::aci_to_rgb;

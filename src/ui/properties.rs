@@ -22,7 +22,7 @@ const COMBO_PAD_V: f32   = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0;  // fills combo 
 const SWATCH_SZ: f32     = ROW_H * 0.54;                          // ≈14 px color swatch
 
 use crate::scene::object::{PropSection, PropValue};
-use crate::Message;
+use crate::app::Message;
 
 const VARIES_LABEL: &str = "*VARIES*";
 

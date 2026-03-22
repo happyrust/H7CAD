@@ -1,6 +1,6 @@
 //! H7CAD-style command line — bottom panel with input and history
 
-use crate::Message;
+use crate::app::Message;
 use iced::widget::{column, container, row, text, text_input};
 use iced::{Background, Border, Color, Element, Length, Theme};
 

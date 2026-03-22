@@ -9,7 +9,7 @@ use iced::{Background, Border, Color, Element, Length, Point, Size, Theme};
 
 use crate::scene::object::GripShape;
 use crate::scene::SelectionState;
-use crate::Message;
+use crate::app::Message;
 
 /// Half-size of the crosshair center square in screen pixels (square = SQ*2 × SQ*2).
 pub const CROSSHAIR_SQ: f32 = 7.5;

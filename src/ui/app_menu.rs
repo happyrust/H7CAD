@@ -13,7 +13,7 @@ use iced::widget::{button, column, container, row, scrollable, text, text_input}
 use iced::{Background, Border, Color, Element, Length, Theme};
 use std::path::PathBuf;
 
-use crate::Message;
+use crate::app::Message;
 
 // ── Menu item definitions ─────────────────────────────────────────────────
 
