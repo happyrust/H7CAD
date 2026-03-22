@@ -1,0 +1,50 @@
+name: Flatpak Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install flatpak and flatpak-builder
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y flatpak flatpak-builder
+
+      - name: Add Flathub remote
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install runtimes
+        run: |
+          flatpak install -y --user \
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//24.08
+
+      - name: Generate cargo-sources.json
+        run: |
+          pip3 install tomlkit aiohttp
+          git clone --depth=1 https://github.com/flatpak/flatpak-builder-tools.git /tmp/flatpak-builder-tools
+          python3 /tmp/flatpak-builder-tools/cargo/flatpak-cargo-generator.py \
+            Cargo.lock -o flatpak/cargo-sources.json
+
+      - name: Build Flatpak
+        run: |
+          flatpak-builder --force-clean --user --repo=repo build-dir \
+            flatpak/io.github.HakanSeven12.H7CAD.ci.yml
+
+      - name: Create bundle
+        run: |
+          flatpak build-bundle repo H7CAD.flatpak io.github.HakanSeven12.H7CAD
+
+      - name: Upload bundle to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: H7CAD.flatpak
