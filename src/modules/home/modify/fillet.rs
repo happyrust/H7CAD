@@ -263,7 +263,7 @@ fn line_pts(l: &LineEnt) -> Vec<[f32; 3]> {
     ]
 }
 
-fn arc_pts(cx: f64, cy: f64, r: f64, a0_deg: f64, a1_deg: f64, y: f64) -> Vec<[f32; 3]> {
+fn arc_pts(cx: f64, cy: f64, r: f64, a0_deg: f64, a1_deg: f64, z: f64) -> Vec<[f32; 3]> {
     use std::f64::consts::TAU;
     let fn_norm = |a: f64| -> f64 { ((a % TAU) + TAU) % TAU };
     let a0 = a0_deg.to_radians();
@@ -282,8 +282,8 @@ fn arc_pts(cx: f64, cy: f64, r: f64, a0_deg: f64, a1_deg: f64, y: f64) -> Vec<[f
             let ang = fn_norm(a0) + span * (i as f64 / steps as f64);
             [
                 (cx + r * ang.cos()) as f32,
-                y as f32,
                 (cy + r * ang.sin()) as f32,
+                z as f32,
             ]
         })
         .collect()
@@ -298,7 +298,7 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
             a.radius,
             a.start_angle,
             a.end_angle,
-            a.center.y,
+            a.center.z,
         ),
         _ => vec![],
     }
@@ -364,6 +364,7 @@ fn compute_chamfer(
 
 enum FilletStep {
     First,
+    WaitingForRadius,
     Second {
         h1: Handle,
         l1: LineEnt,
@@ -395,7 +396,11 @@ impl CadCommand for FilletCommand {
     fn prompt(&self) -> String {
         match &self.step {
             FilletStep::First => format!(
-                "FILLET  Select first line  [R={:.4} | type R <val> to change]:",
+                "FILLET  Select first line  [R={:.4} | type R to change]:",
+                self.radius
+            ),
+            FilletStep::WaitingForRadius => format!(
+                "FILLET  Enter fillet radius <{:.4}>:",
                 self.radius
             ),
             FilletStep::Second { .. } => {
@@ -405,27 +410,58 @@ impl CadCommand for FilletCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, FilletStep::First)
+        matches!(self.step, FilletStep::WaitingForRadius)
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let t = text.trim();
-        let body = if t.to_uppercase().starts_with('R') {
-            t[1..].trim()
-        } else {
-            t
-        };
-        if let Ok(v) = body.replace(',', ".").parse::<f64>() {
-            if v >= 0.0 {
-                self.radius = v;
-                defaults::set_fillet_radius(v as f32);
+        match self.step {
+            FilletStep::WaitingForRadius => {
+                let t = text.trim();
+                if t.is_empty() {
+                    // Keep current radius, return to First
+                    self.step = FilletStep::First;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if let Ok(v) = t.replace(',', ".").parse::<f64>() {
+                    if v >= 0.0 {
+                        self.radius = v;
+                        defaults::set_fillet_radius(v as f32);
+                    }
+                    self.step = FilletStep::First;
+                    return Some(CmdResult::NeedPoint);
+                }
+                // Invalid — stay and re-prompt
+                Some(CmdResult::NeedPoint)
+            }
+            FilletStep::First | FilletStep::Second { .. } => {
+                let t = text.trim();
+                let upper = t.to_uppercase();
+                // "R" alone → enter sub-step to collect radius
+                if upper == "R" {
+                    self.step = FilletStep::WaitingForRadius;
+                    return Some(CmdResult::NeedPoint);
+                }
+                // "R 5.0" inline shorthand
+                if upper.starts_with('R') {
+                    let body = t[1..].trim();
+                    if let Ok(v) = body.replace(',', ".").parse::<f64>() {
+                        if v >= 0.0 {
+                            self.radius = v;
+                            defaults::set_fillet_radius(v as f32);
+                        }
+                        return Some(CmdResult::NeedPoint);
+                    }
+                    // "R" + invalid body → enter sub-step
+                    self.step = FilletStep::WaitingForRadius;
+                    return Some(CmdResult::NeedPoint);
+                }
+                None
             }
         }
-        None
     }
 
     fn needs_entity_pick(&self) -> bool {
-        true
+        !matches!(self.step, FilletStep::WaitingForRadius)
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: Vec3) -> CmdResult {
@@ -435,6 +471,7 @@ impl CadCommand for FilletCommand {
         let click = [pt.x as f64, pt.y as f64];
 
         match &self.step {
+            FilletStep::WaitingForRadius => return CmdResult::NeedPoint,
             FilletStep::First => {
                 // Must be a line
                 let l1 = self
@@ -510,6 +547,7 @@ impl CadCommand for FilletCommand {
         let click = [pt.x as f64, pt.y as f64];
 
         match &self.step {
+            FilletStep::WaitingForRadius => vec![],
             FilletStep::First => {
                 // Highlight hovered line in cyan
                 let pts = self
@@ -602,6 +640,8 @@ impl CadCommand for FilletCommand {
 
 enum ChamferStep {
     First,
+    WaitingForDist1,
+    WaitingForDist2,
     Second {
         h1: Handle,
         l1: LineEnt,
@@ -635,8 +675,16 @@ impl CadCommand for ChamferCommand {
     fn prompt(&self) -> String {
         match &self.step {
             ChamferStep::First => format!(
-                "CHAMFER  Select first line  [D1={:.4} D2={:.4} | type D <d1> <d2>]:",
+                "CHAMFER  Select first line  [D1={:.4} D2={:.4} | type D to change]:",
                 self.dist1, self.dist2
+            ),
+            ChamferStep::WaitingForDist1 => format!(
+                "CHAMFER  Enter first chamfer distance <{:.4}>:",
+                self.dist1
+            ),
+            ChamferStep::WaitingForDist2 => format!(
+                "CHAMFER  Enter second chamfer distance <{:.4}>:",
+                self.dist2
             ),
             ChamferStep::Second { .. } => format!(
                 "CHAMFER  Select second line  [D1={:.4} D2={:.4}]:",
@@ -646,36 +694,89 @@ impl CadCommand for ChamferCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        matches!(self.step, ChamferStep::First)
+        matches!(
+            self.step,
+            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2
+        )
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let t = text.trim();
-        let body = if t.to_uppercase().starts_with('D') {
-            t[1..].trim()
-        } else {
-            t
-        };
-        let parts: Vec<f64> = body
-            .split_whitespace()
-            .filter_map(|s| s.replace(',', ".").parse::<f64>().ok())
-            .collect();
-        if let Some(&v) = parts.first() {
-            self.dist1 = v.max(0.0);
-            defaults::set_chamfer_dist1(self.dist1 as f32);
+        match self.step {
+            ChamferStep::WaitingForDist1 => {
+                let t = text.trim();
+                if t.is_empty() {
+                    // Keep current dist1, move on to dist2
+                    self.step = ChamferStep::WaitingForDist2;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if let Ok(v) = t.replace(',', ".").parse::<f64>() {
+                    self.dist1 = v.max(0.0);
+                    defaults::set_chamfer_dist1(self.dist1 as f32);
+                    self.step = ChamferStep::WaitingForDist2;
+                    return Some(CmdResult::NeedPoint);
+                }
+                // Invalid — stay and re-prompt
+                Some(CmdResult::NeedPoint)
+            }
+            ChamferStep::WaitingForDist2 => {
+                let t = text.trim();
+                if t.is_empty() {
+                    // Keep current dist2, return to First
+                    self.step = ChamferStep::First;
+                    return Some(CmdResult::NeedPoint);
+                }
+                if let Ok(v) = t.replace(',', ".").parse::<f64>() {
+                    self.dist2 = v.max(0.0);
+                    defaults::set_chamfer_dist2(self.dist2 as f32);
+                    self.step = ChamferStep::First;
+                    return Some(CmdResult::NeedPoint);
+                }
+                // Invalid — stay and re-prompt
+                Some(CmdResult::NeedPoint)
+            }
+            ChamferStep::First | ChamferStep::Second { .. } => {
+                let t = text.trim();
+                let upper = t.to_uppercase();
+                // "D" alone → enter sub-step to collect distances
+                if upper == "D" {
+                    self.step = ChamferStep::WaitingForDist1;
+                    return Some(CmdResult::NeedPoint);
+                }
+                // "D 5.0" or "D 5.0 3.0" inline shorthand
+                if upper.starts_with('D') {
+                    let body = t[1..].trim();
+                    let parts: Vec<f64> = body
+                        .split_whitespace()
+                        .filter_map(|s| s.replace(',', ".").parse::<f64>().ok())
+                        .collect();
+                    if !parts.is_empty() {
+                        if let Some(&v) = parts.first() {
+                            self.dist1 = v.max(0.0);
+                            defaults::set_chamfer_dist1(self.dist1 as f32);
+                        }
+                        if let Some(&v) = parts.get(1) {
+                            self.dist2 = v.max(0.0);
+                            defaults::set_chamfer_dist2(self.dist2 as f32);
+                        } else {
+                            self.dist2 = self.dist1;
+                            defaults::set_chamfer_dist2(self.dist2 as f32);
+                        }
+                        return Some(CmdResult::NeedPoint);
+                    }
+                    // "D" + invalid body → enter sub-step
+                    self.step = ChamferStep::WaitingForDist1;
+                    return Some(CmdResult::NeedPoint);
+                }
+                None
+            }
         }
-        if let Some(&v) = parts.get(1) {
-            self.dist2 = v.max(0.0);
-            defaults::set_chamfer_dist2(self.dist2 as f32);
-        } else if parts.len() == 1 {
-            self.dist2 = self.dist1;
-            defaults::set_chamfer_dist2(self.dist2 as f32);
-        }
-        None
     }
 
     fn needs_entity_pick(&self) -> bool {
-        true
+        !matches!(
+            self.step,
+            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2
+        )
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: Vec3) -> CmdResult {
@@ -685,6 +786,9 @@ impl CadCommand for ChamferCommand {
         let click = [pt.x as f64, pt.y as f64];
 
         match &self.step {
+            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => {
+                return CmdResult::NeedPoint;
+            }
             ChamferStep::First => {
                 let l1 = self
                     .all_entities
@@ -750,6 +854,7 @@ impl CadCommand for ChamferCommand {
         let click = [pt.x as f64, pt.y as f64];
 
         match &self.step {
+            ChamferStep::WaitingForDist1 | ChamferStep::WaitingForDist2 => return vec![],
             ChamferStep::First => {
                 let pts = self
                     .all_entities

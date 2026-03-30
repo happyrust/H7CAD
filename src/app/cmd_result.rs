@@ -290,6 +290,7 @@ impl H7CAD {
         if self.tabs[i].active_cmd.is_some() {
             self.focus_cmd_input()
         } else {
+            self.ribbon.deactivate_tool();
             self.blur_cmd_input()
         }
     }

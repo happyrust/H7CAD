@@ -12,6 +12,9 @@ impl H7CAD {
             self.tabs[i].scene.clear_preview_wire();
             self.tabs[i].active_cmd = None;
         }
+        // Reset the last committed point so the first click of the new command
+        // is not constrained by ortho/polar relative to a previous command's endpoint.
+        self.last_point = None;
 
         if let Some(path_str) = cmd.strip_prefix("OPEN_RECENT:") {
             let path = PathBuf::from(path_str);

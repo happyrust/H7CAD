@@ -211,7 +211,10 @@ pub(super) fn render_small<'a>(
             let tip_text = format!("{}\nCommand: {}", cur_label, last);
 
             let icon_btn = button(make_icon(cur_icon, SMALL_ICON))
-                .on_press(Message::Command(last.to_string()))
+                .on_press(Message::RibbonToolClick {
+                    tool_id: last.to_string(),
+                    event: ModuleEvent::Command(last.to_string()),
+                })
                 .style(move |_: &Theme, status| tool_btn_style(active, status))
                 .width(Length::Fixed(SMALL_W))
                 .height(ROW_H)
@@ -332,7 +335,10 @@ pub(super) fn render_large<'a>(
                 .align_x(iced::Center)
                 .spacing(3),
             )
-            .on_press(Message::Command(last.to_string()))
+            .on_press(Message::RibbonToolClick {
+                tool_id: last.to_string(),
+                event: ModuleEvent::Command(last.to_string()),
+            })
             .style(move |_: &Theme, status| tool_btn_style(active, status))
             .width(Length::Fixed(LARGE_W))
             .height(Fill)

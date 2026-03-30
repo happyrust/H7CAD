@@ -103,6 +103,9 @@ impl Ribbon {
     pub fn activate_tool(&mut self, id: &str) {
         self.active_tool = Some(id.to_string());
     }
+    pub fn deactivate_tool(&mut self) {
+        self.active_tool = None;
+    }
     pub fn set_wireframe(&mut self, w: bool) {
         self.wireframe = w;
     }
