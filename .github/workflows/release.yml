@@ -1,4 +1,4 @@
-name: Flatpak Release
+name: Release
 
 on:
   release:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-flatpak:
     runs-on: ubuntu-latest
     permissions:
       contents: write
