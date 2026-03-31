@@ -706,7 +706,7 @@ impl H7CAD {
                     let raw = self.tabs[i].scene.paper_to_model(raw_paper);
 
                     let edited_name = grip.handle.value().to_string();
-                    let all_wires = self.tabs[i].scene.entity_wires();
+                    let all_wires = self.tabs[i].scene.hit_test_wires();
                     let snap_wires: Vec<_> = all_wires
                         .iter()
                         .filter(|w| w.name != edited_name)
@@ -749,7 +749,7 @@ impl H7CAD {
                     // command previews and snapping work in the correct coordinate space.
                     let cursor_world = self.tabs[i].scene.paper_to_model(cursor_paper);
 
-                    let all_wires = self.tabs[i].scene.entity_wires();
+                    let all_wires = self.tabs[i].scene.hit_test_wires();
                     let needs_tan = self.tabs[i]
                         .active_cmd.as_ref().map(|c| c.needs_tangent_pick()).unwrap_or(false);
                     self.tabs[i].snap_result = if needs_tan {
@@ -758,7 +758,11 @@ impl H7CAD {
                         self.snapper.snap(cursor_world, p, &all_wires, view_proj, bounds)
                     };
                     let effective = {
-                        let mut pt = self.tabs[i].snap_result.map(|s| s.world).unwrap_or(cursor_world);
+                        // snap.world is paper-space for viewport-projected wires; convert
+                        // to model-space so previews use consistent coordinates.
+                        let mut pt = self.tabs[i].snap_result
+                            .map(|s| self.tabs[i].scene.paper_to_model(s.world))
+                            .unwrap_or(cursor_world);
                         if self.tabs[i].active_cmd.is_some() { pt.z = 0.0; }
                         if let Some(base) = self.last_point {
                             if self.ortho_mode {
@@ -895,7 +899,7 @@ impl H7CAD {
                         // Convert paper-space → model-space when inside a viewport.
                         let raw = self.tabs[i].scene.paper_to_model(raw_paper);
                         let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                        let all_wires = self.tabs[i].scene.entity_wires();
+                        let all_wires = self.tabs[i].scene.hit_test_wires();
                         let needs_tan = self.tabs[i].active_cmd.as_ref()
                             .map(|c| c.needs_tangent_pick()).unwrap_or(false);
                         let snap_hit = if needs_tan {
@@ -903,7 +907,11 @@ impl H7CAD {
                         } else {
                             self.snapper.snap(raw, p, &all_wires, vp_mat, bounds)
                         };
-                        let mut pt = snap_hit.map(|s| s.world).unwrap_or(raw);
+                        // snap.world is in paper-space (projected wire coords in MSPACE);
+                        // convert to model-space so commands receive consistent coordinates.
+                        let mut pt = snap_hit
+                            .map(|s| self.tabs[i].scene.paper_to_model(s.world))
+                            .unwrap_or(raw);
                         pt.z = 0.0;
                         if let Some(base) = self.last_point {
                             if self.ortho_mode {
@@ -919,7 +927,7 @@ impl H7CAD {
                         .map(|c| c.needs_entity_pick()).unwrap_or(false)
                     {
                         let vp_mat2 = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                        let all_wires2 = self.tabs[i].scene.entity_wires();
+                        let all_wires2 = self.tabs[i].scene.hit_test_wires();
                         let hit = scene::hit_test::click_hit(p, &all_wires2, vp_mat2, bounds)
                             .and_then(|s| Scene::handle_from_wire_name(s));
                         if let Some(handle) = hit {
@@ -976,7 +984,7 @@ impl H7CAD {
                         if elapsed_ms < POLY_START_DELAY_MS {
                             if let Some(a) = box_anchor {
                                 let crossing = box_crossing;
-                                let all_wires = self.tabs[i].scene.entity_wires();
+                                let all_wires = self.tabs[i].scene.hit_test_wires();
                                 let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                                 let mut handles: Vec<Handle> = scene::hit_test::box_hit(
                                     a, p, crossing, &all_wires, vp_mat, bounds,
@@ -996,7 +1004,7 @@ impl H7CAD {
                                 (sel.poly_points.clone(), sel.poly_crossing)
                             };
                             self.tabs[i].scene.selection.borrow_mut().poly_last_crossing = crossing;
-                            let all_wires = self.tabs[i].scene.entity_wires();
+                            let all_wires = self.tabs[i].scene.hit_test_wires();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let mut handles: Vec<Handle> = scene::hit_test::poly_hit(
                                 &poly_pts, crossing, &all_wires, vp_mat, bounds,
@@ -1018,7 +1026,7 @@ impl H7CAD {
                         sel.box_current = None;
                     } else {
                         if box_anchor.is_none() {
-                            let all_wires = self.tabs[i].scene.entity_wires();
+                            let all_wires = self.tabs[i].scene.hit_test_wires();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
@@ -1041,7 +1049,7 @@ impl H7CAD {
                         } else {
                             let a = box_anchor.unwrap();
                             let crossing = box_crossing;
-                            let all_wires = self.tabs[i].scene.entity_wires();
+                            let all_wires = self.tabs[i].scene.hit_test_wires();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let mut handles: Vec<Handle> = scene::hit_test::box_hit(
                                 a, p, crossing, &all_wires, vp_mat, bounds,
@@ -1107,7 +1115,7 @@ impl H7CAD {
                         // 1) Try direct wire hit — works when the border is clicked.
                         let hit_vp: Option<acadrust::Handle> = {
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                            let all_wires = self.tabs[i].scene.entity_wires();
+                            let all_wires = self.tabs[i].scene.hit_test_wires();
                             scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
                                 .and_then(|h| {
@@ -1679,13 +1687,19 @@ impl H7CAD {
 
             Message::EnterViewport(handle) => {
                 let i = self.active_tab;
+                // Clear paper-space selection before entering model space.
+                self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.active_viewport = Some(handle);
-                self.command_line.push_output("MSPACE — viewport entered. Middle-drag/scroll to navigate, double-click outside to exit.");
+                self.refresh_properties();
+                self.command_line.push_output("MSPACE");
                 Task::none()
             }
 
             Message::ExitViewport => {
                 let i = self.active_tab;
+                // Clear model-space selection before returning to paper space.
+                self.tabs[i].scene.deselect_all();
+                self.refresh_properties();
                 self.tabs[i].scene.active_viewport = None;
                 self.command_line.push_output("PSPACE");
                 Task::none()
@@ -1801,7 +1815,7 @@ impl H7CAD {
             Message::PlotExportPath(None) => Task::none(),
             Message::PlotExportPath(Some(path)) => {
                 let i = self.active_tab;
-                let wires = self.tabs[i].scene.entity_wires();
+                let wires = self.tabs[i].scene.entity_wires(); // full scene for PDF
                 let (paper_w, paper_h, offset_x, offset_y) =
                     if let Some(((x0, y0), (x1, y1))) = self.tabs[i].scene.paper_limits() {
                         (x1 - x0, y1 - y0, -x0, -y0)

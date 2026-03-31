@@ -288,9 +288,33 @@ impl Scene {
             if let Some(((x0, y0), (x1, y1))) = self.paper_limits() {
                 wires.insert(0, paper_boundary_wire(x0 as f32, y0 as f32, x1 as f32, y1 as f32));
             }
-            wires.extend(self.viewport_content_wires(layout_block));
+            wires.extend(self.viewport_content_wires(layout_block, None));
         }
         wires
+    }
+
+    /// Wires that should participate in hit-testing, snapping, and selection.
+    ///
+    /// - Model layout: all entity wires (same as entity_wires).
+    /// - PSPACE (paper layout, no active viewport): paper-space entities only —
+    ///   viewport content is NOT interactive.
+    /// - MSPACE (active viewport set): model-space content of the active viewport
+    ///   only — paper-space entities are NOT interactive.
+    pub fn hit_test_wires(&self) -> Vec<WireModel> {
+        if self.current_layout == "Model" {
+            return self.entity_wires();
+        }
+        let layout_block = self.current_layout_block_handle();
+        match self.active_viewport {
+            None => {
+                // PSPACE: only paper-space entities (viewport borders, title blocks…)
+                self.wires_for_block(layout_block)
+            }
+            Some(vp_handle) => {
+                // MSPACE: only model content visible through the active viewport
+                self.viewport_content_wires(layout_block, Some(vp_handle))
+            }
+        }
     }
 
     /// Tessellate all non-invisible entities owned by `block_handle`.
@@ -534,7 +558,9 @@ impl Scene {
         vp.view_height = vp.height / fit_scale;
     }
 
-    fn viewport_content_wires(&self, paper_block: Handle) -> Vec<WireModel> {
+    /// Collect model-space wires projected into paper space for all (or one specific)
+    /// user viewports.  `only_vp = Some(h)` restricts output to that viewport.
+    fn viewport_content_wires(&self, paper_block: Handle, only_vp: Option<Handle>) -> Vec<WireModel> {
         use acadrust::entities::Viewport;
         use std::collections::HashSet as HSet;
 
@@ -544,7 +570,12 @@ impl Scene {
             .filter_map(|e| {
                 if let EntityType::Viewport(vp) = e { Some(vp) } else { None }
             })
-            .filter(|vp| vp.id > 1 && vp.common.owner_handle == paper_block && vp.status.is_on)
+            .filter(|vp| {
+                vp.id > 1
+                    && vp.common.owner_handle == paper_block
+                    && vp.status.is_on
+                    && only_vp.map_or(true, |h| vp.common.handle == h)
+            })
             .collect();
 
         if viewports.is_empty() {
@@ -911,7 +942,18 @@ impl Scene {
             None
         };
 
-        let handle = self.document.add_entity(entity).unwrap_or(Handle::NULL);
+        // Route to the correct block based on current editing mode:
+        //   - PSPACE (paper layout, no active viewport): paper-space layout block.
+        //   - MSPACE or model layout: model space (document default).
+        let handle = if self.current_layout != "Model" && self.active_viewport.is_none() {
+            let layout_name = self.current_layout.clone();
+            self.document
+                .add_entity_to_layout(entity, &layout_name)
+                .unwrap_or(Handle::NULL)
+        } else {
+            self.document.add_entity(entity).unwrap_or(Handle::NULL)
+        };
+
         if !handle.is_null() {
             if let Some(model) = hatch_seed {
                 self.hatches.insert(handle, model);
