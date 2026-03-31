@@ -84,8 +84,8 @@ impl CadCommand for MviewCommand {
             points: vec![
                 [c1.x, c1.y, c1.z],
                 [pt.x, c1.y, c1.z],
-                [pt.x, c1.y, pt.z],
-                [c1.x, c1.y, pt.z],
+                [pt.x, pt.y, c1.z],
+                [c1.x, pt.y, c1.z],
                 [c1.x, c1.y, c1.z],
             ],
             color: WireModel::CYAN,
