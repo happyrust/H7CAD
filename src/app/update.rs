@@ -750,9 +750,15 @@ impl H7CAD {
                     let cursor_world = self.tabs[i].scene.paper_to_model(cursor_paper);
 
                     let all_wires = self.tabs[i].scene.hit_test_wires();
+                    let needs_entity = self.tabs[i]
+                        .active_cmd.as_ref().map(|c| c.needs_entity_pick()).unwrap_or(false);
+                    let is_gathering = self.tabs[i]
+                        .active_cmd.as_ref().map(|c| c.is_selection_gathering()).unwrap_or(false);
                     let needs_tan = self.tabs[i]
                         .active_cmd.as_ref().map(|c| c.needs_tangent_pick()).unwrap_or(false);
-                    self.tabs[i].snap_result = if needs_tan {
+                    self.tabs[i].snap_result = if needs_entity || is_gathering {
+                        None
+                    } else if needs_tan {
                         self.snapper.snap_tangent_only(cursor_world, p, &all_wires, view_proj, bounds)
                     } else {
                         self.snapper.snap(cursor_world, p, &all_wires, view_proj, bounds)
@@ -775,8 +781,6 @@ impl H7CAD {
                     };
                     self.tabs[i].last_cursor_world = effective;
 
-                    let needs_entity = self.tabs[i]
-                        .active_cmd.as_ref().map(|c| c.needs_entity_pick()).unwrap_or(false);
                     let previews = if needs_entity {
                         let hover_handle =
                             scene::hit_test::click_hit(p, &all_wires, view_proj, bounds)
@@ -902,7 +906,11 @@ impl H7CAD {
                         let all_wires = self.tabs[i].scene.hit_test_wires();
                         let needs_tan = self.tabs[i].active_cmd.as_ref()
                             .map(|c| c.needs_tangent_pick()).unwrap_or(false);
-                        let snap_hit = if needs_tan {
+                        let needs_entity_click = self.tabs[i].active_cmd.as_ref()
+                            .map(|c| c.needs_entity_pick()).unwrap_or(false);
+                        let snap_hit = if needs_entity_click {
+                            None
+                        } else if needs_tan {
                             self.snapper.snap_tangent_only(raw, p, &all_wires, vp_mat, bounds)
                         } else {
                             self.snapper.snap(raw, p, &all_wires, vp_mat, bounds)
