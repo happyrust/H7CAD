@@ -231,14 +231,27 @@ impl Scene {
     /// Sorted list of layout names: "Model" first, then paper layouts by tab order.
     pub fn layout_names(&self) -> Vec<String> {
         let mut names = vec!["Model".to_string()];
-        let mut paper: Vec<(i16, String)> = self
-            .document
-            .objects
-            .values()
-            .filter_map(|obj| match obj {
-                ObjectType::Layout(l) if l.name != "Model" => Some((l.tab_order, l.name.clone())),
-                _ => None,
-            })
+        // Deduplicate by name: prefer the entry with a non-null block_record (the
+        // real layout from the file) over the default placeholder created by
+        // CadDocument::new().
+        let mut by_name: std::collections::HashMap<String, (i16, Handle)> =
+            Default::default();
+        for obj in self.document.objects.values() {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == "Model" || l.name.is_empty() {
+                    continue;
+                }
+                let entry = by_name
+                    .entry(l.name.clone())
+                    .or_insert((l.tab_order, l.block_record));
+                if entry.1.is_null() && !l.block_record.is_null() {
+                    *entry = (l.tab_order, l.block_record);
+                }
+            }
+        }
+        let mut paper: Vec<(i16, String)> = by_name
+            .into_iter()
+            .map(|(name, (order, _))| (order, name))
             .collect();
         paper.sort_by_key(|(order, _)| *order);
         names.extend(paper.into_iter().map(|(_, n)| n));
