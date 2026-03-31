@@ -168,6 +168,23 @@ fn properties(vp: &Viewport) -> PropSection {
             },
             edit("Target X", "vtgt_x", vp.view_target.x),
             edit("Target Z", "vtgt_z", vp.view_target.z),
+            // Perspective lens length.
+            edit("Lens Length (mm)", "vp_lens", vp.lens_length),
+            // Per-Viewport UCS.
+            Property {
+                label: "UCS Per Viewport".into(),
+                field: "vp_ucs_per_vp",
+                value: PropValue::BoolToggle { field: "vp_ucs_per_vp", value: vp.ucs_per_viewport },
+            },
+            edit("UCS Origin X", "vp_ucs_ox", vp.ucs_origin.x),
+            edit("UCS Origin Y", "vp_ucs_oy", vp.ucs_origin.y),
+            edit("UCS Origin Z", "vp_ucs_oz", vp.ucs_origin.z),
+            edit("UCS X-Axis X", "vp_ucs_xx", vp.ucs_x_axis.x),
+            edit("UCS X-Axis Y", "vp_ucs_xy", vp.ucs_x_axis.y),
+            edit("UCS X-Axis Z", "vp_ucs_xz", vp.ucs_x_axis.z),
+            edit("UCS Y-Axis X", "vp_ucs_yx", vp.ucs_y_axis.x),
+            edit("UCS Y-Axis Y", "vp_ucs_yy", vp.ucs_y_axis.y),
+            edit("UCS Y-Axis Z", "vp_ucs_yz", vp.ucs_y_axis.z),
         ],
     }
 }
@@ -216,6 +233,10 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
         }
         "vp_ucs_icon" => {
             vp.ucs_icon_visible = if value == "toggle" { !vp.ucs_icon_visible } else { value == "true" };
+            return;
+        }
+        "vp_ucs_per_vp" => {
+            vp.ucs_per_viewport = if value == "toggle" { !vp.ucs_per_viewport } else { value == "true" };
             return;
         }
         _ => {}
@@ -284,6 +305,16 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
         }
         "vtgt_x" => vp.view_target.x = v,
         "vtgt_z" => vp.view_target.z = v,
+        "vp_lens" if v > 0.0 => vp.lens_length = v,
+        "vp_ucs_ox" => vp.ucs_origin.x = v,
+        "vp_ucs_oy" => vp.ucs_origin.y = v,
+        "vp_ucs_oz" => vp.ucs_origin.z = v,
+        "vp_ucs_xx" => vp.ucs_x_axis.x = v,
+        "vp_ucs_xy" => vp.ucs_x_axis.y = v,
+        "vp_ucs_xz" => vp.ucs_x_axis.z = v,
+        "vp_ucs_yx" => vp.ucs_y_axis.x = v,
+        "vp_ucs_yy" => vp.ucs_y_axis.y = v,
+        "vp_ucs_yz" => vp.ucs_y_axis.z = v,
         _ => {}
     }
 }

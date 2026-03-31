@@ -661,6 +661,17 @@ impl Scene {
             let vp_y0 = pcy - hh;
             let vp_y1 = pcy + hh;
 
+            // ── Perspective setup ─────────────────────────────────────────
+            // camera_dist: how far the camera is from the target plane.
+            // Derived from lens_length (mm, 35mm-film equiv.) and view_height:
+            //   tan(fov_v/2) = 12 / lens_length  →  camera_dist = view_height * lens_length / 24
+            let use_perspective = vp.status.perspective && vp.lens_length > 1.0;
+            let camera_dist = if use_perspective {
+                (vp.view_height as f32 * vp.lens_length as f32 / 24.0).max(0.001)
+            } else {
+                0.0
+            };
+
             for wire in &model_wires {
                 // Project 3-D model points onto view plane → paper space.
                 let projected_pts: Vec<[f32; 3]> = wire.points.iter().map(|&[mx, my, mz]| {
@@ -670,7 +681,21 @@ impl Scene {
                     let mp = glam::Vec3::new(mx, my, mz) - target;
                     let u = mp.dot(view_right);
                     let v = mp.dot(view_up);
-                    [pcx + u * scale, pcy + v * scale, pcz]
+                    if use_perspective {
+                        // vd points from target toward camera, so depth along vd is the
+                        // distance from the target plane toward the camera.
+                        let d_vd = mp.dot(vd);
+                        // Forward distance from camera (positive = in front of camera).
+                        let fwd = camera_dist - d_vd;
+                        if fwd <= 0.001 {
+                            // Point is behind or at the camera — discard.
+                            return [f32::NAN; 3];
+                        }
+                        let factor = camera_dist / fwd;
+                        [pcx + u * factor * scale, pcy + v * factor * scale, pcz]
+                    } else {
+                        [pcx + u * scale, pcy + v * scale, pcz]
+                    }
                 }).collect();
 
                 // Fast AABB pre-reject: skip entirely if no finite point is
