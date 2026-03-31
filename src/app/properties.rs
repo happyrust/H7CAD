@@ -56,7 +56,7 @@ impl H7CAD {
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
 
-                    // Inject frozen-layer property for viewports (requires doc access).
+                    // Inject viewport-only properties that require doc access.
                     if let acadrust::EntityType::Viewport(vp) = entity {
                         let frozen_names: Vec<String> = vp
                             .frozen_layers
@@ -67,6 +67,21 @@ impl H7CAD {
                                     .map(|l| l.name.clone())
                             })
                             .collect();
+
+                        // Collect available UCS names for the name picker.
+                        let ucs_names: Vec<String> = self.tabs[i].scene.document.ucss
+                            .iter()
+                            .map(|u| u.name.clone())
+                            .filter(|n| !n.is_empty())
+                            .collect();
+
+                        // Current UCS name (resolved from vp.ucs_handle).
+                        let current_ucs = self.tabs[i].scene.document.ucss
+                            .iter()
+                            .find(|u| u.handle == vp.ucs_handle)
+                            .map(|u| u.name.clone())
+                            .unwrap_or_default();
+
                         if let Some(geom) = sections.last_mut() {
                             geom.props.push(crate::scene::object::Property {
                                 label: "Frozen Layers".to_string(),
@@ -75,6 +90,16 @@ impl H7CAD {
                                     frozen_names.join(", "),
                                 ),
                             });
+                            if !ucs_names.is_empty() {
+                                geom.props.push(crate::scene::object::Property {
+                                    label: "UCS Name".to_string(),
+                                    field: "vp_ucs_name",
+                                    value: crate::scene::object::PropValue::Choice {
+                                        selected: current_ucs,
+                                        options: ucs_names,
+                                    },
+                                });
+                            }
                         }
                     }
 

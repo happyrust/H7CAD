@@ -1484,9 +1484,29 @@ impl H7CAD {
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
                     self.push_undo_snapshot(i, "CHPROP");
-                    for handle in handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_geom_prop(entity, field, &value);
+                    if field == "vp_ucs_name" {
+                        // Resolve UCS name → cloned data, then mutate viewports.
+                        let ucs_data = self.tabs[i].scene.document.ucss
+                            .iter()
+                            .find(|u| u.name == value)
+                            .cloned();
+                        if let Some(ucs) = ucs_data {
+                            for handle in &handles {
+                                if let Some(acadrust::EntityType::Viewport(vp)) =
+                                    self.tabs[i].scene.document.get_entity_mut(*handle)
+                                {
+                                    vp.ucs_handle = ucs.handle;
+                                    vp.ucs_origin = ucs.origin.clone();
+                                    vp.ucs_x_axis = ucs.x_axis.clone();
+                                    vp.ucs_y_axis = ucs.y_axis.clone();
+                                }
+                            }
+                        }
+                    } else {
+                        for handle in handles {
+                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                                crate::scene::dispatch::apply_geom_prop(entity, field, &value);
+                            }
                         }
                     }
                     self.tabs[i].dirty = true;
