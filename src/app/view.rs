@@ -5,7 +5,7 @@ use super::helpers::grid_plane_from_camera;
 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
 use crate::scene::grip::grips_to_screen;
 use crate::ui::overlay;
-use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, Row};
+use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, text_input, Row};
 use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 
@@ -199,7 +199,13 @@ impl H7CAD {
                 iced::widget::Space::new().width(0).height(0).into()
             };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer].into()
+        let page_setup_layer: Element<'_, Message> = if self.page_setup_open {
+            page_setup_overlay(&self.page_setup_w, &self.page_setup_h)
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -440,6 +446,116 @@ fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
         .align_bottom(Fill)
         .align_left(Fill)
         .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 30.0, left: 8.0 });
+
+    stack![catcher, positioned].into()
+}
+
+// ── Page Setup overlay ──────────────────────────────────────────────────────
+
+/// Modal panel for editing paper width / height of the current layout.
+fn page_setup_overlay<'a>(w_buf: &'a str, h_buf: &'a str) -> Element<'a, Message> {
+    const PANEL_BG: Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
+    const BORDER_COL: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const TEXT_COLOR: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const ACCENT: Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
+
+    let label = |s: &'static str| text(s).size(12).color(TEXT_COLOR);
+
+    let field_style = |_: &Theme, _: text_input::Status| text_input::Style {
+        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
+        border: Border { color: BORDER_COL, width: 1.0, radius: 3.0.into() },
+        icon: TEXT_COLOR,
+        placeholder: Color { r: 0.45, g: 0.45, b: 0.45, a: 1.0 },
+        value: TEXT_COLOR,
+        selection: ACCENT,
+    };
+
+    let btn_style = |accent: bool| {
+        move |_: &Theme, status: button::Status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered | button::Status::Pressed if accent => {
+                    Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 }
+                }
+                button::Status::Hovered | button::Status::Pressed => {
+                    Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
+                }
+                _ if accent => ACCENT,
+                _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+            })),
+            text_color: TEXT_COLOR,
+            border: Border { color: BORDER_COL, width: 1.0, radius: 4.0.into() },
+            shadow: iced::Shadow::default(),
+            snap: false,
+        }
+    };
+
+    let panel = container(
+        column![
+            text("Page Setup").size(14).color(TEXT_COLOR),
+            container(iced::widget::Space::new().width(Fill).height(1))
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(BORDER_COL)),
+                    ..Default::default()
+                })
+                .width(Fill),
+            row![
+                label("Width (mm)"),
+                text_input("297", w_buf)
+                    .on_input(Message::PageSetupWidthEdit)
+                    .on_submit(Message::PageSetupCommit)
+                    .style(field_style)
+                    .width(90)
+                    .size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            row![
+                label("Height (mm)"),
+                text_input("210", h_buf)
+                    .on_input(Message::PageSetupHeightEdit)
+                    .on_submit(Message::PageSetupCommit)
+                    .style(field_style)
+                    .width(90)
+                    .size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            row![
+                button(text("Cancel").size(12).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupClose)
+                    .style(btn_style(false))
+                    .padding([5, 14]),
+                button(text("OK").size(12).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupCommit)
+                    .style(btn_style(true))
+                    .padding([5, 20]),
+            ]
+            .spacing(8),
+        ]
+        .spacing(10)
+        .padding(16)
+        .width(240),
+    )
+    .style(move |_: &Theme| container::Style {
+        background: Some(Background::Color(PANEL_BG)),
+        border: Border { color: BORDER_COL, width: 1.0, radius: 6.0.into() },
+        ..Default::default()
+    });
+
+    // Click-catcher to close on outside click.
+    let catcher = mouse_area(
+        container(iced::widget::Space::new().width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill),
+    )
+    .on_press(Message::PageSetupClose);
+
+    // Center the panel on screen.
+    let positioned = container(panel)
+        .width(Fill)
+        .height(Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
 
     stack![catcher, positioned].into()
 }

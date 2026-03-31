@@ -1653,6 +1653,95 @@ impl H7CAD {
             }
 
             Message::Noop => Task::none(),
+
+            // ── Page Setup ────────────────────────────────────────────────
+            Message::PageSetupOpen => {
+                let i = self.active_tab;
+                // Populate edit buffers from current paper limits.
+                let (w, h) = if let Some(((_, _), (x1, y1))) = self.tabs[i].scene.paper_limits() {
+                    (x1, y1)
+                } else {
+                    (297.0, 210.0) // A4 default
+                };
+                self.page_setup_w = format!("{w:.1}");
+                self.page_setup_h = format!("{h:.1}");
+                self.page_setup_open = true;
+                Task::none()
+            }
+            Message::PageSetupClose => {
+                self.page_setup_open = false;
+                Task::none()
+            }
+            Message::PageSetupWidthEdit(s) => {
+                self.page_setup_w = s;
+                Task::none()
+            }
+            Message::PageSetupHeightEdit(s) => {
+                self.page_setup_h = s;
+                Task::none()
+            }
+            Message::PageSetupCommit => {
+                let i = self.active_tab;
+                let layout_name = self.tabs[i].scene.current_layout.clone();
+                if layout_name != "Model" {
+                    let w: f64 = self.page_setup_w.parse::<f64>().unwrap_or(297.0).max(1.0);
+                    let h: f64 = self.page_setup_h.parse::<f64>().unwrap_or(210.0).max(1.0);
+                    // Update the Layout object's limits.
+                    for obj in self.tabs[i].scene.document.objects.values_mut() {
+                        if let acadrust::objects::ObjectType::Layout(l) = obj {
+                            if l.name == layout_name {
+                                l.min_limits = (0.0, 0.0);
+                                l.max_limits = (w, h);
+                                l.min_extents = (0.0, 0.0, 0.0);
+                                l.max_extents = (w, h, 0.0);
+                                break;
+                            }
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_info(&format!(
+                        "Page size set to {w:.1} × {h:.1} mm."
+                    ));
+                }
+                self.page_setup_open = false;
+                Task::none()
+            }
+
+            // ── Plot / Export ─────────────────────────────────────────────
+            Message::PlotExport => {
+                let i = self.active_tab;
+                let stem = self.tabs[i]
+                    .current_path
+                    .as_deref()
+                    .and_then(|p: &std::path::Path| p.file_stem())
+                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "drawing".into());
+                Task::perform(
+                    crate::io::pdf_export::pick_pdf_path_owned(stem),
+                    Message::PlotExportPath,
+                )
+            }
+            Message::PlotExportPath(None) => Task::none(),
+            Message::PlotExportPath(Some(path)) => {
+                let i = self.active_tab;
+                let wires = self.tabs[i].scene.entity_wires();
+                let (paper_w, paper_h) = if let Some(((_, _), (w, h))) =
+                    self.tabs[i].scene.paper_limits()
+                {
+                    (w, h)
+                } else {
+                    // Model space: use extents or default A4 landscape.
+                    (297.0, 210.0)
+                };
+                match crate::io::pdf_export::export_pdf(&wires, paper_w, paper_h, &path) {
+                    Ok(()) => self.command_line.push_info(&format!(
+                        "Exported: {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    )),
+                    Err(e) => self.command_line.push_error(&format!("Export failed: {e}")),
+                }
+                Task::none()
+            }
         }
     }
 }

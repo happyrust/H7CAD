@@ -1,7 +1,9 @@
-// I/O module — open and save CAD documents.
+// I/O module — open, save, and export CAD documents.
 //
 // All file reading/writing goes through acadrust.
 // Default save format: DWG (AC1032 / R2018+).
+
+pub mod pdf_export;
 
 use acadrust::io::dwg::DwgReader;
 use acadrust::{CadDocument, DwgWriter, DxfReader, DxfWriter};

@@ -3,7 +3,7 @@
 
 pub mod mview;
 
-use crate::modules::{CadModule, RibbonGroup};
+use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, ToolDef};
 
 pub struct LayoutModule;
 
@@ -16,9 +16,30 @@ impl CadModule for LayoutModule {
     }
 
     fn ribbon_groups(&self) -> Vec<RibbonGroup> {
-        vec![RibbonGroup {
-            title: "Viewport",
-            tools: vec![mview::tool().into()],
-        }]
+        vec![
+            RibbonGroup {
+                title: "Viewport",
+                tools: vec![mview::tool().into()],
+            },
+            RibbonGroup {
+                title: "Plot",
+                tools: vec![
+                    ToolDef {
+                        id: "PAGESETUP",
+                        label: "Page Setup",
+                        icon: IconKind::Glyph("📋"),
+                        event: ModuleEvent::Command("PAGESETUP".to_string()),
+                    }
+                    .into(),
+                    ToolDef {
+                        id: "PLOT",
+                        label: "Export PDF",
+                        icon: IconKind::Glyph("🖨"),
+                        event: ModuleEvent::Command("PLOT".to_string()),
+                    }
+                    .into(),
+                ],
+            },
+        ]
     }
 }

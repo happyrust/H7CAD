@@ -65,6 +65,12 @@ pub(super) struct H7CAD {
     last_vp_click_time: Option<Instant>,
     /// Screen position of the previous viewport left-click release.
     last_vp_click_pos: Option<Point>,
+    /// Page Setup overlay open/closed.
+    page_setup_open: bool,
+    /// Editable paper width buffer for the Page Setup panel (string while typing).
+    page_setup_w: String,
+    /// Editable paper height buffer for the Page Setup panel (string while typing).
+    page_setup_h: String,
 }
 
 #[derive(Debug, Clone)]
@@ -240,6 +246,22 @@ pub enum Message {
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.
     Noop,
+    // ── Page Setup ────────────────────────────────────────────────────────
+    /// Open the Page Setup panel for the current layout.
+    PageSetupOpen,
+    /// Close (cancel) the Page Setup panel without applying changes.
+    PageSetupClose,
+    /// Live-edit of the paper width field.
+    PageSetupWidthEdit(String),
+    /// Live-edit of the paper height field.
+    PageSetupHeightEdit(String),
+    /// Apply the changes entered in Page Setup.
+    PageSetupCommit,
+    // ── Plot / Export ─────────────────────────────────────────────────────
+    /// Show the SVG save-file dialog and trigger export.
+    PlotExport,
+    /// Callback after the user picks (or cancels) the export path.
+    PlotExportPath(Option<std::path::PathBuf>),
 }
 
 impl H7CAD {
@@ -271,6 +293,9 @@ impl H7CAD {
             layout_rename_state: None,
             last_vp_click_time: None,
             last_vp_click_pos: None,
+            page_setup_open: false,
+            page_setup_w: String::new(),
+            page_setup_h: String::new(),
         };
         app.sync_ribbon_layers();
         app

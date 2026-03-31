@@ -892,12 +892,24 @@ impl H7CAD {
             // ── Layout / viewport ──────────────────────────────────────────
             "MVIEW"|"MV" => {
                 if self.tabs[i].scene.current_layout == "Model" {
-                    self.command_line.push_error("MVIEW: önce bir paper space layout'una geçin.");
+                    self.command_line.push_error("MVIEW: switch to a paper space layout first.");
                 } else {
                     use crate::modules::layout::mview::MviewCommand;
                     let new_cmd = MviewCommand::new();
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                }
+            }
+
+            // ── Plot / Page Setup ──────────────────────────────────────────
+            "PRINT"|"PLOT"|"EXPORT" => {
+                return Task::done(Message::PlotExport);
+            }
+            "PAGESETUP"|"PS" => {
+                if self.tabs[i].scene.current_layout == "Model" {
+                    self.command_line.push_error("PAGESETUP: switch to a paper space layout first.");
+                } else {
+                    return Task::done(Message::PageSetupOpen);
                 }
             }
 
