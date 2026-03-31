@@ -463,6 +463,7 @@ fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
 /// Modal panel for editing paper width / height of the current layout.
 // ── Paper size presets ────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const PAPER_PRESETS: &[(&str, f64, f64)] = &[
     ("A4 Portrait",   210.0, 297.0),
     ("A4 Landscape",  297.0, 210.0),

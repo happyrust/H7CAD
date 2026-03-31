@@ -1918,7 +1918,7 @@ impl H7CAD {
                 let wires = scene.entity_wires();
 
                 // Read PlotSettings for current layout (if available).
-                use acadrust::objects::{ObjectType, PlotType, PlotRotation};
+                use acadrust::objects::{ObjectType, PlotType};
                 let ps_snap = scene.document.objects.values().find_map(|obj| {
                     if let ObjectType::PlotSettings(ps) = obj {
                         if ps.page_name == layout_name { Some(ps.clone()) } else { None }
@@ -1936,7 +1936,7 @@ impl H7CAD {
                             .unwrap_or(false);
 
                         let (ox, oy) = if use_extents {
-                            if let Some((mn, mx)) = scene.model_space_extents() {
+                            if let Some((mn, _mx)) = scene.model_space_extents() {
                                 (-mn.x as f64, -mn.y as f64)
                             } else {
                                 (-x0, -y0)
