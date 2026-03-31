@@ -5,7 +5,7 @@ use super::helpers::grid_plane_from_camera;
 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
 use crate::scene::grip::grips_to_screen;
 use crate::ui::overlay;
-use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, text_input, Row};
+use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, text_input, Row, Space};
 use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 
@@ -200,7 +200,15 @@ impl H7CAD {
             };
 
         let page_setup_layer: Element<'_, Message> = if self.page_setup_open {
-            page_setup_overlay(&self.page_setup_w, &self.page_setup_h)
+            page_setup_overlay(
+                &self.page_setup_w,
+                &self.page_setup_h,
+                &self.page_setup_plot_area,
+                self.page_setup_center,
+                &self.page_setup_offset_x,
+                &self.page_setup_offset_y,
+                &self.page_setup_rotation,
+            )
         } else {
             iced::widget::Space::new().width(0).height(0).into()
         };
@@ -453,13 +461,41 @@ fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
 // ── Page Setup overlay ──────────────────────────────────────────────────────
 
 /// Modal panel for editing paper width / height of the current layout.
-fn page_setup_overlay<'a>(w_buf: &'a str, h_buf: &'a str) -> Element<'a, Message> {
-    const PANEL_BG: Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
+// ── Paper size presets ────────────────────────────────────────────────────
+
+const PAPER_PRESETS: &[(&str, f64, f64)] = &[
+    ("A4 Portrait",   210.0, 297.0),
+    ("A4 Landscape",  297.0, 210.0),
+    ("A3 Portrait",   297.0, 420.0),
+    ("A3 Landscape",  420.0, 297.0),
+    ("A2 Portrait",   420.0, 594.0),
+    ("A2 Landscape",  594.0, 420.0),
+    ("A1 Portrait",   594.0, 841.0),
+    ("A1 Landscape",  841.0, 594.0),
+    ("A0 Portrait",   841.0, 1189.0),
+    ("A0 Landscape",  1189.0, 841.0),
+    ("Letter Portrait",  215.9, 279.4),
+    ("Letter Landscape", 279.4, 215.9),
+    ("Custom",           0.0,   0.0),
+];
+
+fn page_setup_overlay<'a>(
+    w_buf: &'a str,
+    h_buf: &'a str,
+    plot_area: &'a str,
+    center: bool,
+    offset_x: &'a str,
+    offset_y: &'a str,
+    rotation: &'a str,
+) -> Element<'a, Message> {
+    const PANEL_BG: Color  = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
     const BORDER_COL: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
     const TEXT_COLOR: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-    const ACCENT: Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
+    const DIM_COLOR: Color  = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
+    const ACCENT: Color     = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
+    const ACTIVE_BG: Color  = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
 
-    let label = |s: &'static str| text(s).size(12).color(TEXT_COLOR);
+    let lbl = |s: &'static str| text(s).size(11).color(DIM_COLOR).width(110);
 
     let field_style = |_: &Theme, _: text_input::Status| text_input::Style {
         background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
@@ -489,52 +525,163 @@ fn page_setup_overlay<'a>(w_buf: &'a str, h_buf: &'a str) -> Element<'a, Message
         }
     };
 
+    let pill_style = |active: bool| {
+        move |_: &Theme, status: button::Status| button::Style {
+            background: Some(Background::Color(match (active, status) {
+                (true,  _) => ACTIVE_BG,
+                (false, button::Status::Hovered | button::Status::Pressed) => {
+                    Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
+                }
+                _ => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
+            })),
+            text_color: TEXT_COLOR,
+            border: Border { color: BORDER_COL, width: 1.0, radius: 3.0.into() },
+            shadow: iced::Shadow::default(),
+            snap: false,
+        }
+    };
+
+    let divider = || container(Space::new().width(Fill).height(1))
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(BORDER_COL)),
+            ..Default::default()
+        })
+        .width(Fill)
+        .height(1);
+
+    // ── Paper size presets ────────────────────────────────────────────────
+    let preset_row1 = row![
+        button(text("A4 P").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("A4 Portrait".into()))
+            .style(pill_style(false)).padding([3, 6]),
+        button(text("A4 L").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("A4 Landscape".into()))
+            .style(pill_style(false)).padding([3, 6]),
+        button(text("A3 P").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("A3 Portrait".into()))
+            .style(pill_style(false)).padding([3, 6]),
+        button(text("A3 L").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("A3 Landscape".into()))
+            .style(pill_style(false)).padding([3, 6]),
+    ].spacing(4);
+
+    let preset_row2 = row![
+        button(text("A2 L").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("A2 Landscape".into()))
+            .style(pill_style(false)).padding([3, 6]),
+        button(text("A1 L").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("A1 Landscape".into()))
+            .style(pill_style(false)).padding([3, 6]),
+        button(text("A0 L").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("A0 Landscape".into()))
+            .style(pill_style(false)).padding([3, 6]),
+        button(text("Letter").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPreset("Letter Landscape".into()))
+            .style(pill_style(false)).padding([3, 6]),
+    ].spacing(4);
+
+    // ── Plot area buttons ─────────────────────────────────────────────────
+    let area_row = row![
+        button(text("Layout").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPlotArea("Layout".into()))
+            .style(pill_style(plot_area == "Layout")).padding([3, 8]),
+        button(text("Extents").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupPlotArea("Extents".into()))
+            .style(pill_style(plot_area == "Extents")).padding([3, 8]),
+    ].spacing(6);
+
+    // ── Center toggle ─────────────────────────────────────────────────────
+    let center_btn = button(
+        text(if center { "✓ Center on page" } else { "  Center on page" }).size(11).color(TEXT_COLOR)
+    )
+    .on_press(Message::PageSetupCenterToggle)
+    .style(pill_style(center))
+    .padding([4, 10]);
+
+    // ── Rotation buttons ──────────────────────────────────────────────────
+    let rot_row = row![
+        button(text("0°").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupRotation("0".into()))
+            .style(pill_style(rotation == "0")).padding([3, 8]),
+        button(text("90°").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupRotation("90".into()))
+            .style(pill_style(rotation == "90")).padding([3, 8]),
+        button(text("180°").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupRotation("180".into()))
+            .style(pill_style(rotation == "180")).padding([3, 8]),
+        button(text("270°").size(10).color(TEXT_COLOR))
+            .on_press(Message::PageSetupRotation("270".into()))
+            .style(pill_style(rotation == "270")).padding([3, 8]),
+    ].spacing(4);
+
     let panel = container(
         column![
             text("Page Setup").size(14).color(TEXT_COLOR),
-            container(iced::widget::Space::new().width(Fill).height(1))
-                .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(BORDER_COL)),
-                    ..Default::default()
-                })
-                .width(Fill),
+            divider(),
+            // Paper size
+            text("Paper Size").size(11).color(DIM_COLOR),
+            preset_row1,
+            preset_row2,
             row![
-                label("Width (mm)"),
+                lbl("Width (mm)"),
                 text_input("297", w_buf)
                     .on_input(Message::PageSetupWidthEdit)
                     .on_submit(Message::PageSetupCommit)
                     .style(field_style)
-                    .width(90)
-                    .size(12),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center),
+                    .width(80).size(12),
+            ].spacing(6).align_y(iced::Alignment::Center),
             row![
-                label("Height (mm)"),
+                lbl("Height (mm)"),
                 text_input("210", h_buf)
                     .on_input(Message::PageSetupHeightEdit)
                     .on_submit(Message::PageSetupCommit)
                     .style(field_style)
-                    .width(90)
-                    .size(12),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center),
+                    .width(80).size(12),
+            ].spacing(6).align_y(iced::Alignment::Center),
+            divider(),
+            // Plot area
+            text("Plot Area").size(11).color(DIM_COLOR),
+            area_row,
+            divider(),
+            // Position
+            text("Position").size(11).color(DIM_COLOR),
+            center_btn,
+            row![
+                lbl("Offset X (mm)"),
+                text_input("0", offset_x)
+                    .on_input(Message::PageSetupOffsetXEdit)
+                    .style(field_style)
+                    .width(80).size(12),
+            ].spacing(6).align_y(iced::Alignment::Center),
+            row![
+                lbl("Offset Y (mm)"),
+                text_input("0", offset_y)
+                    .on_input(Message::PageSetupOffsetYEdit)
+                    .style(field_style)
+                    .width(80).size(12),
+            ].spacing(6).align_y(iced::Alignment::Center),
+            divider(),
+            // Rotation
+            text("Rotation").size(11).color(DIM_COLOR),
+            rot_row,
+            divider(),
+            // Buttons
             row![
                 button(text("Cancel").size(12).color(TEXT_COLOR))
                     .on_press(Message::PageSetupClose)
                     .style(btn_style(false))
                     .padding([5, 14]),
+                Space::new().width(Fill).height(0),
                 button(text("OK").size(12).color(TEXT_COLOR))
                     .on_press(Message::PageSetupCommit)
                     .style(btn_style(true))
                     .padding([5, 20]),
             ]
-            .spacing(8),
+            .align_y(iced::Alignment::Center),
         ]
-        .spacing(10)
+        .spacing(8)
         .padding(16)
-        .width(240),
+        .width(290),
     )
     .style(move |_: &Theme| container::Style {
         background: Some(Background::Color(PANEL_BG)),
@@ -544,7 +691,7 @@ fn page_setup_overlay<'a>(w_buf: &'a str, h_buf: &'a str) -> Element<'a, Message
 
     // Click-catcher to close on outside click.
     let catcher = mouse_area(
-        container(iced::widget::Space::new().width(Fill).height(Fill))
+        container(Space::new().width(Fill).height(Fill))
             .width(Fill)
             .height(Fill),
     )

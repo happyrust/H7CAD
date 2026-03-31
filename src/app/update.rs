@@ -1779,12 +1779,60 @@ impl H7CAD {
                 self.page_setup_h = s;
                 Task::none()
             }
+            Message::PageSetupPreset(name) => {
+                // Paper size presets defined in view.rs — mirror them here.
+                let sizes: &[(&str, f64, f64)] = &[
+                    ("A4 Portrait",      210.0, 297.0),
+                    ("A4 Landscape",     297.0, 210.0),
+                    ("A3 Portrait",      297.0, 420.0),
+                    ("A3 Landscape",     420.0, 297.0),
+                    ("A2 Portrait",      420.0, 594.0),
+                    ("A2 Landscape",     594.0, 420.0),
+                    ("A1 Portrait",      594.0, 841.0),
+                    ("A1 Landscape",     841.0, 594.0),
+                    ("A0 Portrait",      841.0, 1189.0),
+                    ("A0 Landscape",    1189.0,  841.0),
+                    ("Letter Portrait",  215.9, 279.4),
+                    ("Letter Landscape", 279.4, 215.9),
+                ];
+                if let Some(&(_, w, h)) = sizes.iter().find(|(n, _, _)| *n == name) {
+                    self.page_setup_w = format!("{w:.1}");
+                    self.page_setup_h = format!("{h:.1}");
+                }
+                Task::none()
+            }
+            Message::PageSetupPlotArea(s) => {
+                self.page_setup_plot_area = s;
+                Task::none()
+            }
+            Message::PageSetupCenterToggle => {
+                self.page_setup_center = !self.page_setup_center;
+                Task::none()
+            }
+            Message::PageSetupOffsetXEdit(s) => {
+                self.page_setup_offset_x = s;
+                Task::none()
+            }
+            Message::PageSetupOffsetYEdit(s) => {
+                self.page_setup_offset_y = s;
+                Task::none()
+            }
+            Message::PageSetupRotation(s) => {
+                self.page_setup_rotation = s;
+                Task::none()
+            }
             Message::PageSetupCommit => {
                 let i = self.active_tab;
                 let layout_name = self.tabs[i].scene.current_layout.clone();
                 if layout_name != "Model" {
                     let w: f64 = self.page_setup_w.parse::<f64>().unwrap_or(297.0).max(1.0);
                     let h: f64 = self.page_setup_h.parse::<f64>().unwrap_or(210.0).max(1.0);
+                    let plot_area = self.page_setup_plot_area.clone();
+                    let center    = self.page_setup_center;
+                    let offset_x  = self.page_setup_offset_x.parse::<f64>().unwrap_or(0.0);
+                    let offset_y  = self.page_setup_offset_y.parse::<f64>().unwrap_or(0.0);
+                    let rotation: i16 = self.page_setup_rotation.parse().unwrap_or(0);
+
                     // Update the Layout object's limits.
                     for obj in self.tabs[i].scene.document.objects.values_mut() {
                         if let acadrust::objects::ObjectType::Layout(l) = obj {
@@ -1797,9 +1845,51 @@ impl H7CAD {
                             }
                         }
                     }
+
+                    // Find or create the PlotSettings object for this layout.
+                    use acadrust::objects::{ObjectType, PlotSettings, PlotType, PlotRotation, PlotPaperUnits};
+                    let plot_handle = self.tabs[i].scene.document.objects.iter()
+                        .find_map(|(h, obj)| {
+                            if let ObjectType::PlotSettings(ps) = obj {
+                                if ps.page_name == layout_name { Some(*h) } else { None }
+                            } else { None }
+                        });
+
+                    let ps_entry = if let Some(h) = plot_handle {
+                        self.tabs[i].scene.document.objects.get_mut(&h)
+                    } else {
+                        // Create a new PlotSettings object and insert it.
+                        let mut ps = PlotSettings::new(layout_name.clone());
+                        ps.handle = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
+                        let h = ps.handle;
+                        self.tabs[i].scene.document.objects.insert(h, ObjectType::PlotSettings(ps));
+                        self.tabs[i].scene.document.objects.get_mut(&h)
+                    };
+
+                    if let Some(ObjectType::PlotSettings(ps)) = ps_entry {
+                        ps.paper_width  = w;
+                        ps.paper_height = h;
+                        ps.paper_units  = PlotPaperUnits::Millimeters;
+                        ps.plot_type    = if plot_area == "Extents" {
+                            PlotType::Extents
+                        } else {
+                            PlotType::Layout
+                        };
+                        ps.flags.plot_centered = center;
+                        ps.origin_x = offset_x;
+                        ps.origin_y = offset_y;
+                        ps.rotation = match rotation {
+                            90  => PlotRotation::Degrees90,
+                            180 => PlotRotation::Degrees180,
+                            270 => PlotRotation::Degrees270,
+                            _   => PlotRotation::None,
+                        };
+                    }
+
                     self.tabs[i].dirty = true;
                     self.command_line.push_info(&format!(
-                        "Page size set to {w:.1} × {h:.1} mm."
+                        "Page setup: {w:.1}×{h:.1} mm  area={plot_area}  \
+                         center={center}  rot={rotation}°"
                     ));
                 }
                 self.page_setup_open = false;
@@ -1823,24 +1913,97 @@ impl H7CAD {
             Message::PlotExportPath(None) => Task::none(),
             Message::PlotExportPath(Some(path)) => {
                 let i = self.active_tab;
-                let wires = self.tabs[i].scene.entity_wires(); // full scene for PDF
-                let (paper_w, paper_h, offset_x, offset_y) =
-                    if let Some(((x0, y0), (x1, y1))) = self.tabs[i].scene.paper_limits() {
-                        (x1 - x0, y1 - y0, -x0, -y0)
+                let scene = &self.tabs[i].scene;
+                let layout_name = scene.current_layout.clone();
+                let wires = scene.entity_wires();
+
+                // Read PlotSettings for current layout (if available).
+                use acadrust::objects::{ObjectType, PlotType, PlotRotation};
+                let ps_snap = scene.document.objects.values().find_map(|obj| {
+                    if let ObjectType::PlotSettings(ps) = obj {
+                        if ps.page_name == layout_name { Some(ps.clone()) } else { None }
+                    } else { None }
+                });
+
+                // Determine paper size and drawing offset.
+                let (paper_w, paper_h, mut draw_ox, mut draw_oy, rotation_deg) =
+                    if let Some(((x0, y0), (x1, y1))) = scene.paper_limits() {
+                        let (pw, ph) = (x1 - x0, y1 - y0);
+
+                        // If PlotSettings says Extents, use model space extents instead.
+                        let use_extents = ps_snap.as_ref()
+                            .map(|ps| matches!(ps.plot_type, PlotType::Extents))
+                            .unwrap_or(false);
+
+                        let (ox, oy) = if use_extents {
+                            if let Some((mn, mx)) = scene.model_space_extents() {
+                                (-mn.x as f64, -mn.y as f64)
+                            } else {
+                                (-x0, -y0)
+                            }
+                        } else {
+                            (-x0, -y0)
+                        };
+
+                        let rot = ps_snap.as_ref()
+                            .map(|ps| ps.rotation.to_degrees() as i32)
+                            .unwrap_or(0);
+
+                        (pw, ph, ox, oy, rot)
                     } else {
-                        // Model space: fit wires to computed extents with 5 % margin.
+                        // Model space: fit with 5% margin.
                         let margin = 1.05_f64;
-                        if let Some((mn, mx)) = self.tabs[i].scene.model_space_extents() {
+                        if let Some((mn, mx)) = scene.model_space_extents() {
                             let w = ((mx.x - mn.x) as f64 * margin).max(1.0);
                             let h = ((mx.y - mn.y) as f64 * margin).max(1.0);
                             let pad_x = (w - (mx.x - mn.x) as f64) * 0.5;
                             let pad_y = (h - (mx.y - mn.y) as f64) * 0.5;
-                            (w, h, -(mn.x as f64) + pad_x, -(mn.y as f64) + pad_y)
+                            (w, h, -(mn.x as f64) + pad_x, -(mn.y as f64) + pad_y, 0)
                         } else {
-                            (297.0, 210.0, 0.0, 0.0)
+                            (297.0, 210.0, 0.0, 0.0, 0)
                         }
                     };
-                match crate::io::pdf_export::export_pdf(&wires, paper_w, paper_h, offset_x as f32, offset_y as f32, &path) {
+
+                // Apply PlotSettings offset and centering.
+                if let Some(ref ps) = ps_snap {
+                    if ps.flags.plot_centered {
+                        // Centering: compute wire extents and re-centre.
+                        let all_x: Vec<f32> = wires.iter()
+                            .flat_map(|w| w.points.iter().map(|p| p[0]))
+                            .filter(|v| !v.is_nan())
+                            .collect();
+                        let all_y: Vec<f32> = wires.iter()
+                            .flat_map(|w| w.points.iter().map(|p| p[1]))
+                            .filter(|v| !v.is_nan())
+                            .collect();
+                        if let (Some(&min_x), Some(&max_x), Some(&min_y), Some(&max_y)) = (
+                            all_x.iter().copied().reduce(f32::min).as_ref(),
+                            all_x.iter().copied().reduce(f32::max).as_ref(),
+                            all_y.iter().copied().reduce(f32::min).as_ref(),
+                            all_y.iter().copied().reduce(f32::max).as_ref(),
+                        ) {
+                            let cx = (min_x + max_x) as f64 / 2.0;
+                            let cy = (min_y + max_y) as f64 / 2.0;
+                            draw_ox += paper_w / 2.0 - cx;
+                            draw_oy += paper_h / 2.0 - cy;
+                        }
+                    } else {
+                        draw_ox += ps.origin_x;
+                        draw_oy += ps.origin_y;
+                    }
+                }
+
+                // For rotation: swap paper dimensions and note angle for export.
+                let (eff_w, eff_h) = match rotation_deg {
+                    90 | 270 => (paper_h, paper_w),
+                    _        => (paper_w, paper_h),
+                };
+
+                match crate::io::pdf_export::export_pdf(
+                    &wires, eff_w, eff_h,
+                    draw_ox as f32, draw_oy as f32,
+                    rotation_deg, &path,
+                ) {
                     Ok(()) => self.command_line.push_info(&format!(
                         "Exported: {}",
                         path.file_name().unwrap_or_default().to_string_lossy()

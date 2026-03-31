@@ -18,20 +18,20 @@ use std::path::Path;
 
 /// Export `wires` to a PDF file.
 ///
-/// - `paper_w` / `paper_h`: page dimensions in mm.
+/// - `paper_w` / `paper_h`: page dimensions in mm (already swapped for 90°/270° by caller).
 /// - `offset_x` / `offset_y`: added to every wire coordinate so the drawing
-///   origin maps to the bottom-left corner of the page.  Pass 0/0 for paper
-///   space (coordinates are already relative to page origin); pass a computed
-///   shift for model space to normalise the extents.
+///   origin maps to the bottom-left corner of the page.
+/// - `rotation_deg`: 0 | 90 | 180 | 270 — rotates the entire drawing on the page.
 pub fn export_pdf(
     wires: &[WireModel],
     paper_w: f64,
     paper_h: f64,
     offset_x: f32,
     offset_y: f32,
+    rotation_deg: i32,
     path: &Path,
 ) -> Result<(), String> {
-    let bytes = build_pdf(wires, paper_w as f32, paper_h as f32, offset_x, offset_y);
+    let bytes = build_pdf(wires, paper_w as f32, paper_h as f32, offset_x, offset_y, rotation_deg);
     let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
     file.write_all(&bytes).map_err(|e| e.to_string())
 }
@@ -50,7 +50,7 @@ pub async fn pick_pdf_path_owned(stem: String) -> Option<std::path::PathBuf> {
 
 // ── PDF builder ───────────────────────────────────────────────────────────
 
-fn build_pdf(wires: &[WireModel], paper_w: f32, paper_h: f32, ox: f32, oy: f32) -> Vec<u8> {
+fn build_pdf(wires: &[WireModel], paper_w: f32, paper_h: f32, ox: f32, oy: f32, rotation_deg: i32) -> Vec<u8> {
     let mut doc = PdfDocument::new("H7CAD Export");
     let mut ops: Vec<Op> = Vec::new();
 
@@ -65,6 +65,31 @@ fn build_pdf(wires: &[WireModel], paper_w: f32, paper_h: f32, ox: f32, oy: f32) 
     // Round line caps/joins for CAD aesthetics.
     ops.push(Op::SetLineCapStyle { cap: LineCapStyle::Round });
     ops.push(Op::SetLineJoinStyle { join: LineJoinStyle::Round });
+
+    // Apply rotation transform if needed.
+    // PDF uses mm-based coordinate system with origin at bottom-left.
+    // We save state, apply a CTM, then restore it after drawing.
+    let needs_rotation = rotation_deg != 0;
+    if needs_rotation {
+        let (cos_a, sin_a, tx, ty) = match rotation_deg {
+            90  => ( 0.0_f64,  1.0_f64, 0.0,              paper_h as f64),
+            180 => (-1.0_f64,  0.0_f64, paper_w as f64,   paper_h as f64),
+            270 => ( 0.0_f64, -1.0_f64, paper_w as f64,   0.0),
+            _   => ( 1.0_f64,  0.0_f64, 0.0,              0.0),
+        };
+        // PDF CTM: [a b c d e f] = [cos sin -sin cos tx ty]
+        ops.push(Op::SaveGraphicsState);
+        // Convert mm translation to points (1 mm = 2.834645 pt).
+        let tx_pt = (tx * 2.834645) as f32;
+        let ty_pt = (ty * 2.834645) as f32;
+        ops.push(Op::SetTransformationMatrix {
+            matrix: printpdf::CurTransMat::Raw([
+                cos_a as f32, sin_a as f32,
+                -(sin_a as f32), cos_a as f32,
+                tx_pt, ty_pt,
+            ]),
+        });
+    }
 
     let mut last_color: Option<[f32; 3]> = None;
     let mut last_lw: Option<f32> = None;
@@ -119,6 +144,10 @@ fn build_pdf(wires: &[WireModel], paper_w: f32, paper_h: f32, ox: f32, oy: f32) 
             }
         }
         flush_line(&mut ops, &segment);
+    }
+
+    if needs_rotation {
+        ops.push(Op::RestoreGraphicsState);
     }
 
     let page = PdfPage::new(Mm(paper_w), Mm(paper_h), ops);

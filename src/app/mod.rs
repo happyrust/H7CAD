@@ -71,6 +71,16 @@ pub(super) struct H7CAD {
     page_setup_w: String,
     /// Editable paper height buffer for the Page Setup panel (string while typing).
     page_setup_h: String,
+    /// Plot area type: "Layout" | "Extents".
+    page_setup_plot_area: String,
+    /// Center the drawing on the page when exporting.
+    page_setup_center: bool,
+    /// Plot offset X in mm (applied after optional centering).
+    page_setup_offset_x: String,
+    /// Plot offset Y in mm.
+    page_setup_offset_y: String,
+    /// Plot rotation in degrees: "0" | "90" | "180" | "270".
+    page_setup_rotation: String,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +269,18 @@ pub enum Message {
     PageSetupWidthEdit(String),
     /// Live-edit of the paper height field.
     PageSetupHeightEdit(String),
+    /// User selected a paper size preset (e.g. "A4 Portrait").
+    PageSetupPreset(String),
+    /// User changed the plot area type ("Layout" or "Extents").
+    PageSetupPlotArea(String),
+    /// Toggle center-on-page.
+    PageSetupCenterToggle,
+    /// Live-edit of plot offset X.
+    PageSetupOffsetXEdit(String),
+    /// Live-edit of plot offset Y.
+    PageSetupOffsetYEdit(String),
+    /// User changed plot rotation.
+    PageSetupRotation(String),
     /// Apply the changes entered in Page Setup.
     PageSetupCommit,
     // ── Plot / Export ─────────────────────────────────────────────────────
@@ -300,6 +322,11 @@ impl H7CAD {
             page_setup_open: false,
             page_setup_w: String::new(),
             page_setup_h: String::new(),
+            page_setup_plot_area: "Layout".to_string(),
+            page_setup_center: true,
+            page_setup_offset_x: "0.0".to_string(),
+            page_setup_offset_y: "0.0".to_string(),
+            page_setup_rotation: "0".to_string(),
         };
         app.sync_ribbon_layers();
         app
