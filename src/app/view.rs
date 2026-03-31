@@ -415,8 +415,8 @@ fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
 
     let menu = container(
         column![
-            item("Yeniden Adlandır", Message::LayoutRenameStart(rename_name)),
-            item("Sil", Message::LayoutDelete(delete_name)),
+            item("Rename", Message::LayoutRenameStart(rename_name)),
+            item("Delete", Message::LayoutDelete(delete_name)),
         ]
         .spacing(0)
         .width(160),

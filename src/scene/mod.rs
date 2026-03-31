@@ -118,7 +118,8 @@ impl Scene {
                     let w = (max.0 - min.0).abs();
                     let h = (max.1 - min.1).abs();
                     if w < 1e-6 || h < 1e-6 {
-                        return Some(((0.0, 0.0), (12.0, 9.0)));
+                        // Default to A4 landscape (mm).
+                        return Some(((0.0, 0.0), (297.0, 210.0)));
                     }
                     return Some((min, max));
                 }
@@ -379,7 +380,7 @@ impl Scene {
     /// Compute the axis-aligned bounding box of all model-space entities by
     /// collecting their `key_vertices`.  Returns `None` when there are no
     /// vertices (empty drawing).
-    fn model_space_extents(&self) -> Option<(glam::Vec3, glam::Vec3)> {
+    pub fn model_space_extents(&self) -> Option<(glam::Vec3, glam::Vec3)> {
         let model_block = self.model_space_block_handle();
         if model_block.is_null() {
             return None;
@@ -527,43 +528,60 @@ impl Scene {
                 .collect();
 
             // ── Project and clip wires into viewport ──────────────────────
+            let vp_x0 = pcx - hw;
+            let vp_x1 = pcx + hw;
+            let vp_y0 = pcy - hh;
+            let vp_y1 = pcy + hh;
+
             for wire in &model_wires {
                 // Project 3-D model points onto view plane → paper space.
-                let pts: Vec<[f32; 3]> = wire.points.iter().map(|&[mx, my, mz]| {
+                let projected_pts: Vec<[f32; 3]> = wire.points.iter().map(|&[mx, my, mz]| {
+                    if mx.is_nan() || my.is_nan() || mz.is_nan() {
+                        return [f32::NAN; 3];
+                    }
                     let mp = glam::Vec3::new(mx, my, mz) - target;
-                    let u = mp.dot(view_right);  // horizontal in view
-                    let v = mp.dot(view_up);     // vertical in view
+                    let u = mp.dot(view_right);
+                    let v = mp.dot(view_up);
                     [pcx + u * scale, pcy + v * scale, pcz]
                 }).collect();
 
-                // Proper AABB test: discard if the wire's bounding box has
-                // zero overlap with the viewport rectangle.
-                if pts.is_empty() {
+                // Fast AABB pre-reject: skip entirely if no finite point is
+                // anywhere near the viewport.
+                let any_near = projected_pts.iter().any(|&[x, y, _]| {
+                    x.is_finite() && y.is_finite()
+                        && x >= vp_x0 - 1.0 && x <= vp_x1 + 1.0
+                        && y >= vp_y0 - 1.0 && y <= vp_y1 + 1.0
+                });
+                // Also keep wires whose AABB overlaps the viewport (partial overlap).
+                let (min_x, max_x, min_y, max_y) = projected_pts.iter()
+                    .filter(|p| p[0].is_finite())
+                    .fold(
+                        (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY),
+                        |(mnx, mxx, mny, mxy), &[x, y, _]| {
+                            (mnx.min(x), mxx.max(x), mny.min(y), mxy.max(y))
+                        },
+                    );
+                let aabb_hits = max_x >= vp_x0 && min_x <= vp_x1
+                             && max_y >= vp_y0 && min_y <= vp_y1;
+                if !any_near && !aabb_hits {
                     continue;
                 }
-                let min_x = pts.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
-                let max_x = pts.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
-                let min_y = pts.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
-                let max_y = pts.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
 
-                let vp_x0 = pcx - hw;
-                let vp_x1 = pcx + hw;
-                let vp_y0 = pcy - hh;
-                let vp_y1 = pcy + hh;
-
-                // AABB overlap check (no tolerance — exact viewport boundary).
-                if max_x < vp_x0 || min_x > vp_x1 || max_y < vp_y0 || min_y > vp_y1 {
+                // Cohen-Sutherland clipping: clip every segment to the viewport.
+                let clipped = clip_polyline_to_rect(
+                    &projected_pts, vp_x0, vp_y0, vp_x1, vp_y1, pcz,
+                );
+                if clipped.is_empty() {
                     continue;
                 }
 
                 let [r, g, b, a] = wire.color;
-                let mut projected = wire.clone();
-                projected.points = pts;
-                projected.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
-                // Scale line weight proportionally so annotation lines (dimensions,
-                // text outlines) appear at the correct visual thickness in paper space.
-                projected.line_weight_px = wire.line_weight_px * scale;
-                result.push(projected);
+                let mut out = wire.clone();
+                out.points = clipped;
+                out.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
+                // Scale line weight proportionally for correct visual thickness.
+                out.line_weight_px = wire.line_weight_px * scale;
+                result.push(out);
             }
         }
 
@@ -1395,6 +1413,117 @@ impl Default for Scene {
 }
 
 // ── Paper boundary wire ────────────────────────────────────────────────────
+
+// ── Cohen-Sutherland line clipping ───────────────────────────────────────
+
+/// Clip a single segment (x0,y0)→(x1,y1) against the axis-aligned rectangle
+/// [xmin,xmax]×[ymin,ymax].  Returns the clipped endpoints or `None` if the
+/// segment is entirely outside.
+fn cs_clip(
+    mut x0: f32, mut y0: f32,
+    mut x1: f32, mut y1: f32,
+    xmin: f32, ymin: f32, xmax: f32, ymax: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    const LEFT: u8 = 1;
+    const RIGHT: u8 = 2;
+    const BOTTOM: u8 = 4;
+    const TOP: u8 = 8;
+
+    let code = |x: f32, y: f32| -> u8 {
+        let mut c = 0u8;
+        if x < xmin { c |= LEFT; }
+        else if x > xmax { c |= RIGHT; }
+        if y < ymin { c |= BOTTOM; }
+        else if y > ymax { c |= TOP; }
+        c
+    };
+
+    let mut c0 = code(x0, y0);
+    let mut c1 = code(x1, y1);
+
+    loop {
+        if c0 | c1 == 0 { return Some((x0, y0, x1, y1)); }
+        if c0 & c1 != 0 { return None; }
+        let cout = if c0 != 0 { c0 } else { c1 };
+        let (x, y);
+        if cout & TOP != 0 {
+            x = x0 + (x1 - x0) * (ymax - y0) / (y1 - y0);
+            y = ymax;
+        } else if cout & BOTTOM != 0 {
+            x = x0 + (x1 - x0) * (ymin - y0) / (y1 - y0);
+            y = ymin;
+        } else if cout & RIGHT != 0 {
+            y = y0 + (y1 - y0) * (xmax - x0) / (x1 - x0);
+            x = xmax;
+        } else {
+            y = y0 + (y1 - y0) * (xmin - x0) / (x1 - x0);
+            x = xmin;
+        }
+        if cout == c0 { x0 = x; y0 = y; c0 = code(x0, y0); }
+        else           { x1 = x; y1 = y; c1 = code(x1, y1); }
+    }
+}
+
+/// Clip a projected polyline (NaN-separated segments) to the viewport rectangle.
+/// Returns a new points vec with proper NaN separators at clip boundaries.
+fn clip_polyline_to_rect(
+    pts: &[[f32; 3]],
+    xmin: f32, ymin: f32, xmax: f32, ymax: f32,
+    z: f32,
+) -> Vec<[f32; 3]> {
+    const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
+    let mut result: Vec<[f32; 3]> = Vec::new();
+    let mut i = 0;
+
+    while i < pts.len() {
+        // Skip NaN separators.
+        if pts[i][0].is_nan() || pts[i][1].is_nan() {
+            i += 1;
+            continue;
+        }
+        // Gather contiguous run of finite points.
+        let start = i;
+        while i < pts.len() && pts[i][0].is_finite() && pts[i][1].is_finite() {
+            i += 1;
+        }
+        let seg = &pts[start..i];
+        if seg.len() < 2 {
+            continue;
+        }
+
+        // Clip each edge and track pen state to insert NaN on lift.
+        let mut pen_down = false;
+        for j in 0..seg.len() - 1 {
+            let [x0, y0, _] = seg[j];
+            let [x1, y1, _] = seg[j + 1];
+            match cs_clip(x0, y0, x1, y1, xmin, ymin, xmax, ymax) {
+                None => { pen_down = false; }
+                Some((cx0, cy0, cx1, cy1)) => {
+                    if !pen_down {
+                        if !result.is_empty() { result.push(NAN3); }
+                        result.push([cx0, cy0, z]);
+                        pen_down = true;
+                    } else if let Some(&[lx, ly, _]) = result.last() {
+                        if (lx - cx0).abs() > 1e-4 || (ly - cy0).abs() > 1e-4 {
+                            result.push(NAN3);
+                            result.push([cx0, cy0, z]);
+                        }
+                    }
+                    result.push([cx1, cy1, z]);
+                    // If the exit point was clipped, lift pen.
+                    if (cx1 - x1).abs() > 1e-4 || (cy1 - y1).abs() > 1e-4 {
+                        pen_down = false;
+                    }
+                }
+            }
+        }
+    }
+    // Remove trailing NaN.
+    while result.last().map(|p: &[f32; 3]| p[0].is_nan()).unwrap_or(false) {
+        result.pop();
+    }
+    result
+}
 
 /// A thin white rectangle wire that represents the printable-area boundary
 /// of the active paper layout.  Rendered beneath all other paper-space

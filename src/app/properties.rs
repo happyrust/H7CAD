@@ -55,6 +55,29 @@ impl H7CAD {
                     let group_names = self.tabs[i].scene.group_names_for_entity(handle);
                     let mut sections =
                         dispatch::properties_sectioned(handle, entity, &text_style_names);
+
+                    // Inject frozen-layer property for viewports (requires doc access).
+                    if let acadrust::EntityType::Viewport(vp) = entity {
+                        let frozen_names: Vec<String> = vp
+                            .frozen_layers
+                            .iter()
+                            .filter_map(|&h| {
+                                self.tabs[i].scene.document.layers.iter()
+                                    .find(|l| l.handle == h)
+                                    .map(|l| l.name.clone())
+                            })
+                            .collect();
+                        if let Some(geom) = sections.last_mut() {
+                            geom.props.push(crate::scene::object::Property {
+                                label: "Frozen Layers".to_string(),
+                                field: "frozen_layers",
+                                value: crate::scene::object::PropValue::EditText(
+                                    frozen_names.join(", "),
+                                ),
+                            });
+                        }
+                    }
+
                     if !group_names.is_empty() {
                         let label = group_names.join(", ");
                         if let Some(general) = sections.first_mut() {

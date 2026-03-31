@@ -1457,14 +1457,35 @@ impl H7CAD {
                 if !handles.is_empty() {
                     if let Some(val) = self.tabs[i].properties.edit_buf.remove(field) {
                         self.push_undo_snapshot(i, "CHPROP");
-                        for handle in handles {
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                                match field {
-                                    "linetype_scale" | "transparency" => {
-                                        crate::scene::dispatch::apply_common_prop(entity, field, &val);
-                                    }
-                                    _ => {
-                                        crate::scene::dispatch::apply_geom_prop(entity, field, &val);
+                        if field == "frozen_layers" {
+                            // Resolve layer names → handles, then apply to viewports.
+                            let layer_handles: Vec<acadrust::Handle> = val
+                                .split(',')
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty())
+                                .filter_map(|name| {
+                                    self.tabs[i].scene.document.layers.iter()
+                                        .find(|l| l.name.eq_ignore_ascii_case(name))
+                                        .map(|l| l.handle)
+                                })
+                                .collect();
+                            for handle in handles {
+                                if let Some(acadrust::EntityType::Viewport(vp)) =
+                                    self.tabs[i].scene.document.get_entity_mut(handle)
+                                {
+                                    vp.frozen_layers = layer_handles.clone();
+                                }
+                            }
+                        } else {
+                            for handle in handles {
+                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                                    match field {
+                                        "linetype_scale" | "transparency" => {
+                                            crate::scene::dispatch::apply_common_prop(entity, field, &val);
+                                        }
+                                        _ => {
+                                            crate::scene::dispatch::apply_geom_prop(entity, field, &val);
+                                        }
                                     }
                                 }
                             }
@@ -1725,15 +1746,23 @@ impl H7CAD {
             Message::PlotExportPath(Some(path)) => {
                 let i = self.active_tab;
                 let wires = self.tabs[i].scene.entity_wires();
-                let (paper_w, paper_h) = if let Some(((_, _), (w, h))) =
-                    self.tabs[i].scene.paper_limits()
-                {
-                    (w, h)
-                } else {
-                    // Model space: use extents or default A4 landscape.
-                    (297.0, 210.0)
-                };
-                match crate::io::pdf_export::export_pdf(&wires, paper_w, paper_h, &path) {
+                let (paper_w, paper_h, offset_x, offset_y) =
+                    if let Some(((x0, y0), (x1, y1))) = self.tabs[i].scene.paper_limits() {
+                        (x1 - x0, y1 - y0, -x0, -y0)
+                    } else {
+                        // Model space: fit wires to computed extents with 5 % margin.
+                        let margin = 1.05_f64;
+                        if let Some((mn, mx)) = self.tabs[i].scene.model_space_extents() {
+                            let w = ((mx.x - mn.x) as f64 * margin).max(1.0);
+                            let h = ((mx.y - mn.y) as f64 * margin).max(1.0);
+                            let pad_x = (w - (mx.x - mn.x) as f64) * 0.5;
+                            let pad_y = (h - (mx.y - mn.y) as f64) * 0.5;
+                            (w, h, -(mn.x as f64) + pad_x, -(mn.y as f64) + pad_y)
+                        } else {
+                            (297.0, 210.0, 0.0, 0.0)
+                        }
+                    };
+                match crate::io::pdf_export::export_pdf(&wires, paper_w, paper_h, offset_x as f32, offset_y as f32, &path) {
                     Ok(()) => self.command_line.push_info(&format!(
                         "Exported: {}",
                         path.file_name().unwrap_or_default().to_string_lossy()
