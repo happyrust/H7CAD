@@ -707,8 +707,8 @@ impl Scene {
                 let mut out = wire.clone();
                 out.points = clipped;
                 out.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
-                // Scale line weight proportionally for correct visual thickness.
-                out.line_weight_px = wire.line_weight_px * scale;
+                // Line weights are paper-space pen widths — independent of viewport scale.
+                out.line_weight_px = wire.line_weight_px;
                 result.push(out);
             }
         }
