@@ -92,15 +92,87 @@ impl Scene {
     }
 
     /// Returns the block-record handle for `current_layout`.
+    ///
+    /// Primary path: the Layout object's `block_record` field (set correctly
+    /// by the DWG reader).
+    ///
+    /// Fallback for DXF files: the DXF reader never reads group code 340
+    /// (block_record handle), so `block_record` is NULL after loading DXF.
+    /// In that case we derive the block-record name from the DXF convention:
+    ///   Model            → "*Model_Space"
+    ///   first paper tab  → "*Paper_Space"
+    ///   second paper tab → "*Paper_Space0"
+    ///   Nth paper tab    → "*Paper_Space{N-2}"
     fn current_layout_block_handle(&self) -> Handle {
-        self.document
-            .objects
-            .values()
-            .find_map(|obj| match obj {
-                ObjectType::Layout(l) if l.name == self.current_layout => Some(l.block_record),
-                _ => None,
-            })
-            .unwrap_or(Handle::NULL)
+        // Locate the Layout object for the active layout name.
+        let layout = self.document.objects.values().find_map(|obj| {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == self.current_layout { Some(l) } else { None }
+            } else {
+                None
+            }
+        });
+
+        if let Some(l) = layout {
+            // Fast path: block_record already set (DWG reader).
+            if !l.block_record.is_null() {
+                return l.block_record;
+            }
+
+            // Fallback: resolve via conventional DXF block-record name.
+            let br_name: String = if self.current_layout == "Model" {
+                "*Model_Space".into()
+            } else {
+                // tab_order 1 → "*Paper_Space",  2 → "*Paper_Space0", etc.
+                let tab = l.tab_order;
+                if tab <= 1 {
+                    "*Paper_Space".into()
+                } else {
+                    format!("*Paper_Space{}", tab - 2)
+                }
+            };
+
+            if let Some(br) = self.document.block_records.get(&br_name) {
+                return br.handle;
+            }
+
+            // Last resort: match by position among paper layouts when tab_order
+            // is unreliable (some exporters set it to 0 for all layouts).
+            if self.current_layout != "Model" {
+                let mut ps_brs: Vec<_> = self
+                    .document
+                    .block_records
+                    .iter()
+                    .filter(|br| br.is_paper_space())
+                    .collect();
+                ps_brs.sort_by(|a, b| a.name.cmp(&b.name));
+
+                let mut paper_layouts: Vec<(i16, &str)> = self
+                    .document
+                    .objects
+                    .values()
+                    .filter_map(|obj| {
+                        if let ObjectType::Layout(l) = obj {
+                            if l.name != "Model" { Some((l.tab_order, l.name.as_str())) }
+                            else { None }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                paper_layouts.sort_by_key(|(o, n)| (*o, *n));
+
+                if let Some(pos) = paper_layouts.iter().position(|(_, n)| *n == self.current_layout) {
+                    if let Some(br) = ps_brs.get(pos) {
+                        return br.handle;
+                    }
+                }
+            } else if let Some(br) = self.document.block_records.get("*Model_Space") {
+                return br.handle;
+            }
+        }
+
+        Handle::NULL
     }
 
     /// Returns `(min, max)` paper-space limits for the current layout, or `None`
@@ -367,13 +439,25 @@ impl Scene {
     }
 
     fn model_space_block_handle(&self) -> Handle {
+        // Primary: Layout object's block_record (DWG reader sets this).
+        if let Some(h) = self.document.objects.values().find_map(|obj| {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == "Model" && !l.block_record.is_null() {
+                    Some(l.block_record)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }) {
+            return h;
+        }
+        // Fallback for DXF files: conventional block-record name.
         self.document
-            .objects
-            .values()
-            .find_map(|obj| match obj {
-                ObjectType::Layout(l) if l.name == "Model" => Some(l.block_record),
-                _ => None,
-            })
+            .block_records
+            .get("*Model_Space")
+            .map(|br| br.handle)
             .unwrap_or(Handle::NULL)
     }
 
