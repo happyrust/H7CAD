@@ -31,6 +31,8 @@ impl StatusBar {
         current_layout: String,
         // If `Some((original, edit_value))`, the named tab shows a text input.
         rename_state: Option<&'a (String, String)>,
+        // Scale of the first user viewport in the active paper layout.
+        viewport_scale: Option<f64>,
     ) -> Element<'a, Message> {
         let menu_btn = button(text("≡").size(14).color(ICON_COLOR))
             .on_press(Message::Command("MENU".into()))
@@ -57,6 +59,7 @@ impl StatusBar {
         } else {
             "LAYOUT"
         };
+        let scale_label = format_scale(viewport_scale);
         let right_status = row![
             tip(
                 toggle_pill("SNAP", snap_grid_on, Message::ToggleGridSnap),
@@ -76,7 +79,7 @@ impl StatusBar {
             ),
             osnap_btn(osnap_active, snapper.snap_enabled, popup_open),
             status_pill(space_label),
-            status_pill("1:1"),
+            status_pill(scale_label),
         ]
         .spacing(2);
 
@@ -353,8 +356,8 @@ fn space_tab<'a>(label: String, is_active: bool, rename_edit: Option<&'a str>) -
     }
 }
 
-fn status_pill(label: &str) -> Element<'_, Message> {
-    container(text(label).size(10).color(Color {
+fn status_pill(label: impl Into<String>) -> Element<'static, Message> {
+    container(text(label.into()).size(10).color(Color {
         r: 0.65,
         g: 0.65,
         b: 0.65,
@@ -460,3 +463,40 @@ const SNAP_OFF_HOVER: Color = Color {
     b: 0.22,
     a: 1.0,
 };
+
+// ── Scale display ─────────────────────────────────────────────────────────
+
+/// Formats a viewport scale factor as a human-readable ratio string.
+///
+/// - `None`  → "1:1"  (model space or no viewport yet)
+/// - `1.0`   → "1:1"
+/// - `0.02`  → "1:50"
+/// - `2.0`   → "2:1"
+fn format_scale(scale: Option<f64>) -> String {
+    let s = match scale {
+        None => return "1:1".to_string(),
+        Some(v) if v <= 0.0 => return "1:1".to_string(),
+        Some(v) => v,
+    };
+
+    // Try to express as a clean integer ratio.
+    if s >= 1.0 {
+        let n = s.round() as u32;
+        if (s - n as f64).abs() < 0.01 * s {
+            return if n == 1 {
+                "1:1".to_string()
+            } else {
+                format!("{}:1", n)
+            };
+        }
+    } else {
+        let inv = (1.0 / s).round() as u32;
+        if (s - 1.0 / inv as f64).abs() < 0.01 * s {
+            return format!("1:{}", inv);
+        }
+    }
+
+    // Fall back to a decimal string.
+    format!("{:.4}", s).trim_end_matches('0').trim_end_matches('.').to_string()
+}
+

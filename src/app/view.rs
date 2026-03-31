@@ -165,6 +165,7 @@ impl H7CAD {
                     tab.scene.layout_names(),
                     tab.scene.current_layout.clone(),
                     self.layout_rename_state.as_ref(),
+                    tab.scene.first_viewport_scale(),
                 )
             ]
             .width(Fill)

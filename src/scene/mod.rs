@@ -91,6 +91,58 @@ impl Scene {
             .unwrap_or(Handle::NULL)
     }
 
+    /// Returns `(min, max)` paper-space limits for the current layout, or `None`
+    /// when in Model space.  Falls back to `(0,0)-(12,9)` if the layout has
+    /// zero-size limits (common in freshly-created layouts).
+    pub fn paper_limits(&self) -> Option<((f64, f64), (f64, f64))> {
+        if self.current_layout == "Model" {
+            return None;
+        }
+        self.document.objects.values().find_map(|obj| {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == self.current_layout {
+                    let (min, max) = (l.min_limits, l.max_limits);
+                    // Guard against degenerate limits.
+                    let w = (max.0 - min.0).abs();
+                    let h = (max.1 - min.1).abs();
+                    if w < 1e-6 || h < 1e-6 {
+                        return Some(((0.0, 0.0), (12.0, 9.0)));
+                    }
+                    return Some((min, max));
+                }
+            }
+            None
+        })
+    }
+
+    /// Scale of the first user viewport (id > 1) in the current paper layout,
+    /// used for the status-bar display.  Returns `None` in Model space or if
+    /// no user viewport exists.
+    pub fn first_viewport_scale(&self) -> Option<f64> {
+        if self.current_layout == "Model" {
+            return None;
+        }
+        let layout_block = self.current_layout_block_handle();
+        if layout_block.is_null() {
+            return None;
+        }
+        self.document.entities().find_map(|e| {
+            if let EntityType::Viewport(vp) = e {
+                if vp.id > 1 && vp.common.owner_handle == layout_block {
+                    let scale = if vp.custom_scale.abs() > 1e-9 {
+                        vp.custom_scale
+                    } else if vp.view_height.abs() > 1e-9 {
+                        vp.height / vp.view_height
+                    } else {
+                        1.0
+                    };
+                    return Some(scale);
+                }
+            }
+            None
+        })
+    }
+
     /// Sorted list of layout names: "Model" first, then paper layouts by tab order.
     pub fn layout_names(&self) -> Vec<String> {
         let mut names = vec!["Model".to_string()];
@@ -134,6 +186,10 @@ impl Scene {
         let layout_block = self.current_layout_block_handle();
         let mut wires: Vec<WireModel> = self.wires_for_block(layout_block);
         if self.current_layout != "Model" {
+            // Draw the paper boundary rectangle first (rendered beneath everything else).
+            if let Some(((x0, y0), (x1, y1))) = self.paper_limits() {
+                wires.insert(0, paper_boundary_wire(x0 as f32, y0 as f32, x1 as f32, y1 as f32));
+            }
             wires.extend(self.viewport_content_wires(layout_block));
         }
         wires
@@ -1119,5 +1175,32 @@ impl Scene {
 impl Default for Scene {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Paper boundary wire ────────────────────────────────────────────────────
+
+/// A thin white rectangle wire that represents the printable-area boundary
+/// of the active paper layout.  Rendered beneath all other paper-space
+/// geometry so it acts as a visual "page" backdrop.
+fn paper_boundary_wire(x0: f32, y0: f32, x1: f32, y1: f32) -> WireModel {
+    WireModel {
+        name: "__paper_boundary__".to_string(),
+        points: vec![
+            [x0, y0, 0.0],
+            [x1, y0, 0.0],
+            [x1, y1, 0.0],
+            [x0, y1, 0.0],
+            [x0, y0, 0.0],
+        ],
+        // Near-white so it stands out against the dark paper-space background.
+        color: [0.95, 0.95, 0.95, 1.0],
+        selected: false,
+        pattern_length: 0.0,
+        pattern: [0.0; 8],
+        line_weight_px: 1.5,
+        snap_pts: vec![],
+        tangent_geoms: vec![],
+        key_vertices: vec![],
     }
 }
