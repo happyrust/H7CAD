@@ -1,4 +1,4 @@
-use acadrust::entities::Viewport;
+use acadrust::entities::{Viewport, ViewportRenderMode};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -32,6 +32,33 @@ fn scale_label(scale: f64) -> String {
     format!("{:.6}", scale).trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+// ── Render mode options ───────────────────────────────────────────────────
+
+const RENDER_MODES: &[(&str, ViewportRenderMode)] = &[
+    ("2D Wireframe",            ViewportRenderMode::Wireframe2D),
+    ("3D Wireframe",            ViewportRenderMode::Wireframe3D),
+    ("Hidden Line",             ViewportRenderMode::HiddenLine),
+    ("Flat Shaded",             ViewportRenderMode::FlatShaded),
+    ("Gouraud Shaded",          ViewportRenderMode::GouraudShaded),
+    ("Flat Shaded + Edges",     ViewportRenderMode::FlatShadedWithEdges),
+    ("Gouraud Shaded + Edges",  ViewportRenderMode::GouraudShadedWithEdges),
+];
+
+fn render_mode_label(mode: &ViewportRenderMode) -> &'static str {
+    for (label, m) in RENDER_MODES {
+        if m == mode { return label; }
+    }
+    "2D Wireframe"
+}
+
+// ── Shade plot mode labels ────────────────────────────────────────────────
+
+const SHADE_PLOT_LABELS: &[&str] = &["As Displayed", "Wireframe", "Hidden", "Rendered"];
+
+fn shade_plot_label(mode: i16) -> &'static str {
+    SHADE_PLOT_LABELS.get(mode as usize).copied().unwrap_or("As Displayed")
+}
+
 // ── Standard view options ─────────────────────────────────────────────────
 
 const STD_VIEWS: &[&str] = &[
@@ -61,6 +88,12 @@ fn properties(vp: &Viewport) -> PropSection {
     let view_opts: Vec<String> = STD_VIEWS.iter().map(|s| s.to_string()).collect();
     let current_view = viewport_view_label(vp);
 
+    let render_opts: Vec<String> = RENDER_MODES.iter().map(|(s, _)| s.to_string()).collect();
+    let current_render = render_mode_label(&vp.render_mode).to_string();
+
+    let shade_opts: Vec<String> = SHADE_PLOT_LABELS.iter().map(|s| s.to_string()).collect();
+    let current_shade = shade_plot_label(vp.shade_plot_mode).to_string();
+
     PropSection {
         title: "Geometry".into(),
         props: vec![
@@ -89,6 +122,24 @@ fn properties(vp: &Viewport) -> PropSection {
                     options: view_opts,
                 },
             },
+            // Render mode picker.
+            Property {
+                label: "Render Mode".into(),
+                field: "vp_render",
+                value: PropValue::Choice {
+                    selected: current_render,
+                    options: render_opts,
+                },
+            },
+            // Shade plot mode picker.
+            Property {
+                label: "Shade Plot".into(),
+                field: "vp_shade_plot",
+                value: PropValue::Choice {
+                    selected: current_shade,
+                    options: shade_opts,
+                },
+            },
             // Display state toggles.
             Property {
                 label: "Locked".into(),
@@ -99,6 +150,21 @@ fn properties(vp: &Viewport) -> PropSection {
                 label: "On".into(),
                 field: "vp_on",
                 value: PropValue::BoolToggle { field: "vp_on", value: vp.status.is_on },
+            },
+            Property {
+                label: "Perspective".into(),
+                field: "vp_perspective",
+                value: PropValue::BoolToggle { field: "vp_perspective", value: vp.status.perspective },
+            },
+            Property {
+                label: "Hide Plot".into(),
+                field: "vp_hide_plot",
+                value: PropValue::BoolToggle { field: "vp_hide_plot", value: vp.status.hide_plot },
+            },
+            Property {
+                label: "UCS Icon".into(),
+                field: "vp_ucs_icon",
+                value: PropValue::BoolToggle { field: "vp_ucs_icon", value: vp.ucs_icon_visible },
             },
             edit("Target X", "vtgt_x", vp.view_target.x),
             edit("Target Z", "vtgt_z", vp.view_target.z),
@@ -140,6 +206,18 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
             vp.status.is_on = if value == "toggle" { !vp.status.is_on } else { value == "true" };
             return;
         }
+        "vp_perspective" => {
+            vp.status.perspective = if value == "toggle" { !vp.status.perspective } else { value == "true" };
+            return;
+        }
+        "vp_hide_plot" => {
+            vp.status.hide_plot = if value == "toggle" { !vp.status.hide_plot } else { value == "true" };
+            return;
+        }
+        "vp_ucs_icon" => {
+            vp.ucs_icon_visible = if value == "toggle" { !vp.ucs_icon_visible } else { value == "true" };
+            return;
+        }
         _ => {}
     }
 
@@ -150,6 +228,22 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
             if scale > 1e-9 {
                 vp.view_height = vp.height / scale;
             }
+        }
+        return;
+    }
+
+    // Render mode picker.
+    if field == "vp_render" {
+        if let Some(&(_, mode)) = RENDER_MODES.iter().find(|(label, _)| *label == value) {
+            vp.render_mode = mode;
+        }
+        return;
+    }
+
+    // Shade plot mode picker.
+    if field == "vp_shade_plot" {
+        if let Some(idx) = SHADE_PLOT_LABELS.iter().position(|&s| s == value) {
+            vp.shade_plot_mode = idx as i16;
         }
         return;
     }

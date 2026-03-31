@@ -285,6 +285,59 @@ impl H7CAD {
                     self.command_line.push_info("No groups found for selected objects.");
                 }
             }
+            CmdResult::VpLayerUpdate { vp_handle, freeze, thaw } => {
+                // Resolve layer names → handles, then update frozen_layers on the viewport.
+                let freeze_handles: Vec<Handle> = freeze.iter()
+                    .filter_map(|name| {
+                        self.tabs[i].scene.document.layers.iter()
+                            .find(|l| l.name.eq_ignore_ascii_case(name))
+                            .map(|l| l.handle)
+                    })
+                    .collect();
+                let thaw_handles: Vec<Handle> = thaw.iter()
+                    .filter_map(|name| {
+                        self.tabs[i].scene.document.layers.iter()
+                            .find(|l| l.name.eq_ignore_ascii_case(name))
+                            .map(|l| l.handle)
+                    })
+                    .collect();
+
+                let mut frozen_count = 0usize;
+                let mut thawed_count = 0usize;
+
+                if let Some(acadrust::EntityType::Viewport(vp)) =
+                    self.tabs[i].scene.document.get_entity_mut(vp_handle)
+                {
+                    for h in &freeze_handles {
+                        if !vp.frozen_layers.contains(h) {
+                            vp.frozen_layers.push(*h);
+                            frozen_count += 1;
+                        }
+                    }
+                    for h in &thaw_handles {
+                        let before = vp.frozen_layers.len();
+                        vp.frozen_layers.retain(|fh| fh != h);
+                        if vp.frozen_layers.len() < before { thawed_count += 1; }
+                    }
+                }
+
+                if frozen_count > 0 || thawed_count > 0 {
+                    self.push_undo_snapshot(i, "VPLAYER");
+                    self.tabs[i].dirty = true;
+                    if frozen_count > 0 {
+                        self.command_line.push_info(&format!("VPLAYER: {frozen_count} layer(s) frozen in viewport."));
+                    }
+                    if thawed_count > 0 {
+                        self.command_line.push_info(&format!("VPLAYER: {thawed_count} layer(s) thawed in viewport."));
+                    }
+                }
+
+                // Show updated prompt (command stays active for more operations).
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
         }
         // Focus the command-line input while a command is active; blur it when the command ends.
         if self.tabs[i].active_cmd.is_some() {

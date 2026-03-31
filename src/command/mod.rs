@@ -83,6 +83,12 @@ pub enum CmdResult {
     CreateGroup { handles: Vec<Handle>, name: String },
     /// Dissolve all groups that contain any of the given handles; end command.
     DeleteGroups { handles: Vec<Handle> },
+    /// Freeze or thaw layers by name in the given viewport; command stays active.
+    VpLayerUpdate {
+        vp_handle: Handle,
+        freeze: Vec<String>,
+        thaw: Vec<String>,
+    },
     /// Paste clipboard entities translated so their centroid lands at `base_pt`; end command.
     PasteClipboard { base_pt: Vec3 },
 }

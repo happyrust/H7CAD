@@ -767,6 +767,7 @@ impl Scene {
         if let Some(acadrust::EntityType::Viewport(vp)) =
             self.document.get_entity_mut(vp_handle)
         {
+            if vp.status.locked { return; }
             let scale = if vp.custom_scale.abs() > 1e-9 {
                 vp.custom_scale
             } else if vp.view_height.abs() > 1e-9 {
@@ -796,6 +797,7 @@ impl Scene {
         if let Some(acadrust::EntityType::Viewport(vp)) =
             self.document.get_entity_mut(vp_handle)
         {
+            if vp.status.locked { return; }
             // Zoom in = shrink view_height → higher scale → objects appear larger.
             let factor = (1.0_f64 - 0.15 * steps as f64).clamp(0.1, 10.0);
 

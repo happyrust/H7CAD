@@ -909,6 +909,75 @@ impl H7CAD {
                 return Task::done(Message::PspaceCommand);
             }
 
+            // ── VPORTS — list viewports in current layout ─────────────────
+            "VPORTS" => {
+                let scene = &self.tabs[i].scene;
+                if scene.current_layout == "Model" {
+                    self.command_line.push_error("VPORTS: switch to a paper space layout first.");
+                } else {
+                    let layout_block = scene.current_layout_block_handle_pub();
+                    let viewports: Vec<_> = scene.document.entities()
+                        .filter_map(|e| {
+                            if let acadrust::EntityType::Viewport(vp) = e {
+                                if vp.id > 1 && vp.common.owner_handle == layout_block {
+                                    Some((vp.id, vp.center.clone(), vp.width, vp.height, vp.custom_scale, vp.status.is_on, vp.status.locked))
+                                } else { None }
+                            } else { None }
+                        })
+                        .collect();
+                    if viewports.is_empty() {
+                        self.command_line.push_info("No viewports in current layout. Use MVIEW to create one.");
+                    } else {
+                        self.command_line.push_output(&format!("{} viewport(s) in layout \"{}\":", viewports.len(), scene.current_layout));
+                        for (id, center, w, h, scale, is_on, locked) in &viewports {
+                            let state = match (is_on, locked) {
+                                (true, true)  => "On, Locked",
+                                (true, false) => "On",
+                                (false, _)    => "Off",
+                            };
+                            self.command_line.push_output(&format!(
+                                "  VP #{id}: {w:.1}×{h:.1} @ ({:.1},{:.1})  scale={scale:.4}  [{state}]",
+                                center.x, center.y
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // ── VPLAYER — per-viewport layer freeze/thaw ──────────────────
+            "VPLAYER" => {
+                let scene = &self.tabs[i].scene;
+                if scene.current_layout == "Model" {
+                    self.command_line.push_error("VPLAYER: switch to a paper space layout first.");
+                } else if scene.active_viewport.is_none() {
+                    self.command_line.push_error("VPLAYER: enter a viewport first (double-click or MS).");
+                } else {
+                    use crate::modules::layout::vplayer::VplayerCommand;
+                    let vp_handle = scene.active_viewport.unwrap();
+                    // Collect current frozen layer names for display.
+                    let frozen_names: Vec<String> = {
+                        if let Some(acadrust::EntityType::Viewport(vp)) =
+                            scene.document.get_entity(vp_handle)
+                        {
+                            vp.frozen_layers.iter().filter_map(|h| {
+                                scene.document.layers.iter().find(|l| l.handle == *h).map(|l| l.name.clone())
+                            }).collect()
+                        } else { vec![] }
+                    };
+                    if frozen_names.is_empty() {
+                        self.command_line.push_info("VPLAYER: no frozen layers in active viewport.");
+                    } else {
+                        self.command_line.push_info(&format!(
+                            "VPLAYER: frozen layers: {}",
+                            frozen_names.join(", ")
+                        ));
+                    }
+                    let new_cmd = VplayerCommand::new(vp_handle);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                }
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
