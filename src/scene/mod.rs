@@ -378,18 +378,14 @@ impl Scene {
 
     fn viewport_content_wires(&self, paper_block: Handle) -> Vec<WireModel> {
         use acadrust::entities::Viewport;
+        use std::collections::HashSet as HSet;
 
         let viewports: Vec<&Viewport> = self
             .document
             .entities()
             .filter_map(|e| {
-                if let EntityType::Viewport(vp) = e {
-                    Some(vp)
-                } else {
-                    None
-                }
+                if let EntityType::Viewport(vp) = e { Some(vp) } else { None }
             })
-            // Only user viewports (id > 1) that belong to this layout AND are turned on.
             .filter(|vp| vp.id > 1 && vp.common.owner_handle == paper_block && vp.status.is_on)
             .collect();
 
@@ -398,31 +394,30 @@ impl Scene {
         }
 
         let model_block = self.model_space_block_handle();
-        let model_wires: Vec<WireModel> = self
-            .document
-            .entities()
-            .filter(|e| {
-                let c = e.common();
-                if c.invisible || matches!(e, EntityType::Viewport(_)) {
-                    return false;
-                }
-                if self
-                    .document
-                    .layers
-                    .get(&c.layer)
-                    .map(|l| l.flags.off || l.flags.frozen)
-                    .unwrap_or(false)
-                {
-                    return false;
-                }
-                self.belongs_to_visible_block(c.handle, c.owner_handle, model_block)
-            })
-            .flat_map(|e| self.tessellate_one(e))
-            .collect();
-
         let mut result = Vec::new();
 
         for vp in viewports {
+            // ── Per-viewport frozen layer set ─────────────────────────────
+            let frozen: HSet<Handle> = vp.frozen_layers.iter().cloned().collect();
+
+            // ── View direction coordinate frame ───────────────────────────
+            let vd = glam::Vec3::new(
+                vp.view_direction.x as f32,
+                vp.view_direction.y as f32,
+                vp.view_direction.z as f32,
+            ).normalize_or(glam::Vec3::Z);
+
+            // Compute view_right and view_up from the direction vector.
+            let world_z = glam::Vec3::Z;
+            let view_right = if (vd.dot(world_z)).abs() > 0.99 {
+                // Looking straight up/down: use X as right.
+                glam::Vec3::X
+            } else {
+                world_z.cross(vd).normalize()
+            };
+            let view_up = vd.cross(view_right).normalize();
+
+            // ── Scale & viewport parameters ───────────────────────────────
             let scale = if vp.custom_scale.abs() > 1e-9 {
                 vp.custom_scale as f32
             } else if vp.view_height.abs() > 1e-9 {
@@ -431,28 +426,74 @@ impl Scene {
                 1.0
             };
 
-            let tx = vp.view_target.x as f32;
-            let ty = vp.view_target.y as f32;
+            let target = glam::Vec3::new(
+                vp.view_target.x as f32,
+                vp.view_target.y as f32,
+                vp.view_target.z as f32,
+            );
             let pcx = vp.center.x as f32;
             let pcy = vp.center.y as f32;
             let pcz = vp.center.z as f32;
             let hw = (vp.width / 2.0) as f32;
             let hh = (vp.height / 2.0) as f32;
 
-            for wire in &model_wires {
-                let pts: Vec<[f32; 3]> = wire
-                    .points
-                    .iter()
-                    .map(|&[mx, my, _mz]| [pcx + (mx - tx) * scale, pcy + (my - ty) * scale, pcz])
-                    .collect();
-
-                if !pts.is_empty() {
-                    let n = pts.len() as f32;
-                    let cx = pts.iter().map(|p| p[0]).sum::<f32>() / n;
-                    let cy = pts.iter().map(|p| p[1]).sum::<f32>() / n;
-                    if (cx - pcx).abs() > hw * 1.2 || (cy - pcy).abs() > hh * 1.2 {
-                        continue;
+            // ── Collect model wires with per-vp layer freeze ──────────────
+            let model_wires: Vec<WireModel> = self
+                .document
+                .entities()
+                .filter(|e| {
+                    let c = e.common();
+                    if c.invisible || matches!(e, EntityType::Viewport(_)) {
+                        return false;
                     }
+                    // Global layer visibility.
+                    if self.document.layers.get(&c.layer)
+                        .map(|l| l.flags.off || l.flags.frozen)
+                        .unwrap_or(false)
+                    {
+                        return false;
+                    }
+                    // Per-viewport frozen layers.
+                    if !frozen.is_empty() {
+                        if let Some(lh) = self.document.layers.get(&c.layer).map(|l| l.handle) {
+                            if frozen.contains(&lh) {
+                                return false;
+                            }
+                        }
+                    }
+                    self.belongs_to_visible_block(c.handle, c.owner_handle, model_block)
+                })
+                .flat_map(|e| self.tessellate_one(e))
+                .collect();
+
+            // ── Project and clip wires into viewport ──────────────────────
+            for wire in &model_wires {
+                // Project 3-D model points onto view plane → paper space.
+                let pts: Vec<[f32; 3]> = wire.points.iter().map(|&[mx, my, mz]| {
+                    let mp = glam::Vec3::new(mx, my, mz) - target;
+                    let u = mp.dot(view_right);  // horizontal in view
+                    let v = mp.dot(view_up);     // vertical in view
+                    [pcx + u * scale, pcy + v * scale, pcz]
+                }).collect();
+
+                // Proper AABB test: discard if the wire's bounding box has
+                // zero overlap with the viewport rectangle.
+                if pts.is_empty() {
+                    continue;
+                }
+                let min_x = pts.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+                let max_x = pts.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+                let min_y = pts.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+                let max_y = pts.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+
+                let vp_x0 = pcx - hw;
+                let vp_x1 = pcx + hw;
+                let vp_y0 = pcy - hh;
+                let vp_y1 = pcy + hh;
+
+                // AABB overlap check (no tolerance — exact viewport boundary).
+                if max_x < vp_x0 || min_x > vp_x1 || max_y < vp_y0 || min_y > vp_y1 {
+                    continue;
                 }
 
                 let [r, g, b, a] = wire.color;
