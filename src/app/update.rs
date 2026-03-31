@@ -6,7 +6,7 @@ use crate::scene::object::GripApply;
 use crate::modules::ModuleEvent;
 use crate::ui::PropertiesPanel;
 use acadrust::types::Color as AcadColor;
-use acadrust::Handle;
+use acadrust::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::window;
 use iced::{mouse, Task};
@@ -670,10 +670,21 @@ impl H7CAD {
                     }
                 }
 
-                if sel.middle_down {
-                    if let Some(last) = sel.middle_last_pos {
+                let (mid_down, mid_last, vp_size) =
+                    (sel.middle_down, sel.middle_last_pos, sel.vp_size);
+                if mid_down {
+                    if let Some(last) = mid_last {
                         let (dx, dy) = (p.x - last.x, p.y - last.y);
-                        self.tabs[i].scene.camera.borrow_mut().pan(dx, dy);
+                        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vp_size.0, height: vp_size.1 };
+                        // Drop `sel` before calling mutable scene methods.
+                        drop(sel);
+                        if self.tabs[i].scene.active_viewport.is_some() {
+                            self.tabs[i].scene.pan_active_viewport(dx, dy, bounds);
+                        } else {
+                            self.tabs[i].scene.camera.borrow_mut().pan(dx, dy);
+                        }
+                        self.tabs[i].scene.selection.borrow_mut().middle_last_pos = Some(p);
+                        return Task::none();
                     }
                     sel.middle_last_pos = Some(p);
                 }
@@ -873,7 +884,9 @@ impl H7CAD {
                     let tangent_obj_at_click = snap_taken.and_then(|s| s.tangent_obj);
 
                     let world_pt = {
-                        let raw = self.tabs[i].scene.camera.borrow().pick_on_target_plane(p, bounds);
+                        let raw_paper = self.tabs[i].scene.camera.borrow().pick_on_target_plane(p, bounds);
+                        // Convert paper-space → model-space when inside a viewport.
+                        let raw = self.tabs[i].scene.paper_to_model(raw_paper);
                         let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                         let all_wires = self.tabs[i].scene.entity_wires();
                         let needs_tan = self.tabs[i].active_cmd.as_ref()
@@ -1059,6 +1072,51 @@ impl H7CAD {
                     }
                 }
 
+                // ── Double-click: enter/exit MSPACE ───────────────────────
+                // Only when no command is running, no drag, and we're in paper space.
+                if is_click
+                    && !is_down2
+                    && self.tabs[i].active_cmd.is_none()
+                    && self.tabs[i].scene.current_layout != "Model"
+                {
+                    let now = Instant::now();
+                    let is_double = self
+                        .last_vp_click_time
+                        .map(|t| {
+                            let dt = now.duration_since(t).as_millis();
+                            let last = self.last_vp_click_pos.unwrap_or(p);
+                            let d = (p.x - last.x).hypot(p.y - last.y);
+                            dt < 400 && d < 8.0
+                        })
+                        .unwrap_or(false);
+
+                    self.last_vp_click_time = Some(now);
+                    self.last_vp_click_pos = Some(p);
+
+                    if is_double {
+                        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+                        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
+                        let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
+                        let all_wires = self.tabs[i].scene.entity_wires();
+                        let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
+                            .and_then(|s| Scene::handle_from_wire_name(s));
+
+                        if let Some(handle) = hit {
+                            // Double-clicked on a user viewport → enter MSPACE.
+                            if let Some(AcadEntityType::Viewport(vp)) =
+                                self.tabs[i].scene.document.get_entity(handle)
+                            {
+                                if vp.id > 1 {
+                                    return Task::done(Message::EnterViewport(handle));
+                                }
+                            }
+                        } else if self.tabs[i].scene.active_viewport.is_some() {
+                            // Double-clicked on empty area while in MSPACE → exit.
+                            return Task::done(Message::ExitViewport);
+                        }
+                    }
+                }
+
                 Task::none()
             }
 
@@ -1130,11 +1188,16 @@ impl H7CAD {
                 let cursor = self.tabs[i].scene.selection.borrow().last_move_pos;
                 let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
                 let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
-                let mut cam = self.tabs[i].scene.camera.borrow_mut();
-                if let Some(cursor) = cursor {
-                    cam.zoom_about_point(cursor, bounds, s);
+                if self.tabs[i].scene.active_viewport.is_some() {
+                    // In MSPACE: zoom the active viewport's model-space view.
+                    self.tabs[i].scene.zoom_active_viewport(s);
                 } else {
-                    cam.zoom(s);
+                    let mut cam = self.tabs[i].scene.camera.borrow_mut();
+                    if let Some(cursor) = cursor {
+                        cam.zoom_about_point(cursor, bounds, s);
+                    } else {
+                        cam.zoom(s);
+                    }
                 }
                 Task::none()
             }
@@ -1431,9 +1494,10 @@ impl H7CAD {
             Message::LayoutSwitch(name) => {
                 let i = self.active_tab;
                 let going_to_paper = name != "Model";
-                // Cancel any pending rename/context-menu when switching layouts.
+                // Cancel any pending rename/context-menu and active viewport when switching.
                 self.layout_rename_state = None;
                 self.layout_context_menu = None;
+                self.tabs[i].scene.active_viewport = None;
                 self.tabs[i].scene.current_layout = name;
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.fit_all();
@@ -1556,6 +1620,20 @@ impl H7CAD {
 
             Message::LayoutContextMenuClose => {
                 self.layout_context_menu = None;
+                Task::none()
+            }
+
+            Message::EnterViewport(handle) => {
+                let i = self.active_tab;
+                self.tabs[i].scene.active_viewport = Some(handle);
+                self.command_line.push_output("MSPACE — viewport entered. Middle-drag/scroll to navigate, double-click outside to exit.");
+                Task::none()
+            }
+
+            Message::ExitViewport => {
+                let i = self.active_tab;
+                self.tabs[i].scene.active_viewport = None;
+                self.command_line.push_output("PSPACE");
                 Task::none()
             }
 

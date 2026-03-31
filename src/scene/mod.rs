@@ -61,6 +61,10 @@ pub struct Scene {
     pub hatches: HashMap<Handle, HatchModel>,
     /// GPU render data for solid meshes (truck Shell/Solid tessellation).
     pub meshes: HashMap<Handle, MeshModel>,
+    /// The viewport that is currently "entered" (MSPACE mode).
+    /// `None` = paper space editing (PSPACE).  Only meaningful when
+    /// `current_layout != "Model"`.
+    pub active_viewport: Option<Handle>,
 }
 
 impl Scene {
@@ -76,6 +80,7 @@ impl Scene {
             current_layout: "Model".to_string(),
             hatches: HashMap::new(),
             meshes: HashMap::new(),
+            active_viewport: None,
         }
     }
 
@@ -255,10 +260,22 @@ impl Scene {
         let sel = self.selected.contains(&h);
 
         if let EntityType::Viewport(vp) = e {
+            let is_active = self.active_viewport == Some(h);
             let color = if vp.id == 1 {
+                // Overall paper-space viewport — subtle grey.
                 [0.40, 0.40, 0.40, 1.0]
+            } else if is_active {
+                // Active (entered) viewport — bright yellow.
+                [1.0, 0.90, 0.20, 1.0]
             } else {
+                // Normal user viewport — cyan.
                 [0.0, 0.75, 0.75, 1.0]
+            };
+            // Active viewport gets a dashed border to visually indicate MSPACE.
+            let (pattern_length, pattern) = if is_active {
+                (1.5_f32, [0.8, -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0_f32])
+            } else {
+                (0.0_f32, [0.0f32; 8])
             };
             return vec![tessellate::tessellate(
                 &self.document,
@@ -266,9 +283,9 @@ impl Scene {
                 e,
                 sel,
                 color,
-                0.0,
-                [0.0f32; 8],
-                1.0,
+                pattern_length,
+                pattern,
+                1.5,
             )];
         }
 
@@ -439,6 +456,93 @@ impl Scene {
         }
 
         result
+    }
+
+    // ── MSPACE helpers ───────────────────────────────────────────────────
+
+    /// Convert a **paper-space** world coordinate to **model-space** using the
+    /// geometry of the currently active viewport.  Returns the input unchanged
+    /// when there is no active viewport.
+    pub fn paper_to_model(&self, paper_pt: glam::Vec3) -> glam::Vec3 {
+        let vp_handle = match self.active_viewport {
+            Some(h) => h,
+            None => return paper_pt,
+        };
+        let vp = match self.document.get_entity(vp_handle) {
+            Some(acadrust::EntityType::Viewport(vp)) => vp,
+            _ => return paper_pt,
+        };
+        let scale = if vp.custom_scale.abs() > 1e-9 {
+            vp.custom_scale as f32
+        } else if vp.view_height.abs() > 1e-9 {
+            (vp.height / vp.view_height) as f32
+        } else {
+            1.0
+        };
+        if scale.abs() < 1e-9 {
+            return paper_pt;
+        }
+        let tx = vp.view_target.x as f32;
+        let ty = vp.view_target.y as f32;
+        let pcx = vp.center.x as f32;
+        let pcy = vp.center.y as f32;
+        glam::Vec3::new(
+            (paper_pt.x - pcx) / scale + tx,
+            (paper_pt.y - pcy) / scale + ty,
+            paper_pt.z,
+        )
+    }
+
+    /// Pan the active viewport's model-space view by `(screen_dx, screen_dy)` pixels.
+    /// The delta is converted to model-space units using the camera and viewport scale.
+    /// No-op when there is no active viewport.
+    pub fn pan_active_viewport(&mut self, screen_dx: f32, screen_dy: f32, bounds: iced::Rectangle) {
+        let vp_handle = match self.active_viewport {
+            Some(h) => h,
+            None => return,
+        };
+        // Convert screen pixels → paper-space delta using the camera.
+        let cam = self.camera.borrow();
+        let paper_delta = cam.screen_delta_to_world(screen_dx, screen_dy, bounds);
+        drop(cam);
+
+        if let Some(acadrust::EntityType::Viewport(vp)) =
+            self.document.get_entity_mut(vp_handle)
+        {
+            let scale = if vp.custom_scale.abs() > 1e-9 {
+                vp.custom_scale
+            } else if vp.view_height.abs() > 1e-9 {
+                vp.height / vp.view_height
+            } else {
+                1.0
+            };
+            if scale.abs() < 1e-12 { return; }
+            // Paper delta → model delta (divide by viewport scale).
+            vp.view_target.x -= (paper_delta.x / scale as f32) as f64;
+            vp.view_target.y -= (paper_delta.y / scale as f32) as f64;
+        }
+    }
+
+    /// Zoom the active viewport's model-space view by `steps` notches.
+    /// Positive = zoom in (increase detail), negative = zoom out.
+    /// No-op when there is no active viewport.
+    pub fn zoom_active_viewport(&mut self, steps: f32) {
+        let vp_handle = match self.active_viewport {
+            Some(h) => h,
+            None => return,
+        };
+        if let Some(acadrust::EntityType::Viewport(vp)) =
+            self.document.get_entity_mut(vp_handle)
+        {
+            // Zoom in = shrink view_height → more of the model fits less area.
+            let factor = (1.0_f64 - 0.15 * steps as f64).clamp(0.1, 10.0);
+            let new_height = (vp.view_height * factor).max(1e-6);
+            vp.view_height = new_height;
+            // Keep custom_scale in sync.
+            if vp.view_height.abs() > 1e-9 {
+                vp.custom_scale = vp.height / vp.view_height;
+            }
+        }
     }
 
     // ── Layout management ─────────────────────────────────────────────────

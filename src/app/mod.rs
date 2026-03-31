@@ -61,6 +61,10 @@ pub(super) struct H7CAD {
     layout_context_menu: Option<String>,
     /// Inline rename state: (original_name, current_edit_value).
     layout_rename_state: Option<(String, String)>,
+    /// Timestamp of the previous viewport left-click release (for double-click detection).
+    last_vp_click_time: Option<Instant>,
+    /// Screen position of the previous viewport left-click release.
+    last_vp_click_pos: Option<Point>,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +214,10 @@ pub enum Message {
     PropColorPickerToggle,
     /// Toggle the full ACI colour palette expansion.
     PropColorPaletteToggle,
+    /// Enter the model-space editing mode inside the given viewport (MSPACE).
+    EnterViewport(acadrust::Handle),
+    /// Exit MSPACE and return to paper-space editing (PSPACE).
+    ExitViewport,
     /// Switch to a named layout ("Model" or paper space layout name).
     LayoutSwitch(String),
     /// Create a new paper space layout.
@@ -261,6 +269,8 @@ impl H7CAD {
             clipboard_centroid: glam::Vec3::ZERO,
             layout_context_menu: None,
             layout_rename_state: None,
+            last_vp_click_time: None,
+            last_vp_click_pos: None,
         };
         app.sync_ribbon_layers();
         app
