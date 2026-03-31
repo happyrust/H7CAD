@@ -4,7 +4,40 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{diamond_grip, edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
-use crate::scene::object::{GripApply, GripDef, PropSection};
+use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
+
+// ── Standard scale options ────────────────────────────────────────────────
+
+const STANDARD_SCALES: &[(&str, f64)] = &[
+    ("1:500", 0.002),
+    ("1:200", 0.005),
+    ("1:100", 0.01),
+    ("1:50",  0.02),
+    ("1:20",  0.05),
+    ("1:10",  0.1),
+    ("1:5",   0.2),
+    ("1:2",   0.5),
+    ("1:1",   1.0),
+    ("2:1",   2.0),
+    ("5:1",   5.0),
+    ("10:1",  10.0),
+];
+
+fn scale_label(scale: f64) -> String {
+    for (label, val) in STANDARD_SCALES {
+        if (scale - val).abs() < val * 0.01 {
+            return label.to_string();
+        }
+    }
+    format!("{:.6}", scale).trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+// ── Standard view options ─────────────────────────────────────────────────
+
+const STD_VIEWS: &[&str] = &[
+    "Top", "Bottom", "Front", "Back", "Left", "Right",
+    "SW Isometric", "SE Isometric", "NE Isometric", "NW Isometric",
+];
 
 fn grips(vp: &Viewport) -> Vec<GripDef> {
     let cx = vp.center.x as f32;
@@ -22,6 +55,12 @@ fn grips(vp: &Viewport) -> Vec<GripDef> {
 }
 
 fn properties(vp: &Viewport) -> PropSection {
+    let scale_opts: Vec<String> = STANDARD_SCALES.iter().map(|(s, _)| s.to_string()).collect();
+    let current_scale_label = scale_label(vp.custom_scale);
+
+    let view_opts: Vec<String> = STD_VIEWS.iter().map(|s| s.to_string()).collect();
+    let current_view = viewport_view_label(vp);
+
     PropSection {
         title: "Geometry".into(),
         props: vec![
@@ -30,24 +69,125 @@ fn properties(vp: &Viewport) -> PropSection {
             edit("Center Z", "center_z", vp.center.z),
             edit("Width", "vp_w", vp.width),
             edit("Height", "vp_h", vp.height),
-            edit("Scale", "vscale", vp.custom_scale),
+            // Numeric scale entry.
+            edit("Scale (num)", "vscale", vp.custom_scale),
+            // Standard scale picker.
+            Property {
+                label: "Scale".into(),
+                field: "vscale_std",
+                value: PropValue::Choice {
+                    selected: current_scale_label,
+                    options: scale_opts,
+                },
+            },
+            // Standard view picker.
+            Property {
+                label: "View".into(),
+                field: "vp_view",
+                value: PropValue::Choice {
+                    selected: current_view,
+                    options: view_opts,
+                },
+            },
+            // Display state toggles.
+            Property {
+                label: "Locked".into(),
+                field: "vp_locked",
+                value: PropValue::BoolToggle { field: "vp_locked", value: vp.status.locked },
+            },
+            Property {
+                label: "On".into(),
+                field: "vp_on",
+                value: PropValue::BoolToggle { field: "vp_on", value: vp.status.is_on },
+            },
             edit("Target X", "vtgt_x", vp.view_target.x),
             edit("Target Z", "vtgt_z", vp.view_target.z),
         ],
     }
 }
 
+/// Identify which standard view matches the viewport's view direction.
+fn viewport_view_label(vp: &Viewport) -> String {
+    let d = &vp.view_direction;
+    let dx = d.x;
+    let dy = d.y;
+    let dz = d.z;
+
+    // Use a simple threshold comparison to classify the view direction.
+    if dx.abs() < 0.1 && dy.abs() < 0.1 && dz > 0.5 { return "Top".into(); }
+    if dx.abs() < 0.1 && dy.abs() < 0.1 && dz < -0.5 { return "Bottom".into(); }
+    if dx.abs() < 0.1 && dy < -0.5 && dz.abs() < 0.1 { return "Front".into(); }
+    if dx.abs() < 0.1 && dy > 0.5 && dz.abs() < 0.1 { return "Back".into(); }
+    if dx < -0.5 && dy.abs() < 0.1 && dz.abs() < 0.1 { return "Left".into(); }
+    if dx > 0.5 && dy.abs() < 0.1 && dz.abs() < 0.1 { return "Right".into(); }
+    if dx < -0.4 && dy < -0.4 && dz > 0.4 { return "SW Isometric".into(); }
+    if dx > 0.4 && dy < -0.4 && dz > 0.4 { return "SE Isometric".into(); }
+    if dx > 0.4 && dy > 0.4 && dz > 0.4 { return "NE Isometric".into(); }
+    if dx < -0.4 && dy > 0.4 && dz > 0.4 { return "NW Isometric".into(); }
+    "Custom".into()
+}
+
 fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
-    let Some(v) = parse_f64(value) else {
+    use acadrust::types::Vector3;
+
+    // Boolean / toggle fields handled first (value = "toggle" or "true"/"false").
+    match field {
+        "vp_locked" => {
+            vp.status.locked = if value == "toggle" { !vp.status.locked } else { value == "true" };
+            return;
+        }
+        "vp_on" => {
+            vp.status.is_on = if value == "toggle" { !vp.status.is_on } else { value == "true" };
+            return;
+        }
+        _ => {}
+    }
+
+    // Standard scale picker.
+    if field == "vscale_std" {
+        if let Some(&(_, scale)) = STANDARD_SCALES.iter().find(|(label, _)| *label == value) {
+            vp.custom_scale = scale;
+            if scale > 1e-9 {
+                vp.view_height = vp.height / scale;
+            }
+        }
         return;
-    };
+    }
+
+    // Standard view direction picker.
+    if field == "vp_view" {
+        let dir: Option<(f64, f64, f64)> = match value {
+            "Top"          => Some(( 0.0,  0.0,  1.0)),
+            "Bottom"       => Some(( 0.0,  0.0, -1.0)),
+            "Front"        => Some(( 0.0, -1.0,  0.0)),
+            "Back"         => Some(( 0.0,  1.0,  0.0)),
+            "Left"         => Some((-1.0,  0.0,  0.0)),
+            "Right"        => Some(( 1.0,  0.0,  0.0)),
+            "SW Isometric" => Some((-1.0, -1.0,  1.0)),
+            "SE Isometric" => Some(( 1.0, -1.0,  1.0)),
+            "NE Isometric" => Some(( 1.0,  1.0,  1.0)),
+            "NW Isometric" => Some((-1.0,  1.0,  1.0)),
+            _ => None,
+        };
+        if let Some((dx, dy, dz)) = dir {
+            let len = (dx * dx + dy * dy + dz * dz).sqrt();
+            vp.view_direction = Vector3::new(dx / len, dy / len, dz / len);
+        }
+        return;
+    }
+
+    // Numeric fields.
+    let Some(v) = parse_f64(value) else { return };
     match field {
         "center_x" => vp.center.x = v,
         "center_y" => vp.center.y = v,
         "center_z" => vp.center.z = v,
         "vp_w" if v > 0.0 => vp.width = v,
         "vp_h" if v > 0.0 => vp.height = v,
-        "vscale" if v > 0.0 => vp.custom_scale = v,
+        "vscale" if v > 0.0 => {
+            vp.custom_scale = v;
+            vp.view_height = vp.height / v;
+        }
         "vtgt_x" => vp.view_target.x = v,
         "vtgt_z" => vp.view_target.z = v,
         _ => {}

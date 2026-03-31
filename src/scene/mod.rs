@@ -84,6 +84,13 @@ impl Scene {
         }
     }
 
+    /// Public accessor for the block-record handle of the current layout.
+    /// Used by external callers (e.g. `commit_entity`) that need the handle
+    /// without going through private API.
+    pub fn current_layout_block_handle_pub(&self) -> Handle {
+        self.current_layout_block_handle()
+    }
+
     /// Returns the block-record handle for `current_layout`.
     fn current_layout_block_handle(&self) -> Handle {
         self.document
@@ -382,7 +389,8 @@ impl Scene {
                     None
                 }
             })
-            .filter(|vp| vp.id > 1 && vp.common.owner_handle == paper_block)
+            // Only user viewports (id > 1) that belong to this layout AND are turned on.
+            .filter(|vp| vp.id > 1 && vp.common.owner_handle == paper_block && vp.status.is_on)
             .collect();
 
         if viewports.is_empty() {

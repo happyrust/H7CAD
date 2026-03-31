@@ -195,6 +195,25 @@ impl H7CAD {
         if matches!(&entity, acadrust::EntityType::Viewport(_))
             && self.tabs[i].scene.current_layout != "Model"
         {
+            // Assign a unique viewport ID (max existing id + 1, min 2).
+            if let acadrust::EntityType::Viewport(ref mut vp) = entity {
+                let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
+                let max_id = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter_map(|e| {
+                        if let acadrust::EntityType::Viewport(v) = e {
+                            if v.common.owner_handle == layout_block { Some(v.id) } else { None }
+                        } else {
+                            None
+                        }
+                    })
+                    .max()
+                    .unwrap_or(1);
+                vp.id = (max_id + 1).max(2);
+            }
+
             let layout = self.tabs[i].scene.current_layout.clone();
             match self.tabs[i]
                 .scene
@@ -204,7 +223,7 @@ impl H7CAD {
                 Ok(_) => {}
                 Err(e) => self
                     .command_line
-                    .push_error(&format!("Viewport eklenemedi: {e}")),
+                    .push_error(&format!("Viewport could not be added: {e}")),
             }
         } else {
             self.tabs[i].scene.add_entity(entity);
