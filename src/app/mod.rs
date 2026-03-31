@@ -224,6 +224,10 @@ pub enum Message {
     EnterViewport(acadrust::Handle),
     /// Exit MSPACE and return to paper-space editing (PSPACE).
     ExitViewport,
+    /// MS command: enter MSPACE for the first available viewport.
+    MspaceCommand,
+    /// PS command: exit MSPACE (PSPACE).
+    PspaceCommand,
     /// Switch to a named layout ("Model" or paper space layout name).
     LayoutSwitch(String),
     /// Create a new paper space layout.

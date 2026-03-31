@@ -901,11 +901,19 @@ impl H7CAD {
                 }
             }
 
+            // ── MSPACE / PSPACE ───────────────────────────────────────────
+            "MS"|"MSPACE" => {
+                return Task::done(Message::MspaceCommand);
+            }
+            "PSPACE" => {
+                return Task::done(Message::PspaceCommand);
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
             }
-            "PAGESETUP"|"PS" => {
+            "PAGESETUP" => {
                 if self.tabs[i].scene.current_layout == "Model" {
                     self.command_line.push_error("PAGESETUP: switch to a paper space layout first.");
                 } else {

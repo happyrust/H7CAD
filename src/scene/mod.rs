@@ -744,16 +744,20 @@ impl Scene {
                 1.0
             };
             if scale.abs() < 1e-12 { return; }
-            // Paper delta → model delta (divide by viewport scale).
-            vp.view_target.x -= (paper_delta.x / scale as f32) as f64;
-            vp.view_target.y -= (paper_delta.y / scale as f32) as f64;
+            // screen_delta_to_world returns the same delta that cam.pan() ADDS to its
+            // target, so we add it here too (dividing by viewport scale to convert from
+            // paper-space to model-space).  Using -= would invert the drag direction.
+            vp.view_target.x += (paper_delta.x / scale as f32) as f64;
+            vp.view_target.y += (paper_delta.y / scale as f32) as f64;
         }
     }
 
     /// Zoom the active viewport's model-space view by `steps` notches.
     /// Positive = zoom in (increase detail), negative = zoom out.
+    /// `cursor_paper`: optional paper-space XY of the cursor; when supplied the
+    /// model point under the cursor is kept stationary (AutoCAD-style zoom).
     /// No-op when there is no active viewport.
-    pub fn zoom_active_viewport(&mut self, steps: f32) {
+    pub fn zoom_active_viewport(&mut self, steps: f32, cursor_paper: Option<glam::Vec2>) {
         let vp_handle = match self.active_viewport {
             Some(h) => h,
             None => return,
@@ -761,15 +765,81 @@ impl Scene {
         if let Some(acadrust::EntityType::Viewport(vp)) =
             self.document.get_entity_mut(vp_handle)
         {
-            // Zoom in = shrink view_height → more of the model fits less area.
+            // Zoom in = shrink view_height → higher scale → objects appear larger.
             let factor = (1.0_f64 - 0.15 * steps as f64).clamp(0.1, 10.0);
-            let new_height = (vp.view_height * factor).max(1e-6);
-            vp.view_height = new_height;
-            // Keep custom_scale in sync.
-            if vp.view_height.abs() > 1e-9 {
-                vp.custom_scale = vp.height / vp.view_height;
+
+            if let Some(cp) = cursor_paper {
+                // Compute the model-space point under the cursor before zoom.
+                let scale_before = if vp.custom_scale.abs() > 1e-9 {
+                    vp.custom_scale as f32
+                } else if vp.view_height.abs() > 1e-9 {
+                    (vp.height / vp.view_height) as f32
+                } else {
+                    1.0
+                };
+                let cx = vp.center.x as f32;
+                let cy = vp.center.y as f32;
+                let tx = vp.view_target.x as f32;
+                let ty = vp.view_target.y as f32;
+                let mx = (cp.x - cx) / scale_before + tx;
+                let my = (cp.y - cy) / scale_before + ty;
+
+                // Apply zoom.
+                vp.view_height = (vp.view_height * factor).max(1e-6);
+                if vp.view_height.abs() > 1e-9 {
+                    vp.custom_scale = vp.height / vp.view_height;
+                }
+                let scale_after = vp.custom_scale as f32;
+
+                // Adjust view_target so the model point under cursor stays there.
+                let mx_after = (cp.x - cx) / scale_after + vp.view_target.x as f32;
+                let my_after = (cp.y - cy) / scale_after + vp.view_target.y as f32;
+                vp.view_target.x += (mx - mx_after) as f64;
+                vp.view_target.y += (my - my_after) as f64;
+            } else {
+                vp.view_height = (vp.view_height * factor).max(1e-6);
+                if vp.view_height.abs() > 1e-9 {
+                    vp.custom_scale = vp.height / vp.view_height;
+                }
             }
         }
+    }
+
+    /// Return the handle of the user viewport whose bounding rectangle contains
+    /// the given paper-space point, or `None` if no viewport matches.
+    pub fn viewport_at_paper_point(&self, px: f32, py: f32) -> Option<Handle> {
+        let layout_block = self.current_layout_block_handle();
+        self.document
+            .entities()
+            .find_map(|e| {
+                let EntityType::Viewport(vp) = e else { return None; };
+                if vp.id <= 1 || vp.common.owner_handle != layout_block || !vp.status.is_on {
+                    return None;
+                }
+                let hw = (vp.width / 2.0) as f32;
+                let hh = (vp.height / 2.0) as f32;
+                let cx = vp.center.x as f32;
+                let cy = vp.center.y as f32;
+                if px >= cx - hw && px <= cx + hw && py >= cy - hh && py <= cy + hh {
+                    Some(vp.common.handle)
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Return the handle of the first active user viewport in the current layout,
+    /// or `None` if there are none.  Used by the MS command.
+    pub fn first_user_viewport(&self) -> Option<Handle> {
+        let layout_block = self.current_layout_block_handle();
+        self.document.entities().find_map(|e| {
+            let EntityType::Viewport(vp) = e else { return None; };
+            if vp.id > 1 && vp.common.owner_handle == layout_block && vp.status.is_on {
+                Some(vp.common.handle)
+            } else {
+                None
+            }
+        })
     }
 
     // ── Layout management ─────────────────────────────────────────────────

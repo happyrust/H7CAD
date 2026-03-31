@@ -312,6 +312,9 @@ impl H7CAD {
                     if let Some(r) = result {
                         return self.apply_cmd_result(r);
                     }
+                } else if self.tabs[i].scene.active_viewport.is_some() {
+                    // ESC while in MSPACE → exit back to paper space.
+                    return Task::done(Message::ExitViewport);
                 } else {
                     self.tabs[i].scene.deselect_all();
                     self.refresh_properties();
@@ -697,9 +700,10 @@ impl H7CAD {
                     let (vw, vh) = vp_size;
                     let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
                     let cam = self.tabs[i].scene.camera.borrow();
-                    let raw = cam.pick_on_target_plane(p, bounds);
+                    let raw_paper = cam.pick_on_target_plane(p, bounds);
                     let vp_mat = cam.view_proj(bounds);
                     drop(cam);
+                    let raw = self.tabs[i].scene.paper_to_model(raw_paper);
 
                     let edited_name = grip.handle.value().to_string();
                     let all_wires = self.tabs[i].scene.entity_wires();
@@ -738,9 +742,12 @@ impl H7CAD {
                     let (vw, vh) = vp_size;
                     let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
                     let cam = self.tabs[i].scene.camera.borrow();
-                    let cursor_world = cam.pick_on_target_plane(p, bounds);
+                    let cursor_paper = cam.pick_on_target_plane(p, bounds);
                     let view_proj = cam.view_proj(bounds);
                     drop(cam);
+                    // In MSPACE, map paper-space cursor to model space so that
+                    // command previews and snapping work in the correct coordinate space.
+                    let cursor_world = self.tabs[i].scene.paper_to_model(cursor_paper);
 
                     let all_wires = self.tabs[i].scene.entity_wires();
                     let needs_tan = self.tabs[i]
@@ -1075,7 +1082,7 @@ impl H7CAD {
                 // ── Double-click: enter/exit MSPACE ───────────────────────
                 // Only when no command is running, no drag, and we're in paper space.
                 if is_click
-                    && !is_down2
+                    && is_down   // ensures there was a matching left-press
                     && self.tabs[i].active_cmd.is_none()
                     && self.tabs[i].scene.current_layout != "Model"
                 {
@@ -1096,22 +1103,42 @@ impl H7CAD {
                     if is_double {
                         let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
                         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
-                        let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                        let all_wires = self.tabs[i].scene.entity_wires();
-                        let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
-                            .and_then(|s| Scene::handle_from_wire_name(s));
 
-                        if let Some(handle) = hit {
-                            // Double-clicked on a user viewport → enter MSPACE.
-                            if let Some(AcadEntityType::Viewport(vp)) =
-                                self.tabs[i].scene.document.get_entity(handle)
-                            {
-                                if vp.id > 1 {
-                                    return Task::done(Message::EnterViewport(handle));
-                                }
-                            }
+                        // 1) Try direct wire hit — works when the border is clicked.
+                        let hit_vp: Option<acadrust::Handle> = {
+                            let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
+                            let all_wires = self.tabs[i].scene.entity_wires();
+                            scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
+                                .and_then(|s| Scene::handle_from_wire_name(s))
+                                .and_then(|h| {
+                                    if let Some(AcadEntityType::Viewport(vp)) =
+                                        self.tabs[i].scene.document.get_entity(h)
+                                    {
+                                        if vp.id > 1 { Some(h) } else { None }
+                                    } else {
+                                        None
+                                    }
+                                })
+                        };
+
+                        // 2) Geometric fallback: check if the cursor is inside any
+                        //    viewport's bounding rectangle in paper space.  This handles
+                        //    double-clicks on model-entity content wires or empty areas.
+                        let hit_vp = hit_vp.or_else(|| {
+                            let paper_pt = self.tabs[i]
+                                .scene
+                                .camera
+                                .borrow()
+                                .pick_on_target_plane(p, bounds);
+                            self.tabs[i]
+                                .scene
+                                .viewport_at_paper_point(paper_pt.x, paper_pt.y)
+                        });
+
+                        if let Some(handle) = hit_vp {
+                            return Task::done(Message::EnterViewport(handle));
                         } else if self.tabs[i].scene.active_viewport.is_some() {
-                            // Double-clicked on empty area while in MSPACE → exit.
+                            // Double-clicked outside all viewports while in MSPACE → exit.
                             return Task::done(Message::ExitViewport);
                         }
                     }
@@ -1189,8 +1216,14 @@ impl H7CAD {
                 let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
                 let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
                 if self.tabs[i].scene.active_viewport.is_some() {
-                    // In MSPACE: zoom the active viewport's model-space view.
-                    self.tabs[i].scene.zoom_active_viewport(s);
+                    // In MSPACE: zoom the active viewport's model-space view,
+                    // keeping the model point under the cursor stationary.
+                    let cursor_paper = cursor.map(|cp| {
+                        let pt = self.tabs[i].scene.camera.borrow()
+                            .pick_on_target_plane(cp, bounds);
+                        glam::Vec2::new(pt.x, pt.y)
+                    });
+                    self.tabs[i].scene.zoom_active_viewport(s, cursor_paper);
                 } else {
                     let mut cam = self.tabs[i].scene.camera.borrow_mut();
                     if let Some(cursor) = cursor {
@@ -1656,6 +1689,29 @@ impl H7CAD {
                 self.tabs[i].scene.active_viewport = None;
                 self.command_line.push_output("PSPACE");
                 Task::none()
+            }
+
+            Message::MspaceCommand => {
+                let i = self.active_tab;
+                if self.tabs[i].scene.current_layout == "Model" {
+                    self.command_line.push_error("MS is only available in paper space layouts.");
+                    return Task::none();
+                }
+                if self.tabs[i].scene.active_viewport.is_some() {
+                    // Already in MSPACE — nothing to do.
+                    return Task::none();
+                }
+                match self.tabs[i].scene.first_user_viewport() {
+                    Some(handle) => Task::done(Message::EnterViewport(handle)),
+                    None => {
+                        self.command_line.push_error("No viewport found in this layout.");
+                        Task::none()
+                    }
+                }
+            }
+
+            Message::PspaceCommand => {
+                Task::done(Message::ExitViewport)
             }
 
             Message::Undo => { self.undo_active_tab(); Task::none() }
