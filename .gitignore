@@ -19,6 +19,8 @@ flatpak/io.github.HakanSeven12.H7CAD.local.yml
 .flatpak-builder/
 build-dir/
 
+ROADMAP.md
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
