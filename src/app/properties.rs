@@ -220,7 +220,10 @@ impl H7CAD {
                 .document
                 .add_entity_to_layout(entity, &layout)
             {
-                Ok(_) => {}
+                Ok(new_handle) => {
+                    // Auto-fit the new viewport to show model-space content.
+                    self.tabs[i].scene.auto_fit_viewport(new_handle);
+                }
                 Err(e) => self
                     .command_line
                     .push_error(&format!("Viewport could not be added: {e}")),

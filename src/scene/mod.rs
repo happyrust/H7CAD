@@ -376,6 +376,66 @@ impl Scene {
             .unwrap_or(Handle::NULL)
     }
 
+    /// Compute the axis-aligned bounding box of all model-space entities by
+    /// collecting their `key_vertices`.  Returns `None` when there are no
+    /// vertices (empty drawing).
+    fn model_space_extents(&self) -> Option<(glam::Vec3, glam::Vec3)> {
+        let model_block = self.model_space_block_handle();
+        if model_block.is_null() {
+            return None;
+        }
+        let mut min = glam::Vec3::splat(f32::INFINITY);
+        let mut max = glam::Vec3::splat(f32::NEG_INFINITY);
+        let mut any = false;
+        for entity in self.document.entities() {
+            let c = entity.common();
+            if c.owner_handle != model_block || c.invisible {
+                continue;
+            }
+            for wire in self.tessellate_one(entity) {
+                for &[x, y, z] in &wire.key_vertices {
+                    if x.is_finite() && y.is_finite() && z.is_finite() {
+                        min = min.min(glam::Vec3::new(x, y, z));
+                        max = max.max(glam::Vec3::new(x, y, z));
+                        any = true;
+                    }
+                }
+            }
+        }
+        if any { Some((min, max)) } else { None }
+    }
+
+    /// Set a newly created viewport's `view_target` and `view_height` so that
+    /// all model-space content is visible at a reasonable scale.
+    pub fn auto_fit_viewport(&mut self, vp_handle: Handle) {
+        let extents = self.model_space_extents();
+        let (min, max) = match extents {
+            Some(e) => e,
+            None => return,
+        };
+        let center = (min + max) * 0.5;
+        let content_w = (max.x - min.x).max(1e-3);
+        let content_h = (max.y - min.y).max(1e-3);
+
+        let vp = match self.document.get_entity_mut(vp_handle) {
+            Some(acadrust::EntityType::Viewport(vp)) => vp,
+            _ => return,
+        };
+        // Set the view target to the model-space centroid (XY plane, z=0).
+        vp.view_target.x = center.x as f64;
+        vp.view_target.y = center.y as f64;
+        vp.view_target.z = 0.0;
+
+        // Choose the scale that fits both dimensions with a small margin.
+        let margin = 1.1_f64;
+        let scale_w = vp.width / (content_w as f64 * margin);
+        let scale_h = vp.height / (content_h as f64 * margin);
+        let fit_scale = scale_w.min(scale_h).min(1000.0).max(1e-6);
+
+        vp.custom_scale = fit_scale;
+        vp.view_height = vp.height / fit_scale;
+    }
+
     fn viewport_content_wires(&self, paper_block: Handle) -> Vec<WireModel> {
         use acadrust::entities::Viewport;
         use std::collections::HashSet as HSet;
@@ -500,6 +560,9 @@ impl Scene {
                 let mut projected = wire.clone();
                 projected.points = pts;
                 projected.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
+                // Scale line weight proportionally so annotation lines (dimensions,
+                // text outlines) appear at the correct visual thickness in paper space.
+                projected.line_weight_px = wire.line_weight_px * scale;
                 result.push(projected);
             }
         }
