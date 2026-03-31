@@ -302,6 +302,10 @@ impl H7CAD {
             }
 
             Message::CommandEscape => {
+                // Cancel layout rename / context menu first, then fall through.
+                if self.layout_rename_state.take().is_some() || self.layout_context_menu.take().is_some() {
+                    return Task::none();
+                }
                 let i = self.active_tab;
                 if self.tabs[i].active_cmd.is_some() {
                     let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_escape());
@@ -1427,6 +1431,9 @@ impl H7CAD {
             Message::LayoutSwitch(name) => {
                 let i = self.active_tab;
                 let going_to_paper = name != "Model";
+                // Cancel any pending rename/context-menu when switching layouts.
+                self.layout_rename_state = None;
+                self.layout_context_menu = None;
                 self.tabs[i].scene.current_layout = name;
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.fit_all();
@@ -1442,8 +1449,16 @@ impl H7CAD {
 
             Message::LayoutCreate => {
                 let i = self.active_tab;
-                let count = self.tabs[i].scene.layout_names().len();
-                let new_name = format!("Layout{}", count);
+                // Find a unique name (e.g. Layout2, Layout3, ...).
+                let existing = self.tabs[i].scene.layout_names();
+                let mut idx = existing.len();
+                let new_name = loop {
+                    let candidate = format!("Layout{}", idx);
+                    if !existing.contains(&candidate) {
+                        break candidate;
+                    }
+                    idx += 1;
+                };
                 self.push_undo_snapshot(i, "LAYOUT");
                 match self.tabs[i].scene.document.add_layout(&new_name) {
                     Ok(_) => {
@@ -1460,6 +1475,87 @@ impl H7CAD {
                     }
                     Err(e) => self.command_line.push_error(&format!("Layout oluşturulamadı: {e}")),
                 }
+                Task::none()
+            }
+
+            Message::LayoutDelete(name) => {
+                let i = self.active_tab;
+                self.push_undo_snapshot(i, "LAYOUT DEL");
+                if self.tabs[i].scene.delete_layout(&name) {
+                    self.layout_context_menu = None;
+                    self.layout_rename_state = None;
+                    // If we fell back to Model space, update ribbon.
+                    if self.tabs[i].scene.current_layout == "Model"
+                        && self.ribbon.active_is_layout()
+                    {
+                        self.ribbon.select(0);
+                    }
+                    self.command_line.push_output(&format!("Layout \"{name}\" silindi"));
+                    self.tabs[i].dirty = true;
+                }
+                Task::none()
+            }
+
+            Message::LayoutRenameStart(name) => {
+                if name != "Model" {
+                    self.layout_rename_state = Some((name.clone(), name));
+                    self.layout_context_menu = None;
+                }
+                Task::none()
+            }
+
+            Message::LayoutRenameEdit(val) => {
+                if let Some((orig, _)) = &self.layout_rename_state {
+                    let orig = orig.clone();
+                    self.layout_rename_state = Some((orig, val));
+                }
+                Task::none()
+            }
+
+            Message::LayoutRenameCommit => {
+                if let Some((orig, new_name)) = self.layout_rename_state.take() {
+                    let new_name = new_name.trim().to_string();
+                    if !new_name.is_empty() && new_name != orig {
+                        let i = self.active_tab;
+                        let exists = self.tabs[i]
+                            .scene
+                            .layout_names()
+                            .iter()
+                            .any(|n| *n == new_name);
+                        if exists {
+                            self.command_line.push_error(&format!(
+                                "\"{}\" adı zaten kullanımda",
+                                new_name
+                            ));
+                        } else {
+                            self.push_undo_snapshot(i, "LAYOUT RENAME");
+                            self.tabs[i].scene.rename_layout(&orig, &new_name);
+                            if self.tabs[i].scene.current_layout == orig {
+                                self.tabs[i].scene.current_layout = new_name.clone();
+                            }
+                            self.tabs[i].dirty = true;
+                            self.command_line
+                                .push_output(&format!("Layout \"{orig}\" → \"{new_name}\""));
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::LayoutRenameCancel => {
+                self.layout_rename_state = None;
+                Task::none()
+            }
+
+            Message::LayoutContextMenu(name) => {
+                if name != "Model" {
+                    self.layout_context_menu = Some(name);
+                }
+                Task::none()
+            }
+
+            Message::LayoutContextMenuClose => {
+                self.layout_context_menu = None;
                 Task::none()
             }
 

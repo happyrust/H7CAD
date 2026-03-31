@@ -385,6 +385,65 @@ impl Scene {
         result
     }
 
+    // ── Layout management ─────────────────────────────────────────────────
+
+    /// Rename a paper-space layout.  Updates the Layout object name in the document.
+    pub fn rename_layout(&mut self, old_name: &str, new_name: &str) {
+        for obj in self.document.objects.values_mut() {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == old_name {
+                    l.name = new_name.to_string();
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Delete a paper-space layout and all entities owned by it.
+    /// Returns `false` if the layout was not found or is "Model".
+    pub fn delete_layout(&mut self, name: &str) -> bool {
+        if name == "Model" {
+            return false;
+        }
+
+        let layout_info = self.document.objects.values().find_map(|obj| {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == name {
+                    return Some((l.handle, l.block_record));
+                }
+            }
+            None
+        });
+
+        let (layout_handle, block_handle) = match layout_info {
+            Some(info) => info,
+            None => return false,
+        };
+
+        // Remove all entities that belong to this layout's block record.
+        let to_remove: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|e| e.common().owner_handle == block_handle)
+            .map(|e| e.common().handle)
+            .collect();
+        for h in &to_remove {
+            self.hatches.remove(h);
+            self.meshes.remove(h);
+            self.document.remove_entity(*h);
+        }
+
+        // Remove the Layout object itself.
+        self.document.objects.remove(&layout_handle);
+
+        // If the deleted layout was active, fall back to Model space.
+        if self.current_layout == name {
+            self.current_layout = "Model".to_string();
+        }
+
+        true
+    }
+
     // ── Entity management ─────────────────────────────────────────────────
 
     pub fn add_entity(&mut self, entity: EntityType) -> Handle {

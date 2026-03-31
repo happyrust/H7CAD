@@ -1,7 +1,7 @@
 //! Bottom status bar — Model/Layout tabs + OSNAP toggle + status info
 
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, container, row, text, tooltip, Row};
+use iced::widget::{button, container, mouse_area, row, text, text_input, tooltip, Row};
 use iced::{Background, Border, Color, Element, Length, Theme};
 
 use crate::snap::Snapper;
@@ -29,6 +29,8 @@ impl StatusBar {
         show_grid: bool,
         layouts: Vec<String>,
         current_layout: String,
+        // If `Some((original, edit_value))`, the named tab shows a text input.
+        rename_state: Option<&'a (String, String)>,
     ) -> Element<'a, Message> {
         let menu_btn = button(text("≡").size(14).color(ICON_COLOR))
             .on_press(Message::Command("MENU".into()))
@@ -82,7 +84,10 @@ impl StatusBar {
         bar = bar.push(menu_btn);
         for name in layouts {
             let is_active = name == current_layout;
-            bar = bar.push(space_tab(name, is_active));
+            let renaming = rename_state
+                .filter(|(orig, _)| *orig == name)
+                .map(|(_, edit)| edit.as_str());
+            bar = bar.push(space_tab(name, is_active, renaming));
         }
         bar = bar.push(add_btn);
         bar = bar.push(iced::widget::Space::new().width(Length::Fill));
@@ -262,40 +267,90 @@ fn osnap_btn(active: bool, snap_enabled: bool, open: bool) -> Element<'static, M
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-fn space_tab(label: String, is_active: bool) -> Element<'static, Message> {
-    let msg = Message::LayoutSwitch(label.clone());
-    button(text(label).size(11))
-        .on_press(msg)
-        .style(move |_: &Theme, status| button::Style {
-            background: Some(Background::Color(match (is_active, status) {
-                (true, _) => TAB_ACTIVE,
-                (false, button::Status::Hovered) => TAB_HOVER,
-                _ => Color::TRANSPARENT,
-            })),
-            text_color: if is_active {
-                Color::WHITE
-            } else {
-                Color {
-                    r: 0.65,
-                    g: 0.65,
-                    b: 0.65,
-                    a: 1.0,
-                }
-            },
-            border: Border {
-                color: if is_active {
-                    ACCENT
-                } else {
-                    Color::TRANSPARENT
+/// A layout tab button.
+///
+/// When `rename_edit` is `Some(value)` the tab shows an inline text input
+/// instead of the normal button.  The tab is not renameable when it is the
+/// "Model" tab (callers simply never pass `Some` for that name).
+fn space_tab<'a>(label: String, is_active: bool, rename_edit: Option<&'a str>) -> Element<'a, Message> {
+    let bg = move |is_active: bool, hovered: bool| {
+        if is_active {
+            TAB_ACTIVE
+        } else if hovered {
+            TAB_HOVER
+        } else {
+            Color::TRANSPARENT
+        }
+    };
+
+    let border = Border {
+        color: if is_active { ACCENT } else { Color::TRANSPARENT },
+        width: if is_active { 1.0 } else { 0.0 },
+        radius: 2.0.into(),
+    };
+
+    let text_color = if is_active {
+        Color::WHITE
+    } else {
+        Color { r: 0.65, g: 0.65, b: 0.65, a: 1.0 }
+    };
+
+    if let Some(edit_val) = rename_edit {
+        // Inline rename text input with a cancel (✕) button.
+        let input = text_input("", edit_val)
+            .on_input(Message::LayoutRenameEdit)
+            .on_submit(Message::LayoutRenameCommit)
+            .size(11)
+            .style(|_: &Theme, _| text_input::Style {
+                background: Background::Color(TAB_ACTIVE),
+                border: Border {
+                    color: ACCENT,
+                    width: 1.0,
+                    radius: 2.0.into(),
                 },
-                width: if is_active { 1.0 } else { 0.0 },
-                radius: 2.0.into(),
-            },
+                icon: Color::WHITE,
+                placeholder: Color { r: 0.5, g: 0.5, b: 0.5, a: 1.0 },
+                value: Color::WHITE,
+                selection: Color { r: 0.20, g: 0.55, b: 0.90, a: 0.4 },
+            })
+            .padding([2, 6])
+            .width(Length::Fixed(90.0));
+
+        let cancel_btn = button(
+            text("✕").size(10).color(Color { r: 0.65, g: 0.65, b: 0.65, a: 1.0 }),
+        )
+        .on_press(Message::LayoutRenameCancel)
+        .style(|_: &Theme, _| button::Style {
+            background: Some(Background::Color(Color::TRANSPARENT)),
+            border: Border::default(),
             shadow: iced::Shadow::default(),
             snap: false,
+            ..Default::default()
         })
-        .padding([3, 10])
-        .into()
+        .padding([2, 4]);
+
+        row![input, cancel_btn].spacing(0).align_y(iced::Center).into()
+    } else {
+        // Normal clickable tab — left click switches, right click opens context menu.
+        let display = container(
+            text(label.clone()).size(11).color(text_color),
+        )
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(bg(is_active, false))),
+            border,
+            ..Default::default()
+        })
+        .padding([3, 10]);
+
+        let switch_msg = Message::LayoutSwitch(label.clone());
+        let ctx_msg = Message::LayoutContextMenu(label.clone());
+
+        // Use mouse_area so we can capture right-click for the context menu.
+        mouse_area(display)
+            .on_press(switch_msg)
+            .on_right_press(ctx_msg)
+            .into()
+    }
 }
 
 fn status_pill(label: &str) -> Element<'_, Message> {

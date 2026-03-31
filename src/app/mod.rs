@@ -57,6 +57,10 @@ pub(super) struct H7CAD {
     clipboard: Vec<acadrust::EntityType>,
     /// Centroid of the clipboard entities (XZ plane, Y-up).
     clipboard_centroid: glam::Vec3,
+    /// Which layout tab has its context menu open (None = closed).
+    layout_context_menu: Option<String>,
+    /// Inline rename state: (original_name, current_edit_value).
+    layout_rename_state: Option<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +214,20 @@ pub enum Message {
     LayoutSwitch(String),
     /// Create a new paper space layout.
     LayoutCreate,
+    /// Delete the named paper space layout (Model cannot be deleted).
+    LayoutDelete(String),
+    /// Begin inline rename for the given layout tab.
+    LayoutRenameStart(String),
+    /// Live-update the rename text input buffer.
+    LayoutRenameEdit(String),
+    /// Commit the rename (Enter pressed in the text input).
+    LayoutRenameCommit,
+    /// Cancel an in-progress rename (Escape).
+    LayoutRenameCancel,
+    /// Open the right-click context menu for the given layout tab.
+    LayoutContextMenu(String),
+    /// Close the layout context menu.
+    LayoutContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.
@@ -241,6 +259,8 @@ impl H7CAD {
             main_window: None,
             clipboard: Vec::new(),
             clipboard_centroid: glam::Vec3::ZERO,
+            layout_context_menu: None,
+            layout_rename_state: None,
         };
         app.sync_ribbon_layers();
         app

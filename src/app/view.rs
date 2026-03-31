@@ -163,7 +163,8 @@ impl H7CAD {
                     self.polar_mode,
                     self.show_grid,
                     tab.scene.layout_names(),
-                    tab.scene.current_layout.clone()
+                    tab.scene.current_layout.clone(),
+                    self.layout_rename_state.as_ref(),
                 )
             ]
             .width(Fill)
@@ -190,7 +191,14 @@ impl H7CAD {
             )
             .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer].into()
+        let layout_ctx_layer: Element<'_, Message> =
+            if let Some(name) = &self.layout_context_menu {
+                layout_context_menu_overlay(name)
+            } else {
+                iced::widget::Space::new().width(0).height(0).into()
+            };
+
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -366,4 +374,71 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
         .width(Fill)
         .padding([0, 2])
         .into()
+}
+
+// ── Layout context-menu overlay ────────────────────────────────────────────
+
+/// A small right-click context menu rendered above the status bar.
+/// The `name` is the layout tab that was right-clicked.
+fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
+    const MENU_BG: Color = Color { r: 0.17, g: 0.17, b: 0.17, a: 1.0 };
+    const MENU_BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const ITEM_HOVER: Color = Color { r: 0.25, g: 0.45, b: 0.70, a: 1.0 };
+    const TEXT_COLOR: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+
+    let item = |label: &'static str, msg: Message| {
+        button(text(label).size(12).color(TEXT_COLOR))
+            .on_press(msg)
+            .style(|_: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered | button::Status::Pressed => ITEM_HOVER,
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT_COLOR,
+                border: Border::default(),
+                shadow: iced::Shadow::default(),
+                snap: false,
+            })
+            .padding([4, 12])
+            .width(Fill)
+    };
+
+    let rename_name = name.to_string();
+    let delete_name = name.to_string();
+
+    let menu = container(
+        column![
+            item("Yeniden Adlandır", Message::LayoutRenameStart(rename_name)),
+            item("Sil", Message::LayoutDelete(delete_name)),
+        ]
+        .spacing(0)
+        .width(160),
+    )
+    .style(move |_: &Theme| container::Style {
+        background: Some(Background::Color(MENU_BG)),
+        border: Border {
+            color: MENU_BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    })
+    .padding([4, 0]);
+
+    // Click-catcher fills the whole screen to close the menu when clicking outside.
+    let catcher = mouse_area(
+        container(iced::widget::Space::new().width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill),
+    )
+    .on_press(Message::LayoutContextMenuClose)
+    .on_right_press(Message::LayoutContextMenuClose);
+
+    // Position the menu above the status bar at the left.
+    let positioned = container(menu)
+        .align_bottom(Fill)
+        .align_left(Fill)
+        .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 30.0, left: 8.0 });
+
+    stack![catcher, positioned].into()
 }
