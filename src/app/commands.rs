@@ -1304,6 +1304,77 @@ impl H7CAD {
                 }
             }
 
+            // ── DimStyle management ───────────────────────────────────────
+            cmd if cmd == "DIMSTYLE" || cmd == "DDIM" || cmd.starts_with("DIMSTYLE ") || cmd.starts_with("DDIM ") => {
+                use acadrust::tables::DimStyle;
+                let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
+                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let styles: Vec<String> = self.tabs[i].scene.document
+                            .dim_styles.iter()
+                            .map(|s| format!("{}(txt:{:.2} asz:{:.2})", s.name, s.dimtxt, s.dimasz))
+                            .collect();
+                        if styles.is_empty() {
+                            self.command_line.push_output("No dim styles defined.");
+                        } else {
+                            self.command_line.push_output(&format!("DimStyles: {}", styles.join(", ")));
+                        }
+                    }
+                    "NEW" | "N" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: DIMSTYLE NEW <name>");
+                        } else if self.tabs[i].scene.document.dim_styles.contains(&name) {
+                            self.command_line.push_error(&format!("DIMSTYLE: '{}' already exists.", name));
+                        } else {
+                            let style = DimStyle::new(&name);
+                            let _ = self.tabs[i].scene.document.dim_styles.add(style);
+                            self.push_undo_snapshot(i, "DIMSTYLE NEW");
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!("DIMSTYLE: '{}' created.", name));
+                        }
+                    }
+                    "SET" | "S" => {
+                        // DIMSTYLE SET <name> <property> <value>
+                        // e.g. DIMSTYLE SET Standard dimtxt 2.5
+                        let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let prop = parts.get(2).map(|s| s.to_lowercase()).unwrap_or_default();
+                        let val_str = parts.get(3).map(|s| s.trim()).unwrap_or("");
+                        if let Ok(val) = val_str.parse::<f64>() {
+                            if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&style_name) {
+                                match prop.as_str() {
+                                    "dimtxt"  => { ds.dimtxt = val; }
+                                    "dimasz"  => { ds.dimasz = val; }
+                                    "dimdli"  => { ds.dimdli = val; }
+                                    "dimexo"  => { ds.dimexo = val; }
+                                    "dimexe"  => { ds.dimexe = val; }
+                                    "dimgap"  => { ds.dimgap = val; }
+                                    "dimscale"| "dimlfac" => { ds.dimgap = val; } // best effort
+                                    _ => {
+                                        self.command_line.push_error(&format!("DIMSTYLE: unknown property '{}'. Try: dimtxt dimasz dimdli dimexo dimexe dimgap", prop));
+                                        return Task::none();
+                                    }
+                                }
+                                self.push_undo_snapshot(i, "DIMSTYLE SET");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("DIMSTYLE: '{style_name}'.{prop} = {val:.3}"));
+                            } else {
+                                self.command_line.push_error(&format!("DIMSTYLE: '{}' not found.", style_name));
+                            }
+                        } else {
+                            self.command_line.push_error("Usage: DIMSTYLE SET <name> <property> <value>");
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info(
+                            "Usage: DIMSTYLE LIST | NEW <name> | SET <name> <prop> <val>"
+                        );
+                    }
+                }
+            }
+
             // ── TextStyle / Style management ──────────────────────────────
             cmd if cmd == "STYLE" || cmd == "TEXTSTYLE" || cmd.starts_with("STYLE ") || cmd.starts_with("TEXTSTYLE ") => {
                 let (prefix, rest) = if cmd.starts_with("TEXTSTYLE") {
