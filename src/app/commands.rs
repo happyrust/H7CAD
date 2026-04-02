@@ -907,6 +907,69 @@ impl H7CAD {
                 self.command_line.push_info("3D Orbit: drag with right mouse button.");
             }
 
+            // ── Selection utilities ───────────────────────────────────────
+            "SELECTALL"|"SA" => {
+                use crate::scene::Scene;
+                let handles: Vec<acadrust::Handle> = self.tabs[i].scene.entity_wires()
+                    .iter()
+                    .filter_map(|w| Scene::handle_from_wire_name(&w.name))
+                    .collect();
+                let count = handles.len();
+                for h in handles {
+                    self.tabs[i].scene.select_entity(h, false);
+                }
+                self.command_line.push_output(&format!("SELECTALL: {} object(s) selected.", count));
+                self.refresh_properties();
+            }
+
+            "DESELECT"|"DE"|"DESELALL" => {
+                self.tabs[i].scene.deselect_all();
+                self.command_line.push_output("Deselected.");
+                self.refresh_properties();
+            }
+
+            // ── LIST — entity info ────────────────────────────────────────
+            "LIST" | "LI" => {
+                let selected: Vec<_> = self.tabs[i].scene.selected_entities();
+                if selected.is_empty() {
+                    self.command_line.push_error("LIST: no entities selected. Select entities first.");
+                } else {
+                    for (handle, _) in &selected {
+                        if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
+                            let type_name = match entity {
+                                acadrust::EntityType::Line(_)       => "LINE",
+                                acadrust::EntityType::Circle(_)     => "CIRCLE",
+                                acadrust::EntityType::Arc(_)        => "ARC",
+                                acadrust::EntityType::LwPolyline(_) => "LWPOLYLINE",
+                                acadrust::EntityType::Polyline(_)   => "POLYLINE",
+                                acadrust::EntityType::Text(_)       => "TEXT",
+                                acadrust::EntityType::MText(_)      => "MTEXT",
+                                acadrust::EntityType::Insert(_)     => "INSERT",
+                                acadrust::EntityType::Hatch(_)      => "HATCH",
+                                acadrust::EntityType::Dimension(_)  => "DIMENSION",
+                                acadrust::EntityType::Viewport(_)   => "VIEWPORT",
+                                acadrust::EntityType::Spline(_)     => "SPLINE",
+                                acadrust::EntityType::Ellipse(_)    => "ELLIPSE",
+                                acadrust::EntityType::Point(_)      => "POINT",
+                                acadrust::EntityType::Ray(_)        => "RAY",
+                                acadrust::EntityType::XLine(_)      => "XLINE",
+                                acadrust::EntityType::Face3D(_)     => "3DFACE",
+                                acadrust::EntityType::Table(_)      => "TABLE",
+                                _ => "ENTITY",
+                            };
+                            let common = entity.common();
+                            self.command_line.push_output(&format!(
+                                "{} Layer:{} Color:{} Handle:{:X}",
+                                type_name,
+                                common.layer,
+                                common.color.index().map(|c| c.to_string()).unwrap_or_else(|| "ByLayer".to_string()),
+                                handle.value()
+                            ));
+                        }
+                    }
+                }
+            }
+
             "HELP"|"?" => {
                 self.command_line.push_output(
                     "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH  |  \
