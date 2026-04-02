@@ -12,6 +12,7 @@ use std::f64::consts::TAU;
 
 use acadrust::entities::EntityCommon;
 use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{Polyline, Polyline2D};
 use acadrust::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
 
@@ -37,6 +38,9 @@ pub fn tool() -> ToolDef {
 pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<EntityType> {
     match entity {
         EntityType::LwPolyline(p) => explode_lwpolyline(p),
+        EntityType::Polyline2D(p) => explode_polyline2d(p),
+        EntityType::Polyline(p) => explode_polyline(p),
+        EntityType::Polyline3D(p) => explode_polyline3d(p),
         EntityType::Insert(ins) => ins
             .explode_from_document(document)
             .into_iter()
@@ -44,6 +48,84 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
             .collect(),
         _ => vec![],
     }
+}
+
+fn explode_polyline(p: &Polyline) -> Vec<EntityType> {
+    let n = p.vertices.len();
+    if n < 2 {
+        return vec![];
+    }
+    let closed = p.flags.is_closed();
+    let n_segs = if closed { n } else { n - 1 };
+    let mut result = Vec::new();
+    for i in 0..n_segs {
+        let v0 = &p.vertices[i];
+        let v1 = &p.vertices[(i + 1) % n];
+        let mut common = p.common.clone();
+        common.handle = Handle::NULL;
+        result.push(EntityType::Line(LineEnt {
+            common,
+            start: v0.location.clone(),
+            end: v1.location.clone(),
+            ..LineEnt::new()
+        }));
+    }
+    result
+}
+
+fn explode_polyline3d(p: &acadrust::entities::Polyline3D) -> Vec<EntityType> {
+    let n = p.vertices.len();
+    if n < 2 {
+        return vec![];
+    }
+    let closed = p.is_closed();
+    let n_segs = if closed { n } else { n - 1 };
+    let mut result = Vec::new();
+    for i in 0..n_segs {
+        let v0 = &p.vertices[i];
+        let v1 = &p.vertices[(i + 1) % n];
+        let mut common = p.common.clone();
+        common.handle = Handle::NULL;
+        result.push(EntityType::Line(LineEnt {
+            common,
+            start: v0.position.clone(),
+            end: v1.position.clone(),
+            ..LineEnt::new()
+        }));
+    }
+    result
+}
+
+fn explode_polyline2d(p: &Polyline2D) -> Vec<EntityType> {
+    let n = p.vertices.len();
+    if n < 2 {
+        return vec![];
+    }
+    let closed = p.is_closed();
+    let n_segs = if closed { n } else { n - 1 };
+    let elevation = p.elevation;
+
+    let mut result = Vec::new();
+    for i in 0..n_segs {
+        let v0 = &p.vertices[i];
+        let v1 = &p.vertices[(i + 1) % n];
+        let p0 = [v0.location.x, v0.location.y];
+        let p1 = [v1.location.x, v1.location.y];
+
+        if v0.bulge.abs() < 1e-10 {
+            let mut common = p.common.clone();
+            common.handle = Handle::NULL;
+            result.push(EntityType::Line(LineEnt {
+                common,
+                start: Vector3::new(p0[0], p0[1], elevation),
+                end: Vector3::new(p1[0], p1[1], elevation),
+                ..LineEnt::new()
+            }));
+        } else if let Some(arc) = bulge_to_arc(p0, p1, v0.bulge, elevation, &p.common) {
+            result.push(arc);
+        }
+    }
+    result
 }
 
 pub fn normalize_insert_entity(mut entity: EntityType) -> EntityType {
