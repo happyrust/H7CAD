@@ -1048,6 +1048,63 @@ impl H7CAD {
                 }
             }
 
+            // ── UCS management ───────────────────────────────────────────
+            cmd if cmd == "UCS" || cmd.starts_with("UCS ") => {
+                use acadrust::tables::Ucs;
+                let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
+                let sub = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let names: Vec<String> = self.tabs[i].scene.document
+                            .ucss.iter().map(|u| u.name.clone()).collect();
+                        if names.is_empty() {
+                            self.command_line.push_output("No named UCSs defined.");
+                        } else {
+                            self.command_line.push_output(&format!("UCSs: {}", names.join(", ")));
+                        }
+                    }
+                    "SAVE" | "S" => {
+                        let name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: UCS SAVE <name>");
+                        } else {
+                            // Save as WCS (identity) since we don't have active UCS state yet
+                            let ucs = Ucs::new(&name);
+                            self.tabs[i].scene.document.ucss.add_or_replace(ucs);
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!("UCS '{}' saved (WCS).", name));
+                        }
+                    }
+                    "DELETE" | "DEL" | "D" => {
+                        let name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: UCS DELETE <name>");
+                        } else if self.tabs[i].scene.document.ucss.remove(&name).is_some() {
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!("UCS '{}' deleted.", name));
+                        } else {
+                            self.command_line.push_error(&format!("UCS '{}' not found.", name));
+                        }
+                    }
+                    "W" | "WORLD" => {
+                        // Reset active UCS to WCS — currently just an informational message
+                        // as full UCS integration awaits WCS↔UCS transform pipeline
+                        self.command_line.push_output("UCS reset to World Coordinate System.");
+                    }
+                    _ => {
+                        // UCS <name> — try as a restore/apply shortcut
+                        let name = sub.clone();
+                        if self.tabs[i].scene.document.ucss.get(&name).is_some() {
+                            self.command_line.push_output(&format!("UCS '{}' is defined. (Full UCS activation pending transform pipeline.)", name));
+                        } else {
+                            self.command_line.push_error(
+                                "Usage: UCS LIST | UCS SAVE <name> | UCS DELETE <name> | UCS W"
+                            );
+                        }
+                    }
+                }
+            }
+
             // ── Named Views (VIEW command) ────────────────────────────────
             cmd if cmd == "VIEW" || cmd.starts_with("VIEW ") => {
                 let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
