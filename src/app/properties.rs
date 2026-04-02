@@ -103,6 +103,32 @@ impl H7CAD {
                         }
                     }
 
+                    // Inject DimStyle picker for Dimension entities.
+                    if let acadrust::EntityType::Dimension(_) = entity {
+                        let dim_style_names: Vec<String> = self.tabs[i].scene.document.dim_styles
+                            .iter()
+                            .map(|s| s.name.clone())
+                            .filter(|n| !n.is_empty())
+                            .collect();
+                        if !dim_style_names.is_empty() {
+                            // Current style is already shown as EditText in the geom section;
+                            // replace/upgrade it to a Choice if we have a list.
+                            if let Some(geom) = sections.last_mut() {
+                                // Find and replace the style_name EditText with a Choice.
+                                if let Some(prop) = geom.props.iter_mut().find(|p| p.field == "style_name") {
+                                    let current = match &prop.value {
+                                        crate::scene::object::PropValue::EditText(s) => s.clone(),
+                                        _ => String::new(),
+                                    };
+                                    prop.value = crate::scene::object::PropValue::Choice {
+                                        selected: current,
+                                        options: dim_style_names,
+                                    };
+                                }
+                            }
+                        }
+                    }
+
                     if !group_names.is_empty() {
                         let label = group_names.join(", ");
                         if let Some(general) = sections.first_mut() {
