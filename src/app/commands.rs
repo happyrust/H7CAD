@@ -978,6 +978,62 @@ impl H7CAD {
                 }
             }
 
+            // ── Draw Order ────────────────────────────────────────────────
+            cmd if cmd.starts_with("DRAWORDER") => {
+                use acadrust::objects::{ObjectType, SortEntitiesTable};
+                let option = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
+                let bring_front = match option.as_str() {
+                    "F" | "FRONT" => Some(true),
+                    "B" | "BACK"  => Some(false),
+                    _ => None,
+                };
+                let i = self.active_tab;
+                let selected: Vec<acadrust::Handle> = self.tabs[i].scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                if selected.is_empty() {
+                    self.command_line.push_error("DRAWORDER: select entities first.");
+                } else if let Some(to_front) = bring_front {
+                    self.push_undo_snapshot(i, "DRAWORDER");
+                    let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+                    let doc = &mut self.tabs[i].scene.document;
+                    let table_handle = doc.objects.iter()
+                        .find_map(|(h, obj)| {
+                            if let ObjectType::SortEntitiesTable(t) = obj {
+                                if t.block_owner_handle == block_handle { Some(*h) } else { None }
+                            } else { None }
+                        });
+                    if let Some(th) = table_handle {
+                        if let Some(ObjectType::SortEntitiesTable(table)) =
+                            doc.objects.get_mut(&th)
+                        {
+                            for h in &selected {
+                                if to_front { table.bring_to_front(*h); }
+                                else        { table.send_to_back(*h); }
+                            }
+                        }
+                    } else {
+                        let new_handle = acadrust::Handle::new(doc.next_handle());
+                        let mut table = SortEntitiesTable::for_block(block_handle);
+                        table.handle = new_handle;
+                        for h in &selected {
+                            if to_front { table.bring_to_front(*h); }
+                            else        { table.send_to_back(*h); }
+                        }
+                        doc.objects.insert(new_handle, ObjectType::SortEntitiesTable(table));
+                    }
+                    self.tabs[i].dirty = true;
+                    let dir = if to_front { "front" } else { "back" };
+                    self.command_line.push_info(&format!(
+                        "DRAWORDER: moved {} entities to {}.", selected.len(), dir
+                    ));
+                } else {
+                    self.command_line.push_info("Usage: DRAWORDER F  (front)  or  DRAWORDER B  (back)");
+                }
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);

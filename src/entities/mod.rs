@@ -10,6 +10,7 @@ pub mod leader;
 pub mod line;
 pub mod multileader;
 pub mod lwpolyline;
+pub mod mesh;
 pub mod mline;
 pub mod mtext;
 pub mod point;
