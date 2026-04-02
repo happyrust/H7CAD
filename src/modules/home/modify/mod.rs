@@ -3,6 +3,7 @@ pub mod break_cmd;
 pub mod copy;
 pub mod delete;
 pub mod explode;
+pub mod join;
 mod extend;
 pub mod fillet;
 pub mod mirror;

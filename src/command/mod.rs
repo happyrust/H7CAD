@@ -97,6 +97,8 @@ pub enum CmdResult {
     Measurement(String),
     /// Break `handle` at points `p1` and `p2`; replace with computed fragments.
     BreakEntity { handle: Handle, p1: Vec3, p2: Vec3 },
+    /// Attempt to join the given entities into fewer merged entities.
+    JoinEntities(Vec<Handle>),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

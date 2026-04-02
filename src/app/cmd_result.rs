@@ -371,6 +371,42 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
                 self.command_line.push_output(&msg);
             }
+            CmdResult::JoinEntities(handles) => {
+                use crate::modules::home::modify::join::join_entities;
+                let pairs: Vec<_> = handles.iter()
+                    .filter_map(|&h| self.tabs[i].scene.document.get_entity(h).map(|e| (h, e)))
+                    .collect();
+                match join_entities(&pairs) {
+                    Some((to_remove, merged)) => {
+                        let label = self.history_label_from_active_cmd(i, "JOIN");
+                        self.push_undo_snapshot(i, label);
+                        self.tabs[i].scene.erase_entities(&to_remove);
+                        let count_in = to_remove.len();
+                        let count_out = merged.len();
+                        for e in merged {
+                            self.tabs[i].scene.add_entity(e);
+                        }
+                        self.tabs[i].dirty = true;
+                        self.tabs[i].scene.clear_preview_wire();
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                        self.restore_pre_cmd_tangent();
+                        self.command_line.push_output(
+                            &format!("JOIN: {count_in} object(s) joined into {count_out}.")
+                        );
+                        self.refresh_properties();
+                    }
+                    None => {
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                        self.tabs[i].scene.clear_preview_wire();
+                        self.restore_pre_cmd_tangent();
+                        self.command_line.push_error(
+                            "JOIN: objects are not collinear/co-circular or have gaps."
+                        );
+                    }
+                }
+            }
             CmdResult::BreakEntity { handle, p1, p2 } => {
                 use crate::modules::home::modify::break_cmd::break_entity;
                 let replacement = self.tabs[i].scene.document
