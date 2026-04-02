@@ -319,7 +319,18 @@ impl Scene {
 
     /// Tessellate all non-invisible entities owned by `block_handle`.
     fn wires_for_block(&self, block_handle: Handle) -> Vec<WireModel> {
-        self.document
+        use acadrust::objects::ObjectType;
+
+        // Find the SortEntitiesTable for this block (if any).
+        let sort_table = self.document.objects.values().find_map(|obj| {
+            if let ObjectType::SortEntitiesTable(t) = obj {
+                if t.block_owner_handle == block_handle { Some(t) } else { None }
+            } else {
+                None
+            }
+        });
+
+        let mut wires: Vec<WireModel> = self.document
             .entities()
             .filter(|e| {
                 let c = e.common();
@@ -338,7 +349,21 @@ impl Scene {
                 self.belongs_to_visible_block(e.common().handle, c.owner_handle, block_handle)
             })
             .flat_map(|e| self.tessellate_one(e))
-            .collect()
+            .collect();
+
+        // Apply draw order if a SortEntitiesTable exists and has entries.
+        if let Some(table) = sort_table {
+            if !table.is_empty() {
+                wires.sort_by_key(|w| {
+                    let handle = Self::handle_from_wire_name(&w.name)
+                        .unwrap_or(Handle::NULL);
+                    table.get_sort_handle(handle)
+                        .map(|sh| sh.value())
+                        .unwrap_or(u64::MAX / 2) // unsorted entities draw in the middle
+                });
+            }
+        }
+        wires
     }
 
     /// Decide whether an entity should be drawn as direct content of `block_handle`.
