@@ -11,6 +11,8 @@ pub mod multileader;
 pub mod lwpolyline;
 pub mod mtext;
 pub mod point;
+pub mod polyline;
+pub mod ray;
 pub mod spline;
 pub mod text;
 mod text_support;
