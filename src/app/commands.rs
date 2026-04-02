@@ -970,6 +970,28 @@ impl H7CAD {
                 }
             }
 
+            // ── Inquiry ──────────────────────────────────────────────────────
+            "DIST"|"DI" => {
+                use crate::modules::home::inquiry::dist::DistCommand;
+                let cmd = DistCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "ID" => {
+                use crate::modules::home::inquiry::id::IdCommand;
+                let cmd = IdCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "AREA" => {
+                use crate::modules::home::inquiry::area::AreaCommand;
+                let cmd = AreaCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "HELP"|"?" => {
                 self.command_line.push_output(
                     "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH  |  \
@@ -977,6 +999,7 @@ impl H7CAD {
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
                      Dimension: DIMLINEAR DIMANGULAR DIMRADIUS  |  \
+                     Inquiry: DIST ID AREA LIST  |  \
                      View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
                      Layer: LAYER LIST/NEW/ON/OFF/FREEZE/THAW/LOCK/UNLOCK/COLOR/SET  |  \
                      Viewport: MVIEW VPLAYER VPORTS MS PS DRAWORDER  |  \

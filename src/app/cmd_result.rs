@@ -364,6 +364,13 @@ impl H7CAD {
                 self.tabs[i].scene.zoom_to_window(p1, p2);
                 self.command_line.push_output("Zoom Window");
             }
+            CmdResult::Measurement(msg) => {
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.command_line.push_output(&msg);
+            }
         }
         // Focus the command-line input while a command is active; blur it when the command ends.
         if self.tabs[i].active_cmd.is_some() {

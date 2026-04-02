@@ -93,6 +93,8 @@ pub enum CmdResult {
     PasteClipboard { base_pt: Vec3 },
     /// Zoom the model-space camera to fit the given corner points; end command.
     ZoomToWindow { p1: Vec3, p2: Vec3 },
+    /// Print a measurement result to the command line and end the command.
+    Measurement(String),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ pub mod defaults;
 mod donate;
 pub mod draw;
 pub mod groups;
+pub mod inquiry;
 pub mod layers;
 pub mod modify;
 pub mod properties;
