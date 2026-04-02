@@ -332,6 +332,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "REVCLOUD" => {
+                use crate::modules::home::draw::revcloud::RevCloudCommand;
+                let cmd = RevCloudCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "DONUT"|"DO" => {
                 use crate::modules::home::draw::donut::DonutCommand;
                 let cmd = DonutCommand::new();

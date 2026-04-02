@@ -7,5 +7,6 @@ pub mod line;
 pub mod point;
 pub mod polyline;
 pub mod ray;
+pub mod revcloud;
 pub mod shapes;
 pub mod spline;
