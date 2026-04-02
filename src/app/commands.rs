@@ -892,9 +892,16 @@ impl H7CAD {
 
             "HELP"|"?" => {
                 self.command_line.push_output(
-                    "Draw: LINE CIRCLE ARC PLINE POINT ELLIPSE SPLINE  |  \
-                     Modify: MOVE COPY ROTATE SCALE MIRROR ERASE  |  \
-                     Text: TEXT MTEXT  |  File: OPEN SAVE SAVEAS"
+                    "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH  |  \
+                     Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM  |  \
+                     Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
+                     Text: TEXT MTEXT LEADER MLEADER  |  \
+                     Dimension: DIM DIMLINEAR DIMALIGNED DIMANGULAR DIMRADIUS DIMDIAMETER  |  \
+                     View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
+                     Layer: LAYER LIST/NEW/ON/OFF/FREEZE/THAW/LOCK/UNLOCK/COLOR/SET  |  \
+                     Viewport: MVIEW VPLAYER VPORTS MS PS DRAWORDER  |  \
+                     Tables: STYLE DIMSTYLE LINETYPE UCS  |  \
+                     File: NEW OPEN SAVE SAVEAS PRINT PURGE UNDO REDO"
                 );
             }
 
