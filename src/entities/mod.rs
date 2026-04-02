@@ -1,4 +1,5 @@
 pub mod arc;
+pub mod attribute;
 pub mod circle;
 mod common;
 pub mod dimension;
@@ -12,6 +13,7 @@ pub mod lwpolyline;
 pub mod mtext;
 pub mod point;
 pub mod polyline;
+pub mod raster_image;
 pub mod ray;
 pub mod spline;
 pub mod text;
