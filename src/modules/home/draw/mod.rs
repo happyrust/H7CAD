@@ -1,5 +1,6 @@
 pub mod arc;
 pub mod circle;
+pub mod donut;
 pub mod ellipse;
 pub mod hatch;
 pub mod line;

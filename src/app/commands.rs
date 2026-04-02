@@ -332,6 +332,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "DONUT"|"DO" => {
+                use crate::modules::home::draw::donut::DonutCommand;
+                let cmd = DonutCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "CIRCLE"|"C" => {
                 use crate::modules::home::draw::circle::CircleCommand;
                 let new_cmd = CircleCommand::new();
@@ -1037,7 +1044,7 @@ impl H7CAD {
 
             "HELP"|"?" => {
                 self.command_line.push_output(
-                    "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH  |  \
+                    "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT  |  \
                      Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN ALIGN  |  \
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
