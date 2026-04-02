@@ -371,6 +371,30 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
                 self.command_line.push_output(&msg);
             }
+            CmdResult::LengthenEntity { handle, pick_pt, mode } => {
+                use crate::modules::home::modify::lengthen::lengthen_entity;
+                let result = self.tabs[i].scene.document
+                    .get_entity(handle)
+                    .and_then(|e| lengthen_entity(e, pick_pt, &mode));
+                match result {
+                    Some(new_entity) => {
+                        let label = self.history_label_from_active_cmd(i, "LENGTHEN");
+                        self.push_undo_snapshot(i, label);
+                        self.tabs[i].scene.erase_entities(&[handle]);
+                        self.tabs[i].scene.add_entity(new_entity);
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("LENGTHEN: applied.");
+                        self.refresh_properties();
+                    }
+                    None => {
+                        self.command_line.push_error("LENGTHEN: entity type not supported.");
+                    }
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
             CmdResult::DivideEntity { handle, n } => {
                 use crate::modules::home::inquiry::divide::divide_entity;
                 let pts = self.tabs[i].scene.document

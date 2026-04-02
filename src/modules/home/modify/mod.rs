@@ -4,6 +4,7 @@ pub mod copy;
 pub mod delete;
 pub mod explode;
 pub mod join;
+pub mod lengthen;
 mod extend;
 pub mod fillet;
 pub mod mirror;

@@ -985,6 +985,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            "LENGTHEN"|"LEN" => {
+                use crate::modules::home::modify::lengthen::LengthenCommand;
+                let cmd = LengthenCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "DIVIDE"|"DIV" => {
                 use crate::modules::home::inquiry::divide::DivideCommand;
                 let cmd = DivideCommand::new();
@@ -1024,7 +1031,7 @@ impl H7CAD {
             "HELP"|"?" => {
                 self.command_line.push_output(
                     "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH  |  \
-                     Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN  |  \
+                     Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN  |  \
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
                      Dimension: DIMLINEAR DIMANGULAR DIMRADIUS  |  \

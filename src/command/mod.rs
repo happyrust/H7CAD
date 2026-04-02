@@ -103,6 +103,12 @@ pub enum CmdResult {
     DivideEntity { handle: Handle, n: usize },
     /// Place Point entities at `segment_length` intervals along the entity.
     MeasureEntity { handle: Handle, segment_length: f64 },
+    /// Extend/trim a Line or Arc by the given mode; end command.
+    LengthenEntity {
+        handle: Handle,
+        pick_pt: Vec3,
+        mode: crate::modules::home::modify::lengthen::LenMode,
+    },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────
