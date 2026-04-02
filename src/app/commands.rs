@@ -1048,6 +1048,137 @@ impl H7CAD {
                 }
             }
 
+            // ── LAYER management ─────────────────────────────────────────
+            cmd if cmd == "LAYER" || cmd == "LA" || cmd.starts_with("LAYER ") || cmd.starts_with("LA ") => {
+                use acadrust::tables::Layer;
+                let raw_rest = if cmd.starts_with("LAYER ") {
+                    cmd.trim_start_matches("LAYER ").trim()
+                } else if cmd.starts_with("LA ") {
+                    cmd.trim_start_matches("LA ").trim()
+                } else {
+                    ""
+                };
+                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let info: Vec<String> = self.tabs[i].scene.document.layers.iter().map(|l| {
+                            let state = if l.flags.frozen { "frozen" }
+                                       else if l.flags.off { "off" }
+                                       else if l.flags.locked { "locked" }
+                                       else { "on" };
+                            format!("{}({})", l.name, state)
+                        }).collect();
+                        self.command_line.push_output(&format!("Layers: {}", info.join(", ")));
+                    }
+                    "NEW" | "N" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: LAYER NEW <name>");
+                        } else if self.tabs[i].scene.document.layers.contains(&name) {
+                            self.command_line.push_error(&format!("LAYER: '{}' already exists.", name));
+                        } else {
+                            let layer = Layer::new(&name);
+                            let _ = self.tabs[i].scene.document.layers.add(layer);
+                            self.push_undo_snapshot(i, "LAYER NEW");
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!("LAYER: '{}' created.", name));
+                        }
+                    }
+                    "ON" => {
+                        for name in &parts[1..] {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                l.flags.off = false; l.flags.frozen = false;
+                            }
+                        }
+                        self.push_undo_snapshot(i, "LAYER ON");
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("LAYER: layers turned on.");
+                    }
+                    "OFF" => {
+                        for name in &parts[1..] {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                l.flags.off = true;
+                            }
+                        }
+                        self.push_undo_snapshot(i, "LAYER OFF");
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("LAYER: layers turned off.");
+                    }
+                    "FREEZE" | "FR" => {
+                        for name in &parts[1..] {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                l.flags.frozen = true;
+                            }
+                        }
+                        self.push_undo_snapshot(i, "LAYER FREEZE");
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("LAYER: layers frozen.");
+                    }
+                    "THAW" | "TH" => {
+                        for name in &parts[1..] {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                l.flags.frozen = false;
+                            }
+                        }
+                        self.push_undo_snapshot(i, "LAYER THAW");
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("LAYER: layers thawed.");
+                    }
+                    "LOCK" | "LO" => {
+                        for name in &parts[1..] {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                l.flags.locked = true;
+                            }
+                        }
+                        self.push_undo_snapshot(i, "LAYER LOCK");
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("LAYER: layers locked.");
+                    }
+                    "UNLOCK" | "UL" => {
+                        for name in &parts[1..] {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
+                                l.flags.locked = false;
+                            }
+                        }
+                        self.push_undo_snapshot(i, "LAYER UNLOCK");
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("LAYER: layers unlocked.");
+                    }
+                    "COLOR" | "C" => {
+                        // LAYER COLOR <name> <aci_index>
+                        let layer_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let color_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
+                        if let Ok(idx) = color_str.parse::<i16>() {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(&layer_name) {
+                                l.color = acadrust::types::Color::from_index(idx);
+                                self.push_undo_snapshot(i, "LAYER COLOR");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("LAYER: '{}' color set to ACI {}.", layer_name, idx));
+                            } else {
+                                self.command_line.push_error(&format!("LAYER: '{}' not found.", layer_name));
+                            }
+                        } else {
+                            self.command_line.push_error("Usage: LAYER COLOR <name> <aci_index>");
+                        }
+                    }
+                    "SET" | "S" | "CURRENT" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if self.tabs[i].scene.document.layers.contains(&name) {
+                            self.tabs[i].layers.current_layer = name.clone();
+                            self.command_line.push_output(&format!("LAYER: current layer set to '{}'.", name));
+                        } else {
+                            self.command_line.push_error(&format!("LAYER: '{}' not found.", name));
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info(
+                            "Usage: LAYER LIST | NEW <name> | ON/OFF/FREEZE/THAW/LOCK/UNLOCK <name> | COLOR <name> <aci> | SET <name>"
+                        );
+                    }
+                }
+            }
+
             // ── UCS management ───────────────────────────────────────────
             cmd if cmd == "UCS" || cmd.starts_with("UCS ") => {
                 use acadrust::tables::Ucs;
