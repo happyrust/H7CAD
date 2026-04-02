@@ -228,6 +228,24 @@ impl Scene {
         })
     }
 
+    /// Count of user viewports (id > 1) in the current layout.
+    pub fn viewport_count(&self) -> usize {
+        if self.current_layout == "Model" {
+            return 0;
+        }
+        let layout_block = self.current_layout_block_handle();
+        if layout_block.is_null() {
+            return 0;
+        }
+        self.document.entities().filter(|e| {
+            if let EntityType::Viewport(vp) = e {
+                vp.id > 1 && vp.common.owner_handle == layout_block
+            } else {
+                false
+            }
+        }).count()
+    }
+
     /// Sorted list of layout names: "Model" first, then paper layouts by tab order.
     pub fn layout_names(&self) -> Vec<String> {
         let mut names = vec!["Model".to_string()];

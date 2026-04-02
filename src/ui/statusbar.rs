@@ -33,6 +33,8 @@ impl StatusBar {
         rename_state: Option<&'a (String, String)>,
         // Scale of the first user viewport in the active paper layout.
         viewport_scale: Option<f64>,
+        // Number of user viewports in the current paper layout (0 = model space).
+        viewport_count: usize,
     ) -> Element<'a, Message> {
         let menu_btn = button(text("≡").size(14).color(ICON_COLOR))
             .on_press(Message::Command("MENU".into()))
@@ -60,7 +62,12 @@ impl StatusBar {
             "LAYOUT"
         };
         let scale_label = format_scale(viewport_scale);
-        let right_status = row![
+        let vp_label = if viewport_count > 0 {
+            format!("{} VP", viewport_count)
+        } else {
+            String::new()
+        };
+        let mut right_status = row![
             tip(
                 toggle_pill("SNAP", snap_grid_on, Message::ToggleGridSnap),
                 "Snap to Grid\nF9"
@@ -82,6 +89,13 @@ impl StatusBar {
             status_pill(scale_label),
         ]
         .spacing(2);
+        if !vp_label.is_empty() {
+            right_status = right_status.push(tip(
+                status_pill(vp_label).into(),
+                "Viewport count in active layout",
+            ));
+        }
+        let right_status = right_status;
 
         let mut bar = Row::new().align_y(iced::Center).spacing(0);
         bar = bar.push(menu_btn);
