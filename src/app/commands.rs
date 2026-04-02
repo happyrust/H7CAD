@@ -976,11 +976,11 @@ impl H7CAD {
                      Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM  |  \
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
-                     Dimension: DIM DIMLINEAR DIMALIGNED DIMANGULAR DIMRADIUS DIMDIAMETER  |  \
+                     Dimension: DIMLINEAR DIMANGULAR DIMRADIUS  |  \
                      View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
                      Layer: LAYER LIST/NEW/ON/OFF/FREEZE/THAW/LOCK/UNLOCK/COLOR/SET  |  \
                      Viewport: MVIEW VPLAYER VPORTS MS PS DRAWORDER  |  \
-                     Tables: STYLE DIMSTYLE LINETYPE UCS  |  \
+                     Tables: STYLE DIMSTYLE LINETYPE UCS RENAME PURGE  |  \
                      File: NEW OPEN SAVE SAVEAS PRINT PURGE UNDO REDO"
                 );
             }
