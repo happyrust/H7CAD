@@ -1549,6 +1549,74 @@ impl H7CAD {
                 }
             }
 
+            // ── RENAME table entries ──────────────────────────────────────
+            cmd if cmd == "RENAME" || cmd.starts_with("RENAME ") => {
+                // Usage: RENAME <type> <old_name> <new_name>
+                // Types: LAYER BLOCK STYLE DIMSTYLE LINETYPE UCS VIEW
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                let type_str = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                let old_name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                let new_name = parts.get(3).map(|s| s.trim()).unwrap_or("").to_string();
+
+                if type_str.is_empty() || old_name.is_empty() || new_name.is_empty() {
+                    self.command_line.push_info(
+                        "Usage: RENAME <type> <old> <new>  (types: LAYER BLOCK STYLE DIMSTYLE LINETYPE UCS VIEW)"
+                    );
+                } else {
+                    let doc = &mut self.tabs[i].scene.document;
+                    let ok = match type_str.as_str() {
+                        "LAYER" => {
+                            if let Some(l) = doc.layers.get_mut(&old_name) {
+                                l.name = new_name.clone();
+                                // Update entity references
+                                for e in doc.entities_mut() {
+                                    if e.common().layer == old_name {
+                                        e.common_mut().layer = new_name.clone();
+                                    }
+                                }
+                                true
+                            } else { false }
+                        }
+                        "STYLE" | "TEXTSTYLE" => {
+                            if let Some(s) = doc.text_styles.get_mut(&old_name) {
+                                s.name = new_name.clone(); true
+                            } else { false }
+                        }
+                        "DIMSTYLE" => {
+                            if let Some(s) = doc.dim_styles.get_mut(&old_name) {
+                                s.name = new_name.clone(); true
+                            } else { false }
+                        }
+                        "LINETYPE" | "LT" => {
+                            if let Some(lt) = doc.line_types.get_mut(&old_name) {
+                                lt.name = new_name.clone(); true
+                            } else { false }
+                        }
+                        "UCS" => {
+                            if let Some(u) = doc.ucss.get_mut(&old_name) {
+                                u.name = new_name.clone(); true
+                            } else { false }
+                        }
+                        "VIEW" => {
+                            if let Some(v) = doc.views.get_mut(&old_name) {
+                                v.name = new_name.clone(); true
+                            } else { false }
+                        }
+                        _ => {
+                            self.command_line.push_error(&format!("RENAME: unknown type '{}'. Use LAYER BLOCK STYLE DIMSTYLE LINETYPE UCS VIEW", type_str));
+                            false
+                        }
+                    };
+                    if ok {
+                        self.push_undo_snapshot(i, "RENAME");
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!("RENAME: '{}' → '{}'.", old_name, new_name));
+                    } else if type_str != "BLOCK" {
+                        self.command_line.push_error(&format!("RENAME: '{}' not found in {}.", old_name, type_str));
+                    }
+                }
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
