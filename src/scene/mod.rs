@@ -1618,6 +1618,75 @@ impl Scene {
         name.parse::<u64>().ok().map(Handle::new)
     }
 
+    /// Restore camera to a named view from the document view table.
+    pub fn restore_named_view(&mut self, view: &acadrust::tables::View) {
+        use glam::Vec3;
+        let cam = &mut *self.camera.borrow_mut();
+        // view.target is the look-at point; view.direction is eye→target direction.
+        cam.target = Vec3::new(view.target.x as f32, view.target.y as f32, view.target.z as f32);
+        // direction in acadrust = from-target-to-eye (same as AutoCAD convention).
+        let eye_dir = Vec3::new(
+            view.direction.x as f32,
+            view.direction.y as f32,
+            view.direction.z as f32,
+        );
+        let eye_dir = if eye_dir.length_squared() > 1e-10 {
+            eye_dir.normalize()
+        } else {
+            Vec3::Z
+        };
+        // Build rotation: canonical eye is +Z, rotate to eye_dir.
+        cam.rotation = glam::Quat::from_rotation_arc(Vec3::Z, eye_dir);
+        // Sync yaw/pitch from new rotation (for ViewCube).
+        let pitch = eye_dir.z.clamp(-0.999, 0.999).asin();
+        let yaw = eye_dir.x.atan2(eye_dir.y);
+        cam.yaw = yaw;
+        cam.pitch = pitch;
+        // Derive distance from view height and fov.
+        let h = view.height as f32;
+        cam.distance = if h > 0.0 {
+            h / (2.0 * (cam.fov_y * 0.5).tan())
+        } else {
+            cam.distance
+        };
+        self.camera_generation += 1;
+    }
+
+    /// Save the current camera state into a new named view entry.
+    /// Returns the view; caller must push it into document.views.
+    pub fn current_as_named_view(&self, name: &str) -> acadrust::tables::View {
+        use acadrust::types::Vector3;
+        let cam = self.camera.borrow();
+        let eye_dir = cam.rotation * glam::Vec3::Z;
+        let height = cam.ortho_size() * 2.0;
+        let width = height; // caller can adjust; rough square
+        acadrust::tables::View {
+            handle: acadrust::types::Handle::NULL,
+            name: name.to_string(),
+            center: Vector3 {
+                x: cam.target.x as f64,
+                y: cam.target.y as f64,
+                z: 0.0,
+            },
+            target: Vector3 {
+                x: cam.target.x as f64,
+                y: cam.target.y as f64,
+                z: cam.target.z as f64,
+            },
+            direction: Vector3 {
+                x: eye_dir.x as f64,
+                y: eye_dir.y as f64,
+                z: eye_dir.z as f64,
+            },
+            height: height as f64,
+            width: width as f64,
+            lens_length: 50.0,
+            front_clip: 0.0,
+            back_clip: 0.0,
+            twist_angle: 0.0,
+        }
+    }
+
     pub fn fit_all(&mut self) {
         let wires = self.entity_wires();
         if wires.is_empty() {

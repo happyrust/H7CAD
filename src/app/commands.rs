@@ -1034,6 +1034,74 @@ impl H7CAD {
                 }
             }
 
+            // ── Named Views (VIEW command) ────────────────────────────────
+            cmd if cmd == "VIEW" || cmd.starts_with("VIEW ") => {
+                let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
+                let sub = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let views: Vec<String> = self.tabs[i].scene.document
+                            .views.iter().map(|v| v.name.clone()).collect();
+                        if views.is_empty() {
+                            self.command_line.push_output("No named views saved.");
+                        } else {
+                            self.command_line.push_output(&format!(
+                                "Named views: {}", views.join(", ")
+                            ));
+                        }
+                    }
+                    "SAVE" | "S" => {
+                        let name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: VIEW SAVE <name>");
+                        } else {
+                            let new_view = self.tabs[i].scene.current_as_named_view(&name);
+                            self.tabs[i].scene.document.views.add_or_replace(new_view);
+                            self.command_line.push_output(&format!("View '{}' saved.", name));
+                        }
+                    }
+                    "DELETE" | "DEL" | "D" => {
+                        let name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: VIEW DELETE <name>");
+                        } else {
+                            if self.tabs[i].scene.document.views.remove(&name).is_some() {
+                                self.command_line.push_output(&format!("View '{}' deleted.", name));
+                            } else {
+                                self.command_line.push_error(&format!("View '{}' not found.", name));
+                            }
+                        }
+                    }
+                    "RESTORE" | "R" => {
+                        let name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: VIEW RESTORE <name>");
+                        } else {
+                            let found = self.tabs[i].scene.document.views.get(&name).cloned();
+                            if let Some(v) = found {
+                                self.tabs[i].scene.restore_named_view(&v);
+                                self.command_line.push_output(&format!("View '{}' restored.", v.name));
+                            } else {
+                                self.command_line.push_error(&format!("View '{}' not found.", name));
+                            }
+                        }
+                    }
+                    // VIEW <name> shortcut for restore
+                    _ => {
+                        let name = sub.clone();
+                        let found = self.tabs[i].scene.document.views.get(&name).cloned();
+                        if let Some(v) = found {
+                            self.tabs[i].scene.restore_named_view(&v);
+                            self.command_line.push_output(&format!("View '{}' restored.", v.name));
+                        } else {
+                            self.command_line.push_error(
+                                "Usage: VIEW LIST | VIEW SAVE <name> | VIEW RESTORE <name> | VIEW DELETE <name>"
+                            );
+                        }
+                    }
+                }
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
