@@ -99,6 +99,10 @@ pub enum CmdResult {
     BreakEntity { handle: Handle, p1: Vec3, p2: Vec3 },
     /// Attempt to join the given entities into fewer merged entities.
     JoinEntities(Vec<Handle>),
+    /// Place Point entities at N equal intervals along the entity.
+    DivideEntity { handle: Handle, n: usize },
+    /// Place Point entities at `segment_length` intervals along the entity.
+    MeasureEntity { handle: Handle, segment_length: f64 },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

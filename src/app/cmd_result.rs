@@ -371,6 +371,46 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
                 self.command_line.push_output(&msg);
             }
+            CmdResult::DivideEntity { handle, n } => {
+                use crate::modules::home::inquiry::divide::divide_entity;
+                let pts = self.tabs[i].scene.document
+                    .get_entity(handle)
+                    .map(|e| divide_entity(e, n))
+                    .unwrap_or_default();
+                let count = pts.len();
+                if count > 0 {
+                    self.push_undo_snapshot(i, "DIVIDE");
+                    for p in pts { self.tabs[i].scene.add_entity(p); }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("DIVIDE: {count} point(s) placed."));
+                } else {
+                    self.command_line.push_error("DIVIDE: entity type not supported or N < 2.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+            CmdResult::MeasureEntity { handle, segment_length } => {
+                use crate::modules::home::inquiry::divide::measure_entity;
+                let pts = self.tabs[i].scene.document
+                    .get_entity(handle)
+                    .map(|e| measure_entity(e, segment_length))
+                    .unwrap_or_default();
+                let count = pts.len();
+                if count > 0 {
+                    self.push_undo_snapshot(i, "MEASURE");
+                    for p in pts { self.tabs[i].scene.add_entity(p); }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("MEASURE: {count} point(s) placed."));
+                } else {
+                    self.command_line.push_error("MEASURE: entity type not supported or distance too large.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
             CmdResult::JoinEntities(handles) => {
                 use crate::modules::home::modify::join::join_entities;
                 let pairs: Vec<_> = handles.iter()

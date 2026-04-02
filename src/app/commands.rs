@@ -985,6 +985,20 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            "DIVIDE"|"DIV" => {
+                use crate::modules::home::inquiry::divide::DivideCommand;
+                let cmd = DivideCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MEASURE"|"ME" => {
+                use crate::modules::home::inquiry::divide::MeasureCommand;
+                let cmd = MeasureCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             // ── Inquiry ──────────────────────────────────────────────────────
             "DIST"|"DI" => {
                 use crate::modules::home::inquiry::dist::DistCommand;
@@ -1014,7 +1028,7 @@ impl H7CAD {
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
                      Dimension: DIMLINEAR DIMANGULAR DIMRADIUS  |  \
-                     Inquiry: DIST ID AREA LIST  |  \
+                     Inquiry: DIST ID AREA LIST  |  Draw on entity: DIVIDE MEASURE  |  \
                      View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
                      Layer: LAYER LIST/NEW/ON/OFF/FREEZE/THAW/LOCK/UNLOCK/COLOR/SET  |  \
                      Viewport: MVIEW VPLAYER VPORTS MS PS DRAWORDER  |  \
