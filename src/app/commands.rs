@@ -1566,6 +1566,66 @@ impl H7CAD {
                 }
             }
 
+            // ── CHPROP — change entity properties from command line ───────
+            cmd if cmd == "CHPROP" || cmd.starts_with("CHPROP ") => {
+                // Usage: CHPROP <property> <value>
+                // Applies to currently selected entities.
+                // Properties: LAYER, COLOR, LINETYPE, LTSCALE
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                let prop = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                let value = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+
+                if prop.is_empty() {
+                    self.command_line.push_info(
+                        "Usage: CHPROP <prop> <val>  (props: LAYER COLOR LINETYPE LTSCALE)"
+                    );
+                } else {
+                    let handles: Vec<_> = self.tabs[i].scene.selected_entities()
+                        .into_iter().map(|(h, _)| h).collect();
+                    if handles.is_empty() {
+                        self.command_line.push_error("CHPROP: no entities selected.");
+                    } else {
+                        // Validate value early to give clear errors
+                        let color_val: Option<acadrust::types::Color> = if prop == "COLOR" {
+                            value.parse::<i16>().ok().map(acadrust::types::Color::from_index)
+                        } else { None };
+                        let ltscale_val: Option<f64> = if prop == "LTSCALE" {
+                            value.parse().ok()
+                        } else { None };
+
+                        if (prop == "COLOR" && color_val.is_none())
+                            || (prop == "LTSCALE" && ltscale_val.is_none())
+                        {
+                            self.command_line.push_error(&format!("CHPROP: invalid value '{}' for {}.", value, prop));
+                        } else {
+                            let mut changed = 0usize;
+                            for handle in &handles {
+                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                                    let common = entity.common_mut();
+                                    match prop.as_str() {
+                                        "LAYER"            => { common.layer = value.clone(); changed += 1; }
+                                        "LINETYPE" | "LT"  => { common.linetype = value.clone(); changed += 1; }
+                                        "LTSCALE"          => { common.linetype_scale = ltscale_val.unwrap(); changed += 1; }
+                                        "COLOR"            => { common.color = color_val.unwrap(); changed += 1; }
+                                        _ => {
+                                            self.command_line.push_error(&format!(
+                                                "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE", prop
+                                            ));
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if changed > 0 {
+                                self.push_undo_snapshot(i, "CHPROP");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("CHPROP: {} entity/entities updated.", changed));
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── RENAME table entries ──────────────────────────────────────
             cmd if cmd == "RENAME" || cmd.starts_with("RENAME ") => {
                 // Usage: RENAME <type> <old_name> <new_name>
