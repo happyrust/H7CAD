@@ -10,3 +10,4 @@ pub mod ray;
 pub mod revcloud;
 pub mod shapes;
 pub mod spline;
+pub mod wipeout;

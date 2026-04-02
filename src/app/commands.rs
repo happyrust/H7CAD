@@ -332,6 +332,18 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            cmd if cmd == "WIPEOUT" || cmd == "WO" || cmd.starts_with("WIPEOUT ") => {
+                use crate::modules::home::draw::wipeout::WipeoutCommand;
+                let args = cmd.split_once(' ').map(|(_, r)| r.trim().to_uppercase()).unwrap_or_default();
+                let wo_cmd = if args == "P" || args == "POLYGONAL" {
+                    WipeoutCommand::new_polygonal()
+                } else {
+                    WipeoutCommand::new_rectangular()
+                };
+                self.command_line.push_info(&wo_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(wo_cmd));
+            }
+
             "REVCLOUD" => {
                 use crate::modules::home::draw::revcloud::RevCloudCommand;
                 let cmd = RevCloudCommand::new();
