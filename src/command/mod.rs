@@ -109,6 +109,14 @@ pub enum CmdResult {
         pick_pt: Vec3,
         mode: crate::modules::home::modify::lengthen::LenMode,
     },
+    /// Align selected entities: translate to dst1, rotate by angle_rad, optional scale.
+    AlignSelected {
+        handles: Vec<Handle>,
+        src1: Vec3,
+        dst1: Vec3,
+        angle_rad: f32,
+        scale: f32,
+    },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

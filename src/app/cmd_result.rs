@@ -371,6 +371,58 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
                 self.command_line.push_output(&msg);
             }
+            CmdResult::AlignSelected { handles, src1, dst1, angle_rad, scale } => {
+                if handles.is_empty() {
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.tabs[i].scene.clear_preview_wire();
+                    self.restore_pre_cmd_tangent();
+                } else {
+                    let label = self.history_label_from_active_cmd(i, "ALIGN");
+                    self.push_undo_snapshot(i, label);
+                    // Step 1: translate so src1 is at origin
+                    self.tabs[i].scene.transform_entities(
+                        &handles,
+                        &crate::command::EntityTransform::Translate(-src1),
+                    );
+                    // Step 2: uniform scale (only when != 1)
+                    if (scale - 1.0).abs() > 1e-4 {
+                        self.tabs[i].scene.transform_entities(
+                            &handles,
+                            &crate::command::EntityTransform::Scale {
+                                center: glam::Vec3::ZERO,
+                                factor: scale,
+                            },
+                        );
+                    }
+                    // Step 3: rotate in XZ plane by angle_rad
+                    if angle_rad.abs() > 1e-4 {
+                        self.tabs[i].scene.transform_entities(
+                            &handles,
+                            &crate::command::EntityTransform::Rotate {
+                                center: glam::Vec3::ZERO,
+                                angle_rad,
+                            },
+                        );
+                    }
+                    // Step 4: translate to dst1
+                    self.tabs[i].scene.transform_entities(
+                        &handles,
+                        &crate::command::EntityTransform::Translate(dst1),
+                    );
+                    self.tabs[i].dirty = true;
+                    self.tabs[i].scene.deselect_all();
+                    for h in &handles {
+                        self.tabs[i].scene.select_entity(*h, false);
+                    }
+                    self.tabs[i].scene.clear_preview_wire();
+                    self.tabs[i].active_cmd = None;
+                    self.tabs[i].snap_result = None;
+                    self.restore_pre_cmd_tangent();
+                    self.command_line.push_output("ALIGN: applied.");
+                    self.refresh_properties();
+                }
+            }
             CmdResult::LengthenEntity { handle, pick_pt, mode } => {
                 use crate::modules::home::modify::lengthen::lengthen_entity;
                 let result = self.tabs[i].scene.document
