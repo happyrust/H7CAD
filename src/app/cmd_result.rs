@@ -371,6 +371,37 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
                 self.command_line.push_output(&msg);
             }
+            CmdResult::BreakEntity { handle, p1, p2 } => {
+                use crate::modules::home::modify::break_cmd::break_entity;
+                let replacement = self.tabs[i].scene.document
+                    .get_entity(handle)
+                    .and_then(|e| break_entity(e, p1, p2));
+                match replacement {
+                    Some(frags) => {
+                        let label = self.history_label_from_active_cmd(i, "BREAK");
+                        self.push_undo_snapshot(i, label);
+                        self.tabs[i].scene.erase_entities(&[handle]);
+                        let count = frags.len();
+                        for e in frags {
+                            self.tabs[i].scene.add_entity(e);
+                        }
+                        self.tabs[i].dirty = true;
+                        self.tabs[i].scene.clear_preview_wire();
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                        self.restore_pre_cmd_tangent();
+                        self.command_line.push_output(&format!("BREAK: {} fragment(s).", count));
+                        self.refresh_properties();
+                    }
+                    None => {
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                        self.tabs[i].scene.clear_preview_wire();
+                        self.restore_pre_cmd_tangent();
+                        self.command_line.push_error("BREAK: entity type not supported.");
+                    }
+                }
+            }
         }
         // Focus the command-line input while a command is active; blur it when the command ends.
         if self.tabs[i].active_cmd.is_some() {

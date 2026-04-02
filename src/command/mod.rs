@@ -95,6 +95,8 @@ pub enum CmdResult {
     ZoomToWindow { p1: Vec3, p2: Vec3 },
     /// Print a measurement result to the command line and end the command.
     Measurement(String),
+    /// Break `handle` at points `p1` and `p2`; replace with computed fragments.
+    BreakEntity { handle: Handle, p1: Vec3, p2: Vec3 },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────
