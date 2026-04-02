@@ -91,6 +91,8 @@ pub enum CmdResult {
     },
     /// Paste clipboard entities translated so their centroid lands at `base_pt`; end command.
     PasteClipboard { base_pt: Vec3 },
+    /// Zoom the model-space camera to fit the given corner points; end command.
+    ZoomToWindow { p1: Vec3, p2: Vec3 },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

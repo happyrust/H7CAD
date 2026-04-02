@@ -1687,6 +1687,26 @@ impl Scene {
         }
     }
 
+    /// Zoom the model-space camera in/out by a percentage.
+    /// factor > 1 = zoom out, factor < 1 = zoom in.
+    pub fn zoom_camera(&mut self, factor: f32) {
+        let mut cam = self.camera.borrow_mut();
+        cam.distance = (cam.distance * factor).max(0.001);
+        drop(cam);
+        self.camera_generation += 1;
+    }
+
+    /// Fit the camera to a world-space bounding box (corners p1, p2).
+    pub fn zoom_to_window(&mut self, p1: glam::Vec3, p2: glam::Vec3) {
+        let min = p1.min(p2);
+        let max = p1.max(p2);
+        if min == max {
+            return;
+        }
+        self.camera.borrow_mut().fit_to_bounds(min, max);
+        self.camera_generation += 1;
+    }
+
     pub fn fit_all(&mut self) {
         let wires = self.entity_wires();
         if wires.is_empty() {

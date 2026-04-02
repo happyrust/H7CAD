@@ -15,6 +15,7 @@ mod xray;
 mod zoom_ext;
 mod zoom_in;
 mod zoom_out;
+pub mod zoom_window;
 
 use crate::modules::{CadModule, RibbonGroup};
 

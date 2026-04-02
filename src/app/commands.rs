@@ -710,6 +710,23 @@ impl H7CAD {
                 self.command_line.push_output("Zoom Extents");
             }
 
+            "ZOOM IN"|"ZI" => {
+                self.tabs[i].scene.zoom_camera(1.0 / 1.5);
+                self.command_line.push_output("Zoom In");
+            }
+
+            "ZOOM OUT"|"ZO" => {
+                self.tabs[i].scene.zoom_camera(1.5);
+                self.command_line.push_output("Zoom Out");
+            }
+
+            "ZOOM WINDOW"|"ZOOM W"|"ZW" => {
+                use crate::modules::view::zoom_window::ZoomWindowCommand;
+                let new_cmd = ZoomWindowCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "STRETCH"|"SS" => {
                 let handles: Vec<_> = self.tabs[i].scene.selected_entities()
                     .into_iter().map(|(h, _)| h).collect();
