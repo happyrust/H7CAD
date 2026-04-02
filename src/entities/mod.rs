@@ -20,6 +20,7 @@ pub mod ray;
 pub mod spline;
 pub mod text;
 mod text_support;
+pub mod table;
 pub mod tolerance;
 pub mod traits;
 pub mod viewport;
