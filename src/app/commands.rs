@@ -1116,6 +1116,91 @@ impl H7CAD {
                 }
             }
 
+            // ── TextStyle / Style management ──────────────────────────────
+            cmd if cmd == "STYLE" || cmd == "TEXTSTYLE" || cmd.starts_with("STYLE ") || cmd.starts_with("TEXTSTYLE ") => {
+                let (prefix, rest) = if cmd.starts_with("TEXTSTYLE") {
+                    ("TEXTSTYLE", cmd.trim_start_matches("TEXTSTYLE").trim())
+                } else {
+                    ("STYLE", cmd.trim_start_matches("STYLE").trim())
+                };
+                let parts: Vec<&str> = rest.splitn(3, ' ').collect();
+                let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let styles: Vec<String> = self.tabs[i].scene.document
+                            .text_styles.iter()
+                            .map(|s| format!("{} (font: {}, w: {:.2}, oblique: {:.1}°)",
+                                s.name, s.font_file, s.width_factor, s.oblique_angle.to_degrees()))
+                            .collect();
+                        if styles.is_empty() {
+                            self.command_line.push_output("No text styles defined.");
+                        } else {
+                            self.command_line.push_output(&format!("Text styles: {}", styles.join(" | ")));
+                        }
+                    }
+                    "SET" | "S" => {
+                        // STYLE SET <name> — set active text style (for future text commands)
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("");
+                        if self.tabs[i].scene.document.text_styles.get(name).is_some() {
+                            self.command_line.push_output(&format!("{prefix}: active style set to '{name}'."));
+                        } else {
+                            self.command_line.push_error(&format!("{prefix}: style '{name}' not found."));
+                        }
+                    }
+                    "NEW" | "N" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error(&format!("Usage: {prefix} NEW <name>"));
+                        } else if self.tabs[i].scene.document.text_styles.contains(&name) {
+                            self.command_line.push_error(&format!("{prefix}: style '{name}' already exists."));
+                        } else {
+                            let style = acadrust::tables::TextStyle::new(&name);
+                            let _ = self.tabs[i].scene.document.text_styles.add(style);
+                            self.push_undo_snapshot(i, "STYLE NEW");
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!("{prefix}: style '{name}' created."));
+                        }
+                    }
+                    "FONT" | "F" => {
+                        // STYLE FONT <name> <font_file>
+                        let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let font = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
+                        if style_name.is_empty() || font.is_empty() {
+                            self.command_line.push_error(&format!("Usage: {prefix} FONT <style> <font_file>"));
+                        } else if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&style_name) {
+                            s.font_file = font.clone();
+                            self.push_undo_snapshot(i, "STYLE FONT");
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!("{prefix}: '{style_name}' font set to '{font}'."));
+                        } else {
+                            self.command_line.push_error(&format!("{prefix}: style '{style_name}' not found."));
+                        }
+                    }
+                    "WIDTH" | "W" => {
+                        // STYLE WIDTH <name> <factor>
+                        let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let factor_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
+                        if let Ok(factor) = factor_str.parse::<f64>() {
+                            if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&style_name) {
+                                s.width_factor = factor;
+                                self.push_undo_snapshot(i, "STYLE WIDTH");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("{prefix}: '{style_name}' width factor set to {factor:.3}."));
+                            } else {
+                                self.command_line.push_error(&format!("{prefix}: style '{style_name}' not found."));
+                            }
+                        } else {
+                            self.command_line.push_error(&format!("Usage: {prefix} WIDTH <style> <factor>"));
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info(&format!(
+                            "Usage: {prefix} LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor>"
+                        ));
+                    }
+                }
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
