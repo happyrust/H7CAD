@@ -5,5 +5,6 @@ pub mod hatch;
 pub mod line;
 pub mod point;
 pub mod polyline;
+pub mod ray;
 pub mod shapes;
 pub mod spline;

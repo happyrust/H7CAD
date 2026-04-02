@@ -537,6 +537,20 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "RAY" => {
+                use crate::modules::home::draw::ray::RayCommand;
+                let new_cmd = RayCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "XLINE"|"XL" => {
+                use crate::modules::home::draw::ray::XLineCommand;
+                let new_cmd = XLineCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "HATCH"|"H" => {
                 use crate::modules::home::draw::hatch::HatchCommand;
                 let outlines = self.tabs[i].scene.closed_outlines();
