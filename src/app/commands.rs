@@ -1460,6 +1460,88 @@ impl H7CAD {
                 }
             }
 
+            // ── LINETYPE management ───────────────────────────────────────
+            cmd if cmd == "LINETYPE" || cmd == "LT" || cmd.starts_with("LINETYPE ") || cmd.starts_with("LT ") => {
+                let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
+                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let ltypes: Vec<String> = self.tabs[i].scene.document
+                            .line_types.iter()
+                            .map(|lt| format!("{} ({})", lt.name, lt.description))
+                            .collect();
+                        if ltypes.is_empty() {
+                            self.command_line.push_output("No linetypes defined.");
+                        } else {
+                            self.command_line.push_output(&format!("Linetypes: {}", ltypes.join(", ")));
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info("Usage: LINETYPE LIST");
+                    }
+                }
+            }
+
+            // ── PURGE unused definitions ──────────────────────────────────
+            cmd if cmd == "PURGE" || cmd.starts_with("PURGE ") => {
+                let sub = cmd.split_whitespace().nth(1).unwrap_or("ALL").to_uppercase();
+                let all = sub == "ALL" || sub.is_empty();
+
+                // Collect names in use (immutable borrows — done in their own scope)
+                let used_layers: std::collections::HashSet<String> = self.tabs[i].scene.document.entities()
+                    .filter_map(|e| {
+                        let name = &e.common().layer;
+                        if name.is_empty() { None } else { Some(name.clone()) }
+                    }).collect();
+                let used_text_styles: std::collections::HashSet<String> = self.tabs[i].scene.document.entities()
+                    .filter_map(|e| match e {
+                        acadrust::EntityType::Text(t) => Some(t.style.clone()),
+                        acadrust::EntityType::MText(t) => Some(t.style.clone()),
+                        _ => None,
+                    })
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                let used_linetypes: std::collections::HashSet<String> = self.tabs[i].scene.document.entities()
+                    .filter_map(|e| {
+                        let lt = &e.common().linetype;
+                        if lt.is_empty() || lt == "ByLayer" || lt == "ByBlock" { None } else { Some(lt.clone()) }
+                    }).collect();
+
+                // Build removal lists (still immutable)
+                let layer_remove: Vec<String> = if all || sub == "LAYERS" {
+                    self.tabs[i].scene.document.layers.iter()
+                        .filter(|l| l.name != "0" && !used_layers.contains(&l.name))
+                        .map(|l| l.name.clone()).collect()
+                } else { vec![] };
+                let style_remove: Vec<String> = if all || sub == "TEXTSTYLES" || sub == "STYLES" {
+                    self.tabs[i].scene.document.text_styles.iter()
+                        .filter(|s| s.name != "Standard" && !used_text_styles.contains(&s.name))
+                        .map(|s| s.name.clone()).collect()
+                } else { vec![] };
+                let lt_remove: Vec<String> = if all || sub == "LINETYPES" || sub == "LT" {
+                    let standard = ["Continuous", "ByLayer", "ByBlock"];
+                    self.tabs[i].scene.document.line_types.iter()
+                        .filter(|lt| !standard.iter().any(|s| s.eq_ignore_ascii_case(&lt.name))
+                            && !used_linetypes.contains(&lt.name))
+                        .map(|lt| lt.name.clone()).collect()
+                } else { vec![] };
+
+                // Apply removals (mutable)
+                let purged = layer_remove.len() + style_remove.len() + lt_remove.len();
+                for name in &layer_remove { self.tabs[i].scene.document.layers.remove(name); }
+                for name in &style_remove { self.tabs[i].scene.document.text_styles.remove(name); }
+                for name in &lt_remove { self.tabs[i].scene.document.line_types.remove(name); }
+
+                if purged > 0 {
+                    self.push_undo_snapshot(i, "PURGE");
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("PURGE: {} definition(s) removed.", purged));
+                } else {
+                    self.command_line.push_output("PURGE: nothing to purge.");
+                }
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
