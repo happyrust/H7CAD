@@ -2,9 +2,11 @@
 //
 // Usage (command line):
 //   VPLAYER
-//   > F <layer_name>   → freeze layer in active viewport
-//   > T <layer_name>   → thaw layer in active viewport
-//   > Enter            → exit
+//   > F <layer_name>        → freeze layer in active viewport
+//   > T <layer_name>        → thaw layer in active viewport
+//   > F ALL <layer_name>    → freeze layer in ALL viewports
+//   > T ALL <layer_name>    → thaw layer in ALL viewports
+//   > Enter                 → exit
 //
 // Layer names are case-insensitive. Multiple space-separated names are accepted.
 
@@ -43,12 +45,22 @@ impl CadCommand for VplayerCommand {
             return Some(CmdResult::Cancel);
         }
 
-        let mut parts = text.splitn(2, char::is_whitespace);
-        let op = parts.next().unwrap_or("").to_uppercase();
-        let rest = parts.next().unwrap_or("").trim();
+        let tokens: Vec<&str> = text.split_whitespace().collect();
+        if tokens.is_empty() {
+            return None;
+        }
 
-        let layer_names: Vec<String> = rest
-            .split_whitespace()
+        let op = tokens[0].to_uppercase();
+
+        // Check for ALL keyword: "F ALL layer1 layer2" or "T ALL layer1"
+        let (all_viewports, layer_start) = if tokens.get(1).map(|s| s.to_uppercase().as_str() == "ALL").unwrap_or(false) {
+            (true, 2)
+        } else {
+            (false, 1)
+        };
+
+        let layer_names: Vec<String> = tokens[layer_start..]
+            .iter()
             .map(|s| s.to_string())
             .collect();
 
@@ -56,14 +68,17 @@ impl CadCommand for VplayerCommand {
             return None; // no layer name given — ignore and re-prompt
         }
 
+        // Handle::NULL signals "apply to all viewports" in cmd_result.rs
+        let vp_handle = if all_viewports { acadrust::Handle::NULL } else { self.vp_handle };
+
         match op.as_str() {
             "F" | "FREEZE" => Some(CmdResult::VpLayerUpdate {
-                vp_handle: self.vp_handle,
+                vp_handle,
                 freeze: layer_names,
                 thaw: vec![],
             }),
             "T" | "THAW" => Some(CmdResult::VpLayerUpdate {
-                vp_handle: self.vp_handle,
+                vp_handle,
                 freeze: vec![],
                 thaw: layer_names,
             }),

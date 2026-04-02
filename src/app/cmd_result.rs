@@ -286,7 +286,8 @@ impl H7CAD {
                 }
             }
             CmdResult::VpLayerUpdate { vp_handle, freeze, thaw } => {
-                // Resolve layer names → handles, then update frozen_layers on the viewport.
+                // Resolve layer names → handles, then update frozen_layers on the viewport(s).
+                // vp_handle == Handle::NULL means "apply to all viewports in current layout".
                 let freeze_handles: Vec<Handle> = freeze.iter()
                     .filter_map(|name| {
                         self.tabs[i].scene.document.layers.iter()
@@ -305,19 +306,36 @@ impl H7CAD {
                 let mut frozen_count = 0usize;
                 let mut thawed_count = 0usize;
 
-                if let Some(acadrust::EntityType::Viewport(vp)) =
-                    self.tabs[i].scene.document.get_entity_mut(vp_handle)
-                {
-                    for h in &freeze_handles {
-                        if !vp.frozen_layers.contains(h) {
-                            vp.frozen_layers.push(*h);
-                            frozen_count += 1;
+                // Collect target viewport handles
+                let target_handles: Vec<Handle> = if vp_handle == acadrust::Handle::NULL {
+                    // All viewports in current layout block
+                    let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+                    self.tabs[i].scene.document.entities()
+                        .filter(|e| {
+                            e.common().owner_handle == block_handle
+                                && matches!(e, acadrust::EntityType::Viewport(_))
+                        })
+                        .map(|e| e.common().handle)
+                        .collect()
+                } else {
+                    vec![vp_handle]
+                };
+
+                for &target_handle in &target_handles {
+                    if let Some(acadrust::EntityType::Viewport(vp)) =
+                        self.tabs[i].scene.document.get_entity_mut(target_handle)
+                    {
+                        for h in &freeze_handles {
+                            if !vp.frozen_layers.contains(h) {
+                                vp.frozen_layers.push(*h);
+                                frozen_count += 1;
+                            }
                         }
-                    }
-                    for h in &thaw_handles {
-                        let before = vp.frozen_layers.len();
-                        vp.frozen_layers.retain(|fh| fh != h);
-                        if vp.frozen_layers.len() < before { thawed_count += 1; }
+                        for h in &thaw_handles {
+                            let before = vp.frozen_layers.len();
+                            vp.frozen_layers.retain(|fh| fh != h);
+                            if vp.frozen_layers.len() < before { thawed_count += 1; }
+                        }
                     }
                 }
 
