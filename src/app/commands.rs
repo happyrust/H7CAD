@@ -1049,7 +1049,7 @@ impl H7CAD {
             }
 
             // ── LAYER management ─────────────────────────────────────────
-            cmd if cmd == "LAYER" || cmd == "LA" || cmd.starts_with("LAYER ") || cmd.starts_with("LA ") => {
+            cmd if cmd == "LAYER" || cmd.starts_with("LAYER ") || cmd.starts_with("LA ") => {
                 use acadrust::tables::Layer;
                 let raw_rest = if cmd.starts_with("LAYER ") {
                     cmd.trim_start_matches("LAYER ").trim()
