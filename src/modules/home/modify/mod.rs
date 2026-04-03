@@ -6,6 +6,7 @@ pub mod delete;
 pub mod explode;
 pub mod join;
 pub mod lengthen;
+pub mod pedit;
 mod extend;
 pub mod fillet;
 pub mod mirror;

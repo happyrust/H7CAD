@@ -487,6 +487,25 @@ impl H7CAD {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
+            CmdResult::PeditOp { handle, op } => {
+                use crate::modules::home::modify::pedit::apply_pedit;
+                let changed = self.tabs[i].scene.document
+                    .get_entity_mut(handle)
+                    .map(|e| apply_pedit(e, &op))
+                    .unwrap_or(false);
+                if changed {
+                    self.push_undo_snapshot(i, "PEDIT");
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output("PEDIT: applied.");
+                    self.refresh_properties();
+                } else {
+                    self.command_line.push_error("PEDIT: operation not applicable to this entity.");
+                }
+                // Keep command active — user may apply more ops
+                self.command_line.push_info(
+                    "PEDIT  Enter option [C=Close O=Open W=Width X=Exit]:"
+                );
+            }
             CmdResult::JoinEntities(handles) => {
                 use crate::modules::home::modify::join::join_entities;
                 let pairs: Vec<_> = handles.iter()

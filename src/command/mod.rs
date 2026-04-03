@@ -99,6 +99,11 @@ pub enum CmdResult {
     BreakEntity { handle: Handle, p1: Vec3, p2: Vec3 },
     /// Attempt to join the given entities into fewer merged entities.
     JoinEntities(Vec<Handle>),
+    /// Apply a polyline-edit operation to one entity; keep command active.
+    PeditOp {
+        handle: Handle,
+        op: crate::modules::home::modify::pedit::PeditOp,
+    },
     /// Place Point entities at N equal intervals along the entity.
     DivideEntity { handle: Handle, n: usize },
     /// Place Point entities at `segment_length` intervals along the entity.
