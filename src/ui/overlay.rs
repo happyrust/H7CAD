@@ -728,24 +728,32 @@ const UCS_ICON_LEN: f32 = 35.0;    // axis arm length in screen pixels
 const UCS_ICON_TIP: f32 = 6.0;     // arrowhead size in pixels
 
 fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
+    // Guard against zero-size viewport (before layout pass) or degenerate matrix.
+    if bounds.width < 10.0 || bounds.height < 10.0 {
+        return;
+    }
+
     // Project world origin and axis unit vectors to NDC, then to screen px.
-    let w2s = |world: Vec3| -> Point {
+    let w2s = |world: Vec3| -> Option<Point> {
         let ndc = vp.project_point3(world);
-        Point::new(
+        if !ndc.x.is_finite() || !ndc.y.is_finite() {
+            return None;
+        }
+        Some(Point::new(
             (ndc.x + 1.0) * 0.5 * bounds.width,
             (1.0 - ndc.y) * 0.5 * bounds.height,
-        )
+        ))
     };
 
     // Origin in screen space — used to compute axis directions.
-    let origin_s = w2s(Vec3::ZERO);
-    let x_tip_s  = w2s(Vec3::X);
-    let y_tip_s  = w2s(Vec3::Y);
-    let z_tip_s  = w2s(Vec3::Z);
+    let Some(origin_s) = w2s(Vec3::ZERO) else { return };
+    let Some(x_tip_s) = w2s(Vec3::X) else { return };
+    let Some(y_tip_s) = w2s(Vec3::Y) else { return };
+    let Some(z_tip_s) = w2s(Vec3::Z) else { return };
 
     // Icon origin: fixed bottom-left corner.
     let ox = UCS_ICON_MARGIN;
-    let oy = bounds.height - UCS_ICON_MARGIN;
+    let oy = (bounds.height - UCS_ICON_MARGIN).max(UCS_ICON_MARGIN);
     let icon_origin = Point::new(ox, oy);
 
     // Compute normalized screen-space axis directions, then scale to UCS_ICON_LEN.
@@ -761,6 +769,7 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
 
     let draw_axis = |frame: &mut canvas::Frame, dir: Point, r: f32, g: f32, b: f32| {
         let tip = Point::new(icon_origin.x + dir.x, icon_origin.y + dir.y);
+        if !tip.x.is_finite() || !tip.y.is_finite() { return; }
         let path = canvas::Path::new(|p| {
             p.move_to(icon_origin);
             p.line_to(tip);
