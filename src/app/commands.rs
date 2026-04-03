@@ -1060,34 +1060,22 @@ impl H7CAD {
                 } else {
                     for (handle, _) in &selected {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
-                            let type_name = match entity {
-                                acadrust::EntityType::Line(_)       => "LINE",
-                                acadrust::EntityType::Circle(_)     => "CIRCLE",
-                                acadrust::EntityType::Arc(_)        => "ARC",
-                                acadrust::EntityType::LwPolyline(_) => "LWPOLYLINE",
-                                acadrust::EntityType::Polyline(_)   => "POLYLINE",
-                                acadrust::EntityType::Text(_)       => "TEXT",
-                                acadrust::EntityType::MText(_)      => "MTEXT",
-                                acadrust::EntityType::Insert(_)     => "INSERT",
-                                acadrust::EntityType::Hatch(_)      => "HATCH",
-                                acadrust::EntityType::Dimension(_)  => "DIMENSION",
-                                acadrust::EntityType::Viewport(_)   => "VIEWPORT",
-                                acadrust::EntityType::Spline(_)     => "SPLINE",
-                                acadrust::EntityType::Ellipse(_)    => "ELLIPSE",
-                                acadrust::EntityType::Point(_)      => "POINT",
-                                acadrust::EntityType::Ray(_)        => "RAY",
-                                acadrust::EntityType::XLine(_)      => "XLINE",
-                                acadrust::EntityType::Face3D(_)     => "3DFACE",
-                                acadrust::EntityType::Table(_)      => "TABLE",
-                                _ => "ENTITY",
-                            };
+                            let type_name = entity_type_name(entity);
                             let common = entity.common();
+                            let color_str = common.color.index()
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "ByLayer".to_string());
+                            let linetype = if common.linetype.is_empty() || common.linetype == "ByLayer" {
+                                "ByLayer".to_string()
+                            } else {
+                                common.linetype.clone()
+                            };
+                            // Entity-specific details
+                            let details = entity_list_details(entity);
                             self.command_line.push_output(&format!(
-                                "{} Layer:{} Color:{} Handle:{:X}",
-                                type_name,
-                                common.layer,
-                                common.color.index().map(|c| c.to_string()).unwrap_or_else(|| "ByLayer".to_string()),
-                                handle.value()
+                                "{type_name}  Handle:{:X}  Layer:{}  Color:{}  LT:{}{}",
+                                handle.value(), common.layer, color_str, linetype,
+                                if details.is_empty() { String::new() } else { format!("\n    {details}") }
                             ));
                         }
                     }
@@ -2162,6 +2150,55 @@ impl H7CAD {
 }
 
 // ── FIND/REPLACE helpers ───────────────────────────────────────────────────
+
+fn entity_list_details(entity: &acadrust::EntityType) -> String {
+    use std::f64::consts::PI;
+    match entity {
+        acadrust::EntityType::Line(l) => format!(
+            "from ({:.4},{:.4},{:.4}) to ({:.4},{:.4},{:.4})  len={:.4}",
+            l.start.x, l.start.y, l.start.z,
+            l.end.x, l.end.y, l.end.z,
+            ((l.end.x-l.start.x).powi(2)+(l.end.y-l.start.y).powi(2)+(l.end.z-l.start.z).powi(2)).sqrt()
+        ),
+        acadrust::EntityType::Circle(c) => format!(
+            "center ({:.4},{:.4},{:.4})  r={:.4}  area={:.4}",
+            c.center.x, c.center.y, c.center.z, c.radius,
+            PI * c.radius * c.radius
+        ),
+        acadrust::EntityType::Arc(a) => format!(
+            "center ({:.4},{:.4},{:.4})  r={:.4}  start={:.2}° end={:.2}°",
+            a.center.x, a.center.y, a.center.z, a.radius, a.start_angle, a.end_angle
+        ),
+        acadrust::EntityType::LwPolyline(p) => format!(
+            "{} vertices  closed={}  elevation={:.4}",
+            p.vertices.len(), p.is_closed, p.elevation
+        ),
+        acadrust::EntityType::Text(t) => format!(
+            "\"{}\"  h={:.4}  at ({:.4},{:.4})",
+            t.value, t.height, t.insertion_point.x, t.insertion_point.y
+        ),
+        acadrust::EntityType::MText(t) => format!(
+            "\"{}\"  h={:.4}  at ({:.4},{:.4})",
+            t.value.chars().take(40).collect::<String>(),
+            t.height, t.insertion_point.x, t.insertion_point.y
+        ),
+        acadrust::EntityType::Insert(ins) => format!(
+            "block=\"{}\"  at ({:.4},{:.4},{:.4})  scale=({:.4},{:.4},{:.4})  rot={:.2}°",
+            ins.block_name, ins.insert_point.x, ins.insert_point.y, ins.insert_point.z,
+            ins.x_scale(), ins.y_scale(), ins.z_scale(),
+            ins.rotation.to_degrees()
+        ),
+        acadrust::EntityType::Spline(s) => format!(
+            "{} ctrl pts  degree={}  closed={}",
+            s.control_points.len(), s.degree, s.flags.closed
+        ),
+        acadrust::EntityType::Ellipse(e) => format!(
+            "center ({:.4},{:.4})  major_len={:.4}  ratio={:.4}",
+            e.center.x, e.center.y, e.major_axis_length(), e.minor_axis_ratio
+        ),
+        _ => String::new(),
+    }
+}
 
 fn flatten_entity_z(entity: &mut acadrust::EntityType) {
     match entity {
