@@ -1075,6 +1075,32 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // ── COUNT — entity statistics ─────────────────────────────────────
+            cmd if cmd == "COUNT" || cmd.starts_with("COUNT ") => {
+                let filter = cmd.split_once(' ').map(|(_, r)| r.trim().to_uppercase());
+                let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+                for e in self.tabs[i].scene.document.entities() {
+                    let layer = &e.common().layer;
+                    let type_name = entity_type_name(e);
+                    let key = match &filter {
+                        Some(f) if f == "LAYER" => layer.clone(),
+                        Some(f) if f == "TYPE"  => type_name.to_string(),
+                        Some(f) => {
+                            // Filter by layer name
+                            if layer.to_uppercase() != *f { continue; }
+                            type_name.to_string()
+                        }
+                        None => type_name.to_string(),
+                    };
+                    *counts.entry(key).or_default() += 1;
+                }
+                let total: usize = counts.values().sum();
+                for (k, n) in &counts {
+                    self.command_line.push_output(&format!("  {k}: {n}"));
+                }
+                self.command_line.push_output(&format!("COUNT: {total} entity(ies) total."));
+            }
+
             // ── Find / Replace ────────────────────────────────────────────────
             // FIND <search>              — list all Text/MText/Dimension containing <search>
             // FIND <search> REPLACE <rep> — replace first occurrence (case-insensitive)
@@ -1967,6 +1993,39 @@ impl H7CAD {
 }
 
 // ── FIND/REPLACE helpers ───────────────────────────────────────────────────
+
+fn entity_type_name(entity: &acadrust::EntityType) -> &'static str {
+    match entity {
+        acadrust::EntityType::Line(_)               => "LINE",
+        acadrust::EntityType::Circle(_)             => "CIRCLE",
+        acadrust::EntityType::Arc(_)                => "ARC",
+        acadrust::EntityType::LwPolyline(_)         => "LWPOLYLINE",
+        acadrust::EntityType::Polyline(_)           => "POLYLINE",
+        acadrust::EntityType::Polyline2D(_)         => "POLYLINE2D",
+        acadrust::EntityType::Polyline3D(_)         => "POLYLINE3D",
+        acadrust::EntityType::Text(_)               => "TEXT",
+        acadrust::EntityType::MText(_)              => "MTEXT",
+        acadrust::EntityType::Insert(_)             => "INSERT",
+        acadrust::EntityType::Hatch(_)              => "HATCH",
+        acadrust::EntityType::Dimension(_)          => "DIMENSION",
+        acadrust::EntityType::Viewport(_)           => "VIEWPORT",
+        acadrust::EntityType::Spline(_)             => "SPLINE",
+        acadrust::EntityType::Ellipse(_)            => "ELLIPSE",
+        acadrust::EntityType::Point(_)              => "POINT",
+        acadrust::EntityType::Ray(_)                => "RAY",
+        acadrust::EntityType::XLine(_)              => "XLINE",
+        acadrust::EntityType::Face3D(_)             => "3DFACE",
+        acadrust::EntityType::Table(_)              => "TABLE",
+        acadrust::EntityType::MLine(_)              => "MLINE",
+        acadrust::EntityType::RasterImage(_)        => "RASTERIMAGE",
+        acadrust::EntityType::Wipeout(_)            => "WIPEOUT",
+        acadrust::EntityType::AttributeDefinition(_)=> "ATTDEF",
+        acadrust::EntityType::AttributeEntity(_)    => "ATTRIB",
+        acadrust::EntityType::Leader(_)             => "LEADER",
+        acadrust::EntityType::Tolerance(_)          => "TOLERANCE",
+        _ => "ENTITY",
+    }
+}
 
 fn entity_text_content(entity: &acadrust::EntityType) -> Option<String> {
     match entity {
