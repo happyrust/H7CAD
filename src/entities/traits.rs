@@ -94,6 +94,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Insert(ins) => Grippable::grips(ins),
             EntityType::Leader(leader) => Grippable::grips(leader),
             EntityType::MultiLeader(ml) => Grippable::grips(ml),
+            EntityType::Dimension(dim) => Grippable::grips(dim),
             _ => vec![],
         }
     }
@@ -288,6 +289,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Insert(ins) => Grippable::apply_grip(ins, grip_id, apply),
             EntityType::Leader(leader) => Grippable::apply_grip(leader, grip_id, apply),
             EntityType::MultiLeader(ml) => Grippable::apply_grip(ml, grip_id, apply),
+            EntityType::Dimension(dim) => Grippable::apply_grip(dim, grip_id, apply),
             _ => {}
         }
     }

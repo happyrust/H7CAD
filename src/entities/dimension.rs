@@ -6,9 +6,9 @@ use acadrust::Entity;
 use glam::Vec3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_prop as edit, parse_f64, ro_prop as ro};
-use crate::entities::traits::{PropertyEditable, Transformable};
-use crate::scene::object::PropSection;
+use crate::entities::common::{diamond_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
+use crate::scene::object::{GripApply, GripDef, PropSection};
 
 fn base_props(base: &DimensionBase) -> Vec<crate::scene::object::Property> {
     vec![
@@ -532,5 +532,140 @@ impl PropertyEditable for Dimension {
 impl Transformable for Dimension {
     fn apply_transform(&mut self, t: &EntityTransform) {
         apply_transform(self, t);
+    }
+}
+
+// ── Grippable ─────────────────────────────────────────────────────────────────
+
+fn v3(v: &acadrust::types::Vector3) -> Vec3 {
+    Vec3::new(v.x as f32, v.y as f32, v.z as f32)
+}
+
+fn set_v3(target: &mut acadrust::types::Vector3, p: Vec3) {
+    target.x = p.x as f64;
+    target.y = p.y as f64;
+    target.z = p.z as f64;
+}
+
+fn translate_v3(target: &mut acadrust::types::Vector3, d: Vec3) {
+    target.x += d.x as f64;
+    target.y += d.y as f64;
+    target.z += d.z as f64;
+}
+
+fn apply_to_v3(target: &mut acadrust::types::Vector3, apply: &GripApply) {
+    match apply {
+        GripApply::Absolute(p) => set_v3(target, *p),
+        GripApply::Translate(d) => translate_v3(target, *d),
+    }
+}
+
+impl Grippable for Dimension {
+    fn grips(&self) -> Vec<GripDef> {
+        let text = v3(&self.base().text_middle_point);
+        match self {
+            Dimension::Linear(d) => vec![
+                square_grip(0, v3(&d.first_point)),
+                diamond_grip(1, v3(&d.second_point)),
+                diamond_grip(2, v3(&d.definition_point)),
+                diamond_grip(3, text),
+            ],
+            Dimension::Aligned(d) => vec![
+                square_grip(0, v3(&d.first_point)),
+                diamond_grip(1, v3(&d.second_point)),
+                diamond_grip(2, v3(&d.definition_point)),
+                diamond_grip(3, text),
+            ],
+            Dimension::Radius(d) => vec![
+                square_grip(0, v3(&d.angle_vertex)),
+                diamond_grip(1, v3(&d.definition_point)),
+                diamond_grip(2, text),
+            ],
+            Dimension::Diameter(d) => vec![
+                square_grip(0, v3(&d.angle_vertex)),
+                diamond_grip(1, v3(&d.definition_point)),
+                diamond_grip(2, text),
+            ],
+            Dimension::Angular2Ln(d) => vec![
+                square_grip(0, v3(&d.angle_vertex)),
+                diamond_grip(1, v3(&d.first_point)),
+                diamond_grip(2, v3(&d.second_point)),
+                diamond_grip(3, v3(&d.definition_point)),
+                diamond_grip(4, text),
+            ],
+            Dimension::Angular3Pt(d) => vec![
+                square_grip(0, v3(&d.angle_vertex)),
+                diamond_grip(1, v3(&d.first_point)),
+                diamond_grip(2, v3(&d.second_point)),
+                diamond_grip(3, v3(&d.definition_point)),
+                diamond_grip(4, text),
+            ],
+            Dimension::Ordinate(d) => vec![
+                square_grip(0, v3(&d.definition_point)),
+                diamond_grip(1, v3(&d.feature_location)),
+                diamond_grip(2, v3(&d.leader_endpoint)),
+                diamond_grip(3, text),
+            ],
+        }
+    }
+
+    fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        // Last grip always moves the text.
+        let text_grip = match self {
+            Dimension::Linear(_) | Dimension::Aligned(_) => 3,
+            Dimension::Radius(_) | Dimension::Diameter(_) => 2,
+            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => 4,
+            Dimension::Ordinate(_) => 3,
+        };
+        if grip_id == text_grip {
+            apply_to_v3(&mut self.base_mut().text_middle_point, &apply);
+            return;
+        }
+
+        match self {
+            Dimension::Linear(d) => match grip_id {
+                0 => apply_to_v3(&mut d.first_point, &apply),
+                1 => apply_to_v3(&mut d.second_point, &apply),
+                2 => apply_to_v3(&mut d.definition_point, &apply),
+                _ => {}
+            },
+            Dimension::Aligned(d) => match grip_id {
+                0 => apply_to_v3(&mut d.first_point, &apply),
+                1 => apply_to_v3(&mut d.second_point, &apply),
+                2 => apply_to_v3(&mut d.definition_point, &apply),
+                _ => {}
+            },
+            Dimension::Radius(d) => match grip_id {
+                0 => apply_to_v3(&mut d.angle_vertex, &apply),
+                1 => apply_to_v3(&mut d.definition_point, &apply),
+                _ => {}
+            },
+            Dimension::Diameter(d) => match grip_id {
+                0 => apply_to_v3(&mut d.angle_vertex, &apply),
+                1 => apply_to_v3(&mut d.definition_point, &apply),
+                _ => {}
+            },
+            Dimension::Angular2Ln(d) => match grip_id {
+                0 => apply_to_v3(&mut d.angle_vertex, &apply),
+                1 => apply_to_v3(&mut d.first_point, &apply),
+                2 => apply_to_v3(&mut d.second_point, &apply),
+                3 => apply_to_v3(&mut d.definition_point, &apply),
+                _ => {}
+            },
+            Dimension::Angular3Pt(d) => match grip_id {
+                0 => apply_to_v3(&mut d.angle_vertex, &apply),
+                1 => apply_to_v3(&mut d.first_point, &apply),
+                2 => apply_to_v3(&mut d.second_point, &apply),
+                3 => apply_to_v3(&mut d.definition_point, &apply),
+                _ => {}
+            },
+            Dimension::Ordinate(d) => match grip_id {
+                0 => apply_to_v3(&mut d.definition_point, &apply),
+                1 => apply_to_v3(&mut d.feature_location, &apply),
+                2 => apply_to_v3(&mut d.leader_endpoint, &apply),
+                _ => {}
+            },
+        }
+        self.base_mut().actual_measurement = self.measurement();
     }
 }
