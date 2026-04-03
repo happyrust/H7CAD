@@ -1660,6 +1660,15 @@ impl Scene {
         if let Some(entity) = self.document.get_entity_mut(handle) {
             dispatch::apply_grip(entity, grip_id, apply);
         }
+        // Rebuild the GPU hatch model when a hatch boundary vertex moves.
+        if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(handle) {
+            let color = tessellate::aci_to_rgba(&dxf.common.color);
+            if let Some(model) = Self::hatch_model_from_dxf(dxf, color) {
+                self.hatches.insert(handle, model);
+            } else {
+                self.hatches.remove(&handle);
+            }
+        }
     }
 
     // ── Hit-test convenience: wire name → Handle ──────────────────────────
