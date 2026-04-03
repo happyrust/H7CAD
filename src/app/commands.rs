@@ -332,6 +332,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "MLINE"|"ML" => {
+                use crate::modules::home::draw::mline::MlineCommand;
+                let cmd_obj = MlineCommand::new();
+                self.command_line.push_info(&cmd_obj.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            }
+
             cmd if cmd == "WIPEOUT" || cmd == "WO" || cmd.starts_with("WIPEOUT ") => {
                 use crate::modules::home::draw::wipeout::WipeoutCommand;
                 let args = cmd.split_once(' ').map(|(_, r)| r.trim().to_uppercase()).unwrap_or_default();

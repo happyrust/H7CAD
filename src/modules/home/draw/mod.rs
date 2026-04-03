@@ -4,6 +4,7 @@ pub mod donut;
 pub mod ellipse;
 pub mod hatch;
 pub mod line;
+pub mod mline;
 pub mod point;
 pub mod polyline;
 pub mod ray;
