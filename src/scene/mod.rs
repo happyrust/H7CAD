@@ -31,7 +31,7 @@ pub use selection::SelectionState;
 pub use wire_model::WireModel;
 
 use crate::command::EntityTransform;
-use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge};
+use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid};
 use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
 use acadrust::objects::ObjectType;
 use acadrust::types::Vector2;
@@ -1015,6 +1015,9 @@ impl Scene {
         let hatch_seed = if let EntityType::Hatch(dxf) = &entity {
             let color = self.render_style(&entity).0;
             Self::hatch_model_from_dxf(dxf, color)
+        } else if let EntityType::Solid(solid) = &entity {
+            let color = self.render_style(&entity).0;
+            Some(Self::solid_hatch_model(solid, color))
         } else {
             None
         };
@@ -1357,25 +1360,51 @@ impl Scene {
     pub fn populate_hatches_from_document(&mut self) {
         self.hatches.clear();
 
-        let entries: Vec<(Handle, [f32; 4])> = self
+        let entries: Vec<(Handle, EntityType)> = self
             .document
             .entities()
-            .filter_map(|e| {
-                if let EntityType::Hatch(dxf) = e {
-                    let color = tessellate::aci_to_rgba(&dxf.common.color);
-                    Some((dxf.common.handle, color))
-                } else {
-                    None
-                }
+            .filter_map(|e| match e {
+                EntityType::Hatch(h) => Some((h.common.handle, e.clone())),
+                EntityType::Solid(s) => Some((s.common.handle, e.clone())),
+                _ => None,
             })
             .collect();
 
-        for (handle, color) in entries {
-            if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(handle) {
-                if let Some(model) = Self::hatch_model_from_dxf(dxf, color) {
-                    self.hatches.insert(handle, model);
+        for (handle, kind) in entries {
+            let model = match &kind {
+                EntityType::Hatch(dxf) => {
+                    let color = tessellate::aci_to_rgba(&dxf.common.color);
+                    Self::hatch_model_from_dxf(dxf, color)
                 }
+                EntityType::Solid(solid) => {
+                    let color = tessellate::aci_to_rgba(&solid.common.color);
+                    Some(Self::solid_hatch_model(solid, color))
+                }
+                _ => None,
+            };
+            if let Some(m) = model {
+                self.hatches.insert(handle, m);
             }
+        }
+    }
+
+    /// Build a solid-fill HatchModel for a DXF Solid entity.
+    /// DXF SOLID corners are in "Z-order": p0-p1 top, p2-p3 bottom.
+    /// Visual quad is p0→p1→p3→p2 (closed).
+    fn solid_hatch_model(solid: &DxfSolid, color: [f32; 4]) -> HatchModel {
+        let boundary = vec![
+            [solid.first_corner.x as f32,  solid.first_corner.y as f32],
+            [solid.second_corner.x as f32, solid.second_corner.y as f32],
+            [solid.fourth_corner.x as f32, solid.fourth_corner.y as f32],
+            [solid.third_corner.x as f32,  solid.third_corner.y as f32],
+        ];
+        HatchModel {
+            boundary,
+            pattern: hatch_model::HatchPattern::Solid,
+            name: "SOLID".into(),
+            color,
+            angle_offset: 0.0,
+            scale: 1.0,
         }
     }
 
@@ -1660,14 +1689,21 @@ impl Scene {
         if let Some(entity) = self.document.get_entity_mut(handle) {
             dispatch::apply_grip(entity, grip_id, apply);
         }
-        // Rebuild the GPU hatch model when a hatch boundary vertex moves.
-        if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(handle) {
-            let color = tessellate::aci_to_rgba(&dxf.common.color);
-            if let Some(model) = Self::hatch_model_from_dxf(dxf, color) {
-                self.hatches.insert(handle, model);
-            } else {
-                self.hatches.remove(&handle);
+        // Rebuild GPU hatch/solid model when a boundary vertex or corner moves.
+        match self.document.get_entity(handle) {
+            Some(EntityType::Hatch(dxf)) => {
+                let color = tessellate::aci_to_rgba(&dxf.common.color);
+                if let Some(model) = Self::hatch_model_from_dxf(dxf, color) {
+                    self.hatches.insert(handle, model);
+                } else {
+                    self.hatches.remove(&handle);
+                }
             }
+            Some(EntityType::Solid(solid)) => {
+                let color = tessellate::aci_to_rgba(&solid.common.color);
+                self.hatches.insert(handle, Self::solid_hatch_model(solid, color));
+            }
+            _ => {}
         }
     }
 
