@@ -1075,6 +1075,53 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // ── QSELECT — quick-select entities by property ───────────────────
+            // QSELECT TYPE <type>          — select all entities of given type
+            // QSELECT LAYER <name>         — select all entities on layer
+            // QSELECT COLOR <n>            — select all entities with color index n
+            // QSELECT LINETYPE <name>      — select all entities with linetype
+            cmd if cmd == "QSELECT" || cmd.starts_with("QSELECT ") => {
+                use crate::scene::Scene;
+                let rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                let prop = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                let val  = parts.get(1).map(|s| s.trim()).unwrap_or("").to_uppercase();
+
+                let matched: Vec<acadrust::Handle> = self.tabs[i].scene.document
+                    .entities()
+                    .filter(|e| {
+                        let c = e.common();
+                        match prop.as_str() {
+                            "TYPE"     => entity_type_name(e).to_uppercase() == val,
+                            "LAYER"    => c.layer.to_uppercase() == val,
+                            "COLOR"    => c.color.index()
+                                .map(|n| n.to_string() == val)
+                                .unwrap_or(val == "BYLAYER"),
+                            "LINETYPE" => c.linetype.to_uppercase() == val,
+                            _ => false,
+                        }
+                    })
+                    .map(|e| e.common().handle)
+                    .collect();
+
+                if prop.is_empty() {
+                    self.command_line.push_info(
+                        "Usage: QSELECT TYPE|LAYER|COLOR|LINETYPE <value>"
+                    );
+                } else if matched.is_empty() {
+                    self.command_line.push_output("QSELECT: no matching entities.");
+                } else {
+                    self.tabs[i].scene.deselect_all();
+                    for h in &matched {
+                        self.tabs[i].scene.select_entity(*h, false);
+                    }
+                    self.command_line.push_output(&format!(
+                        "QSELECT: {} entity(ies) selected.", matched.len()
+                    ));
+                    self.refresh_properties();
+                }
+            }
+
             // ── COUNT — entity statistics ─────────────────────────────────────
             cmd if cmd == "COUNT" || cmd.starts_with("COUNT ") => {
                 let filter = cmd.split_once(' ').map(|(_, r)| r.trim().to_uppercase());
