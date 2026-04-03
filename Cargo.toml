@@ -12,6 +12,6 @@ truck-modeling = "0.6"
 truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation"] }
 truck-polymesh = "0.6"
 rfd = "0.15"
-acadrust = "0.3.0"
+acadrust = "0.3.3"
 open = "5"
 printpdf = "0.9.1"
