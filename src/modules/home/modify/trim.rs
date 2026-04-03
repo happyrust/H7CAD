@@ -10,7 +10,7 @@
 
 use std::f64::consts::TAU;
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt};
+use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, Ray as RayEnt, XLine as XLineEnt};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -146,6 +146,11 @@ fn cc_angles(cx1: f64, cy1: f64, r1: f64, cx2: f64, cy2: f64, r2: f64) -> Vec<f6
 
 // ── Boundary geometry ─────────────────────────────────────────────────────
 
+/// Virtual extent used to represent infinite ends of Ray / XLine.
+const TRIM_EXTENT: f64 = 1_000_000.0;
+/// If a trim interval endpoint is beyond this threshold it is treated as "infinite".
+const INF_T: f64 = 0.9999;
+
 enum Geo {
     Line {
         handle: Handle,
@@ -165,6 +170,22 @@ enum Geo {
         cx: f64,
         cy: f64,
         r: f64,
+    },
+    /// Semi-infinite line from base in +direction.
+    Ray {
+        handle: Handle,
+        bx: f64,
+        by: f64,
+        dx: f64,
+        dy: f64,
+    },
+    /// Fully-infinite line through base along direction.
+    InfLine {
+        handle: Handle,
+        bx: f64,
+        by: f64,
+        dx: f64,
+        dy: f64,
     },
 }
 
@@ -192,6 +213,20 @@ fn build_geos(entities: &[EntityType]) -> Vec<Geo> {
                     cx: c.center.x,
                     cy: c.center.y,
                     r: c.radius,
+                }),
+                EntityType::Ray(r) => Some(Geo::Ray {
+                    handle: h,
+                    bx: r.base_point.x,
+                    by: r.base_point.y,
+                    dx: r.direction.x,
+                    dy: r.direction.y,
+                }),
+                EntityType::XLine(x) => Some(Geo::InfLine {
+                    handle: h,
+                    bx: x.base_point.x,
+                    by: x.base_point.y,
+                    dx: x.direction.x,
+                    dy: x.direction.y,
                 }),
                 _ => None,
             }
@@ -250,6 +285,24 @@ fn line_seg_ts(ax: f64, ay: f64, bx: f64, by: f64, target: Handle, geos: &[Geo])
                     }
                 }
             }
+            Geo::Ray { handle, bx: rbx, by: rby, dx: rdx, dy: rdy } => {
+                if *handle == target { continue; }
+                if let Some((t, u)) = ll(ax, ay, dx, dy, *rbx, *rby, *rdx, *rdy) {
+                    // Ray: u >= 0 (semi-infinite)
+                    if u >= -1e-9 && (-1e-9..=1.0 + 1e-9).contains(&t) {
+                        ts.push(t.clamp(0.0, 1.0));
+                    }
+                }
+            }
+            Geo::InfLine { handle, bx: ibx, by: iby, dx: idx, dy: idy } => {
+                if *handle == target { continue; }
+                if let Some((t, _u)) = ll(ax, ay, dx, dy, *ibx, *iby, *idx, *idy) {
+                    // XLine: any u accepted
+                    if (-1e-9..=1.0 + 1e-9).contains(&t) {
+                        ts.push(t.clamp(0.0, 1.0));
+                    }
+                }
+            }
         }
     }
     ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -274,11 +327,11 @@ fn arc_seg_ts(
                 if *handle == target {
                     continue;
                 }
-                let (dx, dy) = (p2[0] - p1[0], p2[1] - p1[1]);
-                lc(p1[0], p1[1], dx, dy, cx, cy, r)
+                let (ldx, ldy) = (p2[0] - p1[0], p2[1] - p1[1]);
+                lc(p1[0], p1[1], ldx, ldy, cx, cy, r)
                     .into_iter()
                     .filter(|&u| (-1e-9..=1.0 + 1e-9).contains(&u))
-                    .map(|u| (p1[1] + u * dy - cy).atan2(p1[0] + u * dx - cx))
+                    .map(|u| (p1[1] + u * ldy - cy).atan2(p1[0] + u * ldx - cx))
                     .collect()
             }
             Geo::Arc {
@@ -307,6 +360,23 @@ fn arc_seg_ts(
                     continue;
                 }
                 cc_angles(cx, cy, r, *cx2, *cy2, *r2)
+            }
+            Geo::Ray { handle, bx: rbx, by: rby, dx: rdx, dy: rdy } => {
+                if *handle == target { continue; }
+                // Intersect arc circle with the Ray direction
+                lc(*rbx, *rby, *rdx, *rdy, cx, cy, r)
+                    .into_iter()
+                    .filter(|&u| u >= -1e-9) // Ray: u >= 0
+                    .map(|u| (rby + u * rdy - cy).atan2(rbx + u * rdx - cx))
+                    .collect()
+            }
+            Geo::InfLine { handle, bx: ibx, by: iby, dx: idx, dy: idy } => {
+                if *handle == target { continue; }
+                // XLine: any u accepted
+                lc(*ibx, *iby, *idx, *idy, cx, cy, r)
+                    .into_iter()
+                    .map(|u| (iby + u * idy - cy).atan2(ibx + u * idx - cx))
+                    .collect()
             }
         };
         for a in angles {
@@ -473,6 +543,22 @@ fn extend_line(orig: &LineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityType>
                     }
                 }
             }
+            Geo::Ray { handle, bx: rbx, by: rby, dx: rdx, dy: rdy } => {
+                if *handle == target { continue; }
+                if let Some((t, u)) = ll(ax, ay, dx, dy, *rbx, *rby, *rdx, *rdy) {
+                    if u >= -1e-9 { // only forward along the Ray
+                        if extend_end && t > 1.0 + 1e-6 && t < best_t { best_t = t; }
+                        if !extend_end && t < -1e-6 && t > best_t { best_t = t; }
+                    }
+                }
+            }
+            Geo::InfLine { handle, bx: ibx, by: iby, dx: idx, dy: idy } => {
+                if *handle == target { continue; }
+                if let Some((t, _u)) = ll(ax, ay, dx, dy, *ibx, *iby, *idx, *idy) {
+                    if extend_end && t > 1.0 + 1e-6 && t < best_t { best_t = t; }
+                    if !extend_end && t < -1e-6 && t > best_t { best_t = t; }
+                }
+            }
         }
     }
 
@@ -489,6 +575,113 @@ fn extend_line(orig: &LineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityType>
         line.start = Vector3::new(new_x, new_y, orig.start.z);
     }
     Some(EntityType::Line(line))
+}
+
+/// Trim a Ray entity.
+/// Virtual t ∈ [0,1]: t=0 → base_point, t=1 → base + TRIM_EXTENT * dir.
+/// Surviving pieces become Lines (finite) or Rays (still semi-infinite).
+fn trim_ray(orig: &RayEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
+    let bx = orig.base_point.x;
+    let by = orig.base_point.y;
+    let bz = orig.base_point.z;
+    let dx = orig.direction.x;
+    let dy = orig.direction.y;
+    let dz = orig.direction.z;
+    let pt = |t: f64| [bx + t * dx * TRIM_EXTENT, by + t * dy * TRIM_EXTENT, bz + t * dz * TRIM_EXTENT];
+
+    trim_intervals(ts, t_click)
+        .into_iter()
+        .filter_map(|(ta, tb)| {
+            let pa = pt(ta);
+            let pb = pt(tb);
+            if (pb[0] - pa[0]).hypot(pb[1] - pa[1]) < 1e-6 { return None; }
+
+            if tb > INF_T {
+                // Still extends to infinity → remains a Ray with new base
+                let r = RayEnt::new(
+                    Vector3::new(pa[0], pa[1], pa[2]),
+                    Vector3::new(dx, dy, dz),
+                );
+                let mut r = r;
+                r.common = orig.common.clone();
+                r.common.handle = Handle::NULL;
+                Some(EntityType::Ray(r))
+            } else {
+                // Finite segment → Line
+                let mut l = LineEnt { common: orig.common.clone(), ..LineEnt::new() };
+                l.common.handle = Handle::NULL;
+                l.start = Vector3::new(pa[0], pa[1], pa[2]);
+                l.end = Vector3::new(pb[0], pb[1], pb[2]);
+                Some(EntityType::Line(l))
+            }
+        })
+        .collect()
+}
+
+/// Trim an XLine entity.
+/// Virtual t ∈ [0,1]: t=0 → base - dir*TRIM_EXTENT, t=0.5 → base, t=1 → base + dir*TRIM_EXTENT.
+/// Surviving pieces become Lines (finite), Rays (one infinite end), or the original XLine (both ends).
+fn trim_xline(orig: &XLineEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
+    let bx = orig.base_point.x;
+    let by = orig.base_point.y;
+    let bz = orig.base_point.z;
+    let dx = orig.direction.x;
+    let dy = orig.direction.y;
+    let dz = orig.direction.z;
+    // Point at virtual t: scale factor s = 2t - 1 ∈ [-1, +1]
+    let pt = |t: f64| {
+        let s = 2.0 * t - 1.0;
+        [bx + s * dx * TRIM_EXTENT, by + s * dy * TRIM_EXTENT, bz + s * dz * TRIM_EXTENT]
+    };
+
+    trim_intervals(ts, t_click)
+        .into_iter()
+        .filter_map(|(ta, tb)| {
+            let pa = pt(ta);
+            let pb = pt(tb);
+            let ext_neg = ta < 1.0 - INF_T; // extends toward -infinity
+            let ext_pos = tb > INF_T;        // extends toward +infinity
+
+            match (ext_neg, ext_pos) {
+                (true, true) => {
+                    // Whole XLine survived (shouldn't happen after a real trim)
+                    let mut x = orig.clone();
+                    x.common.handle = Handle::NULL;
+                    Some(EntityType::XLine(x))
+                }
+                (true, false) => {
+                    // Extends toward -infinity: Ray at pb pointing in -dir
+                    let r = RayEnt::new(
+                        Vector3::new(pb[0], pb[1], pb[2]),
+                        Vector3::new(-dx, -dy, -dz),
+                    );
+                    let mut r = r;
+                    r.common = orig.common.clone();
+                    r.common.handle = Handle::NULL;
+                    Some(EntityType::Ray(r))
+                }
+                (false, true) => {
+                    // Extends toward +infinity: Ray at pa pointing in +dir
+                    let r = RayEnt::new(
+                        Vector3::new(pa[0], pa[1], pa[2]),
+                        Vector3::new(dx, dy, dz),
+                    );
+                    let mut r = r;
+                    r.common = orig.common.clone();
+                    r.common.handle = Handle::NULL;
+                    Some(EntityType::Ray(r))
+                }
+                (false, false) => {
+                    // Finite segment
+                    let mut l = LineEnt { common: orig.common.clone(), ..LineEnt::new() };
+                    l.common.handle = Handle::NULL;
+                    l.start = Vector3::new(pa[0], pa[1], pa[2]);
+                    l.end = Vector3::new(pb[0], pb[1], pb[2]);
+                    Some(EntityType::Line(l))
+                }
+            }
+        })
+        .collect()
 }
 
 // ── Point-generation helpers ──────────────────────────────────────────────
@@ -535,6 +728,16 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
             a.end_angle.to_radians(),
             a.center.y,
         ),
+        // For preview, show a 20-unit section of semi-infinite results
+        EntityType::Ray(r) => {
+            let bx = r.base_point.x;
+            let by = r.base_point.y;
+            let bz = r.base_point.z;
+            let far_x = bx + r.direction.x * 20.0;
+            let far_y = by + r.direction.y * 20.0;
+            let far_z = bz + r.direction.z * 20.0;
+            vec![[bx as f32, bz as f32, by as f32], [far_x as f32, far_z as f32, far_y as f32]]
+        }
         _ => vec![],
     }
 }
@@ -611,6 +814,38 @@ impl CadCommand for TrimCommand {
                 let t_click = arc_t(click_angle, a0, a1);
                 Some(trim_arc(a, &ts, t_click))
             }
+            Some(EntityType::Ray(r)) => {
+                // Virtual segment: base → base + dir * TRIM_EXTENT (t ∈ [0,1])
+                let bx = r.base_point.x;
+                let by = r.base_point.y;
+                let ex = bx + r.direction.x * TRIM_EXTENT;
+                let ey = by + r.direction.y * TRIM_EXTENT;
+                let ts = line_seg_ts(bx, by, ex, ey, handle, &self.geos);
+                if ts.is_empty() { return CmdResult::NeedPoint; }
+                let dx = r.direction.x * TRIM_EXTENT;
+                let dy = r.direction.y * TRIM_EXTENT;
+                let len2 = dx * dx + dy * dy;
+                let t_click = if len2 > 1e-12 {
+                    ((pt.x as f64 - bx) * dx + (pt.y as f64 - by) * dy) / len2
+                } else { 0.5 };
+                Some(trim_ray(r, &ts, t_click))
+            }
+            Some(EntityType::XLine(x)) => {
+                // Virtual segment: base - dir*TRIM_EXTENT → base + dir*TRIM_EXTENT
+                let bx = x.base_point.x - x.direction.x * TRIM_EXTENT;
+                let by = x.base_point.y - x.direction.y * TRIM_EXTENT;
+                let ex = x.base_point.x + x.direction.x * TRIM_EXTENT;
+                let ey = x.base_point.y + x.direction.y * TRIM_EXTENT;
+                let ts = line_seg_ts(bx, by, ex, ey, handle, &self.geos);
+                if ts.is_empty() { return CmdResult::NeedPoint; }
+                let dx = ex - bx;
+                let dy = ey - by;
+                let len2 = dx * dx + dy * dy;
+                let t_click = if len2 > 1e-12 {
+                    ((pt.x as f64 - bx) * dx + (pt.y as f64 - by) * dy) / len2
+                } else { 0.5 };
+                Some(trim_xline(x, &ts, t_click))
+            }
             _ => None,
         };
 
@@ -645,6 +880,8 @@ impl CadCommand for TrimCommand {
             match e {
                 EntityType::Line(l) => l.common.handle = h,
                 EntityType::Arc(a) => a.common.handle = h,
+                EntityType::Ray(r) => r.common.handle = h,
+                EntityType::XLine(x) => x.common.handle = h,
                 _ => {}
             }
         }
@@ -718,6 +955,58 @@ impl CadCommand for TrimCommand {
                         WireModel::CYAN,
                         false,
                     ));
+                }
+                out
+            }
+            Some(EntityType::Ray(r)) => {
+                let bx = r.base_point.x;
+                let by = r.base_point.y;
+                let ex = bx + r.direction.x * TRIM_EXTENT;
+                let ey = by + r.direction.y * TRIM_EXTENT;
+                let ts = line_seg_ts(bx, by, ex, ey, handle, &self.geos);
+                if ts.is_empty() { return vec![]; }
+                let dx = r.direction.x * TRIM_EXTENT;
+                let dy = r.direction.y * TRIM_EXTENT;
+                let len2 = dx * dx + dy * dy;
+                let t_click = if len2 > 1e-12 {
+                    ((pt.x as f64 - bx) * dx + (pt.y as f64 - by) * dy) / len2
+                } else { 0.5 };
+                let survivors = trim_ray(r, &ts, t_click);
+                // Show a finite preview section (20 units) for the original ray
+                let far = [(bx + r.direction.x * 20.0) as f32, (by + r.direction.y * 20.0) as f32, r.base_point.z as f32];
+                let base = [bx as f32, by as f32, r.base_point.z as f32];
+                let removed = WireModel::solid("trim_rm".into(), vec![base, far], DIM_RED, false);
+                let mut out = vec![removed];
+                for (i, e) in survivors.iter().enumerate() {
+                    let pts = entity_pts(e);
+                    out.push(WireModel::solid(format!("trim_keep_{i}"), pts, WireModel::CYAN, false));
+                }
+                out
+            }
+            Some(EntityType::XLine(x)) => {
+                let bx = x.base_point.x;
+                let by = x.base_point.y;
+                let ex_start = bx - x.direction.x * TRIM_EXTENT;
+                let ey_start = by - x.direction.y * TRIM_EXTENT;
+                let ex_end = bx + x.direction.x * TRIM_EXTENT;
+                let ey_end = by + x.direction.y * TRIM_EXTENT;
+                let ts = line_seg_ts(ex_start, ey_start, ex_end, ey_end, handle, &self.geos);
+                if ts.is_empty() { return vec![]; }
+                let dx = ex_end - ex_start;
+                let dy = ey_end - ey_start;
+                let len2 = dx * dx + dy * dy;
+                let t_click = if len2 > 1e-12 {
+                    ((pt.x as f64 - ex_start) * dx + (pt.y as f64 - ey_start) * dy) / len2
+                } else { 0.5 };
+                let survivors = trim_xline(x, &ts, t_click);
+                // Show a finite 40-unit preview section around base
+                let neg = [(bx - x.direction.x * 20.0) as f32, (by - x.direction.y * 20.0) as f32, x.base_point.z as f32];
+                let pos = [(bx + x.direction.x * 20.0) as f32, (by + x.direction.y * 20.0) as f32, x.base_point.z as f32];
+                let removed = WireModel::solid("trim_rm".into(), vec![neg, pos], DIM_RED, false);
+                let mut out = vec![removed];
+                for (i, e) in survivors.iter().enumerate() {
+                    let pts = entity_pts(e);
+                    out.push(WireModel::solid(format!("trim_keep_{i}"), pts, WireModel::CYAN, false));
                 }
                 out
             }

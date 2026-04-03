@@ -82,6 +82,13 @@ impl H7CAD {
                             .map(|u| u.name.clone())
                             .unwrap_or_default();
 
+                        // Collect available named view names.
+                        let view_names: Vec<String> = self.tabs[i].scene.document.views
+                            .iter()
+                            .map(|v| v.name.clone())
+                            .filter(|n| !n.is_empty())
+                            .collect();
+
                         if let Some(geom) = sections.last_mut() {
                             geom.props.push(crate::scene::object::Property {
                                 label: "Frozen Layers".to_string(),
@@ -97,6 +104,16 @@ impl H7CAD {
                                     value: crate::scene::object::PropValue::Choice {
                                         selected: current_ucs,
                                         options: ucs_names,
+                                    },
+                                });
+                            }
+                            if !view_names.is_empty() {
+                                geom.props.push(crate::scene::object::Property {
+                                    label: "Named View".to_string(),
+                                    field: "vp_named_view",
+                                    value: crate::scene::object::PropValue::Choice {
+                                        selected: String::new(),
+                                        options: view_names,
                                     },
                                 });
                             }

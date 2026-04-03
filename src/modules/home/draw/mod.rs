@@ -1,4 +1,5 @@
 pub mod arc;
+pub mod attdef;
 pub mod circle;
 pub mod donut;
 pub mod ellipse;

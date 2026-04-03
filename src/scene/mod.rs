@@ -421,12 +421,19 @@ impl Scene {
 
         if let EntityType::Viewport(vp) = e {
             let is_active = self.active_viewport == Some(h);
-            let color = if vp.id == 1 {
+            let is_locked = vp.status.locked;
+            let color = if sel && vp.id != 1 {
+                // Selected viewport — bright white highlight.
+                [1.0, 1.0, 1.0, 1.0]
+            } else if vp.id == 1 {
                 // Overall paper-space viewport — subtle grey.
                 [0.40, 0.40, 0.40, 1.0]
             } else if is_active {
                 // Active (entered) viewport — bright yellow.
                 [1.0, 0.90, 0.20, 1.0]
+            } else if is_locked {
+                // Locked viewport — orange tint to indicate scale is frozen.
+                [0.90, 0.55, 0.10, 1.0]
             } else {
                 // Normal user viewport — cyan.
                 [0.0, 0.75, 0.75, 1.0]

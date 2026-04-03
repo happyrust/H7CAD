@@ -7,8 +7,6 @@
 //
 //   BREAK @ (at-sign as second point) → Break at a single point (splits without gap).
 
-use std::f64::consts::TAU;
-
 use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
@@ -20,6 +18,7 @@ use crate::scene::wire_model::WireModel;
 
 // ── Ribbon definition ──────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub fn tool() -> ToolDef {
     ToolDef {
         id: "BREAK",
@@ -283,5 +282,52 @@ impl CadCommand for BreakInteractiveCommand {
 
     fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> {
         None
+    }
+}
+
+// ── BREAKATPOINT (BAP) — split at a single point, no gap ──────────────────
+
+pub struct BreakAtPointCommand {
+    target: Option<Handle>,
+}
+
+impl BreakAtPointCommand {
+    pub fn new() -> Self {
+        Self { target: None }
+    }
+}
+
+impl CadCommand for BreakAtPointCommand {
+    fn name(&self) -> &'static str { "BREAKATPOINT" }
+
+    fn prompt(&self) -> String {
+        if self.target.is_none() {
+            "BREAKATPOINT  Select object:".into()
+        } else {
+            "BREAKATPOINT  Specify break point:".into()
+        }
+    }
+
+    fn needs_entity_pick(&self) -> bool {
+        self.target.is_none()
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        self.target = Some(handle);
+        CmdResult::NeedPoint
+    }
+
+    fn on_point(&mut self, pt: Vec3) -> CmdResult {
+        match self.target {
+            Some(handle) => CmdResult::BreakEntity { handle, p1: pt, p2: pt },
+            None => CmdResult::Cancel,
+        }
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
     }
 }

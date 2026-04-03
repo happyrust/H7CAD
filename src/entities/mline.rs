@@ -38,8 +38,9 @@ impl TruckConvertible for MLine {
         // Parallel offset lines — one at +scale/2 and one at -scale/2
         // along each vertex's miter direction.
         if scale.abs() > 1e-6 {
-            for sign in [-0.5_f32, 0.5_f32] {
-                let offset = scale * sign;
+            let half = scale * 0.5;
+            for sign in [-1.0_f32, 1.0_f32] {
+                let offset = half * sign;
                 pts.push([f32::NAN; 3]);
                 for v in &self.vertices {
                     let mx = v.miter.x as f32;
@@ -62,6 +63,26 @@ impl TruckConvertible for MLine {
                         v0.position.z as f32 + mz * offset,
                     ]);
                 }
+            }
+
+            // Start and end caps: perpendicular line connecting the two offset lines
+            // at the first and last vertex of an open MLine.
+            if !closed {
+                let cap_v = |v: &acadrust::entities::MLineVertex| {
+                    let mx = v.miter.x as f32;
+                    let my = v.miter.y as f32;
+                    let mz = v.miter.z as f32;
+                    let px = v.position.x as f32;
+                    let py = v.position.y as f32;
+                    let pz = v.position.z as f32;
+                    [
+                        [f32::NAN; 3],
+                        [px + mx * (-half), py + my * (-half), pz + mz * (-half)],
+                        [px + mx * half,    py + my * half,    pz + mz * half   ],
+                    ]
+                };
+                pts.extend_from_slice(&cap_v(&self.vertices[0]));
+                pts.extend_from_slice(&cap_v(&self.vertices[n - 1]));
             }
         }
 

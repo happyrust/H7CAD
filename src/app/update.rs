@@ -1502,6 +1502,26 @@ impl H7CAD {
                                 }
                             }
                         }
+                    } else if field == "vp_named_view" {
+                        // Assign a named view to viewport(s): copy camera parameters.
+                        let view_data = self.tabs[i].scene.document.views
+                            .iter()
+                            .find(|v| v.name == value)
+                            .cloned();
+                        if let Some(view) = view_data {
+                            for handle in &handles {
+                                if let Some(acadrust::EntityType::Viewport(vp)) =
+                                    self.tabs[i].scene.document.get_entity_mut(*handle)
+                                {
+                                    vp.view_target = view.target.clone();
+                                    vp.view_direction = view.direction.clone();
+                                    if view.height > 0.0 {
+                                        vp.view_height = view.height;
+                                    }
+                                }
+                            }
+                            self.tabs[i].scene.camera_generation += 1;
+                        }
                     } else {
                         for handle in handles {
                             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
@@ -1841,6 +1861,10 @@ impl H7CAD {
                 self.page_setup_rotation = s;
                 Task::none()
             }
+            Message::PageSetupScale(s) => {
+                self.page_setup_scale = s;
+                Task::none()
+            }
             Message::PageSetupCommit => {
                 let i = self.active_tab;
                 let layout_name = self.tabs[i].scene.current_layout.clone();
@@ -1852,6 +1876,7 @@ impl H7CAD {
                     let offset_x  = self.page_setup_offset_x.parse::<f64>().unwrap_or(0.0);
                     let offset_y  = self.page_setup_offset_y.parse::<f64>().unwrap_or(0.0);
                     let rotation: i16 = self.page_setup_rotation.parse().unwrap_or(0);
+                    let scale_str = self.page_setup_scale.clone();
 
                     // Update the Layout object's limits.
                     for obj in self.tabs[i].scene.document.objects.values_mut() {
@@ -1904,6 +1929,16 @@ impl H7CAD {
                             270 => PlotRotation::Degrees270,
                             _   => PlotRotation::None,
                         };
+                        // Apply plot scale.
+                        use acadrust::objects::ScaledType;
+                        let (num, den) = parse_plot_scale(&scale_str);
+                        if scale_str == "Fit" {
+                            ps.set_scale_to_fit();
+                        } else {
+                            ps.scale_type = ScaledType::CustomScale;
+                            ps.scale_numerator = num;
+                            ps.scale_denominator = den;
+                        }
                     }
 
                     self.tabs[i].dirty = true;
@@ -2034,4 +2069,16 @@ impl H7CAD {
             }
         }
     }
+}
+
+/// Parse a scale string like "1:50" or "2:1" into (numerator, denominator).
+/// Returns (1.0, 1.0) for "Fit" or unknown formats.
+fn parse_plot_scale(s: &str) -> (f64, f64) {
+    if s == "Fit" { return (1.0, 1.0); }
+    if let Some((a, b)) = s.split_once(':') {
+        let num: f64 = a.trim().parse().unwrap_or(1.0);
+        let den: f64 = b.trim().parse().unwrap_or(1.0);
+        if den > 0.0 { return (num, den); }
+    }
+    (1.0, 1.0)
 }

@@ -209,6 +209,7 @@ impl H7CAD {
                 &self.page_setup_offset_x,
                 &self.page_setup_offset_y,
                 &self.page_setup_rotation,
+                &self.page_setup_scale,
             )
         } else {
             iced::widget::Space::new().width(0).height(0).into()
@@ -489,6 +490,7 @@ fn page_setup_overlay<'a>(
     offset_x: &'a str,
     offset_y: &'a str,
     rotation: &'a str,
+    scale: &'a str,
 ) -> Element<'a, Message> {
     const PANEL_BG: Color  = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
     const BORDER_COL: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
@@ -666,6 +668,40 @@ fn page_setup_overlay<'a>(
             // Rotation
             text("Rotation").size(11).color(DIM_COLOR),
             rot_row,
+            divider(),
+            // Plot Scale
+            text("Plot Scale").size(11).color(DIM_COLOR),
+            row![
+                button(text("Fit").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("Fit".into()))
+                    .style(pill_style(scale == "Fit")).padding([3, 8]),
+                button(text("1:1").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("1:1".into()))
+                    .style(pill_style(scale == "1:1")).padding([3, 8]),
+                button(text("1:2").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("1:2".into()))
+                    .style(pill_style(scale == "1:2")).padding([3, 8]),
+                button(text("1:5").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("1:5".into()))
+                    .style(pill_style(scale == "1:5")).padding([3, 8]),
+                button(text("1:10").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("1:10".into()))
+                    .style(pill_style(scale == "1:10")).padding([3, 8]),
+            ].spacing(4),
+            row![
+                button(text("1:20").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("1:20".into()))
+                    .style(pill_style(scale == "1:20")).padding([3, 8]),
+                button(text("1:50").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("1:50".into()))
+                    .style(pill_style(scale == "1:50")).padding([3, 8]),
+                button(text("1:100").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("1:100".into()))
+                    .style(pill_style(scale == "1:100")).padding([3, 8]),
+                button(text("2:1").size(10).color(TEXT_COLOR))
+                    .on_press(Message::PageSetupScale("2:1".into()))
+                    .style(pill_style(scale == "2:1")).padding([3, 8]),
+            ].spacing(4),
             divider(),
             // Buttons
             row![

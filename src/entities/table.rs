@@ -71,22 +71,49 @@ impl TruckConvertible for Table {
 
         // Cell text — lifted into Lines points via 2D strokes
         let text_height = 0.18_f32;
+        let margin = text_height * 0.5_f32;
+
         for (ri, row) in self.rows.iter().enumerate() {
-            let row_top    = row_offsets[ri];
-            let row_bot    = row_offsets.get(ri + 1).copied().unwrap_or(row_top + row.height as f32);
-            let row_mid    = (row_top + row_bot) * 0.5;
+            let row_top = row_offsets[ri];
+            let row_bot = row_offsets.get(ri + 1).copied().unwrap_or(row_top + row.height as f32);
+            let row_mid = (row_top + row_bot) * 0.5;
 
             for (ci, cell) in row.cells.iter().enumerate() {
                 let text = cell.text_value();
                 if text.is_empty() {
                     continue;
                 }
-                let col_left = col_offsets[ci];
-                let col_mid  = col_left + self.columns.get(ci).map(|c| c.width as f32 * 0.5).unwrap_or(0.5);
-                let cell_center = origin + h * col_mid + v_down * row_mid;
+
+                let col_left  = col_offsets[ci];
+                let col_width = self.columns.get(ci).map(|c| c.width as f32).unwrap_or(1.0);
+                let col_right = col_left + col_width;
+
+                // Alignment: CellStyle.alignment i32 encodes 1-9 (AutoCAD convention):
+                // 1=TopLeft 2=TopCenter 3=TopRight
+                // 4=MiddleLeft 5=MiddleCenter 6=MiddleRight
+                // 7=BottomLeft 8=BottomCenter 9=BottomRight
+                // 0/default = MiddleCenter (5)
+                let align = cell.style.as_ref().map_or(5, |s| s.alignment);
+                let horiz = ((align - 1).rem_euclid(3)) + 1; // 1=left, 2=center, 3=right
+                let vert  = ((align - 1) / 3) + 1;           // 1=top, 2=middle, 3=bottom
+
+                let text_w = cxf::measure_text(text, text_height, 1.0, "txt");
+
+                let x_offset = match horiz {
+                    1 => col_left + margin,                         // left
+                    3 => col_right - margin - text_w,               // right
+                    _ => col_left + (col_width - text_w) * 0.5,    // center (default)
+                };
+                let y_offset = match vert {
+                    1 => row_top + margin,                          // top
+                    3 => row_bot - margin - text_height,            // bottom
+                    _ => row_mid - text_height * 0.5,               // middle (default)
+                };
+
+                let text_origin = origin + h * x_offset + v_down * y_offset;
 
                 let strokes = cxf::tessellate_text_ex(
-                    [cell_center.x, cell_center.y],
+                    [text_origin.x, text_origin.y],
                     text_height,
                     0.0,
                     1.0,

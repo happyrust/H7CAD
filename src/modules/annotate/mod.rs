@@ -3,12 +3,16 @@
 pub mod aligned_dim;
 pub mod angular_dim;
 pub mod diameter_dim;
+pub mod dim_baseline;
+pub mod dim_continue;
 pub mod leader_cmd;
 pub mod linear_dim;
 pub mod mleader_cmd;
 pub mod mtext;
 pub mod radius_dim;
+pub mod table_cmd;
 pub mod text;
+pub mod tolerance_cmd;
 
 use crate::modules::{CadModule, RibbonGroup, RibbonItem};
 

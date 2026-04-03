@@ -416,6 +416,118 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            "ATTDEF" => {
+                use crate::modules::home::draw::attdef::AttdefCommand;
+                let cmd = AttdefCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ATTEDIT — list or edit attribute values on selected Insert entities.
+            // Usage:
+            //   ATTEDIT           — list all attributes on selected Insert(s)
+            //   ATTEDIT <tag> <v> — set the value of attribute <tag> to <v>
+            cmd if cmd == "ATTEDIT" || cmd.starts_with("ATTEDIT ") => {
+                let rest = cmd.trim_start_matches("ATTEDIT").trim();
+                let parts: Vec<&str> = rest.splitn(2, char::is_whitespace).collect();
+                let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                if selected_handles.is_empty() {
+                    self.command_line.push_error("ATTEDIT: select an Insert entity first.");
+                } else {
+                    let mut found_any = false;
+                    for sh in &selected_handles {
+                        if let Some(acadrust::EntityType::Insert(ins)) =
+                            self.tabs[i].scene.document.entities().find(|e| e.common().handle == *sh)
+                        {
+                            found_any = true;
+                            if rest.is_empty() {
+                                // List attributes.
+                                if ins.attributes.is_empty() {
+                                    self.command_line.push_output(&format!(
+                                        "  Insert {:x}: no attributes.", sh.value()
+                                    ));
+                                } else {
+                                    for attr in &ins.attributes {
+                                        self.command_line.push_output(&format!(
+                                            "  [{tag}] = {val}",
+                                            tag = attr.tag,
+                                            val = attr.get_value()
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !found_any {
+                        self.command_line.push_error("ATTEDIT: no Insert entities in selection.");
+                    }
+                    // If tag + value supplied, mutate attributes.
+                    if parts.len() == 2 && !parts[0].is_empty() {
+                        let tag_up = parts[0].to_uppercase();
+                        let new_val = parts[1];
+                        let mut changed = 0usize;
+                        self.push_undo_snapshot(i, "ATTEDIT");
+                        for sh in &selected_handles {
+                            if let Some(acadrust::EntityType::Insert(ins)) =
+                                self.tabs[i].scene.document.entities_mut().find(|e| e.common().handle == *sh)
+                            {
+                                for attr in &mut ins.attributes {
+                                    if attr.tag.to_uppercase() == tag_up {
+                                        attr.set_value(new_val);
+                                        changed += 1;
+                                    }
+                                }
+                            }
+                        }
+                        if changed > 0 {
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!(
+                                "ATTEDIT: updated {changed} attribute(s) [{tag_up}] = {new_val}."
+                            ));
+                        } else {
+                            self.command_line.push_error(&format!(
+                                "ATTEDIT: tag '{tag_up}' not found in selection."
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // ATTDISP — control attribute display visibility.
+            // ATTDISP ON   — make all AttributeDefinitions visible
+            // ATTDISP OFF  — make all AttributeDefinitions invisible
+            // ATTDISP NORMAL — restore: show only those without the invisible flag
+            cmd if cmd == "ATTDISP" || cmd.starts_with("ATTDISP ") => {
+                let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
+                match sub.as_str() {
+                    "ON" | "OFF" | "NORMAL" => {
+                        self.push_undo_snapshot(i, "ATTDISP");
+                        let mut count = 0usize;
+                        for entity in self.tabs[i].scene.document.entities_mut() {
+                            if let acadrust::EntityType::AttributeDefinition(ad) = entity {
+                                match sub.as_str() {
+                                    "ON"     => { ad.flags.invisible = false; count += 1; }
+                                    "OFF"    => { ad.flags.invisible = true;  count += 1; }
+                                    "NORMAL" => { /* leave existing flags — they are already the "normal" state */ }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!(
+                            "ATTDISP {sub}: {count} attribute definition(s) updated."
+                        ));
+                    }
+                    _ => {
+                        self.command_line.push_info("Usage: ATTDISP ON | OFF | NORMAL");
+                    }
+                }
+            }
+
             "DONUT"|"DO" => {
                 use crate::modules::home::draw::donut::DonutCommand;
                 let cmd = DonutCommand::new();
@@ -810,6 +922,42 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "TOLERANCE"|"TOL" => {
+                use crate::modules::annotate::tolerance_cmd::ToleranceCommand;
+                let cmd = ToleranceCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "TABLE" => {
+                use crate::modules::annotate::table_cmd::TableCommand;
+                let cmd = TableCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMCONTINUE"|"DCO" => {
+                use crate::modules::annotate::dim_continue::DimContinueCommand;
+                let cmd = if let Some((p1, p2, dp, rot)) = find_last_linear_dim(&self.tabs[i].scene) {
+                    DimContinueCommand::from_base(p1, p2, dp, rot)
+                } else {
+                    DimContinueCommand::new()
+                };
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMBASELINE"|"DBA" => {
+                use crate::modules::annotate::dim_baseline::DimBaselineCommand;
+                let cmd = if let Some((p1, p2, dp, rot)) = find_last_linear_dim(&self.tabs[i].scene) {
+                    DimBaselineCommand::from_base(p1, p2, dp, rot)
+                } else {
+                    DimBaselineCommand::new()
+                };
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "ZOOM EXTENTS"|"ZOOMEXTENTS"|"ZE" => {
                 self.tabs[i].scene.fit_all();
                 self.command_line.push_output("Zoom Extents");
@@ -842,6 +990,13 @@ impl H7CAD {
                         self.command_line.push_output(&format!("Zoom Scale ×{factor:.3}"));
                     }
                 }
+            }
+
+            "PLOTWINDOW"|"PW" => {
+                use crate::modules::view::plot_window::PlotWindowCommand;
+                let cmd = PlotWindowCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
             "ZOOM WINDOW"|"ZOOM W"|"ZW" => {
@@ -1097,6 +1252,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            "BREAKATPOINT"|"BAP" => {
+                use crate::modules::home::modify::break_cmd::BreakAtPointCommand;
+                let cmd = BreakAtPointCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "PEDIT"|"PE" => {
                 use crate::modules::home::modify::pedit::PeditCommand;
                 let cmd_obj = PeditCommand::new();
@@ -1190,7 +1352,6 @@ impl H7CAD {
             // QSELECT COLOR <n>            — select all entities with color index n
             // QSELECT LINETYPE <name>      — select all entities with linetype
             cmd if cmd == "QSELECT" || cmd.starts_with("QSELECT ") => {
-                use crate::scene::Scene;
                 let rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = rest.splitn(2, ' ').collect();
                 let prop = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
@@ -1336,14 +1497,16 @@ impl H7CAD {
 
             "HELP"|"?" => {
                 self.command_line.push_output(
-                    "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT  |  \
-                     Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN ALIGN  |  \
+                    "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT REVCLOUD WIPEOUT MLINE ATTDEF  |  \
+                     Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN ALIGN PEDIT  |  \
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
-                     Dimension: DIMLINEAR DIMALIGNED DIMANGULAR DIMRADIUS DIMDIAMETER  |  \
+                     Dimension: DIMLINEAR DIMALIGNED DIMANGULAR DIMRADIUS DIMDIAMETER DIMCONTINUE DIMBASELINE  |  \
+                     Annotation: TOLERANCE  |  \
                      Inquiry: DIST ID AREA LIST FIND FINDALL COUNT QSELECT  |  Draw on entity: DIVIDE MEASURE  |  \
-                     Utilities: FLATTEN LAYISO LAYUNISO PEDIT MLINE MLEADER  |  \
-                     View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
+                     Attributes: ATTEDIT ATTDISP  |  \
+                     Utilities: FLATTEN LAYISO LAYUNISO  |  \
+                     View: ZOOM EXTENTS ZOOM WINDOW VIEW LIST/SAVE/RESTORE/DELETE  |  \
                      Layer: LAYER LIST/NEW/ON/OFF/FREEZE/THAW/LOCK/UNLOCK/COLOR/SET  |  \
                      Viewport: MVIEW VPLAYER VPORTS MS PS DRAWORDER  |  \
                      Tables: STYLE DIMSTYLE LINETYPE UCS RENAME PURGE  |  \
@@ -1448,12 +1611,8 @@ impl H7CAD {
             // ── Draw Order ────────────────────────────────────────────────
             cmd if cmd.starts_with("DRAWORDER") => {
                 use acadrust::objects::{ObjectType, SortEntitiesTable};
-                let option = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
-                let bring_front = match option.as_str() {
-                    "F" | "FRONT" => Some(true),
-                    "B" | "BACK"  => Some(false),
-                    _ => None,
-                };
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                let option = parts.get(1).unwrap_or(&"").to_uppercase();
                 let i = self.active_tab;
                 let selected: Vec<acadrust::Handle> = self.tabs[i].scene
                     .selected_entities()
@@ -1462,42 +1621,87 @@ impl H7CAD {
                     .collect();
                 if selected.is_empty() {
                     self.command_line.push_error("DRAWORDER: select entities first.");
-                } else if let Some(to_front) = bring_front {
-                    self.push_undo_snapshot(i, "DRAWORDER");
-                    let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
-                    let doc = &mut self.tabs[i].scene.document;
-                    let table_handle = doc.objects.iter()
-                        .find_map(|(h, obj)| {
-                            if let ObjectType::SortEntitiesTable(t) = obj {
-                                if t.block_owner_handle == block_handle { Some(*h) } else { None }
-                            } else { None }
+                } else {
+                    // Parse relative target handle for ABOVE/UNDER.
+                    let relative_target: Option<(bool, acadrust::Handle)> = match option.as_str() {
+                        "A" | "ABOVE" => {
+                            let h_val = parts.get(2).and_then(|s| u64::from_str_radix(s, 16).ok());
+                            h_val.map(|v| (true, acadrust::Handle::new(v)))
+                        }
+                        "U" | "UNDER" | "BELOW" => {
+                            let h_val = parts.get(2).and_then(|s| u64::from_str_radix(s, 16).ok());
+                            h_val.map(|v| (false, acadrust::Handle::new(v)))
+                        }
+                        _ => None,
+                    };
+                    let to_front_opt = match option.as_str() {
+                        "F" | "FRONT" => Some(true),
+                        "B" | "BACK"  => Some(false),
+                        _ => None,
+                    };
+
+                    if relative_target.is_some() || to_front_opt.is_some() {
+                        self.push_undo_snapshot(i, "DRAWORDER");
+                        let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+                        let doc = &mut self.tabs[i].scene.document;
+                        let table_handle = doc.objects.iter()
+                            .find_map(|(h, obj)| {
+                                if let ObjectType::SortEntitiesTable(t) = obj {
+                                    if t.block_owner_handle == block_handle { Some(*h) } else { None }
+                                } else { None }
+                            });
+                        let get_or_create = |doc: &mut acadrust::CadDocument, block_handle| -> acadrust::Handle {
+                            if let Some(th) = doc.objects.iter()
+                                .find_map(|(h, obj)| {
+                                    if let ObjectType::SortEntitiesTable(t) = obj {
+                                        if t.block_owner_handle == block_handle { Some(*h) } else { None }
+                                    } else { None }
+                                })
+                            {
+                                th
+                            } else {
+                                let nh = acadrust::Handle::new(doc.next_handle());
+                                let mut table = SortEntitiesTable::for_block(block_handle);
+                                table.handle = nh;
+                                doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
+                                nh
+                            }
+                        };
+                        let th = table_handle.unwrap_or_else(|| {
+                            let nh = acadrust::Handle::new(doc.next_handle());
+                            let mut table = SortEntitiesTable::for_block(block_handle);
+                            table.handle = nh;
+                            doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
+                            nh
                         });
-                    if let Some(th) = table_handle {
-                        if let Some(ObjectType::SortEntitiesTable(table)) =
-                            doc.objects.get_mut(&th)
-                        {
-                            for h in &selected {
-                                if to_front { table.bring_to_front(*h); }
-                                else        { table.send_to_back(*h); }
+                        let _ = get_or_create; // suppress unused warning
+                        if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th) {
+                            if let Some((above, target)) = relative_target {
+                                for h in &selected {
+                                    if above { table.move_above(*h, target); }
+                                    else      { table.move_below(*h, target); }
+                                }
+                                let rel = if above { "above" } else { "below" };
+                                self.command_line.push_info(&format!(
+                                    "DRAWORDER: moved {} entities {} {:x}.", selected.len(), rel, target.value()
+                                ));
+                            } else if let Some(to_front) = to_front_opt {
+                                for h in &selected {
+                                    if to_front { table.bring_to_front(*h); }
+                                    else        { table.send_to_back(*h); }
+                                }
+                                let dir = if to_front { "front" } else { "back" };
+                                self.command_line.push_info(&format!(
+                                    "DRAWORDER: moved {} entities to {}.", selected.len(), dir
+                                ));
                             }
                         }
+                        self.tabs[i].dirty = true;
                     } else {
-                        let new_handle = acadrust::Handle::new(doc.next_handle());
-                        let mut table = SortEntitiesTable::for_block(block_handle);
-                        table.handle = new_handle;
-                        for h in &selected {
-                            if to_front { table.bring_to_front(*h); }
-                            else        { table.send_to_back(*h); }
-                        }
-                        doc.objects.insert(new_handle, ObjectType::SortEntitiesTable(table));
+                        self.command_line.push_info(
+                            "Usage: DRAWORDER F|FRONT | B|BACK | A|ABOVE <handle> | U|UNDER <handle>"
+                        );
                     }
-                    self.tabs[i].dirty = true;
-                    let dir = if to_front { "front" } else { "back" };
-                    self.command_line.push_info(&format!(
-                        "DRAWORDER: moved {} entities to {}.", selected.len(), dir
-                    ));
-                } else {
-                    self.command_line.push_info("Usage: DRAWORDER F  (front)  or  DRAWORDER B  (back)");
                 }
             }
 
@@ -1798,15 +2002,23 @@ impl H7CAD {
                         if let Ok(val) = val_str.parse::<f64>() {
                             if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&style_name) {
                                 match prop.as_str() {
-                                    "dimtxt"  => { ds.dimtxt = val; }
-                                    "dimasz"  => { ds.dimasz = val; }
-                                    "dimdli"  => { ds.dimdli = val; }
-                                    "dimexo"  => { ds.dimexo = val; }
-                                    "dimexe"  => { ds.dimexe = val; }
-                                    "dimgap"  => { ds.dimgap = val; }
-                                    "dimscale"| "dimlfac" => { ds.dimgap = val; } // best effort
+                                    "dimtxt"    => { ds.dimtxt   = val; }
+                                    "dimasz"    => { ds.dimasz   = val; }
+                                    "dimdli"    => { ds.dimdli   = val; }
+                                    "dimexo"    => { ds.dimexo   = val; }
+                                    "dimexe"    => { ds.dimexe   = val; }
+                                    "dimgap"    => { ds.dimgap   = val; }
+                                    "dimscale"  => { ds.dimscale = val; }
+                                    "dimlfac"   => { ds.dimlfac  = val; }
+                                    "dimdle"    => { ds.dimdle   = val; }
+                                    "dimtvp"    => { ds.dimtvp   = val; }
+                                    "dimcen"    => { ds.dimcen   = val; }
+                                    "dimtsz"    => { ds.dimtsz   = val; }
+                                    "dimfxl"    => { ds.dimfxl   = val; }
                                     _ => {
-                                        self.command_line.push_error(&format!("DIMSTYLE: unknown property '{}'. Try: dimtxt dimasz dimdli dimexo dimexe dimgap", prop));
+                                        self.command_line.push_error(&format!(
+                                            "DIMSTYLE: unknown property '{}'. Try: dimtxt dimasz dimdli dimexo dimexe dimgap dimscale dimlfac dimdle dimcen dimtsz", prop
+                                        ));
                                         return Task::none();
                                     }
                                 }
@@ -1905,9 +2117,26 @@ impl H7CAD {
                             self.command_line.push_error(&format!("Usage: {prefix} WIDTH <style> <factor>"));
                         }
                     }
+                    "OBLIQUE" => {
+                        // STYLE OBLIQUE <name> <angle_degrees>
+                        let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let angle_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
+                        if let Ok(deg) = angle_str.parse::<f64>() {
+                            if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&style_name) {
+                                s.oblique_angle = deg.to_radians();
+                                self.push_undo_snapshot(i, "STYLE OBLIQUE");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("{prefix}: '{style_name}' oblique angle set to {deg:.1}°."));
+                            } else {
+                                self.command_line.push_error(&format!("{prefix}: style '{style_name}' not found."));
+                            }
+                        } else {
+                            self.command_line.push_error(&format!("Usage: {prefix} OBLIQUE <style> <angle_degrees>"));
+                        }
+                    }
                     _ => {
                         self.command_line.push_info(&format!(
-                            "Usage: {prefix} LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor>"
+                            "Usage: {prefix} LIST | NEW <name> | FONT <style> <file> | WIDTH <style> <factor> | OBLIQUE <style> <angle>"
                         ));
                     }
                 }
@@ -2021,9 +2250,13 @@ impl H7CAD {
                         let ltscale_val: Option<f64> = if prop == "LTSCALE" {
                             value.parse().ok()
                         } else { None };
+                        let transparency_val: Option<acadrust::types::Transparency> = if prop == "TRANSPARENCY" {
+                            value.parse::<f64>().ok().map(acadrust::types::Transparency::from_percent)
+                        } else { None };
 
                         if (prop == "COLOR" && color_val.is_none())
                             || (prop == "LTSCALE" && ltscale_val.is_none())
+                            || (prop == "TRANSPARENCY" && transparency_val.is_none())
                         {
                             self.command_line.push_error(&format!("CHPROP: invalid value '{}' for {}.", value, prop));
                         } else {
@@ -2036,9 +2269,10 @@ impl H7CAD {
                                         "LINETYPE" | "LT"  => { common.linetype = value.clone(); changed += 1; }
                                         "LTSCALE"          => { common.linetype_scale = ltscale_val.unwrap(); changed += 1; }
                                         "COLOR"            => { common.color = color_val.unwrap(); changed += 1; }
+                                        "TRANSPARENCY"     => { common.transparency = transparency_val.unwrap(); changed += 1; }
                                         _ => {
                                             self.command_line.push_error(&format!(
-                                                "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE", prop
+                                                "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE TRANSPARENCY", prop
                                             ));
                                             break;
                                         }
@@ -2119,6 +2353,305 @@ impl H7CAD {
                         self.command_line.push_output(&format!("RENAME: '{}' → '{}'.", old_name, new_name));
                     } else if type_str != "BLOCK" {
                         self.command_line.push_error(&format!("RENAME: '{}' not found in {}.", old_name, type_str));
+                    }
+                }
+            }
+
+            // ── System variable getters/setters ──────────────────────────────────
+            // CLAYER [name]    — get or set current layer
+            // TEXTSTYLE [name] — already handled above under STYLE SET
+            // DIMSTYLE [name]  — get or set active dim style
+            // LTSCALE [val]    — global linetype scale
+            cmd if cmd == "CLAYER" || cmd.starts_with("CLAYER ") => {
+                let name_arg = cmd.trim_start_matches("CLAYER").trim();
+                if name_arg.is_empty() {
+                    let cur = &self.tabs[i].scene.document.header.current_layer_name;
+                    self.command_line.push_output(&format!("CLAYER = \"{cur}\""));
+                } else {
+                    if self.tabs[i].scene.document.layers.contains(name_arg) {
+                        self.tabs[i].scene.document.header.current_layer_name = name_arg.to_string();
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!("CLAYER set to \"{name_arg}\""));
+                    } else {
+                        self.command_line.push_error(&format!("CLAYER: layer '{}' not found.", name_arg));
+                    }
+                }
+            }
+            cmd if cmd == "CDIMSTY" || cmd == "DIMCURRENT" || cmd.starts_with("CDIMSTY ") || cmd.starts_with("DIMCURRENT ") => {
+                let name_arg = cmd.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+                if name_arg.is_empty() {
+                    let cur = &self.tabs[i].scene.document.header.current_dimstyle_name;
+                    self.command_line.push_output(&format!("CDIMSTY = \"{cur}\""));
+                } else {
+                    if self.tabs[i].scene.document.dim_styles.contains(&name_arg) {
+                        self.tabs[i].scene.document.header.current_dimstyle_name = name_arg.clone();
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!("Active dim style set to \"{name_arg}\""));
+                    } else {
+                        self.command_line.push_error(&format!("CDIMSTY: dim style '{}' not found.", name_arg));
+                    }
+                }
+            }
+            cmd if cmd == "LTSCALE" || cmd.starts_with("LTSCALE ") => {
+                let val_str = cmd.trim_start_matches("LTSCALE").trim();
+                if val_str.is_empty() {
+                    let v = self.tabs[i].scene.document.header.linetype_scale;
+                    self.command_line.push_output(&format!("LTSCALE = {v:.4}"));
+                } else if let Ok(v) = val_str.parse::<f64>() {
+                    if v > 0.0 {
+                        self.push_undo_snapshot(i, "LTSCALE");
+                        self.tabs[i].scene.document.header.linetype_scale = v;
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!("LTSCALE set to {v:.4}"));
+                    } else {
+                        self.command_line.push_error("LTSCALE: value must be positive.");
+                    }
+                } else {
+                    self.command_line.push_error("Usage: LTSCALE [value]");
+                }
+            }
+            cmd if cmd == "CELTSCALE" || cmd.starts_with("CELTSCALE ") => {
+                let val_str = cmd.trim_start_matches("CELTSCALE").trim();
+                if val_str.is_empty() {
+                    let v = self.tabs[i].scene.document.header.current_entity_linetype_scale;
+                    self.command_line.push_output(&format!("CELTSCALE = {v:.4}"));
+                } else if let Ok(v) = val_str.parse::<f64>() {
+                    if v > 0.0 {
+                        self.tabs[i].scene.document.header.current_entity_linetype_scale = v;
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!("CELTSCALE set to {v:.4}"));
+                    } else {
+                        self.command_line.push_error("CELTSCALE: value must be positive.");
+                    }
+                } else {
+                    self.command_line.push_error("Usage: CELTSCALE [value]");
+                }
+            }
+
+            // ── SCALETEXT — rescale selected Text/MText entities ─────────────────
+            // Usage: SCALETEXT <factor>   e.g. SCALETEXT 2
+            //        SCALETEXT H <height>  set absolute height
+            cmd if cmd == "SCALETEXT" || cmd.starts_with("SCALETEXT ") => {
+                let rest = cmd.trim_start_matches("SCALETEXT").trim();
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                if selected_handles.is_empty() {
+                    self.command_line.push_error("SCALETEXT: select Text/MText entities first.");
+                } else {
+                    let (use_absolute, value) = match (parts.first().map(|s| s.to_uppercase()).as_deref(), parts.get(1)) {
+                        (Some("H"), Some(v)) => (true, v.parse::<f64>().ok()),
+                        (Some(v), None) => (false, v.parse::<f64>().ok()),
+                        _ => (false, None),
+                    };
+                    if let Some(val) = value {
+                        if val <= 0.0 {
+                            self.command_line.push_error("SCALETEXT: value must be positive.");
+                        } else {
+                            self.push_undo_snapshot(i, "SCALETEXT");
+                            let mut count = 0usize;
+                            for sh in &selected_handles {
+                                for entity in self.tabs[i].scene.document.entities_mut() {
+                                    if entity.common().handle != *sh { continue; }
+                                    match entity {
+                                        acadrust::EntityType::Text(t) => {
+                                            t.height = if use_absolute { val } else { t.height * val };
+                                            count += 1;
+                                        }
+                                        acadrust::EntityType::MText(t) => {
+                                            t.height = if use_absolute { val } else { t.height * val };
+                                            count += 1;
+                                        }
+                                        _ => {}
+                                    }
+                                    break;
+                                }
+                            }
+                            if count > 0 {
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!(
+                                    "SCALETEXT: scaled {count} text entity(ies)."
+                                ));
+                            } else {
+                                self.command_line.push_error("SCALETEXT: no Text/MText in selection.");
+                            }
+                        }
+                    } else {
+                        self.command_line.push_info("Usage: SCALETEXT <factor>  or  SCALETEXT H <height>");
+                    }
+                }
+            }
+
+            // ── Display refresh (no-op in GPU raster pipeline) ────────────────
+            "REGEN"|"REGENALL"|"REDRAW"|"REDRWALL" => {
+                // Display is always up-to-date in the GPU raster pipeline.
+                self.command_line.push_output("Display regenerated.");
+            }
+
+            // ── TABLE cell editing ─────────────────────────────────────────────
+            // TABLE CELL <row> <col> <text> — set text for a cell in the selected Table
+            cmd if cmd.starts_with("TABLE ") => {
+                let rest = cmd.trim_start_matches("TABLE").trim();
+                let sub_up = rest.split_whitespace().next().unwrap_or("").to_uppercase();
+                if sub_up == "CELL" {
+                    let parts: Vec<&str> = rest.splitn(4, char::is_whitespace).collect();
+                    // parts: ["CELL", "<row>", "<col>", "<text>"]
+                    let row_res = parts.get(1).and_then(|s| s.parse::<usize>().ok());
+                    let col_res = parts.get(2).and_then(|s| s.parse::<usize>().ok());
+                    let text = parts.get(3).copied().unwrap_or("");
+                    match (row_res, col_res) {
+                        (Some(row), Some(col)) => {
+                            let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                                .selected_entities()
+                                .iter()
+                                .map(|(h, _)| *h)
+                                .collect();
+                            let mut found = false;
+                            for sh in &selected_handles {
+                                if let Some(acadrust::EntityType::Table(tbl)) =
+                                    self.tabs[i].scene.document.entities_mut().find(|e| e.common().handle == *sh)
+                                {
+                                    if tbl.set_cell_text(row, col, text) {
+                                        found = true;
+                                    }
+                                }
+                            }
+                            if found {
+                                self.push_undo_snapshot(i, "TABLE CELL");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!(
+                                    "TABLE CELL: set [{row},{col}] = \"{text}\"."
+                                ));
+                            } else {
+                                self.command_line.push_error(
+                                    "TABLE CELL: select a Table entity first, or row/col out of range."
+                                );
+                            }
+                        }
+                        _ => {
+                            self.command_line.push_info("Usage: TABLE CELL <row> <col> <text>");
+                        }
+                    }
+                } else {
+                    self.command_line.push_info("Usage: TABLE  (creates new table)  or  TABLE CELL <row> <col> <text>");
+                }
+            }
+
+            // ── UCSICON — toggle UCS icon visibility on all viewports ────────────
+            // UCSICON ON       — show UCS icon in all viewports
+            // UCSICON OFF      — hide UCS icon in all viewports
+            // UCSICON NOORIGIN — show icon but not at origin (show at corner)
+            // UCSICON ORIGIN   — show icon at UCS origin
+            cmd if cmd == "UCSICON" || cmd.starts_with("UCSICON ") => {
+                let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
+                match sub.as_str() {
+                    "ON" | "OFF" | "NOORIGIN" | "ORIGIN" => {
+                        self.push_undo_snapshot(i, "UCSICON");
+                        let visible = sub != "OFF";
+                        let at_origin = sub == "ORIGIN";
+                        let mut count = 0usize;
+                        for entity in self.tabs[i].scene.document.entities_mut() {
+                            if let acadrust::EntityType::Viewport(vp) = entity {
+                                vp.status.ucs_icon_visible = visible;
+                                if sub == "NOORIGIN" || sub == "ORIGIN" {
+                                    vp.status.ucs_icon_at_origin = at_origin;
+                                }
+                                count += 1;
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!(
+                            "UCSICON {sub}: updated {count} viewport(s)."
+                        ));
+                    }
+                    _ => {
+                        self.command_line.push_info("Usage: UCSICON ON | OFF | NOORIGIN | ORIGIN");
+                    }
+                }
+            }
+
+            // ── XDATA — read/write extended entity data ──────────────────────────
+            // XDATA LIST             — show all xdata records on selected entities
+            // XDATA SET <app> <str>  — append a string xdata value for <app>
+            // XDATA CLEAR            — remove all xdata from selected entities
+            // XDATA CLEAR <app>      — remove xdata for a specific application
+            cmd if cmd == "XDATA" || cmd.starts_with("XDATA ") => {
+                use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+                let rest = cmd.trim_start_matches("XDATA").trim();
+                let parts: Vec<&str> = rest.splitn(3, char::is_whitespace).collect();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                if selected_handles.is_empty() {
+                    self.command_line.push_error("XDATA: select entities first.");
+                } else {
+                    match sub.as_str() {
+                        "LIST" | "" => {
+                            for sh in &selected_handles {
+                                if let Some(entity) = self.tabs[i].scene.document.get_entity(*sh) {
+                                    let xd = &entity.common().extended_data;
+                                    if xd.is_empty() {
+                                        self.command_line.push_output(&format!("  {:x}: no xdata.", sh.value()));
+                                    } else {
+                                        for rec in xd.records() {
+                                            self.command_line.push_output(&format!(
+                                                "  {:x} [{}]: {} value(s)", sh.value(), rec.application_name, rec.values.len()
+                                            ));
+                                            for v in &rec.values {
+                                                self.command_line.push_output(&format!("    {:?}", v));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "SET" => {
+                            let app = parts.get(1).copied().unwrap_or("H7CAD");
+                            let val = parts.get(2).copied().unwrap_or("");
+                            self.push_undo_snapshot(i, "XDATA SET");
+                            for sh in &selected_handles {
+                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*sh) {
+                                    let mut rec = ExtendedDataRecord::new(app);
+                                    rec.add_value(XDataValue::String(val.to_string()));
+                                    entity.common_mut().extended_data.add_record(rec);
+                                }
+                            }
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!(
+                                "XDATA: set [{app}] = \"{val}\" on {} entity/entities.", selected_handles.len()
+                            ));
+                        }
+                        "CLEAR" => {
+                            let app_filter = parts.get(1).copied();
+                            self.push_undo_snapshot(i, "XDATA CLEAR");
+                            for sh in &selected_handles {
+                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*sh) {
+                                    let xd = &mut entity.common_mut().extended_data;
+                                    if let Some(app) = app_filter {
+                                        // Rebuild without the matching app.
+                                        let kept: Vec<_> = xd.records().iter()
+                                            .filter(|r| r.application_name != app)
+                                            .cloned()
+                                            .collect();
+                                        xd.clear();
+                                        for r in kept { xd.add_record(r); }
+                                    } else {
+                                        xd.clear();
+                                    }
+                                }
+                            }
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output("XDATA: cleared.");
+                        }
+                        _ => {
+                            self.command_line.push_info("Usage: XDATA LIST | SET <app> <value> | CLEAR [app]");
+                        }
                     }
                 }
             }
@@ -2217,6 +2750,46 @@ fn flatten_entity_z(entity: &mut acadrust::EntityType) {
         acadrust::EntityType::Ellipse(e)     => { e.center.z = 0.0; }
         _ => {}
     }
+}
+
+/// Find the last placed linear or aligned dimension in the document.
+/// Returns `(first_point, second_point, definition_point, rotation_rad)` in world-space.
+fn find_last_linear_dim(scene: &crate::scene::Scene) -> Option<(glam::Vec3, glam::Vec3, glam::Vec3, f64)> {
+    use acadrust::entities::Dimension;
+    let mut best_handle: u64 = 0;
+    let mut result: Option<(glam::Vec3, glam::Vec3, glam::Vec3, f64)> = None;
+
+    for entity in scene.document.entities() {
+        if let acadrust::EntityType::Dimension(dim) = entity {
+            let h = entity.common().handle.value();
+            if h <= best_handle {
+                continue;
+            }
+            let item = match dim {
+                Dimension::Linear(d) => {
+                    let p1 = glam::Vec3::new(d.first_point.x as f32, d.first_point.y as f32, d.first_point.z as f32);
+                    let p2 = glam::Vec3::new(d.second_point.x as f32, d.second_point.y as f32, d.second_point.z as f32);
+                    let dp = glam::Vec3::new(d.base.definition_point.x as f32, d.base.definition_point.y as f32, d.base.definition_point.z as f32);
+                    Some((p1, p2, dp, d.rotation))
+                }
+                Dimension::Aligned(d) => {
+                    let p1 = glam::Vec3::new(d.first_point.x as f32, d.first_point.y as f32, d.first_point.z as f32);
+                    let p2 = glam::Vec3::new(d.second_point.x as f32, d.second_point.y as f32, d.second_point.z as f32);
+                    let dp = glam::Vec3::new(d.base.definition_point.x as f32, d.base.definition_point.y as f32, d.base.definition_point.z as f32);
+                    let dx = (d.second_point.x - d.first_point.x) as f32;
+                    let dy = (d.second_point.y - d.first_point.y) as f32;
+                    let rot = dy.atan2(dx) as f64;
+                    Some((p1, p2, dp, rot))
+                }
+                _ => None,
+            };
+            if let Some(data) = item {
+                best_handle = h;
+                result = Some(data);
+            }
+        }
+    }
+    result
 }
 
 fn entity_type_name(entity: &acadrust::EntityType) -> &'static str {

@@ -259,6 +259,29 @@ pub fn tessellate_text_ex(
     out
 }
 
+/// Measure the width of a rendered text string in font glyph units × scale.
+/// Returns the total advance width in world units (height-independent: divide by height for
+/// a normalised ratio, or use directly when `height` is already the desired em size).
+pub fn measure_text(text: &str, height: f32, width_factor: f32, font_name: &str) -> f32 {
+    if text.is_empty() || height <= 0.0 {
+        return 0.0;
+    }
+    let font = get_font(font_name);
+    let scale = height / 9.0;
+    let wf = width_factor.clamp(0.01, 100.0);
+    let mut cursor_x: f32 = 0.0;
+    for ch in text.chars() {
+        if ch == ' ' {
+            cursor_x += font.word_spacing;
+        } else if let Some(glyph) = font.glyph(ch) {
+            cursor_x += glyph.advance + font.letter_spacing;
+        } else {
+            cursor_x += 6.0 + font.letter_spacing;
+        }
+    }
+    cursor_x * scale * wf
+}
+
 // ── Parser ────────────────────────────────────────────────────────────────
 
 fn parse(src: &str) -> CxfFile {

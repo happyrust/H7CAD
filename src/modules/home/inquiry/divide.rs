@@ -9,7 +9,6 @@ use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
-use crate::scene::wire_model::WireModel;
 
 // ── DIVIDE ─────────────────────────────────────────────────────────────────
 

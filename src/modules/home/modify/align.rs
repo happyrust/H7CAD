@@ -9,7 +9,7 @@
 // With 1 pair:  pure translation (src1 → dst1)
 // With 2 pairs: translate + rotate (+ optional uniform scale to fit)
 
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 use acadrust::Handle;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};

@@ -7,7 +7,6 @@
 //
 // Workflow: select objects then press Enter to join.
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -162,7 +161,7 @@ fn try_join_arcs(arcs: &[&(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<En
     intervals.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap());
 
     // Try to merge into one contiguous arc
-    let mut merged_start = intervals[0][0];
+    let merged_start = intervals[0][0];
     let mut merged_end   = intervals[0][1];
     for &[s, e] in &intervals[1..] {
         let span = ((e - merged_end) + 360.0) % 360.0;

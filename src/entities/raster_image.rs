@@ -251,23 +251,91 @@ impl TruckConvertible for Wipeout {
 
 impl Grippable for Wipeout {
     fn grips(&self) -> Vec<GripDef> {
-        let corners = image_corners(
-            &self.insertion_point,
-            &self.u_vector,
-            &self.v_vector,
-            self.size.x,
-            self.size.y,
-        );
-        vec![
-            square_grip(0, Vec3::from(corners[0])),
-            diamond_grip(1, Vec3::from(corners[1])),
-            diamond_grip(2, Vec3::from(corners[2])),
-            diamond_grip(3, Vec3::from(corners[3])),
-        ]
+        // If polygonal clipping is active, expose individual polygon vertices as grips.
+        let is_polygon = self.clipping_enabled
+            && self.clip_boundary_vertices.len() >= 3
+            && matches!(
+                self.clip_type,
+                acadrust::entities::WipeoutClipType::Polygonal
+            );
+
+        if is_polygon {
+            let ox = self.insertion_point.x as f32;
+            let oy = self.insertion_point.y as f32;
+            let oz = self.insertion_point.z as f32;
+            self.clip_boundary_vertices
+                .iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    let wx = (self.u_vector.x * v.x * self.size.x
+                        + self.v_vector.x * v.y * self.size.y) as f32;
+                    let wy = (self.u_vector.y * v.x * self.size.x
+                        + self.v_vector.y * v.y * self.size.y) as f32;
+                    let wz = (self.u_vector.z * v.x * self.size.x
+                        + self.v_vector.z * v.y * self.size.y) as f32;
+                    if i == 0 {
+                        square_grip(i, Vec3::new(ox + wx, oy + wy, oz + wz))
+                    } else {
+                        diamond_grip(i, Vec3::new(ox + wx, oy + wy, oz + wz))
+                    }
+                })
+                .collect()
+        } else {
+            let corners = image_corners(
+                &self.insertion_point,
+                &self.u_vector,
+                &self.v_vector,
+                self.size.x,
+                self.size.y,
+            );
+            vec![
+                square_grip(0, Vec3::from(corners[0])),
+                diamond_grip(1, Vec3::from(corners[1])),
+                diamond_grip(2, Vec3::from(corners[2])),
+                diamond_grip(3, Vec3::from(corners[3])),
+            ]
+        }
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        if grip_id == 0 {
+        let is_polygon = self.clipping_enabled
+            && self.clip_boundary_vertices.len() >= 3
+            && matches!(
+                self.clip_type,
+                acadrust::entities::WipeoutClipType::Polygonal
+            );
+
+        if is_polygon {
+            // Move the clicked polygon vertex in world space → back-project to pixel space.
+            if let Some(v) = self.clip_boundary_vertices.get_mut(grip_id) {
+                // Compute current world position of this vertex.
+                let ox = self.insertion_point.x;
+                let oy = self.insertion_point.y;
+                let oz = self.insertion_point.z;
+                let cur_wx = ox + self.u_vector.x * v.x * self.size.x + self.v_vector.x * v.y * self.size.y;
+                let cur_wy = oy + self.u_vector.y * v.x * self.size.x + self.v_vector.y * v.y * self.size.y;
+                let cur_wz = oz + self.u_vector.z * v.x * self.size.x + self.v_vector.z * v.y * self.size.y;
+                let new_w = match apply {
+                    GripApply::Translate(d) => {
+                        [cur_wx + d.x as f64, cur_wy + d.y as f64, cur_wz + d.z as f64]
+                    }
+                    GripApply::Absolute(p) => [p.x as f64, p.y as f64, p.z as f64],
+                };
+                // Back-project: solve for pixel coords using u_vector and v_vector.
+                // In 2D (XY plane): new_w - insertion_point = u_vec * vx * sx + v_vec * vy * sy
+                let dx = new_w[0] - self.insertion_point.x;
+                let dy = new_w[1] - self.insertion_point.y;
+                let ux = self.u_vector.x * self.size.x;
+                let uy = self.u_vector.y * self.size.x;
+                let vx = self.v_vector.x * self.size.y;
+                let vy = self.v_vector.y * self.size.y;
+                let det = ux * vy - uy * vx;
+                if det.abs() > 1e-12 {
+                    v.x = (dx * vy - dy * vx) / det;
+                    v.y = (ux * dy - uy * dx) / det;
+                }
+            }
+        } else if grip_id == 0 {
             match apply {
                 GripApply::Translate(d) => {
                     self.insertion_point.x += d.x as f64;

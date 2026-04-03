@@ -122,6 +122,8 @@ pub enum CmdResult {
         angle_rad: f32,
         scale: f32,
     },
+    /// Set the plot window on the active layout's PlotSettings.
+    SetPlotWindow { p1: Vec3, p2: Vec3 },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

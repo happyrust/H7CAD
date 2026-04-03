@@ -81,6 +81,8 @@ pub(super) struct H7CAD {
     page_setup_offset_y: String,
     /// Plot rotation in degrees: "0" | "90" | "180" | "270".
     page_setup_rotation: String,
+    /// Plot scale: "Fit" | "1:1" | "1:2" | "1:4" | "1:5" | "1:10" | "1:20" | "1:50" | "1:100" | "2:1".
+    page_setup_scale: String,
 }
 
 #[derive(Debug, Clone)]
@@ -281,6 +283,7 @@ pub enum Message {
     PageSetupOffsetYEdit(String),
     /// User changed plot rotation.
     PageSetupRotation(String),
+    PageSetupScale(String),
     /// Apply the changes entered in Page Setup.
     PageSetupCommit,
     // ── Plot / Export ─────────────────────────────────────────────────────
@@ -327,6 +330,7 @@ impl H7CAD {
             page_setup_offset_x: "0.0".to_string(),
             page_setup_offset_y: "0.0".to_string(),
             page_setup_rotation: "0".to_string(),
+            page_setup_scale: "Fit".to_string(),
         };
         app.sync_ribbon_layers();
         app
