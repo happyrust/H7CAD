@@ -336,6 +336,23 @@ impl H7CAD {
                 }
             }
 
+            // PASTEORIG — paste at original coordinates (no move to pick point)
+            "PASTEORIG" => {
+                if self.clipboard.is_empty() {
+                    self.command_line.push_error("PASTEORIG: clipboard is empty.");
+                } else {
+                    let count = self.clipboard.len();
+                    self.push_undo_snapshot(i, "PASTEORIG");
+                    for entity in &self.clipboard {
+                        self.tabs[i].scene.add_entity(entity.clone());
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!(
+                        "PASTEORIG: {} object(s) pasted at original coordinates.", count
+                    ));
+                }
+            }
+
             "BLOCK" => {
                 let handles: Vec<_> = self.tabs[i]
                     .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
