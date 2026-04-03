@@ -1,6 +1,8 @@
 // Annotate module — dimension and text annotation tools.
 
+pub mod aligned_dim;
 pub mod angular_dim;
+pub mod diameter_dim;
 pub mod leader_cmd;
 pub mod linear_dim;
 pub mod mleader_cmd;

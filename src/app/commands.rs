@@ -761,6 +761,20 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "DIMALIGNED"|"DAL" => {
+                use crate::modules::annotate::aligned_dim::AlignedDimensionCommand;
+                let cmd = AlignedDimensionCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMDIAMETER"|"DDI" => {
+                use crate::modules::annotate::diameter_dim::DiameterDimensionCommand;
+                let cmd = DiameterDimensionCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "DIMLINEAR" => {
                 use crate::modules::annotate::linear_dim::LinearDimensionCommand;
                 let new_cmd = LinearDimensionCommand::new();
@@ -1338,7 +1352,7 @@ impl H7CAD {
                      Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN ALIGN  |  \
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
-                     Dimension: DIMLINEAR DIMANGULAR DIMRADIUS  |  \
+                     Dimension: DIMLINEAR DIMALIGNED DIMANGULAR DIMRADIUS DIMDIAMETER  |  \
                      Inquiry: DIST ID AREA LIST FIND FINDALL COUNT QSELECT  |  Draw on entity: DIVIDE MEASURE  |  \
                      Utilities: FLATTEN LAYISO LAYUNISO PEDIT MLINE MLEADER  |  \
                      View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
