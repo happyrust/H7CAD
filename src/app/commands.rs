@@ -1075,6 +1075,83 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // ── Find / Replace ────────────────────────────────────────────────
+            // FIND <search>              — list all Text/MText/Dimension containing <search>
+            // FIND <search> REPLACE <rep> — replace first occurrence (case-insensitive)
+            // FINDALL <search> REPLACE <rep> — replace all occurrences
+            cmd if cmd == "FIND" || cmd.starts_with("FIND ") || cmd == "FINDALL" || cmd.starts_with("FINDALL ") => {
+                let all_mode = cmd.starts_with("FINDALL");
+                let rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
+
+                // Split at " REPLACE " keyword (case-insensitive)
+                let (search, replacement) = if let Some(pos) = rest.to_uppercase().find(" REPLACE ") {
+                    (&rest[..pos], Some(rest[pos + 9..].trim()))
+                } else {
+                    (rest, None)
+                };
+
+                if search.is_empty() {
+                    self.command_line.push_error("FIND: specify search text.");
+                } else {
+                    let search_lc = search.to_lowercase();
+                    let mut count = 0usize;
+                    let handles: Vec<acadrust::Handle> = self.tabs[i].scene.document
+                        .entities()
+                        .filter_map(|e| {
+                            let txt = entity_text_content(e)?;
+                            if txt.to_lowercase().contains(&search_lc) {
+                                Some(e.common().handle)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    if let Some(rep) = replacement {
+                        // Replace mode
+                        let targets: Vec<_> = if all_mode {
+                            handles.clone()
+                        } else {
+                            handles.iter().copied().take(1).collect()
+                        };
+                        if targets.is_empty() {
+                            self.command_line.push_output(&format!("FIND: \"{}\" not found.", search));
+                        } else {
+                            self.push_undo_snapshot(i, "FIND/REPLACE");
+                            for h in &targets {
+                                if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
+                                    replace_entity_text(e, search, rep);
+                                    count += 1;
+                                }
+                            }
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!(
+                                "FIND/REPLACE: replaced {} occurrence(s) of \"{}\" → \"{}\".",
+                                count, search, rep
+                            ));
+                            self.refresh_properties();
+                        }
+                    } else {
+                        // List mode
+                        if handles.is_empty() {
+                            self.command_line.push_output(&format!("FIND: \"{}\" not found.", search));
+                        } else {
+                            for h in &handles {
+                                if let Some(e) = self.tabs[i].scene.document.get_entity(*h) {
+                                    let txt = entity_text_content(e).unwrap_or_default();
+                                    self.command_line.push_output(&format!(
+                                        "  Handle {:X}: \"{}\"", h.value(), txt
+                                    ));
+                                }
+                            }
+                            self.command_line.push_output(&format!(
+                                "FIND: {} match(es) for \"{}\".", handles.len(), search
+                            ));
+                        }
+                    }
+                }
+            }
+
             "HELP"|"?" => {
                 self.command_line.push_output(
                     "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT  |  \
@@ -1082,7 +1159,7 @@ impl H7CAD {
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
                      Dimension: DIMLINEAR DIMANGULAR DIMRADIUS  |  \
-                     Inquiry: DIST ID AREA LIST  |  Draw on entity: DIVIDE MEASURE  |  \
+                     Inquiry: DIST ID AREA LIST FIND FINDALL  |  Draw on entity: DIVIDE MEASURE  |  \
                      View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
                      Layer: LAYER LIST/NEW/ON/OFF/FREEZE/THAW/LOCK/UNLOCK/COLOR/SET  |  \
                      Viewport: MVIEW VPLAYER VPORTS MS PS DRAWORDER  |  \
@@ -1888,3 +1965,44 @@ impl H7CAD {
         }
     }
 }
+
+// ── FIND/REPLACE helpers ───────────────────────────────────────────────────
+
+fn entity_text_content(entity: &acadrust::EntityType) -> Option<String> {
+    match entity {
+        acadrust::EntityType::Text(t)  => Some(t.value.clone()),
+        acadrust::EntityType::MText(t) => Some(t.value.clone()),
+        acadrust::EntityType::AttributeDefinition(a) => Some(a.default_value.clone()),
+        acadrust::EntityType::AttributeEntity(a) => Some(a.get_value().to_string()),
+        _ => None,
+    }
+}
+
+fn replace_entity_text(entity: &mut acadrust::EntityType, search: &str, rep: &str) {
+    let search_lc = search.to_lowercase();
+    match entity {
+        acadrust::EntityType::Text(t) => {
+            if t.value.to_lowercase().contains(&search_lc) {
+                t.value = t.value.replace(search, rep);
+            }
+        }
+        acadrust::EntityType::MText(t) => {
+            if t.value.to_lowercase().contains(&search_lc) {
+                t.value = t.value.replace(search, rep);
+            }
+        }
+        acadrust::EntityType::AttributeDefinition(a) => {
+            if a.default_value.to_lowercase().contains(&search_lc) {
+                a.default_value = a.default_value.replace(search, rep);
+            }
+        }
+        acadrust::EntityType::AttributeEntity(a) => {
+            let cur = a.get_value().to_string();
+            if cur.to_lowercase().contains(&search_lc) {
+                a.set_value(cur.replace(search, rep));
+            }
+        }
+        _ => {}
+    }
+}
+
