@@ -794,6 +794,25 @@ impl H7CAD {
                 self.command_line.push_output("Zoom Out");
             }
 
+            // ZOOM ALL — fit all entities (same as EXTENTS for now)
+            "ZOOM ALL"|"ZOOM A"|"ZA" => {
+                self.tabs[i].scene.fit_all();
+                self.command_line.push_output("Zoom All");
+            }
+
+            // ZOOM SCALE — set zoom factor (e.g. "ZOOM SCALE 2" or "ZS 0.5")
+            cmd if cmd.starts_with("ZOOM SCALE ") || cmd.starts_with("ZS ") => {
+                let rest = cmd.split_once(' ')
+                    .and_then(|(_, r)| r.split_once(' ').map(|(_, v)| v).or(Some(r)))
+                    .unwrap_or("1");
+                if let Ok(factor) = rest.trim().parse::<f32>() {
+                    if factor > 0.0 {
+                        self.tabs[i].scene.zoom_camera(1.0 / factor);
+                        self.command_line.push_output(&format!("Zoom Scale ×{factor:.3}"));
+                    }
+                }
+            }
+
             "ZOOM WINDOW"|"ZOOM W"|"ZW" => {
                 use crate::modules::view::zoom_window::ZoomWindowCommand;
                 let new_cmd = ZoomWindowCommand::new();
