@@ -47,6 +47,8 @@ pub(super) struct H7CAD {
     polar_mode: bool,
     /// Show grid lines in the viewport (F7).
     show_grid: bool,
+    /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
+    show_ucs_icon: bool,
     /// Last point committed by a drawing command — used as ortho/polar base.
     last_point: Option<glam::Vec3>,
     /// OS window Id for the floating Layer Properties Manager (None when closed).
@@ -313,6 +315,7 @@ impl H7CAD {
             ortho_mode: false,
             polar_mode: false,
             show_grid: false,
+            show_ucs_icon: true,
             last_point: None,
             layer_window: None,
             main_window: None,

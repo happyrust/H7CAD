@@ -146,6 +146,14 @@ pub struct GridParams {
     pub plane: GridPlane,
 }
 
+/// Parameters for the screen-space UCS icon drawn in the viewport corner.
+pub struct UcsIconParams {
+    /// View-projection matrix used to project world axis directions to screen.
+    pub view_proj: Mat4,
+    /// Viewport bounds (used for NDC → pixel conversion).
+    pub bounds: iced::Rectangle,
+}
+
 // ── Selection overlay ───────────────────────────────────────────────────
 
 pub fn selection_overlay<'a>(
@@ -153,12 +161,14 @@ pub fn selection_overlay<'a>(
     snap: Option<(Point, SnapType)>,
     grips: Vec<GripMarker>,
     grid: Option<GridParams>,
+    ucs_icon: Option<UcsIconParams>,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
         snap,
         grips,
         grid,
+        ucs_icon,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -170,6 +180,7 @@ struct SelectionCanvas {
     snap: Option<(Point, SnapType)>,
     grips: Vec<GripMarker>,
     grid: Option<GridParams>,
+    ucs_icon: Option<UcsIconParams>,
 }
 
 impl canvas::Program<Message> for SelectionCanvas {
@@ -538,6 +549,11 @@ impl canvas::Program<Message> for SelectionCanvas {
             frame.stroke(&square, stroke);
         }
 
+        // ── UCS icon ──────────────────────────────────────────────────────
+        if let Some(ref ucs) = self.ucs_icon {
+            draw_ucs_icon(&mut frame, ucs.view_proj, ucs.bounds);
+        }
+
         vec![frame.into_geometry()]
     }
 }
@@ -699,4 +715,94 @@ fn draw_axes(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle, exten
         }),
         axis_stroke(0.20, 0.40, 0.90),
     );
+}
+
+// ── UCS icon ──────────────────────────────────────────────────────────────
+//
+// Draws a small X/Y/Z axis tripod in the bottom-left corner of the viewport.
+// The axis directions are projected from world space so the icon rotates with
+// the camera, matching the orientation of the drawing plane.
+
+const UCS_ICON_MARGIN: f32 = 50.0; // px from bottom-left corner to icon origin
+const UCS_ICON_LEN: f32 = 35.0;    // axis arm length in screen pixels
+const UCS_ICON_TIP: f32 = 6.0;     // arrowhead size in pixels
+
+fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
+    // Project world origin and axis unit vectors to NDC, then to screen px.
+    let w2s = |world: Vec3| -> Point {
+        let ndc = vp.project_point3(world);
+        Point::new(
+            (ndc.x + 1.0) * 0.5 * bounds.width,
+            (1.0 - ndc.y) * 0.5 * bounds.height,
+        )
+    };
+
+    // Origin in screen space — used to compute axis directions.
+    let origin_s = w2s(Vec3::ZERO);
+    let x_tip_s  = w2s(Vec3::X);
+    let y_tip_s  = w2s(Vec3::Y);
+    let z_tip_s  = w2s(Vec3::Z);
+
+    // Icon origin: fixed bottom-left corner.
+    let ox = UCS_ICON_MARGIN;
+    let oy = bounds.height - UCS_ICON_MARGIN;
+    let icon_origin = Point::new(ox, oy);
+
+    // Compute normalized screen-space axis directions, then scale to UCS_ICON_LEN.
+    let axis_dir = |tip: Point| -> Option<Point> {
+        let dx = tip.x - origin_s.x;
+        let dy = tip.y - origin_s.y;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-4 {
+            return None;
+        }
+        Some(Point::new(dx / len * UCS_ICON_LEN, dy / len * UCS_ICON_LEN))
+    };
+
+    let draw_axis = |frame: &mut canvas::Frame, dir: Point, r: f32, g: f32, b: f32| {
+        let tip = Point::new(icon_origin.x + dir.x, icon_origin.y + dir.y);
+        let path = canvas::Path::new(|p| {
+            p.move_to(icon_origin);
+            p.line_to(tip);
+        });
+        frame.stroke(
+            &path,
+            canvas::Stroke {
+                width: 2.0,
+                style: canvas::Style::Solid(Color { r, g, b, a: 1.0 }),
+                line_cap: canvas::LineCap::Round,
+                ..Default::default()
+            },
+        );
+        // Arrowhead: small filled triangle at tip.
+        let len = (dir.x * dir.x + dir.y * dir.y).sqrt().max(1e-4);
+        let nx = dir.x / len;
+        let ny = dir.y / len;
+        let px = -ny;
+        let py = nx;
+        let tip_l = Point::new(tip.x - nx * UCS_ICON_TIP + px * (UCS_ICON_TIP * 0.4), tip.y - ny * UCS_ICON_TIP + py * (UCS_ICON_TIP * 0.4));
+        let tip_r = Point::new(tip.x - nx * UCS_ICON_TIP - px * (UCS_ICON_TIP * 0.4), tip.y - ny * UCS_ICON_TIP - py * (UCS_ICON_TIP * 0.4));
+        let arrow = canvas::Path::new(|p| {
+            p.move_to(tip);
+            p.line_to(tip_l);
+            p.line_to(tip_r);
+            p.close();
+        });
+        frame.fill(&arrow, Color { r, g, b, a: 1.0 });
+    };
+
+    // Draw Z first (behind), then Y, then X (in front).
+    if let Some(dir) = axis_dir(z_tip_s) {
+        draw_axis(frame, dir, 0.20, 0.40, 0.90); // Z blue
+    }
+    if let Some(dir) = axis_dir(y_tip_s) {
+        draw_axis(frame, dir, 0.20, 0.85, 0.20); // Y green
+    }
+    if let Some(dir) = axis_dir(x_tip_s) {
+        draw_axis(frame, dir, 0.90, 0.20, 0.20); // X red
+    }
+
+    // Small circle at origin.
+    let circle = canvas::Path::circle(icon_origin, 3.0);
+    frame.fill(&circle, Color { r: 0.9, g: 0.9, b: 0.9, a: 0.9 });
 }

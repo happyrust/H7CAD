@@ -2552,6 +2552,8 @@ impl H7CAD {
                         self.push_undo_snapshot(i, "UCSICON");
                         let visible = sub != "OFF";
                         let at_origin = sub == "ORIGIN";
+                        // Update model-space icon flag.
+                        self.show_ucs_icon = visible;
                         let mut count = 0usize;
                         for entity in self.tabs[i].scene.document.entities_mut() {
                             if let acadrust::EntityType::Viewport(vp) = entity {
@@ -2564,7 +2566,7 @@ impl H7CAD {
                         }
                         self.tabs[i].dirty = true;
                         self.command_line.push_output(&format!(
-                            "UCSICON {sub}: updated {count} viewport(s)."
+                            "UCSICON {sub}: updated {count} viewport(s) + model space."
                         ));
                     }
                     _ => {

@@ -58,20 +58,32 @@ impl H7CAD {
                     vec![]
                 };
 
+            let (vw, vh) = tab.scene.selection.borrow().vp_size;
+            let vp_bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
+
             let grid = if self.show_grid {
-                let (vw, vh) = tab.scene.selection.borrow().vp_size;
-                let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
                 let cam = tab.scene.camera.borrow();
                 let plane = grid_plane_from_camera(cam.pitch, cam.yaw);
                 Some(overlay::GridParams {
-                    view_proj: cam.view_proj(bounds),
-                    bounds,
+                    view_proj: cam.view_proj(vp_bounds),
+                    bounds: vp_bounds,
                     plane,
                 })
             } else {
                 None
             };
-            overlay::selection_overlay(sel, snap_info, grips, grid)
+
+            let ucs_icon = if self.show_ucs_icon && !is_paper {
+                let cam = tab.scene.camera.borrow();
+                Some(overlay::UcsIconParams {
+                    view_proj: cam.view_proj(vp_bounds),
+                    bounds: vp_bounds,
+                })
+            } else {
+                None
+            };
+
+            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon)
         };
 
         let nav = container(overlay::nav_toolbar())
