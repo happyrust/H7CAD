@@ -179,6 +179,47 @@ impl H7CAD {
                 }
             }
 
+            // LAYISO — turn off all layers except those used by selected entities
+            "LAYISO" => {
+                let sel_layers: std::collections::HashSet<String> = self.tabs[i].scene
+                    .selected_entities().into_iter()
+                    .map(|(_, e)| e.common().layer.clone()).collect();
+                if sel_layers.is_empty() {
+                    self.command_line.push_error("LAYISO: select entities on the layers to isolate first.");
+                } else {
+                    self.push_undo_snapshot(i, "LAYISO");
+                    let names: Vec<String> = self.tabs[i].scene.document.layers
+                        .iter().map(|l| l.name.clone()).collect();
+                    for name in names {
+                        if !sel_layers.contains(&name) {
+                            if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
+                                dl.turn_off();
+                            }
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.sync_ribbon_layers();
+                    self.command_line.push_info(&format!(
+                        "LAYISO: isolated {} layer(s).", sel_layers.len()
+                    ));
+                }
+            }
+
+            // LAYUNISO — restore all layers that were turned off by LAYISO (turn all on)
+            "LAYUNISO" => {
+                self.push_undo_snapshot(i, "LAYUNISO");
+                let names: Vec<String> = self.tabs[i].scene.document.layers
+                    .iter().map(|l| l.name.clone()).collect();
+                for name in names {
+                    if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
+                        dl.turn_on();
+                    }
+                }
+                self.tabs[i].dirty = true;
+                self.sync_ribbon_layers();
+                self.command_line.push_info("LAYUNISO: all layers restored.");
+            }
+
             "LAYMATCH"|"LAYMCH" => {
                 use crate::modules::home::layers::match_layer::LayMatchCommand;
                 let dest: Vec<_> = self.tabs[i].scene.selected_entities()
@@ -1075,6 +1116,36 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // ── FLATTEN — move selected (or all) entities to Z=0 ─────────────
+            "FLATTEN" => {
+                let handles: Vec<acadrust::Handle> = {
+                    let sel = self.tabs[i].scene.selected_entities();
+                    if sel.is_empty() {
+                        // Flatten all entities
+                        self.tabs[i].scene.document.entities()
+                            .map(|e| e.common().handle)
+                            .collect()
+                    } else {
+                        sel.into_iter().map(|(h, _)| h).collect()
+                    }
+                };
+                if handles.is_empty() {
+                    self.command_line.push_error("FLATTEN: no entities.");
+                } else {
+                    self.push_undo_snapshot(i, "FLATTEN");
+                    for h in &handles {
+                        if let Some(e) = self.tabs[i].scene.document.get_entity_mut(*h) {
+                            flatten_entity_z(e);
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!(
+                        "FLATTEN: {} entity(ies) moved to Z=0.", handles.len()
+                    ));
+                    self.refresh_properties();
+                }
+            }
+
             // ── QSELECT — quick-select entities by property ───────────────────
             // QSELECT TYPE <type>          — select all entities of given type
             // QSELECT LAYER <name>         — select all entities on layer
@@ -1232,7 +1303,8 @@ impl H7CAD {
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
                      Dimension: DIMLINEAR DIMANGULAR DIMRADIUS  |  \
-                     Inquiry: DIST ID AREA LIST FIND FINDALL  |  Draw on entity: DIVIDE MEASURE  |  \
+                     Inquiry: DIST ID AREA LIST FIND FINDALL COUNT QSELECT  |  Draw on entity: DIVIDE MEASURE  |  \
+                     Utilities: FLATTEN LAYISO LAYUNISO PEDIT MLINE MLEADER  |  \
                      View: ZOOM EXTENTS VIEW LIST/SAVE/RESTORE/DELETE  |  \
                      Layer: LAYER LIST/NEW/ON/OFF/FREEZE/THAW/LOCK/UNLOCK/COLOR/SET  |  \
                      Viewport: MVIEW VPLAYER VPORTS MS PS DRAWORDER  |  \
@@ -2040,6 +2112,25 @@ impl H7CAD {
 }
 
 // ── FIND/REPLACE helpers ───────────────────────────────────────────────────
+
+fn flatten_entity_z(entity: &mut acadrust::EntityType) {
+    match entity {
+        acadrust::EntityType::Line(l)        => { l.start.z = 0.0; l.end.z = 0.0; }
+        acadrust::EntityType::Circle(c)      => { c.center.z = 0.0; }
+        acadrust::EntityType::Arc(a)         => { a.center.z = 0.0; }
+        acadrust::EntityType::LwPolyline(p)  => { p.elevation = 0.0; }
+        acadrust::EntityType::Text(t)        => { t.insertion_point.z = 0.0; }
+        acadrust::EntityType::MText(t)       => { t.insertion_point.z = 0.0; }
+        acadrust::EntityType::Insert(ins)    => { ins.insert_point.z = 0.0; }
+        acadrust::EntityType::Point(p)       => { p.location.z = 0.0; }
+        acadrust::EntityType::Spline(s)      => {
+            for cp in &mut s.control_points { cp.z = 0.0; }
+            for fp in &mut s.fit_points     { fp.z = 0.0; }
+        }
+        acadrust::EntityType::Ellipse(e)     => { e.center.z = 0.0; }
+        _ => {}
+    }
+}
 
 fn entity_type_name(entity: &acadrust::EntityType) -> &'static str {
     match entity {
