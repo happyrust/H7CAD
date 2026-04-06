@@ -2085,6 +2085,59 @@ impl H7CAD {
             }
 
             // ── DimStyle management ───────────────────────────────────────
+            // TABLESTYLE — Table Style Manager.
+            cmd if cmd == "TABLESTYLE" || cmd == "TS" || cmd.starts_with("TABLESTYLE ") => {
+                use acadrust::objects::{TableStyle, ObjectType};
+                let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
+                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "DIALOG" | "UI" => {
+                        return Task::done(Message::TableStyleDialogOpen);
+                    }
+                    "LIST" | "?" => {
+                        let doc = &self.tabs[i].scene.document;
+                        let styles: Vec<String> = doc.objects.values()
+                            .filter_map(|o| if let ObjectType::TableStyle(s) = o { Some(s) } else { None })
+                            .map(|s| format!("{}  (h_margin:{:.2} v_margin:{:.2})", s.name, s.horizontal_margin, s.vertical_margin))
+                            .collect();
+                        if styles.is_empty() {
+                            self.command_line.push_output("No table styles.");
+                        } else {
+                            self.command_line.push_output(&format!("TableStyles:\n  {}", styles.join("\n  ")));
+                        }
+                    }
+                    "NEW" | "N" => {
+                        let name = parts.get(1).copied().unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: TABLESTYLE NEW <name>");
+                        } else {
+                            let doc = &self.tabs[i].scene.document;
+                            let exists = doc.objects.values().any(|o| {
+                                matches!(o, ObjectType::TableStyle(s) if s.name.eq_ignore_ascii_case(&name))
+                            });
+                            if exists {
+                                self.command_line.push_error(&format!("TABLESTYLE: '{}' already exists.", name));
+                            } else {
+                                self.push_undo_snapshot(i, "TABLESTYLE NEW");
+                                let mut style = TableStyle::standard();
+                                style.name = name.clone();
+                                let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
+                                style.handle = nh;
+                                self.tabs[i].scene.document.objects.insert(nh, ObjectType::TableStyle(style));
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("TABLESTYLE: '{}' created.", name));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_error(
+                            "Usage: TABLESTYLE [LIST|NEW <name>]"
+                        );
+                    }
+                }
+            }
+
             // MLSTYLE — Multiline Style Manager.
             // Usage:
             //   MLSTYLE                — open dialog

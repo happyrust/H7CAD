@@ -94,6 +94,10 @@ pub(super) struct H7CAD {
     mlstyle_open: bool,
     mlstyle_selected: String,
 
+    // ── TableStyle Dialog ─────────────────────────────────────────────────
+    tablestyle_open: bool,
+    tablestyle_selected: String,
+
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     dimstyle_open: bool,
     /// Name of the style currently shown in the dialog.
@@ -339,6 +343,12 @@ pub enum Message {
     PlotStyleLoaded(Option<crate::io::plot_style::PlotStyleTable>),
     /// Clear the active plot style table.
     PlotStyleClear,
+    // ── TableStyle Dialog ─────────────────────────────────────────────────
+    TableStyleDialogOpen,
+    TableStyleDialogClose,
+    TableStyleDialogSelect(String),
+    TableStyleDialogNew,
+    TableStyleDialogDelete,
     // ── MLineStyle Dialog ─────────────────────────────────────────────────
     MlStyleDialogOpen,
     MlStyleDialogClose,
@@ -407,6 +417,9 @@ impl H7CAD {
             page_setup_scale: "Fit".to_string(),
             // Plot style
             active_plot_style: None,
+            // TableStyle dialog
+            tablestyle_open: false,
+            tablestyle_selected: "Standard".to_string(),
             // MLineStyle dialog
             mlstyle_open: false,
             mlstyle_selected: "Standard".to_string(),

@@ -2126,6 +2126,73 @@ impl H7CAD {
                 Task::none()
             }
 
+            // ── TableStyle Dialog ─────────────────────────────────────────────
+            Message::TableStyleDialogOpen => {
+                use acadrust::objects::ObjectType;
+                let i = self.active_tab;
+                self.tablestyle_selected = self.tabs[i].scene.document.objects.values()
+                    .find_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
+                    .unwrap_or_else(|| "Standard".to_string());
+                self.tablestyle_open = true;
+                Task::none()
+            }
+            Message::TableStyleDialogClose => {
+                self.tablestyle_open = false;
+                Task::none()
+            }
+            Message::TableStyleDialogSelect(name) => {
+                self.tablestyle_selected = name;
+                Task::none()
+            }
+
+            Message::TableStyleDialogNew => {
+                use acadrust::objects::ObjectType;
+                let i = self.active_tab;
+                let doc = &self.tabs[i].scene.document;
+                let mut n = 1u32;
+                let new_name = loop {
+                    let candidate = format!("TS{}", n);
+                    let taken = doc.objects.values().any(|o| {
+                        matches!(o, ObjectType::TableStyle(s) if s.name.eq_ignore_ascii_case(&candidate))
+                    });
+                    if !taken { break candidate; }
+                    n += 1;
+                };
+                self.push_undo_snapshot(i, "TABLESTYLE NEW");
+                let mut style = acadrust::objects::TableStyle::standard();
+                style.name = new_name.clone();
+                let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
+                style.handle = nh;
+                self.tabs[i].scene.document.objects.insert(nh, ObjectType::TableStyle(style));
+                self.tablestyle_selected = new_name;
+                self.tabs[i].dirty = true;
+                Task::none()
+            }
+            Message::TableStyleDialogDelete => {
+                use acadrust::objects::ObjectType;
+                let i = self.active_tab;
+                let name = self.tablestyle_selected.clone();
+                if name.eq_ignore_ascii_case("Standard") {
+                    self.command_line.push_error("Cannot delete the Standard style.");
+                    return Task::none();
+                }
+                let handle = self.tabs[i].scene.document.objects.iter()
+                    .find_map(|(&h, o)| {
+                        if let ObjectType::TableStyle(s) = o {
+                            if s.name == name { Some(h) } else { None }
+                        } else { None }
+                    });
+                if let Some(h) = handle {
+                    self.push_undo_snapshot(i, "TABLESTYLE DEL");
+                    self.tabs[i].scene.document.objects.remove(&h);
+                    self.tablestyle_selected = self.tabs[i].scene.document.objects.values()
+                        .find_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
+                        .unwrap_or_else(|| "Standard".to_string());
+                    self.tabs[i].dirty = true;
+                }
+                Task::none()
+            }
+
             // ── MLineStyle Dialog ─────────────────────────────────────────────
             Message::MlStyleDialogOpen => {
                 use acadrust::objects::ObjectType;
