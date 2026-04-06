@@ -70,8 +70,9 @@ impl ImageGpu {
         }
 
         // ── Upload texture ────────────────────────────────────────────────
+        let tex_label = format!("image.texture:{}", model.file_path);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("image.texture"),
+            label: Some(&tex_label),
             size: wgpu::Extent3d {
                 width: model.width,
                 height: model.height,
