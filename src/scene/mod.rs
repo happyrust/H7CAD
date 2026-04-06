@@ -1178,7 +1178,80 @@ impl Scene {
             }
         }
 
+        // ── Wipeout solid fills ───────────────────────────────────────────────
+        // Wipeouts are rendered as background-colored filled polygons so that
+        // they mask hatch fills drawn earlier in the same pass.
+        // Wipeout fills are appended last so they render on top of other hatches.
+        let bg_color: [f32; 4] = if self.current_layout == "Model" {
+            [0.11, 0.11, 0.11, 1.0]
+        } else {
+            [0.22, 0.24, 0.28, 1.0]
+        };
+        for entity in self.document.entities() {
+            let EntityType::Wipeout(wo) = entity else { continue };
+            if entity.common().invisible {
+                continue;
+            }
+            if self.document.layers
+                .get(&entity.common().layer)
+                .map(|l| l.flags.off || l.flags.frozen)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let boundary = Self::wipeout_boundary_2d(wo);
+            if boundary.len() >= 3 {
+                let mut fill_color = bg_color;
+                if self.selected.contains(&wo.common.handle) {
+                    fill_color = [0.15, 0.55, 1.00, 0.35];
+                }
+                models.push(HatchModel {
+                    boundary,
+                    pattern: hatch_model::HatchPattern::Solid,
+                    name: "WIPEOUT_FILL".into(),
+                    color: fill_color,
+                    angle_offset: 0.0,
+                    scale: 1.0,
+                });
+            }
+        }
+
         models
+    }
+
+    /// Compute the 2D (XY) boundary polygon for a Wipeout entity.
+    fn wipeout_boundary_2d(wo: &acadrust::entities::Wipeout) -> Vec<[f32; 2]> {
+        use acadrust::entities::WipeoutClipType;
+
+        let is_polygon = wo.clipping_enabled
+            && wo.clip_boundary_vertices.len() >= 3
+            && matches!(wo.clip_type, WipeoutClipType::Polygonal);
+
+        if is_polygon {
+            let ox = wo.insertion_point.x as f32;
+            let oy = wo.insertion_point.y as f32;
+            wo.clip_boundary_vertices.iter().map(|v| {
+                let wx = (wo.u_vector.x * v.x * wo.size.x + wo.v_vector.x * v.y * wo.size.y) as f32;
+                let wy = (wo.u_vector.y * v.x * wo.size.x + wo.v_vector.y * v.y * wo.size.y) as f32;
+                [ox + wx, oy + wy]
+            }).collect()
+        } else {
+            // Rectangular boundary from 4 corners.
+            let ox = wo.insertion_point.x as f32;
+            let oy = wo.insertion_point.y as f32;
+            let oz = wo.insertion_point.z as f32;
+            let ux = (wo.u_vector.x * wo.size.x) as f32;
+            let uy = (wo.u_vector.y * wo.size.x) as f32;
+            let vx = (wo.v_vector.x * wo.size.y) as f32;
+            let vy = (wo.v_vector.y * wo.size.y) as f32;
+            let _ = oz;
+            vec![
+                [ox, oy],
+                [ox + ux, oy + uy],
+                [ox + ux + vx, oy + uy + vy],
+                [ox + vx, oy + vy],
+            ]
+        }
     }
 
     fn hatch_model_from_dxf(dxf: &DxfHatch, color: [f32; 4]) -> Option<HatchModel> {
