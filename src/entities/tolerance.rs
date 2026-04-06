@@ -9,43 +9,239 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 use crate::scene::{cxf, transform};
 
+// ── GDT text parser ───────────────────────────────────────────────────────────
+
+/// Parse a DXF tolerance text string into rows of cell strings.
+///
+/// DXF format:  `{\Fgdt;p}%%v0.5%%vA%%vB%%v%%v^J{\Fgdt;j}%%v0.1%%vA%%v%%v%%v`
+///   - `^J`  → row separator
+///   - `%%v` → cell separator within a row
+///   - `{\Fgdt;X}` → GDT symbol X (mapped to a text label)
+fn parse_gdt_rows(raw: &str) -> Vec<Vec<String>> {
+    raw.split("^J")
+        .filter(|row| !row.trim().is_empty())
+        .map(|row| {
+            row.split("%%v")
+                .map(|cell| substitute_gdt_codes(cell.trim()))
+                .collect()
+        })
+        .collect()
+}
+
+/// Replace `{\Fgdt;X}` sequences with a short ASCII label and strip other
+/// MTEXT-style format codes `{\...}`.
+fn substitute_gdt_codes(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            // Collect to closing '}'
+            let mut inner = String::new();
+            let mut depth = 1usize;
+            for c in chars.by_ref() {
+                match c {
+                    '{' => { depth += 1; inner.push(c); }
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 { break; }
+                        inner.push(c);
+                    }
+                    _ => { inner.push(c); }
+                }
+            }
+            // Is it a GDT font switch?
+            if let Some(rest) = inner.strip_prefix("\\Fgdt;") {
+                // rest is the symbol letter(s)
+                if let Some(sym_char) = rest.chars().next() {
+                    out.push_str(gdt_char_to_ascii(sym_char));
+                }
+            }
+            // other format codes: skip
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Map a GDT font character to a short ASCII approximation.
+fn gdt_char_to_ascii(c: char) -> &'static str {
+    match c {
+        'a' => "SRT",   // Straightness
+        'b' => "FLT",   // Flatness
+        'c' => "FLT",   // Flatness
+        'd' => "PSF",   // Profile of Surface
+        'e' => "CYL",   // Cylindricity
+        'f' => "PRL",   // Profile of Line
+        'g' => "CIR",   // Circularity
+        'h' => "PAR",   // Parallelism
+        'i' => "SYM",   // Symmetry
+        'j' => "PRP",   // Perpendicularity
+        'k' => "PLN",   // Profile of Line
+        'l' => "(L)",   // LMC
+        'm' => "(M)",   // MMC / Diameter
+        'n' => "ANG",   // Angularity
+        'o' => "(o)",   // at maximum material boundary
+        'p' => "POS",   // Position
+        'q' => "(q)",
+        'r' => "RUN",   // Circular Runout
+        's' => "(S)",   // RFS / Regardless of Feature Size
+        't' => "TRN",   // Total Runout
+        'u' => "CON",   // Concentricity
+        'v' => "(v)",
+        'w' => "(w)",
+        _ => "?",
+    }
+}
+
+// ── Feature-control frame builder ─────────────────────────────────────────────
+
+/// Tessellate a Tolerance entity into CXF-style polyline output.
+///
+/// Returns (`box_lines`, `text_strokes`) where:
+///   - `box_lines` — 3-D line segments forming the outer border and dividers
+///   - `text_strokes` — 2-D polylines from the CXF tessellator
+///
+/// Since TruckObject has either Lines (3-D) or Text (2-D CXF), we render the
+/// box frame via a separate Lines path (added by the caller) and the text cells
+/// via the Text path.  For simplicity this function packs everything into a
+/// single Vec<Vec<[f32;2]>> by projecting the box lines to 2-D and using NaN
+/// polylines as separators — exactly what the Text wire-builder does.
+fn tessellate_tolerance(tol: &Tolerance) -> Vec<Vec<[f32; 2]>> {
+    if tol.text.is_empty() {
+        return vec![];
+    }
+
+    let rows = parse_gdt_rows(&tol.text);
+    if rows.is_empty() {
+        return vec![];
+    }
+
+    // ── Metrics ──────────────────────────────────────────────────────────
+    let h = if tol.text_height > 1e-6 { tol.text_height as f32 } else { 2.5_f32 };
+    let gap = (h * 0.35).max(0.1);
+    let cell_h = h + 2.0 * gap;
+    let char_w = h * 0.65;
+    let min_cell_w = h * 1.4;
+
+    // Column widths: max across all rows
+    let max_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let mut col_widths: Vec<f32> = vec![0.0_f32; max_cols];
+    for row in &rows {
+        for (ci, cell) in row.iter().enumerate() {
+            let w = (cell.len() as f32 * char_w).max(min_cell_w);
+            if ci < col_widths.len() {
+                col_widths[ci] = col_widths[ci].max(w);
+            }
+        }
+    }
+    let total_w: f32 = col_widths.iter().sum();
+    let total_h = cell_h * rows.len() as f32;
+
+    // ── Transform helpers (world 2-D, ignoring Z for Text path) ──────────
+    let ox = tol.insertion_point.x as f32;
+    let oy = tol.insertion_point.y as f32;
+    let angle = (tol.direction.y as f32).atan2(tol.direction.x as f32);
+    let (sa, ca) = angle.sin_cos();
+
+    let rot = |x: f32, y: f32| -> [f32; 2] {
+        [ox + x * ca - y * sa, oy + x * sa + y * ca]
+    };
+
+    let mut out: Vec<Vec<[f32; 2]>> = Vec::new();
+
+    // ── Outer border ──────────────────────────────────────────────────────
+    out.push(vec![
+        rot(0.0, 0.0),
+        rot(total_w, 0.0),
+        rot(total_w, total_h),
+        rot(0.0, total_h),
+        rot(0.0, 0.0),
+    ]);
+
+    // ── Row separators ─────────────────────────────────────────────────────
+    for ri in 1..rows.len() {
+        let y = cell_h * ri as f32;
+        out.push(vec![rot(0.0, y), rot(total_w, y)]);
+    }
+
+    // ── Column dividers ────────────────────────────────────────────────────
+    let mut x_cursor = 0.0_f32;
+    for ci in 0..col_widths.len().saturating_sub(1) {
+        x_cursor += col_widths[ci];
+        for ri in 0..rows.len() {
+            if ci + 1 < rows[ri].len() {
+                let y0 = cell_h * ri as f32;
+                let y1 = y0 + cell_h;
+                out.push(vec![rot(x_cursor, y0), rot(x_cursor, y1)]);
+            }
+        }
+    }
+
+    // ── Text content per cell ─────────────────────────────────────────────
+    for (ri, row) in rows.iter().enumerate() {
+        let row_y = cell_h * ri as f32 + gap;
+        let mut cell_x = 0.0_f32;
+        for (ci, cell) in row.iter().enumerate() {
+            let cw = if ci < col_widths.len() { col_widths[ci] } else { 0.0 };
+            if !cell.is_empty() {
+                let text_w = cell.len() as f32 * char_w;
+                let tx = cell_x + (cw - text_w) * 0.5;
+                // Tessellate text in local frame then transform
+                let local_strokes = cxf::tessellate_text_ex(
+                    [0.0, 0.0],
+                    h,
+                    0.0,
+                    1.0,
+                    0.0,
+                    "txt",
+                    cell,
+                );
+                for polyline in local_strokes {
+                    let transformed: Vec<[f32; 2]> = polyline
+                        .into_iter()
+                        .map(|[px, py]| rot(px + tx, py + row_y))
+                        .collect();
+                    if !transformed.is_empty() {
+                        out.push(transformed);
+                    }
+                }
+            }
+            cell_x += cw;
+        }
+    }
+
+    out
+}
+
+// ── TruckConvertible ──────────────────────────────────────────────────────────
+
 impl TruckConvertible for Tolerance {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
         if self.text.is_empty() {
             return None;
         }
-        // GDT tolerance text — render with the standard font.
-        // Special GDT symbols (Ⓗ, ⊕ etc.) will display as-is if the font
-        // supports them, otherwise as placeholder glyphs.
+
         let snap_pt = Vec3::new(
             self.insertion_point.x as f32,
             self.insertion_point.y as f32,
             self.insertion_point.z as f32,
         );
 
-        // Determine rotation from the direction vector.
-        let angle = (self.direction.y as f32).atan2(self.direction.x as f32);
-        // Use a default height of 2.5 (standard annotation size).
-        let height = 2.5_f32;
-
-        let strokes = cxf::tessellate_text_ex(
-            [self.insertion_point.x as f32, self.insertion_point.y as f32],
-            height,
-            angle,
-            1.0,
-            0.0,
-            "txt", // standard CAD font
-            &self.text,
-        );
+        // Build the feature-control frame: box outline + cell text, all
+        // represented as 2-D CXF polylines (TruckObject::Text).
+        let polylines = tessellate_tolerance(self);
 
         Some(TruckEntity {
-            object: TruckObject::Text(strokes),
+            object: TruckObject::Text(polylines),
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],
         })
     }
 }
+
+// ── Grippable ─────────────────────────────────────────────────────────────────
 
 impl Grippable for Tolerance {
     fn grips(&self) -> Vec<GripDef> {
@@ -77,6 +273,8 @@ impl Grippable for Tolerance {
     }
 }
 
+// ── PropertyEditable ──────────────────────────────────────────────────────────
+
 impl PropertyEditable for Tolerance {
     fn geometry_properties(&self, _text_style_names: &[String]) -> PropSection {
         PropSection {
@@ -100,6 +298,8 @@ impl PropertyEditable for Tolerance {
         }
     }
 }
+
+// ── Transformable ─────────────────────────────────────────────────────────────
 
 impl Transformable for Tolerance {
     fn apply_transform(&mut self, t: &EntityTransform) {
