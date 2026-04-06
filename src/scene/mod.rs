@@ -1020,7 +1020,7 @@ impl Scene {
 
     // ── Entity management ─────────────────────────────────────────────────
 
-    pub fn add_entity(&mut self, entity: EntityType) -> Handle {
+    pub fn add_entity(&mut self, mut entity: EntityType) -> Handle {
         let hatch_seed = if let EntityType::Hatch(dxf) = &entity {
             let color = self.render_style(&entity).0;
             Self::hatch_model_from_dxf(dxf, color)
@@ -1035,6 +1035,26 @@ impl Scene {
         } else {
             None
         };
+
+        // Auto-create an ImageDefinition object for new RasterImage entities
+        // that don't already reference one.
+        if let EntityType::RasterImage(ref mut img) = entity {
+            if img.definition_handle.is_none() {
+                use acadrust::objects::{ImageDefinition, ObjectType};
+                let def_handle = Handle::new(self.document.next_handle());
+                let mut img_def = ImageDefinition::with_dimensions(
+                    &img.file_path,
+                    img.size.x as u32,
+                    img.size.y as u32,
+                );
+                img_def.handle = def_handle;
+                img_def.is_loaded = true;
+                self.document
+                    .objects
+                    .insert(def_handle, ObjectType::ImageDefinition(img_def));
+                img.definition_handle = Some(def_handle);
+            }
+        }
 
         // Route to the correct block based on current editing mode:
         //   - PSPACE (paper layout, no active viewport): paper-space layout block.
