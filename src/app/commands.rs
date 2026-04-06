@@ -677,7 +677,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "RECT" => {
+            "RECT"|"RECTANG"|"REC" => {
                 use crate::modules::home::draw::shapes::RectCommand;
                 let new_cmd = RectCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -695,7 +695,7 @@ impl H7CAD {
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
-            "POLY" => {
+            "POLY"|"POLYGON"|"POL" => {
                 use crate::modules::home::draw::shapes::PolyCommand;
                 let new_cmd = PolyCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1537,7 +1537,7 @@ impl H7CAD {
 
             "HELP"|"?" => {
                 self.command_line.push_output(
-                    "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT REVCLOUD WIPEOUT MLINE ATTDEF  |  \
+                    "Draw: LINE CIRCLE ARC PLINE RECTANG(RECT) POLYGON(POLY) POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT REVCLOUD WIPEOUT MLINE ATTDEF  |  \
                      Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN ALIGN PEDIT  |  \
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
