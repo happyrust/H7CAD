@@ -126,9 +126,13 @@ impl H7CAD {
             .height(Fill);
 
         let bg_color = if is_paper {
-            Color { r: 0.22, g: 0.24, b: 0.28, a: 1.0 }
+            tab.paper_bg_color
+                .map(|[r, g, b, a]| Color { r, g, b, a })
+                .unwrap_or(Color { r: 0.22, g: 0.24, b: 0.28, a: 1.0 })
         } else {
-            Color { r: 0.11, g: 0.11, b: 0.11, a: 1.0 }
+            tab.bg_color
+                .map(|[r, g, b, a]| Color { r, g, b, a })
+                .unwrap_or(Color { r: 0.11, g: 0.11, b: 0.11, a: 1.0 })
         };
 
         let viewport_stack = stack![

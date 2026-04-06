@@ -31,6 +31,37 @@ impl H7CAD {
             "CLEAR"|"CLR"        => return Task::done(Message::ClearScene),
             "WIREFRAME"|"VW"     => return Task::done(Message::SetWireframe(true)),
             "SOLID"|"VS"         => return Task::done(Message::SetWireframe(false)),
+
+            // ── Background color ───────────────────────────────────────────
+            // Usage:  BACKGROUND <r> <g> <b>   (0–255 each)
+            //         BACKGROUND RESET          (restore default)
+            cmd if cmd == "BACKGROUND" || cmd.starts_with("BACKGROUND ") => {
+                let args = cmd.split_whitespace().skip(1).collect::<Vec<_>>();
+                let is_paper = self.tabs[i].scene.current_layout != "Model";
+                if args.first().map(|s| s.eq_ignore_ascii_case("RESET")).unwrap_or(false) {
+                    if is_paper {
+                        self.tabs[i].paper_bg_color = None;
+                    } else {
+                        self.tabs[i].bg_color = None;
+                    }
+                    self.command_line.push_output("Background reset to default.");
+                } else if args.len() >= 3 {
+                    let r = args[0].parse::<u8>().unwrap_or(0) as f32 / 255.0;
+                    let g = args[1].parse::<u8>().unwrap_or(0) as f32 / 255.0;
+                    let b = args[2].parse::<u8>().unwrap_or(0) as f32 / 255.0;
+                    if is_paper {
+                        self.tabs[i].paper_bg_color = Some([r, g, b, 1.0]);
+                    } else {
+                        self.tabs[i].bg_color = Some([r, g, b, 1.0]);
+                    }
+                    self.command_line
+                        .push_output(&format!("Background: rgb({}, {}, {})", args[0], args[1], args[2]));
+                } else {
+                    self.command_line.push_info(
+                        "Usage: BACKGROUND <r> <g> <b>  (0–255)  |  BACKGROUND RESET"
+                    );
+                }
+            }
             "ORTHO"              => return Task::done(Message::SetProjection(true)),
             "PERSP"              => return Task::done(Message::SetProjection(false)),
             "LAYERS"|"LA"        => return Task::done(Message::ToggleLayers),

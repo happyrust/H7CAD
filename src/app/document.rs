@@ -31,6 +31,10 @@ pub(super) struct DocumentTab {
     pub(super) active_layer: String,
     /// Currently active UCS. `None` means WCS (identity transform).
     pub(super) active_ucs: Option<Ucs>,
+    /// Custom model-space background color.  `None` = default dark grey.
+    pub(super) bg_color: Option<[f32; 4]>,
+    /// Custom paper-space background color.  `None` = default off-white grey.
+    pub(super) paper_bg_color: Option<[f32; 4]>,
 }
 
 impl DocumentTab {
@@ -56,6 +60,8 @@ impl DocumentTab {
             history: HistoryState::default(),
             active_layer: "0".to_string(),
             active_ucs: None,
+            bg_color: None,
+            paper_bg_color: None,
         }
     }
 
