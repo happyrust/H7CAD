@@ -392,7 +392,8 @@ impl H7CAD {
 
             "MLINE"|"ML" => {
                 use crate::modules::home::draw::mline::MlineCommand;
-                let cmd_obj = MlineCommand::new();
+                let style = self.tabs[i].scene.document.header.multiline_style.clone();
+                let cmd_obj = MlineCommand::with_style(style);
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
@@ -2084,6 +2085,115 @@ impl H7CAD {
             }
 
             // ── DimStyle management ───────────────────────────────────────
+            // MLSTYLE — Multiline Style Manager.
+            // Usage:
+            //   MLSTYLE                — open dialog
+            //   MLSTYLE LIST / ?       — list all multiline styles
+            //   MLSTYLE NEW <name>     — create a new style
+            //   MLSTYLE SET <name>     — set current multiline style
+            //   MLSTYLE DEL <name>     — delete a style (not Standard)
+            cmd if cmd == "MLSTYLE" || cmd.starts_with("MLSTYLE ") => {
+                use acadrust::objects::{MLineStyle, ObjectType};
+                let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
+                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "DIALOG" | "UI" => {
+                        return Task::done(Message::MlStyleDialogOpen);
+                    }
+                    "LIST" | "?" => {
+                        let doc = &self.tabs[i].scene.document;
+                        let current = &doc.header.multiline_style;
+                        let styles: Vec<String> = doc.objects.values()
+                            .filter_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s) } else { None })
+                            .map(|s| {
+                                let cur = if &s.name == current { " (current)" } else { "" };
+                                format!("{}  [{}]{}",
+                                    s.name,
+                                    s.elements.len(),
+                                    cur)
+                            })
+                            .collect();
+                        if styles.is_empty() {
+                            self.command_line.push_output("No multiline styles.");
+                        } else {
+                            self.command_line.push_output(&format!("MLineStyles:\n  {}", styles.join("\n  ")));
+                        }
+                    }
+                    "NEW" | "N" => {
+                        let name = parts.get(1).copied().unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: MLSTYLE NEW <name>");
+                        } else {
+                            let doc = &self.tabs[i].scene.document;
+                            let exists = doc.objects.values().any(|o| {
+                                matches!(o, ObjectType::MLineStyle(s) if s.name.eq_ignore_ascii_case(&name))
+                            });
+                            if exists {
+                                self.command_line.push_error(&format!("MLSTYLE: '{}' already exists.", name));
+                            } else {
+                                self.push_undo_snapshot(i, "MLSTYLE NEW");
+                                let mut style = MLineStyle::standard();
+                                style.name = name.clone();
+                                let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
+                                style.handle = nh;
+                                self.tabs[i].scene.document.objects.insert(
+                                    nh, ObjectType::MLineStyle(style)
+                                );
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("MLSTYLE: '{}' created.", name));
+                            }
+                        }
+                    }
+                    "SET" | "S" => {
+                        let name = parts.get(1).copied().unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: MLSTYLE SET <name>");
+                        } else {
+                            let doc = &self.tabs[i].scene.document;
+                            let exists = doc.objects.values().any(|o| {
+                                matches!(o, ObjectType::MLineStyle(s) if s.name.eq_ignore_ascii_case(&name))
+                            });
+                            if exists {
+                                self.push_undo_snapshot(i, "MLSTYLE SET");
+                                self.tabs[i].scene.document.header.multiline_style = name.clone();
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("MLSTYLE: current style set to '{}'.", name));
+                            } else {
+                                self.command_line.push_error(&format!("MLSTYLE: '{}' not found.", name));
+                            }
+                        }
+                    }
+                    "DEL" | "DELETE" => {
+                        let name = parts.get(1).copied().unwrap_or("").to_string();
+                        if name.is_empty() || name.eq_ignore_ascii_case("Standard") {
+                            self.command_line.push_error("Cannot delete the Standard style.");
+                        } else {
+                            let doc = &self.tabs[i].scene.document;
+                            let handle = doc.objects.iter()
+                                .find_map(|(&h, o)| {
+                                    if let ObjectType::MLineStyle(s) = o {
+                                        if s.name.eq_ignore_ascii_case(&name) { Some(h) } else { None }
+                                    } else { None }
+                                });
+                            if let Some(h) = handle {
+                                self.push_undo_snapshot(i, "MLSTYLE DEL");
+                                self.tabs[i].scene.document.objects.remove(&h);
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("MLSTYLE: '{}' deleted.", name));
+                            } else {
+                                self.command_line.push_error(&format!("MLSTYLE: '{}' not found.", name));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_error(
+                            "Usage: MLSTYLE [LIST|NEW <name>|SET <name>|DEL <name>]"
+                        );
+                    }
+                }
+            }
+
             cmd if cmd == "DIMSTYLE" || cmd == "DDIM" || cmd.starts_with("DIMSTYLE ") || cmd.starts_with("DDIM ") => {
                 use acadrust::tables::DimStyle;
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");

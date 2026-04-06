@@ -2126,6 +2126,98 @@ impl H7CAD {
                 Task::none()
             }
 
+            // ── MLineStyle Dialog ─────────────────────────────────────────────
+            Message::MlStyleDialogOpen => {
+                use acadrust::objects::ObjectType;
+                let i = self.active_tab;
+                let cur = self.tabs[i].scene.document.header.multiline_style.clone();
+                let exists = self.tabs[i].scene.document.objects.values().any(|o| {
+                    matches!(o, ObjectType::MLineStyle(s) if s.name == cur)
+                });
+                self.mlstyle_selected = if exists {
+                    cur
+                } else {
+                    self.tabs[i].scene.document.objects.values()
+                        .find_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
+                        .unwrap_or_else(|| "Standard".to_string())
+                };
+                self.mlstyle_open = true;
+                Task::none()
+            }
+            Message::MlStyleDialogClose => {
+                self.mlstyle_open = false;
+                Task::none()
+            }
+            Message::MlStyleDialogSelect(name) => {
+                self.mlstyle_selected = name;
+                Task::none()
+            }
+            Message::MlStyleDialogSetCurrent => {
+                use acadrust::objects::ObjectType;
+                let i = self.active_tab;
+                let name = self.mlstyle_selected.clone();
+                let exists = self.tabs[i].scene.document.objects.values().any(|o| {
+                    matches!(o, ObjectType::MLineStyle(s) if s.name == name)
+                });
+                if exists {
+                    self.push_undo_snapshot(i, "MLSTYLE SET");
+                    self.tabs[i].scene.document.header.multiline_style = name.clone();
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("Current multiline style: {}", name));
+                }
+                Task::none()
+            }
+            Message::MlStyleDialogNew => {
+                use acadrust::objects::ObjectType;
+                let i = self.active_tab;
+                // Generate a unique name.
+                let doc = &self.tabs[i].scene.document;
+                let mut n = 1u32;
+                let base = "MLS";
+                let new_name = loop {
+                    let candidate = format!("{}{}", base, n);
+                    let taken = doc.objects.values().any(|o| {
+                        matches!(o, ObjectType::MLineStyle(s) if s.name.eq_ignore_ascii_case(&candidate))
+                    });
+                    if !taken { break candidate; }
+                    n += 1;
+                };
+                self.push_undo_snapshot(i, "MLSTYLE NEW");
+                let mut style = acadrust::objects::MLineStyle::standard();
+                style.name = new_name.clone();
+                let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
+                style.handle = nh;
+                self.tabs[i].scene.document.objects.insert(nh, ObjectType::MLineStyle(style));
+                self.mlstyle_selected = new_name;
+                self.tabs[i].dirty = true;
+                Task::none()
+            }
+            Message::MlStyleDialogDelete => {
+                use acadrust::objects::ObjectType;
+                let i = self.active_tab;
+                let name = self.mlstyle_selected.clone();
+                if name.eq_ignore_ascii_case("Standard") {
+                    self.command_line.push_error("Cannot delete the Standard style.");
+                    return Task::none();
+                }
+                let handle = self.tabs[i].scene.document.objects.iter()
+                    .find_map(|(&h, o)| {
+                        if let ObjectType::MLineStyle(s) = o {
+                            if s.name == name { Some(h) } else { None }
+                        } else { None }
+                    });
+                if let Some(h) = handle {
+                    self.push_undo_snapshot(i, "MLSTYLE DEL");
+                    self.tabs[i].scene.document.objects.remove(&h);
+                    // Select first remaining style.
+                    self.mlstyle_selected = self.tabs[i].scene.document.objects.values()
+                        .find_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
+                        .unwrap_or_else(|| "Standard".to_string());
+                    self.tabs[i].dirty = true;
+                }
+                Task::none()
+            }
+
             // ── DimStyle Dialog ───────────────────────────────────────────────
             Message::DimStyleDialogOpen => {
                 let i = self.active_tab;

@@ -17,11 +17,17 @@ pub struct MlineCommand {
     points: Vec<Vec3>,
     scale: f64,
     waiting_scale: bool,
+    style_name: String,
 }
 
 impl MlineCommand {
+    #[allow(dead_code)]
     pub fn new() -> Self {
-        Self { points: vec![], scale: 1.0, waiting_scale: false }
+        Self { points: vec![], scale: 1.0, waiting_scale: false, style_name: "Standard".into() }
+    }
+
+    pub fn with_style(style_name: impl Into<String>) -> Self {
+        Self { points: vec![], scale: 1.0, waiting_scale: false, style_name: style_name.into() }
     }
 }
 
@@ -55,7 +61,7 @@ impl CadCommand for MlineCommand {
 
         // Close command
         if (up == "C" || up == "CLOSE") && self.points.len() >= 3 {
-            let entity = build_mline(&self.points, self.scale, true);
+            let entity = build_mline(&self.points, self.scale, true, &self.style_name);
             return Some(CmdResult::CommitAndExit(entity));
         }
 
@@ -85,7 +91,7 @@ impl CadCommand for MlineCommand {
         if self.points.len() < 2 {
             return CmdResult::Cancel;
         }
-        let entity = build_mline(&self.points, self.scale, false);
+        let entity = build_mline(&self.points, self.scale, false, &self.style_name);
         CmdResult::CommitAndExit(entity)
     }
 
@@ -104,12 +110,13 @@ impl CadCommand for MlineCommand {
             line_weight_px: 1.0,
             snap_pts: vec![],
             tangent_geoms: vec![],
+            aci: 0,
             key_vertices: vec![],
         })
     }
 }
 
-fn build_mline(pts: &[Vec3], scale: f64, closed: bool) -> EntityType {
+fn build_mline(pts: &[Vec3], scale: f64, closed: bool, style_name: &str) -> EntityType {
     let verts: Vec<Vector3> = pts.iter()
         .map(|p| Vector3::new(p.x as f64, p.z as f64, p.y as f64))
         .collect();
@@ -119,5 +126,6 @@ fn build_mline(pts: &[Vec3], scale: f64, closed: bool) -> EntityType {
         MLine::from_points(&verts)
     };
     mline.scale_factor = scale;
+    mline.style_name = style_name.to_string();
     EntityType::MLine(mline)
 }
