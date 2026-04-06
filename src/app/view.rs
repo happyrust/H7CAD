@@ -227,6 +227,15 @@ impl H7CAD {
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        let textstyle_layer: Element<'_, Message> = if self.textstyle_open {
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.text_styles
+                .iter().map(|s| s.name.clone()).collect();
+            textstyle_overlay(styles, &self.textstyle_selected, &self.textstyle_font, &self.textstyle_width, &self.textstyle_oblique)
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+
         let tablestyle_layer: Element<'_, Message> = if self.tablestyle_open {
             use acadrust::objects::ObjectType;
             let tab = &self.tabs[self.active_tab];
@@ -271,7 +280,7 @@ impl H7CAD {
             iced::widget::Space::new().width(0).height(0).into()
         };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, tablestyle_layer, mlstyle_layer, dimstyle_layer].into()
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, dimstyle_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -1043,6 +1052,218 @@ fn dimstyle_overlay<'a>(
     let catcher = mouse_area(
         container(iced::widget::Space::new().width(Fill).height(Fill))
     ).on_press(Message::DimStyleDialogClose);
+
+    let positioned = container(panel)
+        .width(Fill).height(Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    stack![catcher, positioned].into()
+}
+
+// ── TextStyle Font Browser overlay ─────────────────────────────────────────
+
+/// Built-in CXF font file names (relative to assets/fonts/).
+const BUILTIN_FONTS: &[&str] = &[
+    "CourierCad.cxf", "Cursive.cxf", "GothGBT.cxf", "GothGRT.cxf", "GothITT.cxf",
+    "GreekC.cxf", "GreekS.cxf", "ItalicC.cxf", "ItalicT.cxf",
+    "RomanC.cxf", "RomanD.cxf", "RomanS.cxf", "RomanT.cxf",
+    "SansND.cxf", "SansNS.cxf", "ScriptC.cxf", "ScriptS.cxf",
+    "Standard.cxf", "Unicode.cxf", "SymbolCad.cxf",
+];
+
+fn textstyle_overlay<'a>(
+    styles: Vec<String>,
+    selected: &'a str,
+    font_buf: &'a str,
+    width_buf: &'a str,
+    oblique_buf: &'a str,
+) -> Element<'a, Message> {
+    use iced::Length::Shrink;
+
+    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
+    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
+    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
+    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
+
+    let field_style = |_: &Theme, _: iced::widget::text_input::Status| iced::widget::text_input::Style {
+        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
+        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+        icon: TEXT_COL, placeholder: DIM_COL, value: TEXT_COL, selection: ACCENT,
+    };
+
+    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
+        background: Some(Background::Color(match (accent, status) {
+            (true, button::Status::Hovered | button::Status::Pressed) =>
+                Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
+            (false, button::Status::Hovered | button::Status::Pressed) =>
+                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
+            (true, _) => ACCENT,
+            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+        })),
+        text_color: TEXT_COL,
+        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        ..Default::default()
+    };
+
+    // Left: style list.
+    let style_items: Vec<Element<'_, Message>> = styles.iter().map(|name| {
+        let is_sel = name.as_str() == selected;
+        button(text(name.clone()).size(11).color(TEXT_COL))
+            .on_press(Message::TextStyleDialogSelect(name.clone()))
+            .style(move |_: &Theme, st| button::Style {
+                background: Some(Background::Color(match (is_sel, st) {
+                    (true, _) => ACTIVE_BG,
+                    (false, button::Status::Hovered | button::Status::Pressed) =>
+                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT_COL,
+                ..Default::default()
+            })
+            .padding([3, 8])
+            .width(Fill)
+            .into()
+    }).collect();
+
+    let style_panel = container(
+        column(style_items).spacing(2)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
+        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        ..Default::default()
+    })
+    .padding(4)
+    .width(150)
+    .height(280);
+
+    // Middle: font file list (built-in CXF fonts).
+    let font_items: Vec<Element<'_, Message>> = BUILTIN_FONTS.iter().map(|&f| {
+        let is_sel = font_buf == f;
+        button(text(f).size(10).color(TEXT_COL))
+            .on_press(Message::TextStyleFontPick(f.to_string()))
+            .style(move |_: &Theme, st| button::Style {
+                background: Some(Background::Color(match (is_sel, st) {
+                    (true, _) => ACTIVE_BG,
+                    (false, button::Status::Hovered | button::Status::Pressed) =>
+                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT_COL,
+                ..Default::default()
+            })
+            .padding([3, 8])
+            .width(Fill)
+            .into()
+    }).collect();
+
+    let font_panel = column![
+        text("Font File:").size(11).color(DIM_COL),
+        container(
+            iced::widget::scrollable(column(font_items).spacing(1))
+        )
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
+            border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+            ..Default::default()
+        })
+        .padding(4)
+        .width(180)
+        .height(160),
+        text_input("font file…", font_buf)
+            .on_input(|v| Message::TextStyleEdit { field: "font", value: v })
+            .style(field_style)
+            .size(11)
+            .width(180),
+    ]
+    .spacing(4);
+
+    // Right: properties + preview.
+    let props = column![
+        text("Properties").size(12).color(ACCENT),
+        row![
+            text("Width Factor:").size(11).color(DIM_COL).width(110),
+            text_input("1.0", width_buf)
+                .on_input(|v| Message::TextStyleEdit { field: "width", value: v })
+                .style(field_style)
+                .size(11)
+                .width(80),
+        ].spacing(6).align_y(iced::Center),
+        row![
+            text("Oblique (°):").size(11).color(DIM_COL).width(110),
+            text_input("0.0", oblique_buf)
+                .on_input(|v| Message::TextStyleEdit { field: "oblique", value: v })
+                .style(field_style)
+                .size(11)
+                .width(80),
+        ].spacing(6).align_y(iced::Center),
+        Space::new().height(8),
+        text("Preview:").size(11).color(DIM_COL),
+        container(
+            text("AaBbCc 0123").size(20).color(TEXT_COL)
+        )
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 })),
+            border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+            ..Default::default()
+        })
+        .padding(10)
+        .width(Fill),
+        Space::new().height(Fill),
+        row![
+            button(text("Apply").size(11))
+                .on_press(Message::TextStyleApply)
+                .style(btn_style(true))
+                .padding([5, 10]),
+            button(text("Set Current").size(11))
+                .on_press(Message::TextStyleDialogSetCurrent)
+                .style(btn_style(false))
+                .padding([5, 10]),
+        ].spacing(6),
+    ]
+    .spacing(8)
+    .width(220);
+
+    let panel = container(
+        column![
+            row![
+                text("Text Style Font Browser").size(13).color(TEXT_COL),
+                Space::new().width(Fill),
+                row![
+                    button(text("New").size(11))
+                        .on_press(Message::TextStyleDialogNew)
+                        .style(btn_style(false))
+                        .padding([3, 8]),
+                    button(text("Delete").size(11))
+                        .on_press(Message::TextStyleDialogDelete)
+                        .style(btn_style(false))
+                        .padding([3, 8]),
+                    button(text("✕").size(12).color(DIM_COL))
+                        .on_press(Message::TextStyleDialogClose)
+                        .style(|_: &Theme, _| button::Style {
+                            background: Some(Background::Color(Color::TRANSPARENT)),
+                            text_color: DIM_COL,
+                            ..Default::default()
+                        })
+                        .padding([2, 6]),
+                ].spacing(4),
+            ].align_y(iced::Center),
+            row![style_panel, font_panel, props].spacing(12).align_y(iced::Top),
+        ].spacing(10).padding(16)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(PANEL_BG)),
+        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
+        ..Default::default()
+    })
+    .width(Shrink);
+
+    let catcher = mouse_area(
+        container(iced::widget::Space::new().width(Fill).height(Fill))
+    ).on_press(Message::TextStyleDialogClose);
 
     let positioned = container(panel)
         .width(Fill).height(Fill)

@@ -2126,6 +2126,122 @@ impl H7CAD {
                 Task::none()
             }
 
+            // ── TextStyle Font Browser ────────────────────────────────────────
+            Message::TextStyleDialogOpen => {
+                let i = self.active_tab;
+                let cur = self.tabs[i].scene.document.header.current_text_style_name.clone();
+                let exists = self.tabs[i].scene.document.text_styles.get(&cur).is_some();
+                self.textstyle_selected = if exists {
+                    cur
+                } else {
+                    self.tabs[i].scene.document.text_styles
+                        .iter().next().map(|s| s.name.clone())
+                        .unwrap_or_else(|| "Standard".to_string())
+                };
+                self.load_textstyle_bufs(i);
+                self.textstyle_open = true;
+                Task::none()
+            }
+            Message::TextStyleDialogClose => {
+                self.textstyle_open = false;
+                Task::none()
+            }
+            Message::TextStyleDialogSelect(name) => {
+                let i = self.active_tab;
+                self.textstyle_selected = name;
+                self.load_textstyle_bufs(i);
+                Task::none()
+            }
+            Message::TextStyleDialogSetCurrent => {
+                let i = self.active_tab;
+                let name = self.textstyle_selected.clone();
+                if self.tabs[i].scene.document.text_styles.get(&name).is_some() {
+                    self.push_undo_snapshot(i, "STYLE SET");
+                    self.tabs[i].scene.document.header.current_text_style_name = name.clone();
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("Current text style: {}", name));
+                }
+                Task::none()
+            }
+            Message::TextStyleDialogNew => {
+                let i = self.active_tab;
+                let doc = &self.tabs[i].scene.document;
+                let mut n = 1u32;
+                let new_name = loop {
+                    let candidate = format!("Style{}", n);
+                    if !doc.text_styles.contains(&candidate) { break candidate; }
+                    n += 1;
+                };
+                self.push_undo_snapshot(i, "STYLE NEW");
+                let style = acadrust::tables::TextStyle::new(&new_name);
+                let _ = self.tabs[i].scene.document.text_styles.add(style);
+                self.textstyle_selected = new_name.clone();
+                self.textstyle_font = String::new();
+                self.textstyle_width = "1.0".to_string();
+                self.textstyle_oblique = "0.0".to_string();
+                self.tabs[i].dirty = true;
+                Task::none()
+            }
+            Message::TextStyleDialogDelete => {
+                let i = self.active_tab;
+                let name = self.textstyle_selected.clone();
+                if name.eq_ignore_ascii_case("Standard") {
+                    self.command_line.push_error("Cannot delete the Standard text style.");
+                    return Task::none();
+                }
+                self.push_undo_snapshot(i, "STYLE DEL");
+                self.tabs[i].scene.document.text_styles.remove(&name);
+                self.textstyle_selected = self.tabs[i].scene.document.text_styles
+                    .iter().next().map(|s| s.name.clone())
+                    .unwrap_or_else(|| "Standard".to_string());
+                self.load_textstyle_bufs(i);
+                self.tabs[i].dirty = true;
+                Task::none()
+            }
+            Message::TextStyleEdit { field, value } => {
+                match field {
+                    "font" => self.textstyle_font = value,
+                    "width" => self.textstyle_width = value,
+                    "oblique" => self.textstyle_oblique = value,
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::TextStyleApply => {
+                let i = self.active_tab;
+                let name = self.textstyle_selected.clone();
+                if self.tabs[i].scene.document.text_styles.get(&name).is_some() {
+                    self.push_undo_snapshot(i, "STYLE EDIT");
+                    let font = self.textstyle_font.clone();
+                    let width_str = self.textstyle_width.clone();
+                    let oblique_str = self.textstyle_oblique.clone();
+                    if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
+                        s.font_file = font;
+                        if let Ok(w) = width_str.trim().parse::<f64>() {
+                            s.width_factor = w;
+                        }
+                        if let Ok(a) = oblique_str.trim().parse::<f64>() {
+                            s.oblique_angle = a.to_radians();
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                }
+                Task::none()
+            }
+            Message::TextStyleFontPick(font_file) => {
+                let i = self.active_tab;
+                self.textstyle_font = font_file.clone();
+                let name = self.textstyle_selected.clone();
+                if self.tabs[i].scene.document.text_styles.get(&name).is_some() {
+                    self.push_undo_snapshot(i, "STYLE FONT");
+                    if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&name) {
+                        s.font_file = font_file;
+                    }
+                    self.tabs[i].dirty = true;
+                }
+                Task::none()
+            }
+
             // ── TableStyle Dialog ─────────────────────────────────────────────
             Message::TableStyleDialogOpen => {
                 use acadrust::objects::ObjectType;
@@ -2463,6 +2579,16 @@ impl H7CAD {
             Dimtol => self.ds_dimtol = !self.ds_dimtol,
             Dimlim => self.ds_dimlim = !self.ds_dimlim,
             _ => {}
+        }
+    }
+
+    /// Populate edit buffers from the currently selected text style.
+    fn load_textstyle_bufs(&mut self, tab: usize) {
+        let doc = &self.tabs[tab].scene.document;
+        if let Some(s) = doc.text_styles.get(&self.textstyle_selected) {
+            self.textstyle_font = s.font_file.clone();
+            self.textstyle_width = format!("{:.4}", s.width_factor);
+            self.textstyle_oblique = format!("{:.2}", s.oblique_angle.to_degrees());
         }
     }
 }

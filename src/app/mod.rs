@@ -98,6 +98,16 @@ pub(super) struct H7CAD {
     tablestyle_open: bool,
     tablestyle_selected: String,
 
+    // ── TextStyle Font Browser ────────────────────────────────────────────
+    textstyle_open: bool,
+    textstyle_selected: String,
+    /// Edit buffer for font file name.
+    textstyle_font: String,
+    /// Edit buffer for width factor.
+    textstyle_width: String,
+    /// Edit buffer for oblique angle (degrees).
+    textstyle_oblique: String,
+
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     dimstyle_open: bool,
     /// Name of the style currently shown in the dialog.
@@ -343,6 +353,19 @@ pub enum Message {
     PlotStyleLoaded(Option<crate::io::plot_style::PlotStyleTable>),
     /// Clear the active plot style table.
     PlotStyleClear,
+    // ── TextStyle Font Browser ────────────────────────────────────────────
+    TextStyleDialogOpen,
+    TextStyleDialogClose,
+    TextStyleDialogSelect(String),
+    TextStyleDialogSetCurrent,
+    TextStyleDialogNew,
+    TextStyleDialogDelete,
+    /// Edit a string field (FontFile / Width / Oblique).
+    TextStyleEdit { field: &'static str, value: String },
+    /// Commit edits to the selected text style.
+    TextStyleApply,
+    /// Select a font from the built-in font list.
+    TextStyleFontPick(String),
     // ── TableStyle Dialog ─────────────────────────────────────────────────
     TableStyleDialogOpen,
     TableStyleDialogClose,
@@ -417,6 +440,12 @@ impl H7CAD {
             page_setup_scale: "Fit".to_string(),
             // Plot style
             active_plot_style: None,
+            // TextStyle font browser
+            textstyle_open: false,
+            textstyle_selected: "Standard".to_string(),
+            textstyle_font: String::new(),
+            textstyle_width: "1.0".to_string(),
+            textstyle_oblique: "0.0".to_string(),
             // TableStyle dialog
             tablestyle_open: false,
             tablestyle_selected: "Standard".to_string(),
