@@ -41,8 +41,10 @@ impl H7CAD {
                 if args.first().map(|s| s.eq_ignore_ascii_case("RESET")).unwrap_or(false) {
                     if is_paper {
                         self.tabs[i].paper_bg_color = None;
+                        self.tabs[i].scene.paper_bg_color = [0.22, 0.24, 0.28, 1.0];
                     } else {
                         self.tabs[i].bg_color = None;
+                        self.tabs[i].scene.bg_color = [0.11, 0.11, 0.11, 1.0];
                     }
                     self.command_line.push_output("Background reset to default.");
                 } else if args.len() >= 3 {
@@ -51,8 +53,10 @@ impl H7CAD {
                     let b = args[2].parse::<u8>().unwrap_or(0) as f32 / 255.0;
                     if is_paper {
                         self.tabs[i].paper_bg_color = Some([r, g, b, 1.0]);
+                        self.tabs[i].scene.paper_bg_color = [r, g, b, 1.0];
                     } else {
                         self.tabs[i].bg_color = Some([r, g, b, 1.0]);
+                        self.tabs[i].scene.bg_color = [r, g, b, 1.0];
                     }
                     self.command_line
                         .push_output(&format!("Background: rgb({}, {}, {})", args[0], args[1], args[2]));

@@ -69,6 +69,11 @@ pub struct Scene {
     /// `None` = paper space editing (PSPACE).  Only meaningful when
     /// `current_layout != "Model"`.
     pub active_viewport: Option<Handle>,
+    /// Custom model-space background fill color for Wipeout entities.
+    /// Set from the active tab's `bg_color`; defaults to dark grey.
+    pub bg_color: [f32; 4],
+    /// Custom paper-space background fill color for Wipeout entities.
+    pub paper_bg_color: [f32; 4],
 }
 
 impl Scene {
@@ -86,6 +91,8 @@ impl Scene {
             meshes: HashMap::new(),
             images: HashMap::new(),
             active_viewport: None,
+            bg_color: [0.11, 0.11, 0.11, 1.0],
+            paper_bg_color: [0.22, 0.24, 0.28, 1.0],
         }
     }
 
@@ -1216,9 +1223,9 @@ impl Scene {
         // they mask hatch fills drawn earlier in the same pass.
         // Wipeout fills are appended last so they render on top of other hatches.
         let bg_color: [f32; 4] = if self.current_layout == "Model" {
-            [0.11, 0.11, 0.11, 1.0]
+            self.bg_color
         } else {
-            [0.22, 0.24, 0.28, 1.0]
+            self.paper_bg_color
         };
         for entity in self.document.entities() {
             let EntityType::Wipeout(wo) = entity else { continue };
