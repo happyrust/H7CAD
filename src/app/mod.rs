@@ -85,6 +85,37 @@ pub(super) struct H7CAD {
     page_setup_rotation: String,
     /// Plot scale: "Fit" | "1:1" | "1:2" | "1:4" | "1:5" | "1:10" | "1:20" | "1:50" | "1:100" | "2:1".
     page_setup_scale: String,
+
+    // ── DimStyle Dialog ───────────────────────────────────────────────────
+    dimstyle_open: bool,
+    /// Name of the style currently shown in the dialog.
+    dimstyle_selected: String,
+    /// Active tab: 0=Lines, 1=Arrows, 2=Text, 3=Scale/Units, 4=Tolerances.
+    dimstyle_tab: u8,
+    // Edit buffers (strings while typing):
+    ds_dimdle: String, ds_dimdli: String, ds_dimgap: String,
+    ds_dimexe: String, ds_dimexo: String,
+    ds_dimsd1: bool,   ds_dimsd2: bool,
+    ds_dimse1: bool,   ds_dimse2: bool,
+    ds_dimasz: String, ds_dimcen: String, ds_dimtsz: String,
+    ds_dimtxt: String, ds_dimtxsty: String, ds_dimtad: String,
+    ds_dimtih: bool,   ds_dimtoh: bool,
+    ds_dimscale: String, ds_dimlfac: String,
+    ds_dimlunit: String, ds_dimdec: String, ds_dimpost: String,
+    ds_dimtol: bool,   ds_dimlim: bool,
+    ds_dimtp: String,  ds_dimtm: String,
+    ds_dimtdec: String, ds_dimtfac: String,
+}
+
+/// Identifies a DimStyle field that can be edited in the dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DsField {
+    Dimdle, Dimdli, Dimgap, Dimexe, Dimexo,
+    Dimsd1, Dimsd2, Dimse1, Dimse2,
+    Dimasz, Dimcen, Dimtsz,
+    Dimtxt, Dimtxsty, Dimtad, Dimtih, Dimtoh,
+    Dimscale, Dimlfac, Dimlunit, Dimdec, Dimpost,
+    Dimtol, Dimlim, Dimtp, Dimtm, Dimtdec, Dimtfac,
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +324,24 @@ pub enum Message {
     PlotExport,
     /// Callback after the user picks (or cancels) the export path.
     PlotExportPath(Option<std::path::PathBuf>),
+    // ── DimStyle Dialog ───────────────────────────────────────────────────
+    DimStyleDialogOpen,
+    DimStyleDialogClose,
+    /// Apply edits to the selected style.
+    DimStyleDialogApply,
+    /// Select a different style in the dialog list.
+    DimStyleDialogSelect(String),
+    /// Switch the active tab.
+    DimStyleDialogTab(u8),
+    /// Create a new empty style (prompts via command line).
+    DimStyleDialogNew,
+    /// Set the selected style as the document's current dim style.
+    DimStyleDialogSetCurrent,
+    /// Delete the selected style.
+    DimStyleDialogDelete,
+    // Field edit messages:
+    DsEdit(DsField, String),
+    DsToggle(DsField),
 }
 
 impl H7CAD {
@@ -334,6 +383,26 @@ impl H7CAD {
             page_setup_offset_y: "0.0".to_string(),
             page_setup_rotation: "0".to_string(),
             page_setup_scale: "Fit".to_string(),
+            // DimStyle dialog
+            dimstyle_open: false,
+            dimstyle_selected: "Standard".to_string(),
+            dimstyle_tab: 0,
+            ds_dimdle: "0".to_string(),       ds_dimdli: "3.75".to_string(),
+            ds_dimgap: "0.625".to_string(),   ds_dimexe: "1.25".to_string(),
+            ds_dimexo: "0.625".to_string(),
+            ds_dimsd1: false, ds_dimsd2: false,
+            ds_dimse1: false, ds_dimse2: false,
+            ds_dimasz: "0.18".to_string(),    ds_dimcen: "0.09".to_string(),
+            ds_dimtsz: "0".to_string(),
+            ds_dimtxt: "0.18".to_string(),    ds_dimtxsty: "Standard".to_string(),
+            ds_dimtad: "1".to_string(),
+            ds_dimtih: false, ds_dimtoh: false,
+            ds_dimscale: "1".to_string(),     ds_dimlfac: "1".to_string(),
+            ds_dimlunit: "2".to_string(),     ds_dimdec: "2".to_string(),
+            ds_dimpost: "<>".to_string(),
+            ds_dimtol: false, ds_dimlim: false,
+            ds_dimtp: "0".to_string(),        ds_dimtm: "0".to_string(),
+            ds_dimtdec: "2".to_string(),      ds_dimtfac: "1".to_string(),
         };
         app.sync_ribbon_layers();
         app

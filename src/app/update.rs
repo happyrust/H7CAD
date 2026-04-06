@@ -2101,6 +2101,185 @@ impl H7CAD {
                 }
                 Task::none()
             }
+
+            // ── DimStyle Dialog ───────────────────────────────────────────────
+            Message::DimStyleDialogOpen => {
+                let i = self.active_tab;
+                // Pick the document's current dim style or "Standard".
+                let cur = self.tabs[i].scene.document.header.current_dimstyle_name.clone();
+                let selected = if self.tabs[i].scene.document.dim_styles.get(&cur).is_some() {
+                    cur
+                } else {
+                    self.tabs[i].scene.document.dim_styles
+                        .iter().next().map(|s| s.name.clone())
+                        .unwrap_or_else(|| "Standard".to_string())
+                };
+                self.dimstyle_selected = selected.clone();
+                self.dimstyle_open = true;
+                self.load_dimstyle_bufs(i);
+                Task::none()
+            }
+            Message::DimStyleDialogClose => {
+                self.dimstyle_open = false;
+                Task::none()
+            }
+            Message::DimStyleDialogApply => {
+                let i = self.active_tab;
+                self.apply_dimstyle_bufs(i);
+                Task::none()
+            }
+            Message::DimStyleDialogSelect(name) => {
+                let i = self.active_tab;
+                self.dimstyle_selected = name;
+                self.load_dimstyle_bufs(i);
+                Task::none()
+            }
+            Message::DimStyleDialogTab(tab) => {
+                self.dimstyle_tab = tab;
+                Task::none()
+            }
+            Message::DimStyleDialogNew => {
+                // Delegate to the DIMSTYLE NEW command via command line prompt.
+                self.command_line.push_info("Enter new DimStyle name:");
+                self.dimstyle_open = false;
+                Task::none()
+            }
+            Message::DimStyleDialogSetCurrent => {
+                let i = self.active_tab;
+                self.push_undo_snapshot(i, "DIMSTYLE SETCURRENT");
+                self.tabs[i].scene.document.header.current_dimstyle_name =
+                    self.dimstyle_selected.clone();
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(&format!(
+                    "Current dim style set to '{}'.", self.dimstyle_selected
+                ));
+                Task::none()
+            }
+            Message::DimStyleDialogDelete => {
+                let i = self.active_tab;
+                let name = self.dimstyle_selected.clone();
+                if name == "Standard" {
+                    self.command_line.push_error("Cannot delete the Standard dim style.");
+                } else if self.tabs[i].scene.document.dim_styles.remove(&name).is_some() {
+                    self.tabs[i].dirty = true;
+                    // Select first remaining style.
+                    self.dimstyle_selected = self.tabs[i].scene.document.dim_styles
+                        .iter().next().map(|s| s.name.clone())
+                        .unwrap_or_else(|| "Standard".to_string());
+                    self.load_dimstyle_bufs(i);
+                    self.command_line.push_output(&format!("DimStyle '{}' deleted.", name));
+                }
+                Task::none()
+            }
+            Message::DsEdit(field, val) => {
+                self.apply_ds_edit(field, val);
+                Task::none()
+            }
+            Message::DsToggle(field) => {
+                self.apply_ds_toggle(field);
+                Task::none()
+            }
+        }
+    }
+}
+
+// ── DimStyle dialog helpers ─────────────────────────────────────────────────
+
+impl H7CAD {
+    /// Populate all edit buffers from the currently selected dim style.
+    fn load_dimstyle_bufs(&mut self, tab: usize) {
+        let doc = &self.tabs[tab].scene.document;
+        let Some(ds) = doc.dim_styles.get(&self.dimstyle_selected) else { return };
+        self.ds_dimdle  = format!("{}", ds.dimdle);
+        self.ds_dimdli  = format!("{}", ds.dimdli);
+        self.ds_dimgap  = format!("{}", ds.dimgap);
+        self.ds_dimexe  = format!("{}", ds.dimexe);
+        self.ds_dimexo  = format!("{}", ds.dimexo);
+        self.ds_dimsd1  = ds.dimsd1; self.ds_dimsd2 = ds.dimsd2;
+        self.ds_dimse1  = ds.dimse1; self.ds_dimse2 = ds.dimse2;
+        self.ds_dimasz  = format!("{}", ds.dimasz);
+        self.ds_dimcen  = format!("{}", ds.dimcen);
+        self.ds_dimtsz  = format!("{}", ds.dimtsz);
+        self.ds_dimtxt  = format!("{}", ds.dimtxt);
+        self.ds_dimtxsty = ds.dimtxsty.clone();
+        self.ds_dimtad  = format!("{}", ds.dimtad);
+        self.ds_dimtih  = ds.dimtih; self.ds_dimtoh = ds.dimtoh;
+        self.ds_dimscale = format!("{}", ds.dimscale);
+        self.ds_dimlfac  = format!("{}", ds.dimlfac);
+        self.ds_dimlunit = format!("{}", ds.dimlunit);
+        self.ds_dimdec   = format!("{}", ds.dimdec);
+        self.ds_dimpost  = ds.dimpost.clone();
+        self.ds_dimtol   = ds.dimtol; self.ds_dimlim = ds.dimlim;
+        self.ds_dimtp    = format!("{}", ds.dimtp);
+        self.ds_dimtm    = format!("{}", ds.dimtm);
+        self.ds_dimtdec  = format!("{}", ds.dimtdec);
+        self.ds_dimtfac  = format!("{}", ds.dimtfac);
+    }
+
+    /// Write edit buffers back into the selected dim style document entry.
+    fn apply_dimstyle_bufs(&mut self, tab: usize) {
+        self.push_undo_snapshot(tab, "DIMSTYLE EDIT");
+        let doc = &mut self.tabs[tab].scene.document;
+        let Some(ds) = doc.dim_styles.get_mut(&self.dimstyle_selected) else { return };
+        macro_rules! set_f64 { ($field:ident, $buf:expr) => {
+            if let Ok(v) = $buf.trim().parse::<f64>() { ds.$field = v; }
+        }}
+        macro_rules! set_i16 { ($field:ident, $buf:expr) => {
+            if let Ok(v) = $buf.trim().parse::<i16>() { ds.$field = v; }
+        }}
+        set_f64!(dimdle, self.ds_dimdle);   set_f64!(dimdli, self.ds_dimdli);
+        set_f64!(dimgap, self.ds_dimgap);   set_f64!(dimexe, self.ds_dimexe);
+        set_f64!(dimexo, self.ds_dimexo);   set_f64!(dimasz, self.ds_dimasz);
+        set_f64!(dimcen, self.ds_dimcen);   set_f64!(dimtsz, self.ds_dimtsz);
+        set_f64!(dimtxt, self.ds_dimtxt);   set_f64!(dimscale, self.ds_dimscale);
+        set_f64!(dimlfac, self.ds_dimlfac); set_f64!(dimtp, self.ds_dimtp);
+        set_f64!(dimtm, self.ds_dimtm);     set_f64!(dimtfac, self.ds_dimtfac);
+        set_i16!(dimtad, self.ds_dimtad);   set_i16!(dimlunit, self.ds_dimlunit);
+        set_i16!(dimdec, self.ds_dimdec);   set_i16!(dimtdec, self.ds_dimtdec);
+        ds.dimsd1 = self.ds_dimsd1; ds.dimsd2 = self.ds_dimsd2;
+        ds.dimse1 = self.ds_dimse1; ds.dimse2 = self.ds_dimse2;
+        ds.dimtih = self.ds_dimtih; ds.dimtoh = self.ds_dimtoh;
+        ds.dimtol = self.ds_dimtol; ds.dimlim = self.ds_dimlim;
+        ds.dimpost = self.ds_dimpost.clone();
+        ds.dimtxsty = self.ds_dimtxsty.clone();
+        self.tabs[tab].dirty = true;
+        self.command_line.push_output(&format!(
+            "DimStyle '{}' updated.", self.dimstyle_selected
+        ));
+    }
+
+    /// Update a single string buffer field.
+    fn apply_ds_edit(&mut self, field: super::DsField, val: String) {
+        use super::DsField::*;
+        match field {
+            Dimdle => self.ds_dimdle = val,   Dimdli => self.ds_dimdli = val,
+            Dimgap => self.ds_dimgap = val,   Dimexe => self.ds_dimexe = val,
+            Dimexo => self.ds_dimexo = val,   Dimasz => self.ds_dimasz = val,
+            Dimcen => self.ds_dimcen = val,   Dimtsz => self.ds_dimtsz = val,
+            Dimtxt => self.ds_dimtxt = val,   Dimtxsty => self.ds_dimtxsty = val,
+            Dimtad => self.ds_dimtad = val,   Dimscale => self.ds_dimscale = val,
+            Dimlfac => self.ds_dimlfac = val, Dimlunit => self.ds_dimlunit = val,
+            Dimdec => self.ds_dimdec = val,   Dimpost => self.ds_dimpost = val,
+            Dimtp => self.ds_dimtp = val,     Dimtm => self.ds_dimtm = val,
+            Dimtdec => self.ds_dimtdec = val, Dimtfac => self.ds_dimtfac = val,
+            // Bool fields — no-op for string edit
+            _ => {}
+        }
+    }
+
+    /// Toggle a boolean buffer field.
+    fn apply_ds_toggle(&mut self, field: super::DsField) {
+        use super::DsField::*;
+        match field {
+            Dimsd1 => self.ds_dimsd1 = !self.ds_dimsd1,
+            Dimsd2 => self.ds_dimsd2 = !self.ds_dimsd2,
+            Dimse1 => self.ds_dimse1 = !self.ds_dimse1,
+            Dimse2 => self.ds_dimse2 = !self.ds_dimse2,
+            Dimtih => self.ds_dimtih = !self.ds_dimtih,
+            Dimtoh => self.ds_dimtoh = !self.ds_dimtoh,
+            Dimtol => self.ds_dimtol = !self.ds_dimtol,
+            Dimlim => self.ds_dimlim = !self.ds_dimlim,
+            _ => {}
         }
     }
 }

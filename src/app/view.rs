@@ -227,7 +227,21 @@ impl H7CAD {
             iced::widget::Space::new().width(0).height(0).into()
         };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer].into()
+        let dimstyle_layer: Element<'_, Message> = if self.dimstyle_open {
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.dim_styles
+                .iter().map(|s| s.name.clone()).collect();
+            dimstyle_overlay(
+                styles,
+                &self.dimstyle_selected,
+                self.dimstyle_tab,
+                self,
+            )
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, dimstyle_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -751,6 +765,257 @@ fn page_setup_overlay<'a>(
     let positioned = container(panel)
         .width(Fill)
         .height(Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    stack![catcher, positioned].into()
+}
+
+// ── DimStyle Dialog overlay ─────────────────────────────────────────────────
+
+fn dimstyle_overlay<'a>(
+    styles: Vec<String>,
+    selected: &'a str,
+    tab: u8,
+    app: &'a super::H7CAD,
+) -> Element<'a, Message> {
+    use super::DsField;
+    use iced::widget::checkbox;
+    use iced::Length::Shrink;
+
+    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
+    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
+    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
+    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
+
+    let lbl = |s: &'static str| text(s).size(11).color(DIM_COL).width(150);
+
+    let field_style = |_: &Theme, _: text_input::Status| text_input::Style {
+        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
+        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+        icon: TEXT_COL, placeholder: DIM_COL, value: TEXT_COL, selection: ACCENT,
+    };
+
+    let mk_field = |fld: DsField, val: &'a str| -> Element<'a, Message> {
+        text_input("", val)
+            .on_input(move |s| Message::DsEdit(fld.clone(), s))
+            .style(field_style)
+            .size(11)
+            .width(90)
+            .into()
+    };
+
+    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
+        background: Some(Background::Color(match (accent, status) {
+            (true, button::Status::Hovered | button::Status::Pressed) =>
+                Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
+            (false, button::Status::Hovered | button::Status::Pressed) =>
+                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
+            (true, _) => ACCENT,
+            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+        })),
+        text_color: TEXT_COL,
+        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        ..Default::default()
+    };
+
+    let tab_btn = |label: &'static str, idx: u8| {
+        let active = tab == idx;
+        button(text(label).size(11).color(TEXT_COL))
+            .on_press(Message::DimStyleDialogTab(idx))
+            .style(move |_: &Theme, st| button::Style {
+                background: Some(Background::Color(match (active, st) {
+                    (true, _) => ACTIVE_BG,
+                    (false, button::Status::Hovered | button::Status::Pressed) =>
+                        Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
+                    _ => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
+                })),
+                text_color: TEXT_COL,
+                border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+                ..Default::default()
+            })
+            .padding([4, 10])
+    };
+
+    // ── Style list ────────────────────────────────────────────────────────
+    let style_list: Element<'_, Message> = {
+        let mut col = column![].spacing(2);
+        for name in styles {
+            let active = name == selected;
+            col = col.push(
+                button(text(name.clone()).size(11).color(TEXT_COL))
+                    .on_press(Message::DimStyleDialogSelect(name))
+                    .style(move |_: &Theme, st| button::Style {
+                        background: Some(Background::Color(match (active, st) {
+                            (true, _) => ACTIVE_BG,
+                            (false, button::Status::Hovered | button::Status::Pressed) =>
+                                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
+                            _ => Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 },
+                        })),
+                        text_color: TEXT_COL,
+                        border: Border { color: BORDER, width: 0.0, radius: 3.0.into() },
+                        ..Default::default()
+                    })
+                    .padding([3, 8])
+                    .width(Fill)
+            );
+        }
+        iced::widget::scrollable(col).height(160).into()
+    };
+
+    let style_panel = column![
+        text("Styles").size(11).color(DIM_COL),
+        container(style_list)
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
+                border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+                ..Default::default()
+            })
+            .width(150)
+            .padding(2),
+        row![
+            button(text("New").size(10).color(TEXT_COL))
+                .on_press(Message::DimStyleDialogNew)
+                .style(btn_style(false)).padding([3, 8]),
+            button(text("Delete").size(10).color(TEXT_COL))
+                .on_press(Message::DimStyleDialogDelete)
+                .style(btn_style(false)).padding([3, 8]),
+        ].spacing(4),
+        button(text("Set Current").size(10).color(TEXT_COL))
+            .on_press(Message::DimStyleDialogSetCurrent)
+            .style(btn_style(false)).padding([3, 8]).width(Fill),
+    ].spacing(6).width(150);
+
+    // ── Tab bar ───────────────────────────────────────────────────────────
+    let tabs = row![
+        tab_btn("Lines",       0),
+        tab_btn("Arrows",      1),
+        tab_btn("Text",        2),
+        tab_btn("Scale/Units", 3),
+        tab_btn("Tolerances",  4),
+    ].spacing(2);
+
+    // ── Checkbox helper ───────────────────────────────────────────────────
+    let chk = |label: &'static str, val: bool, fld: DsField| -> Element<'a, Message> {
+        checkbox(val)
+            .label(label)
+            .on_toggle(move |_| Message::DsToggle(fld.clone()))
+            .size(14)
+            .text_size(11)
+            .into()
+    };
+
+    // ── Tab content ───────────────────────────────────────────────────────
+    let tab_content: Element<'_, Message> = match tab {
+        0 => column![
+            text("Dimension Line").size(11).color(ACCENT),
+            row![lbl("Extension (DIMDLE)"),   mk_field(DsField::Dimdle, &app.ds_dimdle)].spacing(8).align_y(iced::Center),
+            row![lbl("Spacing (DIMDLI)"),     mk_field(DsField::Dimdli, &app.ds_dimdli)].spacing(8).align_y(iced::Center),
+            row![lbl("Text gap (DIMGAP)"),    mk_field(DsField::Dimgap, &app.ds_dimgap)].spacing(8).align_y(iced::Center),
+            chk("Suppress 1st line (DIMSD1)", app.ds_dimsd1, DsField::Dimsd1),
+            chk("Suppress 2nd line (DIMSD2)", app.ds_dimsd2, DsField::Dimsd2),
+            text("Extension Line").size(11).color(ACCENT),
+            row![lbl("Extension (DIMEXE)"),   mk_field(DsField::Dimexe, &app.ds_dimexe)].spacing(8).align_y(iced::Center),
+            row![lbl("Offset (DIMEXO)"),      mk_field(DsField::Dimexo, &app.ds_dimexo)].spacing(8).align_y(iced::Center),
+            chk("Suppress 1st line (DIMSE1)", app.ds_dimse1, DsField::Dimse1),
+            chk("Suppress 2nd line (DIMSE2)", app.ds_dimse2, DsField::Dimse2),
+        ].spacing(6).into(),
+
+        1 => column![
+            text("Arrows").size(11).color(ACCENT),
+            row![lbl("Arrow size (DIMASZ)"),   mk_field(DsField::Dimasz, &app.ds_dimasz)].spacing(8).align_y(iced::Center),
+            row![lbl("Center mark (DIMCEN)"),  mk_field(DsField::Dimcen, &app.ds_dimcen)].spacing(8).align_y(iced::Center),
+            row![lbl("Tick size (DIMTSZ)"),    mk_field(DsField::Dimtsz, &app.ds_dimtsz)].spacing(8).align_y(iced::Center),
+        ].spacing(6).into(),
+
+        2 => column![
+            text("Text").size(11).color(ACCENT),
+            row![lbl("Height (DIMTXT)"),         mk_field(DsField::Dimtxt,   &app.ds_dimtxt)].spacing(8).align_y(iced::Center),
+            row![lbl("Style (DIMTXSTY)"),        mk_field(DsField::Dimtxsty, &app.ds_dimtxsty)].spacing(8).align_y(iced::Center),
+            row![lbl("Vertical pos (DIMTAD)"),   mk_field(DsField::Dimtad,   &app.ds_dimtad)].spacing(8).align_y(iced::Center),
+            chk("Horizontal inside (DIMTIH)", app.ds_dimtih, DsField::Dimtih),
+            chk("Horizontal outside (DIMTOH)", app.ds_dimtoh, DsField::Dimtoh),
+        ].spacing(6).into(),
+
+        3 => column![
+            text("Scale").size(11).color(ACCENT),
+            row![lbl("Overall scale (DIMSCALE)"), mk_field(DsField::Dimscale, &app.ds_dimscale)].spacing(8).align_y(iced::Center),
+            row![lbl("Linear factor (DIMLFAC)"),  mk_field(DsField::Dimlfac,  &app.ds_dimlfac)].spacing(8).align_y(iced::Center),
+            text("Units").size(11).color(ACCENT),
+            row![lbl("Format (DIMLUNIT)"),         mk_field(DsField::Dimlunit, &app.ds_dimlunit)].spacing(8).align_y(iced::Center),
+            row![lbl("Decimals (DIMDEC)"),         mk_field(DsField::Dimdec,   &app.ds_dimdec)].spacing(8).align_y(iced::Center),
+            row![lbl("Suffix (DIMPOST)"),          mk_field(DsField::Dimpost,  &app.ds_dimpost)].spacing(8).align_y(iced::Center),
+        ].spacing(6).into(),
+
+        _ => column![
+            text("Tolerances").size(11).color(ACCENT),
+            chk("Generate tolerances (DIMTOL)", app.ds_dimtol, DsField::Dimtol),
+            chk("Limits generation (DIMLIM)",   app.ds_dimlim, DsField::Dimlim),
+            row![lbl("Plus tolerance (DIMTP)"),    mk_field(DsField::Dimtp,   &app.ds_dimtp)].spacing(8).align_y(iced::Center),
+            row![lbl("Minus tolerance (DIMTM)"),   mk_field(DsField::Dimtm,   &app.ds_dimtm)].spacing(8).align_y(iced::Center),
+            row![lbl("Tol. decimals (DIMTDEC)"),   mk_field(DsField::Dimtdec, &app.ds_dimtdec)].spacing(8).align_y(iced::Center),
+            row![lbl("Tol. scale (DIMTFAC)"),      mk_field(DsField::Dimtfac, &app.ds_dimtfac)].spacing(8).align_y(iced::Center),
+        ].spacing(6).into(),
+    };
+
+    // ── Right panel ───────────────────────────────────────────────────────
+    let right_panel = column![
+        text(format!("Editing: {selected}")).size(12).color(TEXT_COL),
+        tabs,
+        container(
+            iced::widget::scrollable(
+                container(tab_content).padding(8)
+            ).height(220)
+        )
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
+            border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+            ..Default::default()
+        })
+        .width(Fill),
+        row![
+            button(text("Apply").size(11).color(TEXT_COL))
+                .on_press(Message::DimStyleDialogApply)
+                .style(btn_style(true)).padding([5, 16]),
+            button(text("Close").size(11).color(TEXT_COL))
+                .on_press(Message::DimStyleDialogClose)
+                .style(btn_style(false)).padding([5, 12]),
+        ].spacing(8),
+    ].spacing(8).width(Fill);
+
+    // ── Main panel ────────────────────────────────────────────────────────
+    let panel = container(
+        column![
+            row![
+                text("Dimension Style Manager").size(14).color(TEXT_COL),
+                Space::new().width(Fill),
+                button(text("✕").size(12).color(DIM_COL))
+                    .on_press(Message::DimStyleDialogClose)
+                    .style(|_: &Theme, _| button::Style {
+                        background: Some(Background::Color(Color::TRANSPARENT)),
+                        text_color: DIM_COL,
+                        ..Default::default()
+                    })
+                    .padding([2, 6]),
+            ].align_y(iced::Center),
+            row![style_panel, right_panel].spacing(12).align_y(iced::Top),
+        ].spacing(10).padding(16)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(PANEL_BG)),
+        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
+        ..Default::default()
+    })
+    .width(Shrink);
+
+    let catcher = mouse_area(
+        container(iced::widget::Space::new().width(Fill).height(Fill))
+    ).on_press(Message::DimStyleDialogClose);
+
+    let positioned = container(panel)
+        .width(Fill).height(Fill)
         .align_x(iced::Alignment::Center)
         .align_y(iced::Alignment::Center);
 

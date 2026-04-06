@@ -2090,7 +2090,11 @@ impl H7CAD {
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
-                    "" | "LIST" | "?" => {
+                    // No sub-command or "DIALOG" → open the DimStyle Manager dialog
+                    "" | "DIALOG" | "UI" => {
+                        return Task::done(Message::DimStyleDialogOpen);
+                    }
+                    "LIST" | "?" => {
                         let styles: Vec<String> = self.tabs[i].scene.document
                             .dim_styles.iter()
                             .map(|s| format!("{}(txt:{:.2} asz:{:.2})", s.name, s.dimtxt, s.dimasz))
