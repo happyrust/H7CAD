@@ -33,6 +33,8 @@ pub struct Pipeline {
     depth_view: wgpu::TextureView,
     gpu_wires: Vec<WireGpu>,
     gpu_hatches: Vec<HatchGpu>,
+    /// Wipeout fills — rendered after wires in a separate pass.
+    gpu_wipeouts: Vec<HatchGpu>,
     gpu_images: Vec<ImageGpu>,
     gpu_meshes: Vec<MeshGpu>,
     pub viewcube: ViewCubePipeline,
@@ -356,6 +358,7 @@ impl Pipeline {
             depth_view,
             gpu_wires: vec![],
             gpu_hatches: vec![],
+            gpu_wipeouts: vec![],
             gpu_images: vec![],
             gpu_meshes: vec![],
             viewcube,
@@ -376,6 +379,14 @@ impl Pipeline {
 
     pub fn upload_hatches(&mut self, device: &wgpu::Device, hatches: &[HatchModel]) {
         self.gpu_hatches = hatches
+            .iter()
+            .filter(|h| h.boundary.len() >= 3)
+            .map(|h| HatchGpu::new(device, h, &self.hatch_bgl1))
+            .collect();
+    }
+
+    pub fn upload_wipeouts(&mut self, device: &wgpu::Device, wipeouts: &[HatchModel]) {
+        self.gpu_wipeouts = wipeouts
             .iter()
             .filter(|h| h.boundary.len() >= 3)
             .map(|h| HatchGpu::new(device, h, &self.hatch_bgl1))
@@ -572,6 +583,47 @@ impl Pipeline {
                     pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
                     pass.draw(0..wire.vertex_count, 0..1);
                 }
+            }
+        }
+
+        // ── Pass 6: wipeout fills (drawn after wires to mask them) ────────
+        if !self.gpu_wipeouts.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("wipeout.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(
+                vp.x as f32,
+                vp.y as f32,
+                vp.width as f32,
+                vp.height as f32,
+                0.0,
+                1.0,
+            );
+            pass.set_pipeline(&self.hatch_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            for wipeout in &self.gpu_wipeouts {
+                pass.set_bind_group(1, &wipeout.bind_group, &[]);
+                pass.set_vertex_buffer(0, wipeout.vertex_buffer.slice(..));
+                pass.draw(0..6, 0..1);
             }
         }
     }

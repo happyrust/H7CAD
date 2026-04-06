@@ -1249,15 +1249,18 @@ impl Scene {
             }
         }
 
-        // ── Wipeout solid fills ───────────────────────────────────────────────
-        // Wipeouts are rendered as background-colored filled polygons so that
-        // they mask hatch fills drawn earlier in the same pass.
-        // Wipeout fills are appended last so they render on top of other hatches.
+        models
+    }
+
+    /// Wipeout fill models — rendered in a separate pass AFTER wires so that
+    /// wipeouts correctly mask everything below them in the draw order.
+    pub(super) fn wipeout_models(&self) -> Vec<HatchModel> {
         let bg_color: [f32; 4] = if self.current_layout == "Model" {
             self.bg_color
         } else {
             self.paper_bg_color
         };
+        let mut models = Vec::new();
         for entity in self.document.entities() {
             let EntityType::Wipeout(wo) = entity else { continue };
             if entity.common().invisible {
@@ -1286,7 +1289,6 @@ impl Scene {
                 });
             }
         }
-
         models
     }
 
