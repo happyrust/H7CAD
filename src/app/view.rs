@@ -320,6 +320,12 @@ impl H7CAD {
                             {
                                 Some(Message::DeleteSelected)
                             }
+                            keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                                Some(Message::CommandHistoryPrev)
+                            }
+                            keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                                Some(Message::CommandHistoryNext)
+                            }
                             keyboard::Key::Named(keyboard::key::Named::F3) => {
                                 Some(Message::ToggleSnapEnabled)
                             }

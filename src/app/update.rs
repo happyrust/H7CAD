@@ -248,7 +248,21 @@ impl H7CAD {
                 Task::none()
             }
 
-            Message::CommandInput(s) => { self.command_line.input = s; Task::none() }
+            Message::CommandInput(s) => {
+                // Any manual typing resets the history recall cursor.
+                self.command_line.input = s;
+                Task::none()
+            }
+
+            Message::CommandHistoryPrev => {
+                self.command_line.history_prev();
+                Task::none()
+            }
+
+            Message::CommandHistoryNext => {
+                self.command_line.history_next();
+                Task::none()
+            }
 
             Message::CommandSubmit => {
                 let i = self.active_tab;

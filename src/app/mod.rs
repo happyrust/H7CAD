@@ -176,6 +176,10 @@ pub enum Message {
     CommandInput(String),
     CommandSubmit,
     Command(String),
+    /// Recall previous command in history (↑ arrow key).
+    CommandHistoryPrev,
+    /// Recall next command in history (↓ arrow key).
+    CommandHistoryNext,
     ToggleLayers,
     LayerToggleVisible(usize),
     LayerToggleLock(usize),
