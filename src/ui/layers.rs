@@ -6,12 +6,21 @@ use acadrust::tables::layer::Layer as DocLayer;
 use acadrust::tables::Table;
 use acadrust::types::aci_table::aci_to_rgb;
 use acadrust::types::{Color as AcadColor, LineWeight};
+use acadrust::Handle;
 use iced::widget::{
     button, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 use iced::Padding;
 use crate::ui::ROW_H;
+
+// ── Per-viewport column descriptor ───────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub struct VpCol {
+    pub handle: Handle,
+    pub label: String,
+}
 
 // ── Row-height-derived constants ─────────────────────────────────────────
 /// SVG icon size inside a layer-table cell.
@@ -33,6 +42,8 @@ pub struct Layer {
     pub linetype: String,
     pub lineweight: LineWeight,
     pub transparency: i32,
+    /// Freeze state per-viewport, indexed parallel to LayerPanel::vp_cols.
+    pub vp_frozen: Vec<bool>,
 }
 
 impl Layer {
@@ -46,6 +57,7 @@ impl Layer {
             linetype: "Continuous".to_string(),
             lineweight: LineWeight::Default,
             transparency: 0,
+            vp_frozen: vec![],
         }
     }
 }
@@ -66,6 +78,8 @@ pub struct LayerPanel {
     pub color_full_palette: bool,
     pub linetype_combo: combo_box::State<LinetypeItem>,
     pub lw_combo: combo_box::State<LwItem>,
+    /// Per-viewport columns (only populated when in a paper layout with viewports).
+    pub vp_cols: Vec<VpCol>,
 }
 
 impl Default for LayerPanel {
@@ -84,27 +98,47 @@ impl Default for LayerPanel {
                 LinetypeItem { name: "Continuous".into(), art: String::new() }
             ]),
             lw_combo: combo_box::State::new(lw_options()),
+            vp_cols: vec![],
         }
     }
 }
 
 impl LayerPanel {
-    pub fn sync_from_doc(&mut self, doc_layers: &Table<DocLayer>) {
+    /// Sync layers + update per-viewport freeze columns.
+    /// `vp_info`: list of (vp_handle, vp_label, frozen_layer_handles) from scene.
+    pub fn sync_with_viewports(
+        &mut self,
+        doc_layers: &Table<DocLayer>,
+        vp_info: Vec<(Handle, String, Vec<Handle>)>,
+    ) {
+        self.vp_cols = vp_info
+            .iter()
+            .map(|(h, label, _)| VpCol { handle: *h, label: label.clone() })
+            .collect();
+
         self.layers = doc_layers
             .iter()
-            .map(|l| Layer {
-                name: l.name.clone(),
-                visible: !l.flags.off,
-                frozen: l.flags.frozen,
-                locked: l.flags.locked,
-                color: iced_color_from_acad(&l.color),
-                linetype: if l.line_type.is_empty() {
-                    "Continuous".to_string()
-                } else {
-                    l.line_type.clone()
-                },
-                lineweight: l.line_weight,
-                transparency: 0,
+            .map(|l| {
+                let layer_handle = l.handle;
+                let vp_frozen = vp_info
+                    .iter()
+                    .map(|(_, _, frozen_handles)| frozen_handles.contains(&layer_handle))
+                    .collect();
+                Layer {
+                    name: l.name.clone(),
+                    visible: !l.flags.off,
+                    frozen: l.flags.frozen,
+                    locked: l.flags.locked,
+                    color: iced_color_from_acad(&l.color),
+                    linetype: if l.line_type.is_empty() {
+                        "Continuous".to_string()
+                    } else {
+                        l.line_type.clone()
+                    },
+                    lineweight: l.line_weight,
+                    transparency: 0,
+                    vp_frozen,
+                }
             })
             .collect();
     }
@@ -143,28 +177,37 @@ impl LayerPanel {
         .padding([4, 8]);
 
         // ── Column header ─────────────────────────────────────────────────
-        let col_header = container(
-            row![
-                text("Status").size(10).color(DIM).width(50),
-                text("Name").size(10).color(DIM).width(Length::Fixed(COL_NAME)),
-                text("On").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
-                text("Freeze").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
-                text("Lock").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
-                text("Color").size(10).color(DIM).width(Length::Fixed(COL_COLOR)),
-                text("Linetype").size(10).color(DIM).width(Length::Fixed(COL_LT)),
-                text("Lineweight").size(10).color(DIM).width(Length::Fixed(COL_LW)),
-                text("Transparency").size(10).color(DIM).width(Length::Fixed(COL_TRANS)),
-            ]
-            .spacing(4)
-            .align_y(iced::Center),
-        )
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(COL_HEADER_BG)),
-            border: Border { color: BORDER_COLOR, width: 1.0, radius: 0.0.into() },
-            ..Default::default()
-        })
-        .padding([4, 8])
-        .width(Fill);
+        let mut header_row = row![
+            text("Status").size(10).color(DIM).width(50),
+            text("Name").size(10).color(DIM).width(Length::Fixed(COL_NAME)),
+            text("On").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
+            text("Freeze").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
+            text("Lock").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
+            text("Color").size(10).color(DIM).width(Length::Fixed(COL_COLOR)),
+            text("Linetype").size(10).color(DIM).width(Length::Fixed(COL_LT)),
+            text("Lineweight").size(10).color(DIM).width(Length::Fixed(COL_LW)),
+            text("Transparency").size(10).color(DIM).width(Length::Fixed(COL_TRANS)),
+        ]
+        .spacing(4)
+        .align_y(iced::Center);
+
+        for vp in &self.vp_cols {
+            header_row = header_row.push(
+                text(vp.label.as_str())
+                    .size(10)
+                    .color(DIM)
+                    .width(Length::Fixed(COL_ICON)),
+            );
+        }
+
+        let col_header = container(header_row)
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(COL_HEADER_BG)),
+                border: Border { color: BORDER_COLOR, width: 1.0, radius: 0.0.into() },
+                ..Default::default()
+            })
+            .padding([4, 8])
+            .width(Fill);
 
         // ── Layer rows ────────────────────────────────────────────────────
         let mut rows_col = column![].spacing(0);
@@ -182,6 +225,7 @@ impl LayerPanel {
 
             rows_col = rows_col.push(layer_row(
                 i, layer, is_sel, is_current, is_editing, &self.edit_buf, color_open, ltc, lwc,
+                &self.vp_cols,
             ));
 
             // Insert color picker dropdown below this row when open.
@@ -258,6 +302,7 @@ fn layer_row<'a>(
     color_picker_open: bool,
     lt_combo: Option<&'a combo_box::State<LinetypeItem>>,
     lw_combo_state: Option<&'a combo_box::State<LwItem>>,
+    vp_cols: &'a [VpCol],
 ) -> Element<'a, Message> {
     let svg_btn = |bytes: &'static [u8], on_press: Message| -> Element<'a, Message> {
         button(
@@ -443,7 +488,7 @@ fn layer_row<'a>(
 
     let bg = if is_selected { ROW_SEL } else if index % 2 == 0 { ROW_EVEN } else { ROW_ODD };
 
-    let row_content = row![
+    let mut row_content = row![
         container(status_dot).width(50).align_x(iced::Center).align_y(iced::Center),
         name_cell,
         container(svg_btn(vis_svg, Message::LayerToggleVisible(index)))
@@ -462,6 +507,21 @@ fn layer_row<'a>(
     ]
     .spacing(4)
     .align_y(iced::Center);
+
+    // Per-viewport freeze columns
+    for (vp_idx, _vp_col) in vp_cols.iter().enumerate() {
+        let is_vp_frozen = layer.vp_frozen.get(vp_idx).copied().unwrap_or(false);
+        let vp_frz_svg: &'static [u8] = if is_vp_frozen {
+            include_bytes!("../../assets/icons/layers/layfrz.svg")
+        } else {
+            include_bytes!("../../assets/icons/layers/laythw.svg")
+        };
+        row_content = row_content.push(
+            container(svg_btn(vp_frz_svg, Message::LayerToggleVpFreeze(index, vp_idx)))
+                .width(Length::Fixed(COL_ICON))
+                .align_x(iced::Center),
+        );
+    }
 
     mouse_area(
         container(row_content)

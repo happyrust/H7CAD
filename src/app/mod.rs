@@ -180,6 +180,8 @@ pub enum Message {
     LayerToggleVisible(usize),
     LayerToggleLock(usize),
     LayerToggleFreeze(usize),
+    /// Toggle per-viewport freeze: (layer_index, vp_col_index)
+    LayerToggleVpFreeze(usize, usize),
     LayerNew,
     LayerDelete,
     LayerSetCurrent,

@@ -44,7 +44,8 @@ impl H7CAD {
         self.tabs[i].active_grip = None;
         self.tabs[i].dirty = snapshot.dirty;
         let doc_layers = self.tabs[i].scene.document.layers.clone();
-        self.tabs[i].layers.sync_from_doc(&doc_layers);
+        let vp_info = self.tabs[i].scene.viewport_list();
+        self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
         self.sync_ribbon_layers();
         self.refresh_properties();
     }

@@ -56,7 +56,8 @@ impl H7CAD {
                 crate::linetypes::populate_document(&mut self.tabs[i].scene.document);
                 self.tabs[i].properties = PropertiesPanel::empty();
                 let doc_layers = self.tabs[i].scene.document.layers.clone();
-                self.tabs[i].layers.sync_from_doc(&doc_layers);
+                let vp_info = self.tabs[i].scene.viewport_list();
+                self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                 self.sync_ribbon_layers();
                 self.tabs[i].scene.fit_all();
                 self.tabs[i].dirty = false;
@@ -144,7 +145,8 @@ impl H7CAD {
                 crate::linetypes::populate_document(&mut self.tabs[i].scene.document);
                 self.tabs[i].properties = PropertiesPanel::empty();
                 let doc_layers = self.tabs[i].scene.document.layers.clone();
-                self.tabs[i].layers.sync_from_doc(&doc_layers);
+                let vp_info = self.tabs[i].scene.viewport_list();
+                self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                 self.command_line
                     .push_output("Scene cleared. Standard linetypes loaded.");
                 self.tabs[i].current_path = None;
@@ -438,6 +440,43 @@ impl H7CAD {
                 Task::none()
             }
 
+            Message::LayerToggleVpFreeze(layer_idx, vp_col_idx) => {
+                let i = self.active_tab;
+                let vp_handle = self.tabs[i].layers.vp_cols.get(vp_col_idx)
+                    .map(|c| c.handle);
+                let layer_name = self.tabs[i].layers.layers.get(layer_idx)
+                    .map(|l| l.name.clone());
+
+                if let (Some(vp_handle), Some(layer_name)) = (vp_handle, layer_name) {
+                    // Get the layer handle from the document
+                    if let Some(doc_layer) = self.tabs[i].scene.document.layers.get(&layer_name) {
+                        let layer_handle = doc_layer.handle;
+                        self.push_undo_snapshot(i, "VPLAYER");
+
+                        // Toggle frozen_layers on the viewport entity
+                        for e in self.tabs[i].scene.document.entities_mut() {
+                            if let acadrust::EntityType::Viewport(vp) = e {
+                                if vp.common.handle == vp_handle {
+                                    if vp.frozen_layers.contains(&layer_handle) {
+                                        vp.frozen_layers.retain(|h| h != &layer_handle);
+                                    } else {
+                                        vp.frozen_layers.push(layer_handle);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Re-sync layer panel with updated VP info
+                        let vp_info = self.tabs[i].scene.viewport_list();
+                        let doc_layers = self.tabs[i].scene.document.layers.clone();
+                        self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
+                        self.tabs[i].dirty = true;
+                    }
+                }
+                Task::none()
+            }
+
             Message::LayerNew => {
                 let i = self.active_tab;
                 let mut n = 1;
@@ -453,7 +492,8 @@ impl H7CAD {
                 let _ = self.tabs[i].scene.document.layers.add(DocLayer::new(&new_name));
                 self.tabs[i].dirty = true;
                 let doc_layers = self.tabs[i].scene.document.layers.clone();
-                self.tabs[i].layers.sync_from_doc(&doc_layers);
+                let vp_info = self.tabs[i].scene.viewport_list();
+                self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                 let new_idx = self.tabs[i].layers.layers.iter()
                     .position(|l| l.name == new_name);
                 if let Some(idx) = new_idx {
@@ -476,7 +516,8 @@ impl H7CAD {
                     self.tabs[i].scene.document.layers.remove(&name);
                     self.tabs[i].dirty = true;
                     let doc_layers = self.tabs[i].scene.document.layers.clone();
-                    self.tabs[i].layers.sync_from_doc(&doc_layers);
+                    let vp_info = self.tabs[i].scene.viewport_list();
+                    self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                     self.tabs[i].layers.selected = None;
                     self.sync_ribbon_layers();
                 }
@@ -549,7 +590,8 @@ impl H7CAD {
                         self.tabs[i].dirty = true;
                     }
                     let doc_layers = self.tabs[i].scene.document.layers.clone();
-                    self.tabs[i].layers.sync_from_doc(&doc_layers);
+                    let vp_info = self.tabs[i].scene.viewport_list();
+                    self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                     self.tabs[i].layers.edit_buf.clear();
                     self.sync_ribbon_layers();
                 }
@@ -1682,6 +1724,10 @@ impl H7CAD {
                 } else if self.ribbon.active_is_layout() {
                     self.ribbon.select(0);
                 }
+                // Refresh VP freeze columns for the new layout.
+                let doc_layers = self.tabs[i].scene.document.layers.clone();
+                let vp_info = self.tabs[i].scene.viewport_list();
+                self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                 Task::none()
             }
 

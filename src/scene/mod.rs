@@ -240,6 +240,37 @@ impl Scene {
         })
     }
 
+    /// List of user viewports in the current layout: (handle, label, frozen_layer_handles).
+    pub fn viewport_list(&self) -> Vec<(acadrust::Handle, String, Vec<acadrust::Handle>)> {
+        if self.current_layout == "Model" {
+            return vec![];
+        }
+        let layout_block = self.current_layout_block_handle();
+        if layout_block.is_null() {
+            return vec![];
+        }
+        let mut result: Vec<(acadrust::Handle, String, Vec<acadrust::Handle>)> = self
+            .document
+            .entities()
+            .filter_map(|e| {
+                if let EntityType::Viewport(vp) = e {
+                    if vp.id > 1 && vp.common.owner_handle == layout_block {
+                        Some((vp.common.handle, vp.id, vp.frozen_layers.clone()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|(h, id, frozen)| (h, format!("VP {}", id - 1), frozen))
+            .collect();
+        result.sort_by_key(|(_, label, _)| label.clone());
+        result
+    }
+
     /// Count of user viewports (id > 1) in the current layout.
     pub fn viewport_count(&self) -> usize {
         if self.current_layout == "Model" {

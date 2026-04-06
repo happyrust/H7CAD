@@ -348,6 +348,10 @@ impl H7CAD {
                     if thawed_count > 0 {
                         self.command_line.push_info(&format!("VPLAYER: {thawed_count} layer(s) thawed in viewport."));
                     }
+                    // Sync layer panel so VP freeze columns update immediately.
+                    let doc_layers = self.tabs[i].scene.document.layers.clone();
+                    let vp_info = self.tabs[i].scene.viewport_list();
+                    self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                 }
 
                 // Show updated prompt (command stays active for more operations).
