@@ -1839,16 +1839,25 @@ impl H7CAD {
             // ── UCS management ───────────────────────────────────────────
             cmd if cmd == "UCS" || cmd.starts_with("UCS ") => {
                 use acadrust::tables::Ucs;
-                let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
+                use acadrust::types::Vector3;
+                use super::helpers::{ucs_to_wcs, ucs_z_axis, ucs_rotated_z};
+                let parts: Vec<&str> = cmd.splitn(4, ' ').collect();
                 let sub = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "LIST" | "?" => {
+                        let active_name = self.tabs[i].active_ucs.as_ref()
+                            .map(|u| u.name.clone())
+                            .unwrap_or_else(|| "WCS".into());
                         let names: Vec<String> = self.tabs[i].scene.document
                             .ucss.iter().map(|u| u.name.clone()).collect();
                         if names.is_empty() {
-                            self.command_line.push_output("No named UCSs defined.");
+                            self.command_line.push_output(&format!(
+                                "Active UCS: {}  |  No named UCSs defined.", active_name
+                            ));
                         } else {
-                            self.command_line.push_output(&format!("UCSs: {}", names.join(", ")));
+                            self.command_line.push_output(&format!(
+                                "Active UCS: {}  |  Named: {}", active_name, names.join(", ")
+                            ));
                         }
                     }
                     "SAVE" | "S" => {
@@ -1856,11 +1865,18 @@ impl H7CAD {
                         if name.is_empty() {
                             self.command_line.push_error("Usage: UCS SAVE <name>");
                         } else {
-                            // Save as WCS (identity) since we don't have active UCS state yet
-                            let ucs = Ucs::new(&name);
+                            // Save the current active UCS under this name.
+                            let ucs = match &self.tabs[i].active_ucs {
+                                Some(u) => {
+                                    let mut saved = u.clone();
+                                    saved.name = name.clone();
+                                    saved
+                                }
+                                None => Ucs::new(&name), // save WCS (identity)
+                            };
                             self.tabs[i].scene.document.ucss.add_or_replace(ucs);
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!("UCS '{}' saved (WCS).", name));
+                            self.command_line.push_output(&format!("UCS '{}' saved.", name));
                         }
                     }
                     "DELETE" | "DEL" | "D" => {
@@ -1875,19 +1891,125 @@ impl H7CAD {
                         }
                     }
                     "W" | "WORLD" => {
-                        // Reset active UCS to WCS — currently just an informational message
-                        // as full UCS integration awaits WCS↔UCS transform pipeline
+                        self.tabs[i].active_ucs = None;
                         self.command_line.push_output("UCS reset to World Coordinate System.");
                     }
-                    _ => {
-                        // UCS <name> — try as a restore/apply shortcut
-                        let name = sub.clone();
-                        if self.tabs[i].scene.document.ucss.get(&name).is_some() {
-                            self.command_line.push_output(&format!("UCS '{}' is defined. (Full UCS activation pending transform pipeline.)", name));
-                        } else {
-                            self.command_line.push_error(
-                                "Usage: UCS LIST | UCS SAVE <name> | UCS DELETE <name> | UCS W"
+                    // UCS ORIGIN x,y,z  — shift the active UCS origin, keep axes
+                    "ORIGIN" | "O" => {
+                        let coord_str = parts.get(2).copied().unwrap_or("");
+                        if let Some(pt) = super::helpers::parse_coord(coord_str) {
+                            // `pt` is in current UCS space; convert to WCS
+                            let wcs_origin = if let Some(ref ucs) = self.tabs[i].active_ucs {
+                                ucs_to_wcs(pt, ucs)
+                            } else {
+                                pt
+                            };
+                            let ucs = self.tabs[i].active_ucs.get_or_insert_with(|| Ucs::new("*ACTIVE*"));
+                            ucs.origin = Vector3::new(
+                                wcs_origin.x as f64, wcs_origin.y as f64, wcs_origin.z as f64,
                             );
+                            self.command_line.push_output(&format!(
+                                "UCS origin set to ({:.4}, {:.4}, {:.4}).",
+                                wcs_origin.x, wcs_origin.y, wcs_origin.z
+                            ));
+                        } else {
+                            self.command_line.push_error("Usage: UCS ORIGIN x,y,z");
+                        }
+                    }
+                    // UCS Z angle  — rotate active UCS around its Z axis by degrees
+                    "Z" => {
+                        let deg: Option<f32> = parts.get(2).and_then(|s| s.trim().parse().ok());
+                        if let Some(angle_deg) = deg {
+                            let rad = angle_deg.to_radians();
+                            let current = self.tabs[i].active_ucs.as_ref();
+                            let origin = current.map(|u| {
+                                glam::Vec3::new(
+                                    u.origin.x as f32, u.origin.y as f32, u.origin.z as f32,
+                                )
+                            }).unwrap_or(glam::Vec3::ZERO);
+                            let mut new_ucs = ucs_rotated_z(origin, rad);
+                            // If already had axes, compose rotation on top
+                            if let Some(ref ucs) = self.tabs[i].active_ucs {
+                                let old_x = glam::Vec3::new(
+                                    ucs.x_axis.x as f32, ucs.x_axis.y as f32, ucs.x_axis.z as f32,
+                                );
+                                let old_y = glam::Vec3::new(
+                                    ucs.y_axis.x as f32, ucs.y_axis.y as f32, ucs.y_axis.z as f32,
+                                );
+                                let z_ax = ucs_z_axis(ucs);
+                                let rot = glam::Quat::from_axis_angle(z_ax, rad);
+                                let nx = rot * old_x;
+                                let ny = rot * old_y;
+                                new_ucs.x_axis = Vector3::new(
+                                    nx.x as f64, nx.y as f64, nx.z as f64,
+                                );
+                                new_ucs.y_axis = Vector3::new(
+                                    ny.x as f64, ny.y as f64, ny.z as f64,
+                                );
+                            }
+                            self.tabs[i].active_ucs = Some(new_ucs);
+                            self.command_line.push_output(&format!(
+                                "UCS rotated {:.2}° around Z.", angle_deg
+                            ));
+                        } else {
+                            self.command_line.push_error("Usage: UCS Z <angle_degrees>");
+                        }
+                    }
+                    // UCS X angle  — rotate around current UCS X axis
+                    "X" => {
+                        let deg: Option<f32> = parts.get(2).and_then(|s| s.trim().parse().ok());
+                        if let Some(angle_deg) = deg {
+                            let rad = angle_deg.to_radians();
+                            let ucs = self.tabs[i].active_ucs.get_or_insert_with(|| Ucs::new("*ACTIVE*"));
+                            let x_ax = glam::Vec3::new(
+                                ucs.x_axis.x as f32, ucs.x_axis.y as f32, ucs.x_axis.z as f32,
+                            );
+                            let old_y = glam::Vec3::new(
+                                ucs.y_axis.x as f32, ucs.y_axis.y as f32, ucs.y_axis.z as f32,
+                            );
+                            let rot = glam::Quat::from_axis_angle(x_ax, rad);
+                            let ny = rot * old_y;
+                            ucs.y_axis = Vector3::new(ny.x as f64, ny.y as f64, ny.z as f64);
+                            self.command_line.push_output(&format!(
+                                "UCS rotated {:.2}° around X.", angle_deg
+                            ));
+                        } else {
+                            self.command_line.push_error("Usage: UCS X <angle_degrees>");
+                        }
+                    }
+                    // UCS Y angle  — rotate around current UCS Y axis
+                    "Y" => {
+                        let deg: Option<f32> = parts.get(2).and_then(|s| s.trim().parse().ok());
+                        if let Some(angle_deg) = deg {
+                            let rad = angle_deg.to_radians();
+                            let ucs = self.tabs[i].active_ucs.get_or_insert_with(|| Ucs::new("*ACTIVE*"));
+                            let y_ax = glam::Vec3::new(
+                                ucs.y_axis.x as f32, ucs.y_axis.y as f32, ucs.y_axis.z as f32,
+                            );
+                            let old_x = glam::Vec3::new(
+                                ucs.x_axis.x as f32, ucs.x_axis.y as f32, ucs.x_axis.z as f32,
+                            );
+                            let rot = glam::Quat::from_axis_angle(y_ax, rad);
+                            let nx = rot * old_x;
+                            ucs.x_axis = Vector3::new(nx.x as f64, nx.y as f64, nx.z as f64);
+                            self.command_line.push_output(&format!(
+                                "UCS rotated {:.2}° around Y.", angle_deg
+                            ));
+                        } else {
+                            self.command_line.push_error("Usage: UCS Y <angle_degrees>");
+                        }
+                    }
+                    _ => {
+                        // UCS <name> — activate a named UCS
+                        let name = sub.clone();
+                        if let Some(named) = self.tabs[i].scene.document.ucss.get(&name).cloned() {
+                            self.tabs[i].active_ucs = Some(named);
+                            self.command_line.push_output(&format!("UCS '{}' activated.", name));
+                        } else {
+                            self.command_line.push_error(&format!(
+                                "UCS '{}' not found.  Usage: UCS LIST | SAVE <name> | DELETE <name> | W | ORIGIN x,y,z | X/Y/Z <angle>",
+                                name
+                            ));
                         }
                     }
                 }

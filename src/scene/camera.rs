@@ -101,6 +101,47 @@ impl Camera {
         OPENGL_TO_WGPU * proj * view
     }
 
+    /// Project a screen point onto an arbitrary world-space plane.
+    ///
+    /// The plane is defined by `plane_normal` (unit vector) and a `plane_point`
+    /// that lies on it.  Returns the intersection of the view ray with the plane;
+    /// falls back to `plane_point` when the ray is nearly parallel to the plane.
+    pub fn pick_on_plane(
+        &self,
+        screen: Point,
+        bounds: Rectangle,
+        plane_normal: Vec3,
+        plane_point: Vec3,
+    ) -> Vec3 {
+        let ndc_x = (screen.x / bounds.width) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (screen.y / bounds.height) * 2.0;
+        let inv = self.view_proj(bounds).inverse();
+
+        let (ray_origin, ray_dir) = match self.projection {
+            Projection::Perspective => {
+                let near_pt = inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
+                let far_pt  = inv.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
+                let dir = (far_pt - near_pt).normalize();
+                (near_pt, dir)
+            }
+            Projection::Orthographic => {
+                let origin = inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
+                let forward = (self.target - self.eye()).normalize();
+                (origin, forward)
+            }
+        };
+
+        let denom = ray_dir.dot(plane_normal);
+        if denom.abs() < 1e-6 {
+            return plane_point;
+        }
+        let t = (plane_point - ray_origin).dot(plane_normal) / denom;
+        if t < 0.0 {
+            return plane_point;
+        }
+        ray_origin + ray_dir * t
+    }
+
     pub fn pick_on_target_plane(&self, screen: Point, bounds: Rectangle) -> Vec3 {
         let ndc_x = (screen.x / bounds.width) * 2.0 - 1.0;
         let ndc_y = 1.0 - (screen.y / bounds.height) * 2.0;

@@ -1,5 +1,5 @@
 use super::{H7CAD, Message, POLY_START_DELAY_MS};
-use super::helpers::{parse_coord, angle_close, ortho_constrain, polar_constrain};
+use super::helpers::{parse_coord, angle_close, ortho_constrain, polar_constrain, ucs_to_wcs, ucs_z_axis};
 use crate::scene::{self, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX};
 use crate::scene::grip::{find_hit_grip, GripEdit};
 use crate::scene::object::GripApply;
@@ -259,8 +259,14 @@ impl H7CAD {
                         return Task::none();
                     }
 
-                    if let Some(pt) = parse_coord(&text) {
-                        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(pt));
+                    if let Some(ucs_pt) = parse_coord(&text) {
+                        // Typed coordinates are in active UCS space; convert to WCS.
+                        let wcs_pt = if let Some(ref ucs) = self.tabs[i].active_ucs {
+                            ucs_to_wcs(ucs_pt, ucs)
+                        } else {
+                            ucs_pt
+                        };
+                        let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_point(wcs_pt));
                         if let Some(r) = result {
                             return self.apply_cmd_result(r);
                         }
@@ -741,10 +747,18 @@ impl H7CAD {
                 if self.tabs[i].active_cmd.is_some() {
                     let (vw, vh) = vp_size;
                     let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
-                    let cam = self.tabs[i].scene.camera.borrow();
-                    let cursor_paper = cam.pick_on_target_plane(p, bounds);
-                    let view_proj = cam.view_proj(bounds);
-                    drop(cam);
+                    let cursor_paper = if let Some(ref ucs) = self.tabs[i].active_ucs {
+                        let origin = glam::Vec3::new(
+                            ucs.origin.x as f32, ucs.origin.y as f32, ucs.origin.z as f32,
+                        );
+                        let normal = ucs_z_axis(ucs);
+                        self.tabs[i].scene.camera.borrow()
+                            .pick_on_plane(p, bounds, normal, origin)
+                    } else {
+                        self.tabs[i].scene.camera.borrow()
+                            .pick_on_target_plane(p, bounds)
+                    };
+                    let view_proj = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                     // In MSPACE, map paper-space cursor to model space so that
                     // command previews and snapping work in the correct coordinate space.
                     let cursor_world = self.tabs[i].scene.paper_to_model(cursor_paper);
@@ -769,7 +783,11 @@ impl H7CAD {
                         let mut pt = self.tabs[i].snap_result
                             .map(|s| self.tabs[i].scene.paper_to_model(s.world))
                             .unwrap_or(cursor_world);
-                        if self.tabs[i].active_cmd.is_some() { pt.z = 0.0; }
+                        // Clamp to world XY only when no UCS is active; with a UCS the
+                        // point already lies on the UCS XY plane.
+                        if self.tabs[i].active_cmd.is_some() && self.tabs[i].active_ucs.is_none() {
+                            pt.z = 0.0;
+                        }
                         if let Some(base) = self.last_point {
                             if self.ortho_mode {
                                 pt = ortho_constrain(pt, base);
@@ -899,7 +917,19 @@ impl H7CAD {
                     let tangent_obj_at_click = snap_taken.and_then(|s| s.tangent_obj);
 
                     let world_pt = {
-                        let raw_paper = self.tabs[i].scene.camera.borrow().pick_on_target_plane(p, bounds);
+                        // Project screen point onto the active UCS XY plane (or world XY when
+                        // no UCS is active).
+                        let raw_paper = if let Some(ref ucs) = self.tabs[i].active_ucs {
+                            let origin = glam::Vec3::new(
+                                ucs.origin.x as f32, ucs.origin.y as f32, ucs.origin.z as f32,
+                            );
+                            let normal = ucs_z_axis(ucs);
+                            self.tabs[i].scene.camera.borrow()
+                                .pick_on_plane(p, bounds, normal, origin)
+                        } else {
+                            self.tabs[i].scene.camera.borrow()
+                                .pick_on_target_plane(p, bounds)
+                        };
                         // Convert paper-space → model-space when inside a viewport.
                         let raw = self.tabs[i].scene.paper_to_model(raw_paper);
                         let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
@@ -920,7 +950,11 @@ impl H7CAD {
                         let mut pt = snap_hit
                             .map(|s| self.tabs[i].scene.paper_to_model(s.world))
                             .unwrap_or(raw);
-                        pt.z = 0.0;
+                        // When no UCS is active clamp to world XY; with a UCS the point is
+                        // already constrained to that plane by the ray–plane intersection.
+                        if self.tabs[i].active_ucs.is_none() {
+                            pt.z = 0.0;
+                        }
                         if let Some(base) = self.last_point {
                             if self.ortho_mode {
                                 pt = ortho_constrain(pt, base);

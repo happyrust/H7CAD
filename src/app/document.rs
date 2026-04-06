@@ -5,6 +5,7 @@ use crate::snap::SnapResult;
 use crate::scene::grip::GripEdit;
 use crate::scene::GripDef;
 use acadrust::{CadDocument, Handle};
+use acadrust::tables::Ucs;
 use crate::linetypes;
 use std::path::PathBuf;
 
@@ -28,6 +29,8 @@ pub(super) struct DocumentTab {
     pub(super) last_cursor_world: glam::Vec3,
     pub(super) history: HistoryState,
     pub(super) active_layer: String,
+    /// Currently active UCS. `None` means WCS (identity transform).
+    pub(super) active_ucs: Option<Ucs>,
 }
 
 impl DocumentTab {
@@ -52,6 +55,7 @@ impl DocumentTab {
             last_cursor_world: glam::Vec3::ZERO,
             history: HistoryState::default(),
             active_layer: "0".to_string(),
+            active_ucs: None,
         }
     }
 
