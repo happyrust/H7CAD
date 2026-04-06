@@ -456,12 +456,12 @@ impl Scene {
             )];
         }
 
-        let (entity_color, pattern_length, pattern, line_weight_px) = self.render_style(e);
+        let (entity_color, pattern_length, pattern, line_weight_px, aci) = self.render_style(e);
         let lt_scale = e.common().linetype_scale as f32;
         let lt_name = self.resolved_linetype_name(e);
 
         if let EntityType::Dimension(dim) = e {
-            return tessellate::tessellate_dimension(
+            let mut wires = tessellate::tessellate_dimension(
                 &self.document,
                 h,
                 dim,
@@ -469,6 +469,8 @@ impl Scene {
                 entity_color,
                 line_weight_px,
             );
+            for w in &mut wires { w.aci = aci; }
+            return wires;
         }
 
         if let EntityType::Insert(ins) = e {
@@ -478,7 +480,7 @@ impl Scene {
                 .cloned()
                 .map(crate::modules::home::modify::explode::normalize_insert_entity)
                 .flat_map(|sub| {
-                    let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px) =
+                    let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
                         self.render_style(&sub);
                     let mut wire = tessellate::tessellate(
                         &self.document,
@@ -491,12 +493,13 @@ impl Scene {
                         sub_line_weight_px,
                     );
                     wire.name = h.value().to_string();
+                    wire.aci = sub_aci;
                     vec![wire]
                 })
                 .collect();
         }
 
-        let base = tessellate::tessellate(
+        let mut base = tessellate::tessellate(
             &self.document,
             h,
             e,
@@ -506,6 +509,7 @@ impl Scene {
             pattern,
             line_weight_px,
         );
+        base.aci = aci;
 
         if let Some(clt) = crate::linetypes::complex_lt(lt_name) {
             let wires = complex_lt::apply_along(
@@ -1966,6 +1970,7 @@ fn paper_boundary_wire(x0: f32, y0: f32, x1: f32, y1: f32) -> WireModel {
         line_weight_px: 1.5,
         snap_pts: vec![],
         tangent_geoms: vec![],
-        key_vertices: vec![],
+        aci: 0,
+            key_vertices: vec![],
     }
 }

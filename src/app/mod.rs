@@ -86,6 +86,10 @@ pub(super) struct H7CAD {
     /// Plot scale: "Fit" | "1:1" | "1:2" | "1:4" | "1:5" | "1:10" | "1:20" | "1:50" | "1:100" | "2:1".
     page_setup_scale: String,
 
+    // ── Plot Style Table ──────────────────────────────────────────────────
+    /// Currently loaded CTB/STB table (None = no override).
+    active_plot_style: Option<crate::io::plot_style::PlotStyleTable>,
+
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     dimstyle_open: bool,
     /// Name of the style currently shown in the dialog.
@@ -324,6 +328,13 @@ pub enum Message {
     PlotExport,
     /// Callback after the user picks (or cancels) the export path.
     PlotExportPath(Option<std::path::PathBuf>),
+    // ── Plot Style Table ─────────────────────────────────────────────────
+    /// Open file dialog to load a CTB/STB plot style table.
+    PlotStyleLoad,
+    /// Callback when the user picks (or cancels) a CTB/STB file.
+    PlotStyleLoaded(Option<crate::io::plot_style::PlotStyleTable>),
+    /// Clear the active plot style table.
+    PlotStyleClear,
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     DimStyleDialogOpen,
     DimStyleDialogClose,
@@ -383,6 +394,8 @@ impl H7CAD {
             page_setup_offset_y: "0.0".to_string(),
             page_setup_rotation: "0".to_string(),
             page_setup_scale: "Fit".to_string(),
+            // Plot style
+            active_plot_style: None,
             // DimStyle dialog
             dimstyle_open: false,
             dimstyle_selected: "Standard".to_string(),

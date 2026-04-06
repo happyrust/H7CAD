@@ -2092,6 +2092,7 @@ impl H7CAD {
                     &wires, eff_w, eff_h,
                     draw_ox as f32, draw_oy as f32,
                     rotation_deg, &path,
+                    self.active_plot_style.as_ref(),
                 ) {
                     Ok(()) => self.command_line.push_info(&format!(
                         "Exported: {}",
@@ -2099,6 +2100,29 @@ impl H7CAD {
                     )),
                     Err(e) => self.command_line.push_error(&format!("Export failed: {e}")),
                 }
+                Task::none()
+            }
+
+            // ── Plot Style Table ──────────────────────────────────────────────
+            Message::PlotStyleLoad => {
+                Task::perform(
+                    crate::io::pick_plot_style(),
+                    Message::PlotStyleLoaded,
+                )
+            }
+            Message::PlotStyleLoaded(Some(table)) => {
+                self.command_line.push_output(&format!(
+                    "Plot style '{}' loaded ({} color entries).",
+                    table.name,
+                    table.aci_entries.iter().filter(|e| e.color.is_some()).count()
+                ));
+                self.active_plot_style = Some(table);
+                Task::none()
+            }
+            Message::PlotStyleLoaded(None) => Task::none(),
+            Message::PlotStyleClear => {
+                self.active_plot_style = None;
+                self.command_line.push_output("Plot style table cleared.");
                 Task::none()
             }
 

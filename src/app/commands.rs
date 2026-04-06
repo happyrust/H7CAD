@@ -2788,6 +2788,39 @@ impl H7CAD {
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
             }
+            // PLOTSTYLE — load or clear CTB/STB plot style table
+            cmd if cmd == "PLOTSTYLE" || cmd.starts_with("PLOTSTYLE ") => {
+                let sub = cmd.split_once(' ')
+                    .map(|(_, r)| r.trim().to_uppercase())
+                    .unwrap_or_default();
+                match sub.as_str() {
+                    "CLEAR" | "NONE" => {
+                        return Task::done(Message::PlotStyleClear);
+                    }
+                    "" | "LOAD" => {
+                        let active = self.active_plot_style.as_ref()
+                            .map(|t| format!("Active: {}", t.name))
+                            .unwrap_or_else(|| "No plot style loaded.".into());
+                        self.command_line.push_info(&active);
+                        return Task::done(Message::PlotStyleLoad);
+                    }
+                    "?" | "STATUS" => {
+                        let msg = self.active_plot_style.as_ref()
+                            .map(|t| format!(
+                                "Plot style: {}  ({} color overrides)",
+                                t.name,
+                                t.aci_entries.iter().filter(|e| e.color.is_some()).count()
+                            ))
+                            .unwrap_or_else(|| "No plot style table loaded.".into());
+                        self.command_line.push_output(&msg);
+                    }
+                    _ => {
+                        self.command_line.push_error(
+                            "Usage: PLOTSTYLE [LOAD | CLEAR | STATUS]"
+                        );
+                    }
+                }
+            }
             "PAGESETUP" => {
                 if self.tabs[i].scene.current_layout == "Model" {
                     self.command_line.push_error("PAGESETUP: switch to a paper space layout first.");

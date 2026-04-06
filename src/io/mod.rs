@@ -4,6 +4,7 @@
 // Default save format: DWG (AC1032 / R2018+).
 
 pub mod pdf_export;
+pub mod plot_style;
 
 use acadrust::io::dwg::DwgReader;
 use acadrust::{CadDocument, DwgWriter, DxfReader, DxfWriter};
@@ -95,6 +96,21 @@ pub async fn pick_save_path() -> Option<PathBuf> {
         dlg = dlg.add_filter(*label, *exts);
     }
     dlg.save_file().await.map(|h| h.path().to_path_buf())
+}
+
+// ── Plot Style Table ──────────────────────────────────────────────────────
+
+/// Show a file-open dialog and load the selected CTB or STB file.
+pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("Load Plot Style Table")
+        .add_filter("Plot Style Tables", &["ctb", "stb", "CTB", "STB"])
+        .add_filter("CTB Files", &["ctb", "CTB"])
+        .add_filter("STB Files", &["stb", "STB"])
+        .add_filter("All Files", &["*"])
+        .pick_file()
+        .await?;
+    plot_style::PlotStyleTable::load(handle.path()).ok()
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────

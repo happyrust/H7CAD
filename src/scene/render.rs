@@ -150,9 +150,10 @@ impl shader::Primitive for Primitive {
 // ── Render-style helpers (impl Scene) ────────────────────────────────────
 
 impl Scene {
-    pub(super) fn render_style(&self, e: &EntityType) -> ([f32; 4], f32, [f32; 8], f32) {
+    /// Returns (entity_color, pattern_length, pattern, line_weight_px, aci).
+    pub(super) fn render_style(&self, e: &EntityType) -> ([f32; 4], f32, [f32; 8], f32, u8) {
         let layer_name = &e.common().layer;
-        let entity_color = {
+        let (entity_color, aci) = {
             let ec = &e.common().color;
             let resolved = if *ec == AcadColor::ByLayer {
                 self.document
@@ -163,9 +164,13 @@ impl Scene {
             } else {
                 ec
             };
+            let aci = match resolved {
+                AcadColor::Index(i) => *i,
+                _ => 0,
+            };
             let [r, g, b, _] = tessellate::aci_to_rgba(resolved);
             let alpha = 1.0 - e.common().transparency.as_percent() as f32;
-            [r, g, b, alpha]
+            ([r, g, b, alpha], aci)
         };
 
         let lt_name = self.resolved_linetype_name(e);
@@ -191,7 +196,7 @@ impl Scene {
                 .unwrap_or(1.0)
         };
 
-        (entity_color, pattern_length, pattern, line_weight_px)
+        (entity_color, pattern_length, pattern, line_weight_px, aci)
     }
 
     pub(super) fn resolved_linetype_name<'a>(&'a self, e: &'a EntityType) -> &'a str {

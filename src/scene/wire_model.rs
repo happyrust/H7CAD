@@ -44,6 +44,8 @@ pub struct WireModel {
     pub pattern: [f32; 8],
     /// Rendered line width in screen pixels (half-width = line_weight_px / 2).
     pub line_weight_px: f32,
+    /// ACI color index (1-255).  0 means true-color or unknown (no CTB lookup).
+    pub aci: u8,
     /// Pre-baked snap candidates (Center, Node, Quadrant, Insertion).
     pub snap_pts: Vec<(glam::Vec3, SnapHint)>,
     /// Per-segment tangent geometry for Tangent snap.
@@ -67,6 +69,7 @@ impl WireModel {
             points,
             color,
             selected,
+            aci: 0,
             pattern_length: 0.0,
             pattern: [0.0; 8],
             line_weight_px: 1.0,

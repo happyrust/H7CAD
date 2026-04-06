@@ -94,7 +94,8 @@ pub fn tessellate(
                     line_weight_px,
                     snap_pts: te.snap_pts,
                     tangent_geoms: te.tangent_geoms,
-                    key_vertices: te.key_vertices,
+                    aci: 0,
+            key_vertices: te.key_vertices,
                 };
             }
 
@@ -119,7 +120,8 @@ pub fn tessellate(
                             line_weight_px: 1.0,
                             snap_pts: te.snap_pts,
                             tangent_geoms: te.tangent_geoms,
-                            key_vertices: te.key_vertices,
+                            aci: 0,
+            key_vertices: te.key_vertices,
                         };
                     }
                     _ => {}
@@ -138,7 +140,8 @@ pub fn tessellate(
                         line_weight_px,
                         snap_pts: te.snap_pts,
                         tangent_geoms: te.tangent_geoms,
-                        key_vertices: te.key_vertices,
+                        aci: 0,
+            key_vertices: te.key_vertices,
                     };
                 }
             }
@@ -155,7 +158,8 @@ pub fn tessellate(
                         line_weight_px,
                         snap_pts: te.snap_pts,
                         tangent_geoms: te.tangent_geoms,
-                        key_vertices: te.key_vertices,
+                        aci: 0,
+            key_vertices: te.key_vertices,
                     };
                 }
             }
@@ -171,7 +175,8 @@ pub fn tessellate(
                     line_weight_px,
                     snap_pts: te.snap_pts,
                     tangent_geoms: te.tangent_geoms,
-                    key_vertices: te.key_vertices,
+                    aci: 0,
+            key_vertices: te.key_vertices,
                 };
             }
 
@@ -189,6 +194,7 @@ pub fn tessellate(
         points,
         color,
         selected,
+        aci: 0,
         pattern_length,
         pattern,
         line_weight_px,
@@ -224,6 +230,7 @@ pub fn tessellate_dimension(
         points,
         color,
         selected,
+        aci: 0,
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px,
@@ -274,6 +281,7 @@ fn tessellate_leader(
             line_weight_px,
             snap_pts: vec![],
             tangent_geoms: vec![],
+            aci: 0,
             key_vertices: vec![],
         }];
     }
@@ -335,6 +343,7 @@ fn tessellate_leader(
         points,
         color,
         selected,
+        aci: 0,
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px,
@@ -445,7 +454,8 @@ fn tessellate_multileader(
         line_weight_px,
         snap_pts: vec![],
         tangent_geoms: vec![],
-        key_vertices: key_verts,
+        aci: 0,
+            key_vertices: key_verts,
     }];
 
     // Render text content as MText wire
