@@ -18,6 +18,7 @@ pub mod polyline;
 pub mod raster_image;
 pub mod underlay;
 pub mod ray;
+pub mod shape;
 pub mod solid;
 pub mod spline;
 pub mod text;

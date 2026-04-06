@@ -62,6 +62,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Leader(leader) => TruckConvertible::to_truck(leader, document),
             EntityType::MultiLeader(ml) => TruckConvertible::to_truck(ml, document),
             EntityType::Underlay(ul) => TruckConvertible::to_truck(ul, document),
+            EntityType::Shape(shp) => TruckConvertible::to_truck(shp, document),
             _ => None,
         }
     }
@@ -100,6 +101,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Dimension(dim) => Grippable::grips(dim),
             EntityType::Hatch(hatch) => Grippable::grips(hatch),
             EntityType::Underlay(ul) => Grippable::grips(ul),
+            EntityType::Shape(shp) => Grippable::grips(shp),
             _ => vec![],
         }
     }
@@ -230,6 +232,10 @@ impl EntityTypeOps for EntityType {
                 ul,
                 text_style_names,
             )),
+            EntityType::Shape(shp) => Some(PropertyEditable::geometry_properties(
+                shp,
+                text_style_names,
+            )),
             _ => None,
         }
     }
@@ -270,6 +276,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Leader(leader) => PropertyEditable::apply_geom_prop(leader, field, value),
             EntityType::MultiLeader(ml) => PropertyEditable::apply_geom_prop(ml, field, value),
             EntityType::Underlay(ul) => PropertyEditable::apply_geom_prop(ul, field, value),
+            EntityType::Shape(shp) => PropertyEditable::apply_geom_prop(shp, field, value),
             _ => {}
         }
     }
@@ -308,6 +315,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Dimension(dim) => Grippable::apply_grip(dim, grip_id, apply),
             EntityType::Hatch(hatch) => Grippable::apply_grip(hatch, grip_id, apply),
             EntityType::Underlay(ul) => Grippable::apply_grip(ul, grip_id, apply),
+            EntityType::Shape(shp) => Grippable::apply_grip(shp, grip_id, apply),
             _ => {}
         }
     }
@@ -346,6 +354,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Leader(leader) => Transformable::apply_transform(leader, t),
             EntityType::MultiLeader(ml) => Transformable::apply_transform(ml, t),
             EntityType::Underlay(ul) => Transformable::apply_transform(ul, t),
+            EntityType::Shape(shp) => Transformable::apply_transform(shp, t),
             _ => {}
         }
     }

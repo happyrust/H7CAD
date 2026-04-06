@@ -3276,6 +3276,7 @@ fn entity_type_name(entity: &acadrust::EntityType) -> &'static str {
         acadrust::EntityType::AttributeEntity(_)    => "ATTRIB",
         acadrust::EntityType::Leader(_)             => "LEADER",
         acadrust::EntityType::Tolerance(_)          => "TOLERANCE",
+        acadrust::EntityType::Shape(_)              => "SHAPE",
         _ => "ENTITY",
     }
 }
