@@ -73,6 +73,7 @@ impl CadCommand for AreaCommand {
             line_weight_px: 1.0,
             snap_pts: vec![],
             tangent_geoms: vec![],
+            aci: 0,
             key_vertices: vec![],
         })
     }

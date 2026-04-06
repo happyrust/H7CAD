@@ -524,6 +524,7 @@ fn line_wire(from: Vec3, to: Vec3) -> WireModel {
         line_weight_px: 1.0,
         snap_pts: vec![],
         tangent_geoms: vec![],
-        key_vertices: vec![],
+        aci: 0,
+            key_vertices: vec![],
     }
 }

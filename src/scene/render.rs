@@ -12,7 +12,7 @@ use iced::{Event, Rectangle, Size};
 use super::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
 use super::pipeline::Pipeline;
 use super::tessellate;
-use super::{HatchModel, MeshModel, Scene, Uniforms, WireModel};
+use super::{HatchModel, ImageModel, MeshModel, Scene, Uniforms, WireModel};
 
 // ── Camera hover state (shader::Program::State) ───────────────────────────
 
@@ -27,6 +27,7 @@ pub struct CameraState {
 pub struct Primitive {
     pub(super) wires: Vec<WireModel>,
     pub(super) hatches: Vec<HatchModel>,
+    pub(super) images: Vec<ImageModel>,
     pub(super) meshes: Vec<MeshModel>,
     pub(super) uniforms: Uniforms,
     /// Camera rotation matrix derived from the quaternion.
@@ -59,6 +60,7 @@ impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
         Primitive {
             wires: all_wires,
             hatches: self.synced_hatch_models(),
+            images: self.images.values().cloned().collect(),
             meshes: self.meshes.values().cloned().collect(),
             uniforms: Uniforms::new(&cam, bounds),
             cam_rotation: cam.view_rotation_mat(),
@@ -123,6 +125,7 @@ impl shader::Primitive for Primitive {
         pipeline.viewcube.ensure_depth_texture(device, size);
         pipeline.upload_uniforms(queue, &self.uniforms);
         pipeline.upload_hatches(device, &self.hatches);
+        pipeline.upload_images(device, queue, &self.images);
         pipeline.upload_meshes(device, &self.meshes);
         pipeline.upload_wires(device, &self.wires);
         let logical = viewport.logical_size();

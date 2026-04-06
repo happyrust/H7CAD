@@ -1,4 +1,5 @@
 pub mod hatch_gpu;
+pub mod image_gpu;
 pub mod mesh_gpu;
 pub mod uniforms;
 pub mod viewcube;
@@ -8,26 +9,31 @@ use iced::wgpu;
 use iced::{Rectangle, Size};
 
 pub use hatch_gpu::HatchGpu;
+pub use image_gpu::ImageGpu;
 pub use mesh_gpu::MeshGpu;
 pub use uniforms::Uniforms;
 pub use viewcube::ViewCubePipeline;
 pub use wire_gpu::WireGpu;
 
 use crate::scene::hatch_model::HatchModel;
+use crate::scene::image_model::ImageModel;
 use crate::scene::mesh_model::MeshModel;
 use crate::scene::wire_model::WireModel;
 
 pub struct Pipeline {
     wire_pipeline: wgpu::RenderPipeline,
     hatch_pipeline: wgpu::RenderPipeline,
+    image_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     hatch_bgl1: wgpu::BindGroupLayout,
+    image_bgl1: wgpu::BindGroupLayout,
     depth_texture_size: Size<u32>,
     depth_view: wgpu::TextureView,
     gpu_wires: Vec<WireGpu>,
     gpu_hatches: Vec<HatchGpu>,
+    gpu_images: Vec<ImageGpu>,
     gpu_meshes: Vec<MeshGpu>,
     pub viewcube: ViewCubePipeline,
 }
@@ -246,19 +252,111 @@ impl Pipeline {
             cache: None,
         });
 
+        // ── Image pipeline ─────────────────────────────────────────────────
+        let image_bgl1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("image.bgl1"),
+            entries: &[
+                // binding 0: texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // binding 1: sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // binding 2: ImageParams uniform
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let image_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("image.pipeline_layout"),
+            bind_group_layouts: &[&frame_bgl, &image_bgl1],
+            push_constant_ranges: &[],
+        });
+
+        let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("image.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/image.wgsl"
+            ))),
+        });
+
+        let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("image.pipeline"),
+            layout: Some(&image_layout),
+            vertex: wgpu::VertexState {
+                module: &image_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[image_gpu::ImageVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &image_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
         let viewcube = ViewCubePipeline::new(device, queue, format);
 
         Self {
             wire_pipeline,
             hatch_pipeline,
+            image_pipeline,
             mesh_pipeline,
             uniform_buffer,
             uniform_bind_group,
             hatch_bgl1,
+            image_bgl1,
             depth_texture_size: Size::new(1, 1),
             depth_view,
             gpu_wires: vec![],
             gpu_hatches: vec![],
+            gpu_images: vec![],
             gpu_meshes: vec![],
             viewcube,
         }
@@ -281,6 +379,18 @@ impl Pipeline {
             .iter()
             .filter(|h| h.boundary.len() >= 3)
             .map(|h| HatchGpu::new(device, h, &self.hatch_bgl1))
+            .collect();
+    }
+
+    pub fn upload_images(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        images: &[ImageModel],
+    ) {
+        self.gpu_images = images
+            .iter()
+            .filter_map(|m| ImageGpu::new(device, queue, m, &self.image_bgl1))
             .collect();
     }
 
@@ -339,7 +449,48 @@ impl Pipeline {
             }
         }
 
-        // ── Pass 2: solid meshes ───────────────────────────────────────────
+        // ── Pass 2: raster images ─────────────────────────────────────────
+        if !self.gpu_images.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("image.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(
+                vp.x as f32,
+                vp.y as f32,
+                vp.width as f32,
+                vp.height as f32,
+                0.0,
+                1.0,
+            );
+            pass.set_pipeline(&self.image_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            for img in &self.gpu_images {
+                pass.set_bind_group(1, &img.bind_group, &[]);
+                pass.set_vertex_buffer(0, img.vertex_buffer.slice(..));
+                pass.draw(0..6, 0..1);
+            }
+        }
+
+        // ── Pass 4: solid meshes ──────────────────────────────────────────
         if !self.gpu_meshes.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mesh.render_pass"),
@@ -382,7 +533,7 @@ impl Pipeline {
             }
         }
 
-        // ── Pass 3: wires ──────────────────────────────────────────────────
+        // ── Pass 5: wires ─────────────────────────────────────────────────
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wire.render_pass"),

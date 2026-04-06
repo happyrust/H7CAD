@@ -159,6 +159,7 @@ pub fn apply_along(
             line_weight_px,
             snap_pts: vec![],
             tangent_geoms: vec![],
+            aci: 0,
             key_vertices: vec![],
         })
         .collect()

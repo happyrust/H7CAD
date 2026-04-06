@@ -410,6 +410,10 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(wo_cmd));
             }
 
+            cmd if cmd == "IMAGE" || cmd == "IMAGEATTACH" || cmd == "IM" => {
+                return Task::done(Message::ImagePick);
+            }
+
             "REVCLOUD" => {
                 use crate::modules::home::draw::revcloud::RevCloudCommand;
                 let cmd = RevCloudCommand::new();

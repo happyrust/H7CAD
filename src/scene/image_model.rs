@@ -1,0 +1,61 @@
+// ImageModel — CPU-side data for a raster image quad.
+//
+// Holds decoded RGBA pixel data and the world-space quad geometry derived
+// from the RasterImage entity's insertion point, u/v vectors, and pixel size.
+
+use std::path::Path;
+
+#[derive(Clone, Debug)]
+pub struct ImageModel {
+    /// Original file path (used for reload / display in properties).
+    pub file_path: String,
+    /// RGBA8 pixel data in row-major order.
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    /// Opacity: 1.0 = opaque, 0.0 = transparent.
+    pub opacity: f32,
+    /// World-space quad corners (CCW), same order as image_corners() helper:
+    ///   [0] origin (bottom-left)
+    ///   [1] origin + U*W (bottom-right)
+    ///   [2] origin + U*W + V*H (top-right)
+    ///   [3] origin + V*H (top-left)
+    pub corners: [[f32; 3]; 4],
+}
+
+impl ImageModel {
+    /// Build an ImageModel from a DXF RasterImage entity.
+    /// Returns `None` if the image file cannot be opened or decoded.
+    pub fn from_raster_image(img: &acadrust::entities::RasterImage) -> Option<Self> {
+        let w = img.size.x;
+        let h = img.size.y;
+        let ox = img.insertion_point.x as f32;
+        let oy = img.insertion_point.y as f32;
+        let oz = img.insertion_point.z as f32;
+        let ux = (img.u_vector.x * w) as f32;
+        let uy = (img.u_vector.y * w) as f32;
+        let uz = (img.u_vector.z * w) as f32;
+        let vx = (img.v_vector.x * h) as f32;
+        let vy = (img.v_vector.y * h) as f32;
+        let vz = (img.v_vector.z * h) as f32;
+        let corners = [
+            [ox, oy, oz],
+            [ox + ux, oy + uy, oz + uz],
+            [ox + ux + vx, oy + uy + vy, oz + uz + vz],
+            [ox + vx, oy + vy, oz + vz],
+        ];
+        let opacity = 1.0 - img.fade as f32 / 100.0;
+
+        let (pixels, width, height) = load_pixels(&img.file_path)?;
+        Some(Self { file_path: img.file_path.clone(), pixels, width, height, opacity, corners })
+    }
+}
+
+/// Decode a raster image file into RGBA8 pixels.
+/// Returns `None` if the file does not exist or cannot be decoded.
+pub fn load_pixels(path_str: &str) -> Option<(Vec<u8>, u32, u32)> {
+    let img = image::open(Path::new(path_str)).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    Some((rgba.into_raw(), w, h))
+}

@@ -35,8 +35,10 @@ impl H7CAD {
             .filter(|h| self.tabs[i].scene.document.get_entity(*h).is_some())
             .collect::<HashSet<_>>();
         self.tabs[i].scene.populate_hatches_from_document();
+        self.tabs[i].scene.populate_images_from_document();
         self.tabs[i].scene.clear_preview_wire();
         self.tabs[i].scene.meshes.clear();
+        self.tabs[i].scene.images.clear();
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
         self.tabs[i].active_grip = None;

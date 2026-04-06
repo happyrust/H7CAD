@@ -7,6 +7,7 @@ pub mod grip;
 pub mod hatch_model;
 pub mod hatch_patterns;
 pub mod hit_test;
+pub mod image_model;
 pub mod mesh_model;
 pub mod object;
 pub mod pipeline;
@@ -21,6 +22,7 @@ pub mod wire_model;
 use camera::Camera;
 pub use camera::Projection;
 pub use hatch_model::HatchModel;
+pub use image_model::ImageModel;
 pub use mesh_model::MeshModel;
 pub use object::{GripApply, GripDef};
 pub use pipeline::uniforms::Uniforms;
@@ -61,6 +63,8 @@ pub struct Scene {
     pub hatches: HashMap<Handle, HatchModel>,
     /// GPU render data for solid meshes (truck Shell/Solid tessellation).
     pub meshes: HashMap<Handle, MeshModel>,
+    /// GPU render data for raster images (RasterImage entities), keyed by handle.
+    pub images: HashMap<Handle, ImageModel>,
     /// The viewport that is currently "entered" (MSPACE mode).
     /// `None` = paper space editing (PSPACE).  Only meaningful when
     /// `current_layout != "Model"`.
@@ -80,6 +84,7 @@ impl Scene {
             current_layout: "Model".to_string(),
             hatches: HashMap::new(),
             meshes: HashMap::new(),
+            images: HashMap::new(),
             active_viewport: None,
         }
     }
@@ -1025,6 +1030,11 @@ impl Scene {
         } else {
             None
         };
+        let image_seed = if let EntityType::RasterImage(img) = &entity {
+            ImageModel::from_raster_image(img)
+        } else {
+            None
+        };
 
         // Route to the correct block based on current editing mode:
         //   - PSPACE (paper layout, no active viewport): paper-space layout block.
@@ -1041,6 +1051,9 @@ impl Scene {
         if !handle.is_null() {
             if let Some(model) = hatch_seed {
                 self.hatches.insert(handle, model);
+            }
+            if let Some(model) = image_seed {
+                self.images.insert(handle, model);
             }
         }
         handle
@@ -1432,6 +1445,28 @@ impl Scene {
             angle_offset: 0.0,
             scale: 1.0,
         })
+    }
+
+    /// Decode and cache all RasterImage entities from the current document.
+    /// Silently skips images whose files cannot be read.
+    pub fn populate_images_from_document(&mut self) {
+        self.images.clear();
+        let entries: Vec<(Handle, acadrust::entities::RasterImage)> = self
+            .document
+            .entities()
+            .filter_map(|e| {
+                if let EntityType::RasterImage(img) = e {
+                    Some((img.common.handle, img.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (handle, img) in entries {
+            if let Some(model) = ImageModel::from_raster_image(&img) {
+                self.images.insert(handle, model);
+            }
+        }
     }
 
     pub fn populate_hatches_from_document(&mut self) {

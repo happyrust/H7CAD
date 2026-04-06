@@ -8,6 +8,7 @@ pub mod line;
 pub mod mline;
 pub mod point;
 pub mod polyline;
+pub mod raster_image;
 pub mod ray;
 pub mod revcloud;
 pub mod shapes;

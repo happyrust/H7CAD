@@ -113,6 +113,26 @@ pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
     plot_style::PlotStyleTable::load(handle.path()).ok()
 }
 
+// ── Image file picker ─────────────────────────────────────────────────────
+
+/// Show a file-open dialog for raster images and decode the selected file.
+/// Returns `(path, pixel_width, pixel_height)` or an error string.
+pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("Select Image File")
+        .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "tiff", "tif"])
+        .add_filter("PNG", &["png"])
+        .add_filter("JPEG", &["jpg", "jpeg"])
+        .add_filter("All Files", &["*"])
+        .pick_file()
+        .await
+        .ok_or_else(|| "Cancelled".to_string())?;
+    let path = handle.path().to_path_buf();
+    let img = image::open(&path).map_err(|e| e.to_string())?;
+    let (w, h) = image::GenericImageView::dimensions(&img);
+    Ok((path, w, h))
+}
+
 // ── Save ──────────────────────────────────────────────────────────────────
 
 /// Save the document to the given path.

@@ -104,7 +104,8 @@ impl CadCommand for WipeoutCommand {
                     line_weight_px: 1.0,
                     snap_pts: vec![],
                     tangent_geoms: vec![],
-                    key_vertices: vec![],
+                    aci: 0,
+            key_vertices: vec![],
                 })
             }
             WipeoutMode::Polygonal => {
@@ -123,7 +124,8 @@ impl CadCommand for WipeoutCommand {
                     line_weight_px: 1.0,
                     snap_pts: vec![],
                     tangent_geoms: vec![],
-                    key_vertices: vec![],
+                    aci: 0,
+            key_vertices: vec![],
                 })
             }
         }

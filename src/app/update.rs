@@ -49,6 +49,7 @@ impl H7CAD {
                 self.tabs[i].current_path = Some(path);
                 self.tabs[i].scene.document = doc;
                 self.tabs[i].scene.populate_hatches_from_document();
+                self.tabs[i].scene.populate_images_from_document();
                 self.tabs[i].scene.selected = std::collections::HashSet::new();
                 self.tabs[i].scene.preview_wires = vec![];
                 self.tabs[i].scene.current_layout = "Model".to_string();
@@ -67,6 +68,35 @@ impl H7CAD {
             Message::FileOpened(Err(e)) => {
                 if e != "Cancelled" {
                     self.command_line.push_error(&format!("Open failed: {e}"));
+                }
+                Task::none()
+            }
+
+            Message::ImagePick => {
+                Task::perform(crate::io::pick_image_file(), Message::ImagePickResult)
+            }
+
+            Message::ImagePickResult(Ok((path, pw, ph))) => {
+                use crate::command::CadCommand;
+                use crate::modules::home::draw::raster_image::ImageCommand;
+                let path_str = path.to_string_lossy().into_owned();
+                let short = std::path::Path::new(&path_str)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&path_str)
+                    .to_string();
+                self.command_line
+                    .push_output(&format!("IMAGE  \"{short}\": {pw}×{ph} px"));
+                let cmd = ImageCommand::new(path_str, pw, ph);
+                let i = self.active_tab;
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                Task::none()
+            }
+
+            Message::ImagePickResult(Err(e)) => {
+                if e != "Cancelled" {
+                    self.command_line.push_error(&format!("IMAGE: {e}"));
                 }
                 Task::none()
             }

@@ -397,6 +397,11 @@ pub enum Message {
     // Field edit messages:
     DsEdit(DsField, String),
     DsToggle(DsField),
+    // ── Raster Image ──────────────────────────────────────────────────────
+    /// Open file-picker dialog for IMAGE command (async).
+    ImagePick,
+    /// Result of the image file picker + pixel dimension decode.
+    ImagePickResult(Result<(std::path::PathBuf, u32, u32), String>),
 }
 
 impl H7CAD {
