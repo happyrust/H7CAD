@@ -16,6 +16,7 @@ pub mod mtext;
 pub mod point;
 pub mod polyline;
 pub mod raster_image;
+pub mod underlay;
 pub mod ray;
 pub mod solid;
 pub mod spline;

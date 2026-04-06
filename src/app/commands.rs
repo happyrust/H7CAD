@@ -2821,6 +2821,98 @@ impl H7CAD {
                     }
                 }
             }
+            // UNDERLAY — edit properties of selected PDF/DWF/DGN underlay entities.
+            // Usage:
+            //   UNDERLAY FADE <0-80>
+            //   UNDERLAY CONTRAST <0-100>
+            //   UNDERLAY ON | OFF
+            //   UNDERLAY CLIP ON | OFF
+            //   UNDERLAY MONO ON | OFF
+            cmd if cmd == "UNDERLAY" || cmd.starts_with("UNDERLAY ") => {
+                let sub = cmd.split_once(' ')
+                    .map(|(_, r)| r.trim().to_uppercase())
+                    .unwrap_or_default();
+                let handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                    .selected_entities()
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .collect();
+                if handles.is_empty() {
+                    self.command_line.push_error("UNDERLAY: select underlay entities first.");
+                } else {
+                    let parts: Vec<&str> = sub.splitn(2, char::is_whitespace).collect();
+                    let action = parts.first().copied().unwrap_or("");
+                    let arg = parts.get(1).copied().unwrap_or("").trim();
+                    let mut changed = 0usize;
+                    self.push_undo_snapshot(i, "UNDERLAY");
+                    for h in &handles {
+                        if let Some(acadrust::EntityType::Underlay(ul)) = self.tabs[i].scene
+                            .document.entities_mut()
+                            .find(|e| e.common().handle == *h)
+                        {
+                            match action {
+                                "FADE" => {
+                                    if let Ok(v) = arg.parse::<u8>() {
+                                        ul.set_fade(v);
+                                        changed += 1;
+                                    }
+                                }
+                                "CONTRAST" => {
+                                    if let Ok(v) = arg.parse::<u8>() {
+                                        ul.set_contrast(v);
+                                        changed += 1;
+                                    }
+                                }
+                                "ON" => { ul.set_on(true); changed += 1; }
+                                "OFF" => { ul.set_on(false); changed += 1; }
+                                "CLIP" => {
+                                    match arg {
+                                        "ON" => {
+                                            ul.flags |= acadrust::entities::UnderlayDisplayFlags::CLIPPING;
+                                            changed += 1;
+                                        }
+                                        "OFF" => {
+                                            ul.clear_clip();
+                                            changed += 1;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                "MONO" => {
+                                    match arg {
+                                        "ON" => { ul.set_monochrome(true); changed += 1; }
+                                        "OFF" => { ul.set_monochrome(false); changed += 1; }
+                                        _ => {}
+                                    }
+                                }
+                                _ => {
+                                    // No sub-command: print status.
+                                    self.command_line.push_output(&format!(
+                                        "Underlay {:x}: fade={}, contrast={}, on={}, clip={}, mono={}",
+                                        h.value(),
+                                        ul.fade,
+                                        ul.contrast,
+                                        ul.is_on(),
+                                        ul.is_clipping(),
+                                        ul.is_monochrome(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if changed > 0 {
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_info(&format!(
+                            "Updated {changed} underlay(s)."
+                        ));
+                    } else if !action.is_empty() {
+                        self.command_line.push_error(
+                            "Usage: UNDERLAY [FADE <n>|CONTRAST <n>|ON|OFF|CLIP ON|OFF|MONO ON|OFF]"
+                        );
+                    }
+                }
+            }
+
             "PAGESETUP" => {
                 if self.tabs[i].scene.current_layout == "Model" {
                     self.command_line.push_error("PAGESETUP: switch to a paper space layout first.");
@@ -2978,6 +3070,7 @@ fn entity_type_name(entity: &acadrust::EntityType) -> &'static str {
         acadrust::EntityType::MLine(_)              => "MLINE",
         acadrust::EntityType::RasterImage(_)        => "RASTERIMAGE",
         acadrust::EntityType::Wipeout(_)            => "WIPEOUT",
+        acadrust::EntityType::Underlay(_)           => "UNDERLAY",
         acadrust::EntityType::AttributeDefinition(_)=> "ATTDEF",
         acadrust::EntityType::AttributeEntity(_)    => "ATTRIB",
         acadrust::EntityType::Leader(_)             => "LEADER",
