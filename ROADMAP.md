@@ -42,7 +42,7 @@ Durum simgeleri: ✅ Tamamlandı · 🔧 Kısmen yapıldı · ⬜ Yapılmadı
 | 2.11 | UCS simgesi (XYZ tripod) | ✅ |
 | 2.12 | Solid3D / 3DSOLID tessellation (truck pipeline) | ✅ |
 | 2.13 | Region / Body / Wire / Silhouette entity render | ⬜ |
-| 2.14 | Anti-aliasing / MSAA seçeneği | ⬜ |
+| 2.14 | Anti-aliasing / MSAA (4×) | ✅ |
 
 ---
 

@@ -36,6 +36,8 @@ pub struct Primitive {
     /// Used by the ViewCube pipeline — no gimbal lock.
     pub(super) cam_rotation: Mat4,
     pub(super) hover_region: Option<usize>,
+    /// Background color used to clear the MSAA buffer at the start of each frame.
+    pub(super) bg_color: [f32; 4],
 }
 
 // ── shader::Program impl ──────────────────────────────────────────────────
@@ -59,6 +61,12 @@ impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
         }
         all_wires.extend(self.preview_wires.iter().cloned());
 
+        let bg_color = if self.current_layout == "Model" {
+            self.bg_color
+        } else {
+            self.paper_bg_color
+        };
+
         Primitive {
             wires: all_wires,
             hatches: self.synced_hatch_models(),
@@ -68,6 +76,7 @@ impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
             uniforms: Uniforms::new(&cam, bounds),
             cam_rotation: cam.view_rotation_mat(),
             hover_region: state.hover_region,
+            bg_color,
         }
     }
 
@@ -149,7 +158,7 @@ impl shader::Primitive for Primitive {
         target: &iced::wgpu::TextureView,
         clip: &Rectangle<u32>,
     ) {
-        pipeline.render(encoder, target, *clip);
+        pipeline.render(encoder, target, *clip, self.bg_color);
         pipeline.viewcube.render(encoder, target, *clip);
     }
 }

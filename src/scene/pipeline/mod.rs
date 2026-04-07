@@ -20,6 +20,9 @@ use crate::scene::image_model::ImageModel;
 use crate::scene::mesh_model::MeshModel;
 use crate::scene::wire_model::WireModel;
 
+/// MSAA sample count for the main drawing pipelines.
+const MSAA_SAMPLES: u32 = 4;
+
 pub struct Pipeline {
     wire_pipeline: wgpu::RenderPipeline,
     hatch_pipeline: wgpu::RenderPipeline,
@@ -31,6 +34,10 @@ pub struct Pipeline {
     image_bgl1: wgpu::BindGroupLayout,
     depth_texture_size: Size<u32>,
     depth_view: wgpu::TextureView,
+    /// 4× MSAA color buffer for the main drawing passes.
+    msaa_view: wgpu::TextureView,
+    /// Cached texture format (needed to recreate MSAA / depth textures on resize).
+    surface_format: wgpu::TextureFormat,
     gpu_wires: Vec<WireGpu>,
     gpu_hatches: Vec<HatchGpu>,
     /// Wipeout fills — rendered after wires in a separate pass.
@@ -113,7 +120,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -182,7 +189,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -236,7 +243,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -325,7 +332,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -345,6 +352,10 @@ impl Pipeline {
 
         let viewcube = ViewCubePipeline::new(device, queue, format);
 
+        let init_size = Size::new(1, 1);
+        let msaa_view = create_msaa_texture(device, init_size, format)
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
         Self {
             wire_pipeline,
             hatch_pipeline,
@@ -356,6 +367,8 @@ impl Pipeline {
             image_bgl1,
             depth_texture_size: Size::new(1, 1),
             depth_view,
+            msaa_view,
+            surface_format: format,
             gpu_wires: vec![],
             gpu_hatches: vec![],
             gpu_wipeouts: vec![],
@@ -414,19 +427,24 @@ impl Pipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         clip_bounds: Rectangle<u32>,
+        bg_color: [f32; 4],
     ) {
         let vp = clip_bounds;
+        let msaa = &self.msaa_view;
+        let [r, g, b, a] = bg_color;
+        let clear_color = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: a as f64 };
 
         // ── Pass 1: hatch fills ────────────────────────────────────────────
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("hatch.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        // Clear MSAA to background color on the first pass.
+                        load: wgpu::LoadOp::Clear(clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -465,7 +483,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("image.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -506,7 +524,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mesh.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -549,7 +567,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wire.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -591,7 +609,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wipeout.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -626,12 +644,36 @@ impl Pipeline {
                 pass.draw(0..6, 0..1);
             }
         }
+
+        // ── Resolve MSAA → target ─────────────────────────────────────────
+        // An empty render pass with resolve_target transfers the MSAA samples
+        // to the non-multisampled iced target surface.
+        {
+            let _resolve = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("msaa.resolve_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: Some(target),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            // No draw calls — the pass itself triggers the MSAA resolve.
+        }
     }
 
     pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {
         if self.depth_texture_size != size {
-            let tex = create_depth_texture(device, size);
-            self.depth_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+            let depth_tex = create_depth_texture(device, size);
+            self.depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            let msaa_tex = create_msaa_texture(device, size, self.surface_format);
+            self.msaa_view = msaa_tex.create_view(&wgpu::TextureViewDescriptor::default());
             self.depth_texture_size = size;
         }
     }
@@ -646,9 +688,30 @@ fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
+        sample_count: MSAA_SAMPLES,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
+}
+
+fn create_msaa_texture(
+    device: &wgpu::Device,
+    size: Size<u32>,
+    format: wgpu::TextureFormat,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("viewer.msaa_texture"),
+        size: wgpu::Extent3d {
+            width: size.width.max(1),
+            height: size.height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: MSAA_SAMPLES,
+        dimension: wgpu::TextureDimension::D2,
+        format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     })
