@@ -233,6 +233,16 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// If this command needs attribute data injected (ATTEDIT), returns the
+    /// INSERT handle awaiting attr initialization; else None.
+    fn attedit_pending_handle(&self) -> Option<acadrust::Handle> {
+        None
+    }
+
+    /// Inject attribute (tag, value) pairs into the command after entity pick.
+    fn attedit_set_attrs(&mut self, _attrs: Vec<(String, String)>) {}
+
+
     /// Called instead of `on_point` when the command needs a tangent pick
     /// and the snap system found a tangent object.
     fn on_tangent_point(&mut self, obj: TangentObject, hit: Vec3) -> CmdResult {

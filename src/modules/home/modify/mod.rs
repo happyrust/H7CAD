@@ -1,4 +1,5 @@
 pub mod align;
+pub mod attedit;
 pub mod array;
 pub mod break_cmd;
 pub mod copy;

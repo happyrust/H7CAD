@@ -127,7 +127,7 @@ Underlay (PDF/DWF/DGN)
 | STRETCH (SS) | ✅ | — |
 | SPLINEDIT | ✅ CLOSE/OPEN/REVERSE + grip editing | — |
 | HATCHEDIT | ✅ | — |
-| ATTEDIT | ⬜ | Attribute değerlerini düzenleme |
+| ATTEDIT | ✅ Interactive tag-by-tag value editing | — |
 | DDEDIT (çift tık metin) | ✅ | — |
 | REFEDIT | ⬜ | Block in-place düzenleme |
 | DIVIDE (DIV) | ✅ | — |

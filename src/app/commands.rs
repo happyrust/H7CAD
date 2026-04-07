@@ -1442,6 +1442,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
+            "ATTEDIT"|"ATE"|"-ATTEDIT" => {
+                use crate::modules::home::modify::attedit::AtteditCommand;
+                let cmd_obj = AtteditCommand::new();
+                self.command_line.push_info(&cmd_obj.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            }
+
             "ALIGN"|"AL" => {
                 use crate::modules::home::modify::align::AlignCommand;
                 let cmd = AlignCommand::new();
