@@ -116,9 +116,9 @@ Underlay (PDF/DWF/DGN)
 | ARRAY Path | ✅ | — |
 | BREAK (BR) | ✅ | — |
 | TRIM (TR) | ✅ | — |
-| EXTEND (EX) | 🔧 | LwPolyline |
+| EXTEND (EX) | ✅ | — |
 | OFFSET (O) | ✅ | — |
-| LENGTHEN (LEN) | 🔧 | LwPolyline |
+| LENGTHEN (LEN) | ✅ | — |
 | FILLET (F) | ✅ | — |
 | CHAMFER (CHA) | ✅ | — |
 | JOIN (J) | ✅ | — |
@@ -302,7 +302,7 @@ Underlay (PDF/DWF/DGN)
 ## Öncelik Sırası (Bir Sonraki Adımlar)
 
 ### Yüksek Öncelik
-1. **EXTEND / LENGTHEN → LwPolyline desteği**
+1. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
 
 ### Orta Öncelik
 5. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)

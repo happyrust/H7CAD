@@ -10,7 +10,7 @@
 
 use std::f64::consts::TAU;
 
-use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, Ray as RayEnt, Spline as SplineEnt, XLine as XLineEnt};
+use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Ray as RayEnt, Spline as SplineEnt, XLine as XLineEnt};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -976,7 +976,116 @@ fn trim_arc(orig: &ArcEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
         .collect()
 }
 
-// ── Extend helper ─────────────────────────────────────────────────────────
+// ── Extend helpers ────────────────────────────────────────────────────────
+
+/// Extend the first or last segment of an LwPolyline to the nearest boundary.
+/// Click point (DXF XY) determines which end to extend.
+fn extend_lwpoly(poly: &LwPolyline, click_x: f64, click_y: f64, geos: &[Geo]) -> Option<EntityType> {
+    let n = poly.vertices.len();
+    if n < 2 { return None; }
+
+    let first = &poly.vertices[0];
+    let second = &poly.vertices[1];
+    let last   = &poly.vertices[n - 1];
+    let prev   = &poly.vertices[n - 2];
+
+    let d_first = (first.location.x - click_x).hypot(first.location.y - click_y);
+    let d_last  = (last.location.x  - click_x).hypot(last.location.y  - click_y);
+    let extend_end = d_last <= d_first;
+
+    // Extract the terminal segment as a virtual line.
+    let (ax, ay, bx, by) = if extend_end {
+        (prev.location.x, prev.location.y, last.location.x, last.location.y)
+    } else {
+        (second.location.x, second.location.y, first.location.x, first.location.y)
+    };
+
+    let (dx, dy) = (bx - ax, by - ay);
+    let len2 = dx * dx + dy * dy;
+    if len2 < 1e-12 { return None; }
+
+    // t_click on the segment: 0 = ax/ay, 1 = bx/by. We're extending beyond t=1.
+    let target = poly.common.handle;
+    let mut best_t = f64::INFINITY;
+
+    for geo in geos {
+        match geo {
+            Geo::Line { handle, p1, p2 } => {
+                if *handle == target { continue; }
+                let (ex, ey) = (p2[0] - p1[0], p2[1] - p1[1]);
+                if let Some((t, u)) = ll(ax, ay, dx, dy, p1[0], p1[1], ex, ey) {
+                    if (-1e-9..=1.0 + 1e-9).contains(&u) && t > 1.0 + 1e-6 && t < best_t {
+                        best_t = t;
+                    }
+                }
+            }
+            Geo::Arc { handle, cx, cy, r, a0, a1 } => {
+                if *handle == target { continue; }
+                for t in lc(ax, ay, dx, dy, *cx, *cy, *r) {
+                    let ix = ax + t * dx;
+                    let iy = ay + t * dy;
+                    if in_arc((iy - cy).atan2(ix - cx), *a0, *a1) && t > 1.0 + 1e-6 && t < best_t {
+                        best_t = t;
+                    }
+                }
+            }
+            Geo::Circle { handle, cx, cy, r } => {
+                if *handle == target { continue; }
+                for t in lc(ax, ay, dx, dy, *cx, *cy, *r) {
+                    if t > 1.0 + 1e-6 && t < best_t { best_t = t; }
+                }
+            }
+            Geo::Ray { handle, bx: rbx, by: rby, dx: rdx, dy: rdy } => {
+                if *handle == target { continue; }
+                if let Some((t, u)) = ll(ax, ay, dx, dy, *rbx, *rby, *rdx, *rdy) {
+                    if u >= -1e-9 && t > 1.0 + 1e-6 && t < best_t { best_t = t; }
+                }
+            }
+            Geo::InfLine { handle, bx: ibx, by: iby, dx: idx, dy: idy } => {
+                if *handle == target { continue; }
+                if let Some((t, _)) = ll(ax, ay, dx, dy, *ibx, *iby, *idx, *idy) {
+                    if t > 1.0 + 1e-6 && t < best_t { best_t = t; }
+                }
+            }
+            Geo::Ellipse { handle, cx, cy, a, b, nx, ny, t0, t1 } => {
+                if *handle == target { continue; }
+                for (t, t_ell) in le(ax, ay, dx, dy, *cx, *cy, *a, *b, *nx, *ny) {
+                    if in_arc(t_ell, *t0, *t1) && t > 1.0 + 1e-6 && t < best_t {
+                        best_t = t;
+                    }
+                }
+            }
+            Geo::Spline { handle, segs } => {
+                if *handle == target { continue; }
+                for (p1, p2) in segs {
+                    let ex = p2[0] - p1[0]; let ey = p2[1] - p1[1];
+                    if let Some((t, u)) = ll(ax, ay, dx, dy, p1[0], p1[1], ex, ey) {
+                        if (-1e-9..=1.0+1e-9).contains(&u) && t > 1.0 + 1e-6 && t < best_t {
+                            best_t = t;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !best_t.is_finite() { return None; }
+
+    let new_x = ax + best_t * dx;
+    let new_y = ay + best_t * dy;
+    let mut new_poly = poly.clone();
+    new_poly.common.handle = Handle::NULL;
+    if extend_end {
+        let last_v = new_poly.vertices.last_mut()?;
+        last_v.location.x = new_x;
+        last_v.location.y = new_y;
+    } else {
+        let first_v = new_poly.vertices.first_mut()?;
+        first_v.location.x = new_x;
+        first_v.location.y = new_y;
+    }
+    Some(EntityType::LwPolyline(new_poly))
+}
 
 /// Extend a Line to the nearest boundary on the extended side.
 /// t_click < 0.5 → extend start (look for t < 0); t_click ≥ 0.5 → extend end (t > 1).
@@ -1268,6 +1377,19 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
             ellipse_pts(e.center.x, e.center.y, a, b, nx, ny, t0, t1, e.center.z)
         }
         EntityType::Spline(s) => spline_pts_wire(s),
+        EntityType::LwPolyline(p) => {
+            let elev = p.elevation as f32;
+            let n = p.vertices.len();
+            let seg_count = if p.is_closed { n } else { n.saturating_sub(1) };
+            let mut pts = Vec::with_capacity(seg_count * 2);
+            for i in 0..seg_count {
+                let v0 = &p.vertices[i];
+                let v1 = &p.vertices[(i + 1) % n];
+                pts.push([v0.location.x as f32, elev, v0.location.y as f32]);
+                pts.push([v1.location.x as f32, elev, v1.location.y as f32]);
+            }
+            pts
+        }
         // For preview, show a 20-unit section of semi-infinite results
         EntityType::Ray(r) => {
             let bx = r.base_point.x;
@@ -1724,6 +1846,9 @@ impl CadCommand for ExtendCommand {
                 let _ = span;
                 extend_ellipse(e, t_click, &self.geos)
             }
+            Some(EntityType::LwPolyline(p)) => {
+                extend_lwpoly(p, pt.x as f64, pt.y as f64, &self.geos)
+            }
             Some(EntityType::Spline(s)) => {
                 let t_click = spline_nearest_t(s, pt.x as f64, pt.y as f64)
                     .and_then(|t_actual| {
@@ -1757,6 +1882,7 @@ impl CadCommand for ExtendCommand {
                     EntityType::Line(l) => l.common.handle = new_handle,
                     EntityType::Ellipse(e) => e.common.handle = new_handle,
                     EntityType::Spline(s) => s.common.handle = new_handle,
+                    EntityType::LwPolyline(p) => p.common.handle = new_handle,
                     _ => {}
                 }
                 if let Some(pos) = self
@@ -1808,6 +1934,11 @@ impl CadCommand for ExtendCommand {
                     if let Some(ext) = extend_ellipse(e, t_click, &self.geos) {
                         return vec![WireModel::solid("extend_prev".into(), entity_pts(&ext), WireModel::CYAN, false)];
                     }
+                }
+            }
+            Some(EntityType::LwPolyline(p)) => {
+                if let Some(ext) = extend_lwpoly(p, pt.x as f64, pt.y as f64, &self.geos) {
+                    return vec![WireModel::solid("extend_prev".into(), entity_pts(&ext), WireModel::CYAN, false)];
                 }
             }
             Some(EntityType::Spline(s)) => {

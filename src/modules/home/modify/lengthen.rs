@@ -7,7 +7,7 @@
 //
 // The entity is modified at whichever end is closest to the pick point.
 
-use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, Spline as SplineEnt};
+use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
 use truck_modeling::base::{BoundedCurve, Cut, ParametricCurve};
 use crate::modules::home::modify::spline_ops::{bspline_to_spline, spline_nearest_t, spline_to_bspline};
 use acadrust::types::Vector3;
@@ -98,10 +98,11 @@ pub enum LenMode {
 /// `pick_pt` determines which end to extend/trim (closest end is modified).
 pub fn lengthen_entity(entity: &EntityType, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
     match entity {
-        EntityType::Line(l)    => lengthen_line(l, pick_pt, mode),
-        EntityType::Arc(a)     => lengthen_arc(a, pick_pt, mode),
-        EntityType::Ellipse(e) => lengthen_ellipse(e, pick_pt, mode),
-        EntityType::Spline(s)  => lengthen_spline(s, pick_pt, mode),
+        EntityType::Line(l)       => lengthen_line(l, pick_pt, mode),
+        EntityType::Arc(a)        => lengthen_arc(a, pick_pt, mode),
+        EntityType::Ellipse(e)    => lengthen_ellipse(e, pick_pt, mode),
+        EntityType::Spline(s)     => lengthen_spline(s, pick_pt, mode),
+        EntityType::LwPolyline(p) => lengthen_lwpoly(p, pick_pt, mode),
         _ => None,
     }
 }
@@ -264,6 +265,56 @@ fn arc_span_deg(start: f64, end: f64) -> f64 {
 fn xz_to_v3(v: Vec3, z: f64) -> Vector3 {
     // v is (world_x, world_z, 0) → DXF (x, world_z, z)
     Vector3::new(v.x as f64, v.y as f64, z)
+}
+
+fn lengthen_lwpoly(poly: &LwPolyline, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
+    let n = poly.vertices.len();
+    if n < 2 { return None; }
+
+    // Determine which end is closer to the pick point (DXF XY: pick_pt.x, pick_pt.z).
+    let px = pick_pt.x as f64;
+    let py = pick_pt.z as f64; // Y-up: world Z = DXF Y
+
+    let first = &poly.vertices[0];
+    let last  = &poly.vertices[n - 1];
+    let d_first = (first.location.x - px).hypot(first.location.y - py);
+    let d_last  = (last.location.x  - px).hypot(last.location.y  - py);
+    let at_end = d_last <= d_first;
+
+    // Terminal segment direction and current length.
+    let (sx, sy, ex, ey) = if at_end {
+        (poly.vertices[n - 2].location.x, poly.vertices[n - 2].location.y,
+         last.location.x, last.location.y)
+    } else {
+        (poly.vertices[1].location.x, poly.vertices[1].location.y,
+         first.location.x, first.location.y)
+    };
+
+    let dx = ex - sx;
+    let dy = ey - sy;
+    let current_len = (dx * dx + dy * dy).sqrt();
+    if current_len < 1e-10 { return None; }
+
+    let new_len = apply_mode(current_len, mode)?;
+    if new_len < 1e-10 { return None; }
+
+    let ux = dx / current_len;
+    let uy = dy / current_len;
+    let new_x = sx + ux * new_len;
+    let new_y = sy + uy * new_len;
+
+    let mut new_poly = poly.clone();
+    new_poly.common.handle = Handle::NULL;
+    if at_end {
+        let v = new_poly.vertices.last_mut()?;
+        v.location.x = new_x;
+        v.location.y = new_y;
+    } else {
+        let v = new_poly.vertices.first_mut()?;
+        v.location.x = new_x;
+        v.location.y = new_y;
+    }
+    Some(EntityType::LwPolyline(new_poly))
 }
 
 fn lengthen_spline(spl: &SplineEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
