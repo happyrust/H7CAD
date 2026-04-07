@@ -40,7 +40,7 @@ Durum simgeleri: ✅ Tamamlandı · 🔧 Kısmen yapıldı · ⬜ Yapılmadı
 | 2.9 | Çizim sırası (draw order / SortEntitiesTable) | ✅ |
 | 2.10 | ViewCube (3D yönelim küpü) | ✅ |
 | 2.11 | UCS simgesi (XYZ tripod) | ✅ |
-| 2.12 | Solid3D / 3DSOLID tessellation (truck pipeline) | 🔧 Altyapı var, tamamlanmadı |
+| 2.12 | Solid3D / 3DSOLID tessellation (truck pipeline) | ✅ |
 | 2.13 | Region / Body / Wire / Silhouette entity render | ⬜ |
 | 2.14 | Anti-aliasing / MSAA seçeneği | ⬜ |
 
@@ -59,7 +59,7 @@ Underlay (PDF/DWF/DGN)
 ### 3.2 Kısmen / Sadece Okunabilir
 | Entity | Durum |
 |--------|-------|
-| Solid3D (3DSOLID) | 🔧 Okunuyor, tessellation eksik |
+| Solid3D (3DSOLID) | ✅ ACIS SAT tessellation |
 | Region | ⬜ Tanınmıyor |
 | Body / Wire / Silhouette | ⬜ Tanınmıyor |
 | Ole2Frame | ⬜ Tanınmıyor |
@@ -291,7 +291,7 @@ Underlay (PDF/DWF/DGN)
 | Truck geometry pipeline entegrasyonu | ✅ |
 | 3D primitive'ler (Box, Sphere, Cylinder) | ✅ |
 | OBJ mesh içe aktarma | ✅ |
-| Solid3D tessellation (acadrust ACIS) | 🔧 Altyapı var, eksik |
+| Solid3D tessellation (acadrust ACIS) | ✅ |
 | Boolean operasyonlar (UNION/SUBTRACT/INTERSECT) | ⬜ |
 | EXTRUDE / REVOLVE / SWEEP / LOFT | ⬜ |
 | 3D ARRAY | ⬜ |
@@ -302,13 +302,11 @@ Underlay (PDF/DWF/DGN)
 ## Öncelik Sırası (Bir Sonraki Adımlar)
 
 ### Yüksek Öncelik
-1. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
+1. **Çoklu Layout sekmeleri** arayüzü
 
 ### Orta Öncelik
-5. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
-6. **Çoklu Layout sekmeleri** arayüzü
-7. **Grid snap + Polar tracking**
-8. **XREF yönetimi**
+5. **Grid snap + Polar tracking**
+6. **XREF yönetimi**
 
 ### Düşük Öncelik
 11. Grid snap + Polar tracking

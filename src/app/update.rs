@@ -50,6 +50,7 @@ impl H7CAD {
                 self.tabs[i].scene.document = doc;
                 self.tabs[i].scene.populate_hatches_from_document();
                 self.tabs[i].scene.populate_images_from_document();
+                self.tabs[i].scene.populate_meshes_from_document();
                 self.tabs[i].scene.selected = std::collections::HashSet::new();
                 self.tabs[i].scene.preview_wires = vec![];
                 self.tabs[i].scene.current_layout = "Model".to_string();

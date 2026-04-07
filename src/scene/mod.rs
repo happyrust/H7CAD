@@ -14,6 +14,7 @@ pub mod pipeline;
 pub mod properties;
 mod render;
 mod selection;
+pub mod solid3d_tess;
 pub mod tessellate;
 pub mod transform;
 pub mod truck_tess;
@@ -34,7 +35,7 @@ pub use wire_model::WireModel;
 
 use crate::command::EntityTransform;
 use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid};
-use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
+use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert, Solid3D};
 use acadrust::objects::ObjectType;
 use acadrust::types::Vector2;
 use acadrust::{CadDocument, EntityType, Handle, TableEntry};
@@ -1073,6 +1074,12 @@ impl Scene {
         } else {
             None
         };
+        let mesh_seed = if let EntityType::Solid3D(s3d) = &entity {
+            let color = self.render_style(&entity).0;
+            solid3d_tess::tessellate_solid3d(s3d, color)
+        } else {
+            None
+        };
 
         // Auto-create an ImageDefinition object for new RasterImage entities
         // that don't already reference one.
@@ -1112,6 +1119,9 @@ impl Scene {
             }
             if let Some(model) = image_seed {
                 self.images.insert(handle, model);
+            }
+            if let Some(model) = mesh_seed {
+                self.meshes.insert(handle, model);
             }
         }
         handle
@@ -1560,6 +1570,36 @@ impl Scene {
         }
     }
 
+    /// Tessellate all `Solid3D` entities in the current document into
+    /// GPU-ready `MeshModel`s and store them in `self.meshes`.
+    ///
+    /// Called after loading a document or after undo/redo so that every
+    /// `Solid3D` entity is represented in the mesh cache.
+    pub fn populate_meshes_from_document(&mut self) {
+        self.meshes.clear();
+        let entries: Vec<(Handle, Solid3D)> = self
+            .document
+            .entities()
+            .filter_map(|e| {
+                if let EntityType::Solid3D(s) = e {
+                    Some((s.common.handle, s.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (handle, solid) in entries {
+            let color = if let Some(e) = self.document.get_entity(handle) {
+                tessellate::aci_to_rgba(&e.common().color)
+            } else {
+                [0.7, 0.7, 0.7, 1.0]
+            };
+            if let Some(model) = solid3d_tess::tessellate_solid3d(&solid, color) {
+                self.meshes.insert(handle, model);
+            }
+        }
+    }
+
     /// Build a solid-fill HatchModel for a DXF Solid entity.
     /// DXF SOLID corners are in "Z-order": p0-p1 top, p2-p3 bottom.
     /// Visual quad is p0→p1→p3→p2 (closed).
@@ -1687,6 +1727,7 @@ impl Scene {
             self.document.remove_entity(h);
             self.selected.remove(&h);
             self.hatches.remove(&h);
+            self.meshes.remove(&h);
         }
         // Remove erased handles from all groups; delete groups that become empty.
         let group_dict_handle = self.document.header.acad_group_dict_handle;
