@@ -12,7 +12,7 @@
 use std::f64::consts::TAU;
 
 use acadrust::entities::LwVertex;
-use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
@@ -255,6 +255,42 @@ fn offset_lwpolyline(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Option<EntityT
     Some(EntityType::LwPolyline(new_p))
 }
 
+// ── Ellipse offset ─────────────────────────────────────────────────────────
+//
+// A true offset of an ellipse is a Lamé curve, not an ellipse. As an
+// acceptable CAD approximation we scale both semi-axes uniformly and keep
+// the same orientation, center and parameter range.  The sign of the offset
+// is determined by whether side_pt is inside or outside the ellipse.
+
+fn offset_ellipse(e: &EllipseEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
+    let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
+    if a < 1e-9 { return None; }
+    let b = a * e.minor_axis_ratio;
+    let nx = e.major_axis.x / a;
+    let ny = e.major_axis.y / a;
+    // Project side_pt onto ellipse local frame and test inside/outside.
+    let rx = side_pt.x as f64 - e.center.x;
+    let ry = side_pt.y as f64 - e.center.y;
+    let xl =  rx * nx + ry * ny;
+    let yl = -rx * ny + ry * nx;
+    let inside = (xl / a).powi(2) + (yl / b).powi(2) < 1.0;
+    let sign = if inside { -1.0 } else { 1.0 };
+
+    let new_a = a + sign * dist;
+    let new_b = b + sign * dist;
+    if new_a <= 1e-9 || new_b <= 1e-9 { return None; }
+
+    let mut new_e = e.clone();
+    new_e.common.handle = Handle::NULL;
+    // Scale the major_axis vector proportionally.
+    let scale = new_a / a;
+    new_e.major_axis.x *= scale;
+    new_e.major_axis.y *= scale;
+    new_e.major_axis.z *= scale;
+    new_e.minor_axis_ratio = new_b / new_a;
+    Some(EntityType::Ellipse(new_e))
+}
+
 // ── Dispatch ───────────────────────────────────────────────────────────────
 
 fn compute_offset(entity: &EntityType, dist: f64, side_pt: Vec3) -> Option<EntityType> {
@@ -263,6 +299,7 @@ fn compute_offset(entity: &EntityType, dist: f64, side_pt: Vec3) -> Option<Entit
         EntityType::Circle(c) => offset_circle(c, dist, side_pt),
         EntityType::Arc(a) => offset_arc(a, dist, side_pt),
         EntityType::LwPolyline(p) => offset_lwpolyline(p, dist, side_pt),
+        EntityType::Ellipse(e) => offset_ellipse(e, dist, side_pt),
         _ => None,
     }
 }
@@ -312,6 +349,26 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
                 .collect()
         }
         EntityType::LwPolyline(p) => lwpolyline_pts(p),
+        EntityType::Ellipse(e) => {
+            let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
+            if a < 1e-9 { return vec![]; }
+            let b = a * e.minor_axis_ratio;
+            let nx = e.major_axis.x / a;
+            let ny = e.major_axis.y / a;
+            let t0 = e.start_parameter;
+            let mut t1 = e.end_parameter;
+            if t1 <= t0 { t1 += TAU; }
+            let span = t1 - t0;
+            let steps = ((span.abs() * 20.0).ceil() as usize).max(4);
+            (0..=steps).map(|i| {
+                let t = t0 + span * (i as f64 / steps as f64);
+                let lx = a * t.cos();
+                let ly = b * t.sin();
+                [(e.center.x + lx * nx - ly * ny) as f32,
+                 (e.center.y + lx * ny + ly * nx) as f32,
+                 e.center.z as f32]
+            }).collect()
+        }
         _ => vec![],
     }
 }
