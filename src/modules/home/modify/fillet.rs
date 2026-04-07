@@ -9,10 +9,12 @@
 //   Pick two lines (line-only; arcs are not chamferable).
 //   Finds intersection, backs off dist1 along line 1 and dist2 along line 2.
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt};
+use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline, LwVertex};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
+
+const TAU: f64 = std::f64::consts::TAU;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::home::defaults;
@@ -300,6 +302,7 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
             a.end_angle,
             a.center.z,
         ),
+        EntityType::LwPolyline(p) => lwpoly_pts(p),
         _ => vec![],
     }
 }
@@ -384,13 +387,147 @@ fn circle_circle_pts(c1: [f64; 2], r1: f64, c2: [f64; 2], r2: f64) -> Vec<[f64; 
     }
 }
 
+// ── LwPolyline helpers ────────────────────────────────────────────────────
+
+/// Find the index of the LwPolyline segment nearest to `click` (DXF XY).
+fn lwpoly_nearest_seg(poly: &LwPolyline, click: [f64; 2]) -> usize {
+    let n = poly.vertices.len();
+    let seg_count = if poly.is_closed { n } else { n.saturating_sub(1) };
+    let mut best_idx = 0;
+    let mut best_dist = f64::MAX;
+    for i in 0..seg_count {
+        let v0 = &poly.vertices[i];
+        let v1 = &poly.vertices[(i + 1) % n];
+        let px = v0.location.x;
+        let py = v0.location.y;
+        let dx = v1.location.x - px;
+        let dy = v1.location.y - py;
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 < 1e-24 {
+            0.0
+        } else {
+            ((click[0] - px) * dx + (click[1] - py) * dy) / len2
+        }
+        .clamp(0.0, 1.0);
+        let cx = px + t * dx - click[0];
+        let cy = py + t * dy - click[1];
+        let dist = cx * cx + cy * cy;
+        if dist < best_dist {
+            best_dist = dist;
+            best_idx = i;
+        }
+    }
+    best_idx
+}
+
+/// Extract a LwPolyline segment as a virtual `LineEnt` (ignores bulge).
+fn lwpoly_seg_as_line(poly: &LwPolyline, seg_idx: usize) -> LineEnt {
+    let n = poly.vertices.len();
+    let v0 = &poly.vertices[seg_idx];
+    let v1 = &poly.vertices[(seg_idx + 1) % n];
+    let mut l = LineEnt::new();
+    l.common = poly.common.clone();
+    l.common.handle = Handle::NULL;
+    l.start = Vector3::new(v0.location.x, v0.location.y, poly.elevation);
+    l.end   = Vector3::new(v1.location.x, v1.location.y, poly.elevation);
+    l
+}
+
+/// Compute the LwPolyline bulge for the arc from T1 to T2 whose center is `arc_center`.
+/// Positive = CCW, negative = CW.
+fn compute_bulge(t1: [f64; 2], t2: [f64; 2], arc_center: [f64; 2]) -> f64 {
+    let a1 = (t1[1] - arc_center[1]).atan2(t1[0] - arc_center[0]);
+    let a2 = (t2[1] - arc_center[1]).atan2(t2[0] - arc_center[0]);
+    // CCW angular span from T1 to T2
+    let span_ccw = ((a2 - a1) % TAU + TAU) % TAU;
+    // Determine whether the fillet arc goes CCW (center to left of T1→T2) or CW.
+    let chord = [t2[0] - t1[0], t2[1] - t1[1]];
+    let mid = [(t1[0] + t2[0]) * 0.5, (t1[1] + t2[1]) * 0.5];
+    let to_c = [arc_center[0] - mid[0], arc_center[1] - mid[1]];
+    let cross = chord[0] * to_c[1] - chord[1] * to_c[0];
+    if cross >= 0.0 {
+        (span_ccw / 4.0).tan()        // CCW arc
+    } else {
+        let span_cw = TAU - span_ccw;
+        -(span_cw / 4.0).tan()        // CW arc
+    }
+}
+
+/// Rebuild a LwPolyline, replacing the corner vertex at `corner_idx` with two
+/// new vertices T1 (start of fillet arc) and T2 (end of fillet arc).
+/// `bulge` encodes the direction and span of the arc (T1 → T2).
+fn lwpoly_replace_corner(
+    poly: &LwPolyline,
+    corner_idx: usize,
+    t1: [f64; 2],
+    t2: [f64; 2],
+    bulge: f64,
+) -> LwPolyline {
+    let mut new_poly = poly.clone();
+    new_poly.common.handle = Handle::NULL;
+    let orig = poly.vertices[corner_idx].clone();
+    let mut vt1 = orig.clone();
+    vt1.location.x = t1[0];
+    vt1.location.y = t1[1];
+    vt1.bulge = bulge;
+    let mut vt2 = orig;
+    vt2.location.x = t2[0];
+    vt2.location.y = t2[1];
+    vt2.bulge = 0.0;
+    new_poly.vertices.remove(corner_idx);
+    new_poly.vertices.insert(corner_idx, vt2);
+    new_poly.vertices.insert(corner_idx, vt1);
+    new_poly
+}
+
+/// Rebuild a LwPolyline after shortening segment `seg_idx`:
+/// `new_start` / `new_end` replace the segment's start/end vertex if `Some`.
+fn lwpoly_shorten_seg(
+    poly: &LwPolyline,
+    seg_idx: usize,
+    new_start: Option<[f64; 2]>,
+    new_end: Option<[f64; 2]>,
+) -> LwPolyline {
+    let n = poly.vertices.len();
+    let mut new_poly = poly.clone();
+    new_poly.common.handle = Handle::NULL;
+    if let Some([x, y]) = new_start {
+        new_poly.vertices[seg_idx].location.x = x;
+        new_poly.vertices[seg_idx].location.y = y;
+        new_poly.vertices[seg_idx].bulge = 0.0;
+    }
+    if let Some([x, y]) = new_end {
+        let end_idx = (seg_idx + 1) % n;
+        new_poly.vertices[end_idx].location.x = x;
+        new_poly.vertices[end_idx].location.y = y;
+    }
+    new_poly
+}
+
+/// Wire points for a LwPolyline (straight segments only, for preview).
+fn lwpoly_pts(poly: &LwPolyline) -> Vec<[f32; 3]> {
+    let elev = poly.elevation as f32;
+    let n = poly.vertices.len();
+    let seg_count = if poly.is_closed { n } else { n.saturating_sub(1) };
+    let mut pts = Vec::with_capacity(seg_count * 2);
+    for i in 0..seg_count {
+        let v0 = &poly.vertices[i];
+        let v1 = &poly.vertices[(i + 1) % n];
+        pts.push([v0.location.x as f32, v0.location.y as f32, elev]);
+        pts.push([v1.location.x as f32, v1.location.y as f32, elev]);
+    }
+    pts
+}
+
 // ── Unified fillet entity type ─────────────────────────────────────────────
 
-/// A pickable entity for FILLET: Line or Arc.
+/// A pickable entity for FILLET: Line, Arc, or an LwPolyline segment.
 #[derive(Clone)]
 enum FilletEntity {
     Line(LineEnt),
     Arc(ArcEnt),
+    /// A segment of an LwPolyline identified by its entity handle and segment index.
+    LwPoly { poly: LwPolyline, handle: Handle, seg_idx: usize },
 }
 
 impl FilletEntity {
@@ -402,10 +539,16 @@ impl FilletEntity {
         }
     }
 
+    fn from_lwpoly(poly: &LwPolyline, handle: Handle, click: [f64; 2]) -> Self {
+        let seg_idx = lwpoly_nearest_seg(poly, click);
+        Self::LwPoly { poly: poly.clone(), handle, seg_idx }
+    }
+
     fn to_entity_type(&self) -> EntityType {
         match self {
             Self::Line(l) => EntityType::Line(l.clone()),
             Self::Arc(a)  => EntityType::Arc(a.clone()),
+            Self::LwPoly { poly, .. } => EntityType::LwPolyline(poly.clone()),
         }
     }
 
@@ -413,12 +556,14 @@ impl FilletEntity {
         match self {
             Self::Line(l) => l.start.z,
             Self::Arc(a)  => a.center.z,
+            Self::LwPoly { poly, .. } => poly.elevation,
         }
     }
 }
 
-/// Compute FILLET between two entities (Line or Arc).
+/// Compute FILLET between two entities (Line, Arc, or LwPolyline segment).
 /// Returns (trimmed_e1, trimmed_e2, optional_fillet_arc).
+/// For same-poly corner fillet the two returned entities are identical (the rebuilt poly).
 fn compute_fillet_entities(
     e1: &FilletEntity,
     click1: [f64; 2],
@@ -429,9 +574,11 @@ fn compute_fillet_entities(
     let z = e1.elevation();
 
     match (e1, e2) {
+        // ── Line × Line ───────────────────────────────────────────────────
         (FilletEntity::Line(l1), FilletEntity::Line(l2)) => {
             compute_fillet(l1, click1, l2, click2, radius)
         }
+        // ── Line × Arc ────────────────────────────────────────────────────
         (FilletEntity::Line(l), FilletEntity::Arc(a)) => {
             fillet_line_arc(l, click1, a, click2, radius, z)
         }
@@ -439,10 +586,121 @@ fn compute_fillet_entities(
             fillet_line_arc(l, click2, a, click1, radius, z)
                 .map(|(new_l, new_a, arc)| (new_a, new_l, arc))
         }
+        // ── Arc × Arc ─────────────────────────────────────────────────────
         (FilletEntity::Arc(a1), FilletEntity::Arc(a2)) => {
             fillet_arc_arc(a1, click1, a2, click2, radius, z)
         }
+        // ── LwPoly × LwPoly (same entity — corner fillet) ─────────────────
+        (
+            FilletEntity::LwPoly { poly: p1, handle: h1, seg_idx: s1 },
+            FilletEntity::LwPoly { handle: h2, seg_idx: s2, .. },
+        ) if h1 == h2 => {
+            // Adjacent segments share a corner vertex — fillet that corner.
+            let (low, high) = if *s1 < *s2 { (*s1, *s2) } else { (*s2, *s1) };
+            let n = p1.vertices.len();
+            // Segments must be consecutive (high == low+1, or wrap-around on closed poly).
+            let consecutive = high == low + 1
+                || (p1.is_closed && low == 0 && high == n.saturating_sub(1));
+            if !consecutive {
+                return None;
+            }
+            let corner_idx = high % n; // vertex shared by both segments
+            let l1 = lwpoly_seg_as_line(p1, low);
+            let l2 = lwpoly_seg_as_line(p1, high % n.max(1)); // seg after corner
+            // Re-map click to whichever segment each was picked on.
+            let (c1, c2) = if *s1 == low { (click1, click2) } else { (click2, click1) };
+            match compute_fillet(&l1, c1, &l2, c2, radius)? {
+                (EntityType::Line(tl1), EntityType::Line(tl2), maybe_arc) => {
+                    let t1 = [tl1.end.x, tl1.end.y]; // trimmed end of seg before corner
+                    let t2 = [tl2.start.x, tl2.start.y]; // trimmed start of seg after corner
+                    let bulge = if let Some(EntityType::Arc(ref fa)) = maybe_arc {
+                        // center from arc entity
+                        compute_bulge(t1, t2, [fa.center.x, fa.center.y])
+                    } else {
+                        0.0 // r=0, sharp corner
+                    };
+                    let new_poly = lwpoly_replace_corner(p1, corner_idx, t1, t2, bulge);
+                    let et = EntityType::LwPolyline(new_poly);
+                    // Return same rebuilt poly for both slots; caller uses only h1.
+                    Some((et.clone(), et, None))
+                }
+                _ => None,
+            }
+        }
+        // ── LwPoly × LwPoly (different entities) ──────────────────────────
+        (
+            FilletEntity::LwPoly { poly: p1, seg_idx: s1, .. },
+            FilletEntity::LwPoly { poly: p2, seg_idx: s2, .. },
+        ) => {
+            let l1 = lwpoly_seg_as_line(p1, *s1);
+            let l2 = lwpoly_seg_as_line(p2, *s2);
+            let (tl1_e, tl2_e, maybe_arc) = compute_fillet(&l1, click1, &l2, click2, radius)?;
+            if let (EntityType::Line(tl1), EntityType::Line(tl2)) = (&tl1_e, &tl2_e) {
+                let np1 = rebuild_poly_from_trimmed_line(p1, *s1, &l1, tl1);
+                let np2 = rebuild_poly_from_trimmed_line(p2, *s2, &l2, tl2);
+                Some((EntityType::LwPolyline(np1), EntityType::LwPolyline(np2), maybe_arc))
+            } else {
+                None
+            }
+        }
+        // ── LwPoly × Line ─────────────────────────────────────────────────
+        (FilletEntity::LwPoly { poly, seg_idx, .. }, FilletEntity::Line(l2)) => {
+            let l1 = lwpoly_seg_as_line(poly, *seg_idx);
+            let (tl1_e, new_l2, maybe_arc) = compute_fillet(&l1, click1, l2, click2, radius)?;
+            if let EntityType::Line(tl1) = &tl1_e {
+                let np = rebuild_poly_from_trimmed_line(poly, *seg_idx, &l1, tl1);
+                Some((EntityType::LwPolyline(np), new_l2, maybe_arc))
+            } else {
+                None
+            }
+        }
+        (FilletEntity::Line(l1), FilletEntity::LwPoly { poly, seg_idx, .. }) => {
+            let l2 = lwpoly_seg_as_line(poly, *seg_idx);
+            let (new_l1, tl2_e, maybe_arc) = compute_fillet(l1, click1, &l2, click2, radius)?;
+            if let EntityType::Line(tl2) = &tl2_e {
+                let np = rebuild_poly_from_trimmed_line(poly, *seg_idx, &l2, tl2);
+                Some((new_l1, EntityType::LwPolyline(np), maybe_arc))
+            } else {
+                None
+            }
+        }
+        // ── LwPoly × Arc ──────────────────────────────────────────────────
+        (FilletEntity::LwPoly { poly, seg_idx, .. }, FilletEntity::Arc(a)) => {
+            let l = lwpoly_seg_as_line(poly, *seg_idx);
+            let (tl_e, new_a, maybe_arc) = fillet_line_arc(&l, click1, a, click2, radius, z)?;
+            if let EntityType::Line(tl) = &tl_e {
+                let np = rebuild_poly_from_trimmed_line(poly, *seg_idx, &l, tl);
+                Some((EntityType::LwPolyline(np), new_a, maybe_arc))
+            } else {
+                None
+            }
+        }
+        (FilletEntity::Arc(a), FilletEntity::LwPoly { poly, seg_idx, .. }) => {
+            let l = lwpoly_seg_as_line(poly, *seg_idx);
+            let (tl_e, new_a, maybe_arc) = fillet_line_arc(&l, click2, a, click1, radius, z)?;
+            if let EntityType::Line(tl) = &tl_e {
+                let np = rebuild_poly_from_trimmed_line(poly, *seg_idx, &l, tl);
+                Some((new_a, EntityType::LwPolyline(np), maybe_arc))
+            } else {
+                None
+            }
+        }
     }
+}
+
+/// Rebuild an LwPolyline after a segment was trimmed.
+/// Detects which endpoint of the original line moved and updates the vertex accordingly.
+fn rebuild_poly_from_trimmed_line(
+    poly: &LwPolyline,
+    seg_idx: usize,
+    orig: &LineEnt,
+    trimmed: &LineEnt,
+) -> LwPolyline {
+    let start_moved = (trimmed.start.x - orig.start.x).hypot(trimmed.start.y - orig.start.y) > 1e-9;
+    let end_moved   = (trimmed.end.x   - orig.end.x  ).hypot(trimmed.end.y   - orig.end.y  ) > 1e-9;
+    let new_start = if start_moved { Some([trimmed.start.x, trimmed.start.y]) } else { None };
+    let new_end   = if end_moved   { Some([trimmed.end.x,   trimmed.end.y  ]) } else { None };
+    lwpoly_shorten_seg(poly, seg_idx, new_start, new_end)
 }
 
 /// Fillet a Line and an Arc.
@@ -804,7 +1062,7 @@ impl CadCommand for FilletCommand {
     fn prompt(&self) -> String {
         match &self.step {
             FilletStep::First => format!(
-                "FILLET  Select first object (Line/Arc)  [R={:.4} | type R to change]:",
+                "FILLET  Select first object (Line/Arc/LwPolyline)  [R={:.4} | type R to change]:",
                 self.radius
             ),
             FilletStep::WaitingForRadius => format!(
@@ -812,7 +1070,7 @@ impl CadCommand for FilletCommand {
                 self.radius
             ),
             FilletStep::Second { .. } => {
-                format!("FILLET  Select second object (Line/Arc)  [R={:.4}]:", self.radius)
+                format!("FILLET  Select second object (Line/Arc/LwPolyline)  [R={:.4}]:", self.radius)
             }
         }
     }
@@ -885,7 +1143,12 @@ impl CadCommand for FilletCommand {
                     .all_entities
                     .iter()
                     .find(|e| e.common().handle == handle)
-                    .and_then(FilletEntity::from_entity);
+                    .and_then(|entity| match entity {
+                        EntityType::LwPolyline(p) => {
+                            Some(FilletEntity::from_lwpoly(p, handle, click))
+                        }
+                        other => FilletEntity::from_entity(other),
+                    });
                 if let Some(e) = e1 {
                     self.step = FilletStep::Second { h1: handle, e1: e, click1: click };
                     CmdResult::NeedPoint
@@ -897,23 +1160,38 @@ impl CadCommand for FilletCommand {
                 let h1 = *h1;
                 let e1 = e1.clone();
                 let click1 = *click1;
-                if handle == h1 {
+                let same_entity = handle == h1;
+
+                // For non-LwPoly entities, reject same-entity re-picks.
+                if same_entity && !matches!(e1, FilletEntity::LwPoly { .. }) {
                     return CmdResult::NeedPoint;
                 }
+
                 let e2 = self
                     .all_entities
                     .iter()
                     .find(|e| e.common().handle == handle)
-                    .and_then(FilletEntity::from_entity);
+                    .and_then(|entity| match entity {
+                        EntityType::LwPolyline(p) => {
+                            Some(FilletEntity::from_lwpoly(p, handle, click))
+                        }
+                        other => FilletEntity::from_entity(other),
+                    });
+
                 if let Some(e2) = e2 {
                     match compute_fillet_entities(&e1, click1, &e2, click, self.radius) {
                         Some((new_e1, new_e2, maybe_arc)) => {
                             let mut additions = vec![];
                             if let Some(arc) = maybe_arc { additions.push(arc); }
-                            CmdResult::ReplaceMany(
-                                vec![(h1, vec![new_e1]), (handle, vec![new_e2])],
-                                additions,
-                            )
+                            if same_entity {
+                                // Corner fillet: both results are the same rebuilt poly.
+                                CmdResult::ReplaceMany(vec![(h1, vec![new_e1])], additions)
+                            } else {
+                                CmdResult::ReplaceMany(
+                                    vec![(h1, vec![new_e1]), (handle, vec![new_e2])],
+                                    additions,
+                                )
+                            }
                         }
                         None => CmdResult::NeedPoint,
                     }
@@ -946,14 +1224,22 @@ impl CadCommand for FilletCommand {
                     vec![]
                 }
             }
-            FilletStep::Second { e1, click1, .. } => {
+            FilletStep::Second { h1, e1, click1 } => {
+                let h1 = *h1;
                 let e1 = e1.clone();
                 let click1 = *click1;
                 let e2 = self
                     .all_entities
                     .iter()
                     .find(|e| e.common().handle == handle)
-                    .and_then(FilletEntity::from_entity);
+                    .and_then(|entity| match entity {
+                        EntityType::LwPolyline(p) => {
+                            Some(FilletEntity::from_lwpoly(p, handle, click))
+                        }
+                        other => FilletEntity::from_entity(other),
+                    });
+                // For non-LwPoly, skip same-entity hover.
+                let _ = h1;
                 if let Some(e2) = e2 {
                     if let Some((new_e1, new_e2, maybe_arc)) =
                         compute_fillet_entities(&e1, click1, &e2, click, self.radius)
