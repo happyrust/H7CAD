@@ -122,7 +122,7 @@ Underlay (PDF/DWF/DGN)
 | FILLET (F) | 🔧 | LwPolyline desteği yok |
 | CHAMFER (CHA) | ✅ | — |
 | JOIN (J) | ✅ | — |
-| EXPLODE (X) | 🔧 | Dimension eksik |
+| EXPLODE (X) | ✅ | — |
 | PEDIT (PE) | ✅ | — |
 | STRETCH (SS) | ✅ | — |
 | SPLINEDIT | ⬜ | — |
@@ -303,8 +303,7 @@ Underlay (PDF/DWF/DGN)
 
 ### Yüksek Öncelik
 1. **TRIM / EXTEND / OFFSET / BREAK / LENGTHEN → Spline desteği**
-2. **EXPLODE → Dimension desteği**
-3. **FILLET → LwPolyline desteği**
+2. **FILLET → LwPolyline desteği**
 
 ### Orta Öncelik
 5. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
