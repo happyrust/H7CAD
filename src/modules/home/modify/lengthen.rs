@@ -7,7 +7,7 @@
 //
 // The entity is modified at whichever end is closest to the pick point.
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt};
+use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -96,8 +96,9 @@ pub enum LenMode {
 /// `pick_pt` determines which end to extend/trim (closest end is modified).
 pub fn lengthen_entity(entity: &EntityType, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
     match entity {
-        EntityType::Line(l) => lengthen_line(l, pick_pt, mode),
-        EntityType::Arc(a)  => lengthen_arc(a, pick_pt, mode),
+        EntityType::Line(l)    => lengthen_line(l, pick_pt, mode),
+        EntityType::Arc(a)     => lengthen_arc(a, pick_pt, mode),
+        EntityType::Ellipse(e) => lengthen_ellipse(e, pick_pt, mode),
         _ => None,
     }
 }
@@ -177,6 +178,71 @@ fn lengthen_arc(arc: &ArcEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityTyp
     }
     let _ = delta_span;
     Some(EntityType::Arc(result))
+}
+
+fn lengthen_ellipse(ell: &EllipseEnt, pick_pt: Vec3, mode: &LenMode) -> Option<EntityType> {
+    let a = (ell.major_axis.x.powi(2) + ell.major_axis.y.powi(2)).sqrt();
+    if a < 1e-9 { return None; }
+    let b = a * ell.minor_axis_ratio;
+    let nx = ell.major_axis.x / a;
+    let ny = ell.major_axis.y / a;
+
+    let t0 = ell.start_parameter;
+    let mut t1 = ell.end_parameter;
+    if t1 <= t0 { t1 += std::f64::consts::TAU; }
+    let span = t1 - t0;
+
+    // Approximate arc length via 128-point Gaussian quadrature estimate.
+    let arc_len_approx = |span: f64| -> f64 {
+        let n = 128usize;
+        let mut len = 0.0;
+        for i in 0..n {
+            let ti = t0 + span * (i as f64 / n as f64);
+            let tip = t0 + span * ((i + 1) as f64 / n as f64);
+            let xi = a * ti.cos() * nx - b * ti.sin() * ny + ell.center.x;
+            let yi = a * ti.cos() * ny + b * ti.sin() * nx + ell.center.y;
+            let xip = a * tip.cos() * nx - b * tip.sin() * ny + ell.center.x;
+            let yip = a * tip.cos() * ny + b * tip.sin() * nx + ell.center.y;
+            len += (xip - xi).hypot(yip - yi);
+        }
+        len
+    };
+
+    let current_len = arc_len_approx(span);
+    if current_len < 1e-10 { return None; }
+
+    let new_len = apply_mode(current_len, mode)?;
+    if new_len < 1e-10 { return None; }
+
+    // Find the new span via bisection so that arc_len_approx(new_span) ≈ new_len.
+    let max_span = std::f64::consts::TAU;
+    let mut lo = 0.0f64;
+    let mut hi = max_span;
+    for _ in 0..40 {
+        let mid = (lo + hi) * 0.5;
+        if arc_len_approx(mid) < new_len { lo = mid; } else { hi = mid; }
+    }
+    let new_span = (lo + hi) * 0.5;
+
+    // Determine which end is closer to pick_pt (use DXF XY plane).
+    let p_x = pick_pt.x as f64;
+    let p_y = pick_pt.z as f64; // Y-up: world Z → DXF Y
+    let pt_start_x = ell.center.x + a * t0.cos() * nx - b * t0.sin() * ny;
+    let pt_start_y = ell.center.y + a * t0.cos() * ny + b * t0.sin() * nx;
+    let pt_end_x   = ell.center.x + a * t1.cos() * nx - b * t1.sin() * ny;
+    let pt_end_y   = ell.center.y + a * t1.cos() * ny + b * t1.sin() * nx;
+    let dist_start = (p_x - pt_start_x).hypot(p_y - pt_start_y);
+    let dist_end   = (p_x - pt_end_x).hypot(p_y - pt_end_y);
+
+    let mut result = ell.clone();
+    result.common.handle = Handle::NULL;
+
+    if dist_end <= dist_start {
+        result.end_parameter = t0 + new_span;
+    } else {
+        result.start_parameter = t1 - new_span;
+    }
+    Some(EntityType::Ellipse(result))
 }
 
 fn apply_mode(current: f64, mode: &LenMode) -> Option<f64> {
