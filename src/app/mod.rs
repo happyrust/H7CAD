@@ -422,6 +422,11 @@ pub enum Message {
     WblockSave(String),
     /// Result of the WBLOCK save path dialog.
     WblockSaveResult(String, Option<std::path::PathBuf>),
+    // ── DATAEXTRACTION ────────────────────────────────────────────────────
+    /// Save the pre-built CSV string to a file chosen by the user.
+    DataExtractionSave(String),
+    /// Path chosen (or None = cancelled).
+    DataExtractionSaveResult(String, Option<std::path::PathBuf>),
 }
 
 impl H7CAD {

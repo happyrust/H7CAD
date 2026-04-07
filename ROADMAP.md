@@ -258,7 +258,7 @@ Underlay (PDF/DWF/DGN)
 | QSELECT — özelliğe göre seç | ✅ |
 | FLATTEN (Z=0 düzleme) | ✅ |
 | MASSPROP (alan merkezi, atalet) | ✅ |
-| DATAEXTRACTION | ⬜ |
+| DATAEXTRACTION | ✅ CSV export: type/handle/layer/color/linetype/geometry |
 
 ---
 

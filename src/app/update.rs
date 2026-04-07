@@ -207,6 +207,45 @@ impl H7CAD {
 
             Message::WblockSaveResult(_, None) => Task::none(),
 
+            Message::DataExtractionSave(csv) => {
+                let csv_clone = csv.clone();
+                Task::perform(
+                    async move {
+                        let path = rfd::AsyncFileDialog::new()
+                            .set_title("Save Data Extraction")
+                            .set_file_name("extraction.csv")
+                            .add_filter("CSV", &["csv"])
+                            .add_filter("All Files", &["*"])
+                            .save_file()
+                            .await
+                            .map(|h| h.path().to_path_buf());
+                        (csv_clone, path)
+                    },
+                    |(csv, path)| Message::DataExtractionSaveResult(csv, path),
+                )
+            }
+
+            Message::DataExtractionSaveResult(csv, Some(path)) => {
+                match std::fs::write(&path, csv.as_bytes()) {
+                    Ok(()) => {
+                        let rows = csv.lines().count().saturating_sub(1);
+                        let fname = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                        self.command_line.push_output(&format!(
+                            "DATAEXTRACTION  {rows} rows → \"{fname}\""
+                        ));
+                    }
+                    Err(e) => self
+                        .command_line
+                        .push_error(&format!("DATAEXTRACTION: write failed: {e}")),
+                }
+                Task::none()
+            }
+
+            Message::DataExtractionSaveResult(_, None) => Task::none(),
+
             Message::SaveFile => {
                 let i = self.active_tab;
                 if let Some(path) = &self.tabs[i].current_path {
