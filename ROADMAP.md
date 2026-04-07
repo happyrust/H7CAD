@@ -125,7 +125,7 @@ Underlay (PDF/DWF/DGN)
 | EXPLODE (X) | ✅ | — |
 | PEDIT (PE) | ✅ | — |
 | STRETCH (SS) | ✅ | — |
-| SPLINEDIT | ⬜ | — |
+| SPLINEDIT | ✅ CLOSE/OPEN/REVERSE + grip editing | — |
 | HATCHEDIT | ✅ | — |
 | ATTEDIT | ⬜ | Attribute değerlerini düzenleme |
 | DDEDIT (çift tık metin) | ✅ | — |

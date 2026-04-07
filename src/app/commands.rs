@@ -1435,6 +1435,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
+            "SPLINEDIT"|"SPE" => {
+                use crate::modules::home::modify::splinedit::SplineditCommand;
+                let cmd_obj = SplineditCommand::new();
+                self.command_line.push_info(&cmd_obj.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            }
+
             "ALIGN"|"AL" => {
                 use crate::modules::home::modify::align::AlignCommand;
                 let cmd = AlignCommand::new();

@@ -170,6 +170,25 @@ impl H7CAD {
                 self.refresh_properties();
             }
             CmdResult::ReplaceEntity(handle, new_entities) => {
+                // Detect SPLINEDIT sentinel: a single XLine with a magic layer name.
+                if new_entities.len() == 1 {
+                    if let acadrust::EntityType::XLine(ref xl) = new_entities[0] {
+                        let op = xl.common.layer.clone();
+                        if op.starts_with("__SPLINEDIT_") {
+                            let label = self.history_label_from_active_cmd(i, "SPLINEDIT");
+                            self.push_undo_snapshot(i, label);
+                            crate::modules::home::modify::splinedit::apply_spline_op(
+                                &mut self.tabs[i].scene.document,
+                                handle,
+                                &op,
+                            );
+                            self.tabs[i].dirty = true;
+                            let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                            if let Some(p) = prompt { self.command_line.push_info(&p); }
+                            return Task::none();
+                        }
+                    }
+                }
                 let label = self.history_label_from_active_cmd(i, "TRIM");
                 self.push_undo_snapshot(i, label);
                 self.tabs[i].scene.erase_entities(&[handle]);
