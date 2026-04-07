@@ -13,7 +13,7 @@ use std::f64::consts::TAU;
 
 use acadrust::entities::LwVertex;
 use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
-use crate::modules::home::modify::spline_ops::{bspline_to_spline, spline_sample_xy, spline_to_bspline, spline_pts_wire};
+use crate::modules::home::modify::spline_ops::{spline_sample_xy, spline_pts_wire};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 

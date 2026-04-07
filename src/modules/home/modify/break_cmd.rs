@@ -190,7 +190,7 @@ fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     let cy = ell.center.y;
     let a = (ell.major_axis.x.powi(2) + ell.major_axis.y.powi(2)).sqrt();
     if a < 1e-9 { return vec![EntityType::Ellipse(ell.clone())]; }
-    let b = a * ell.minor_axis_ratio;
+    let _b = a * ell.minor_axis_ratio;
     let nx = ell.major_axis.x / a;
     let ny = ell.major_axis.y / a;
 
