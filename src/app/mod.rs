@@ -329,6 +329,8 @@ pub enum Message {
     LayoutContextMenu(String),
     /// Close the layout context menu.
     LayoutContextMenuClose,
+    /// Close the viewport right-click context menu without performing any action.
+    ViewportContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.

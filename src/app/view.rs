@@ -325,7 +325,21 @@ impl H7CAD {
             iced::widget::Space::new().width(0).height(0).into()
         };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, dimstyle_layer].into()
+        // ── Viewport right-click context menu ─────────────────────────────
+        let viewport_ctx_layer: Element<'_, Message> = {
+            let ctx_pos = tab.scene.selection.borrow().context_menu;
+            if let Some(p) = ctx_pos {
+                let has_cmd = tab.active_cmd.is_some();
+                let has_selection = !tab.scene.selected.is_empty();
+                let last_cmds: Vec<String> = self.command_line.cmd_recall
+                    .iter().rev().take(3).cloned().collect();
+                viewport_context_menu_overlay(p, has_cmd, has_selection, last_cmds)
+            } else {
+                iced::widget::Space::new().width(0).height(0).into()
+            }
+        };
+
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, dimstyle_layer, viewport_ctx_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -516,6 +530,108 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
 }
 
 // ── Layout context-menu overlay ────────────────────────────────────────────
+
+// ── Viewport right-click context menu ──────────────────────────────────────
+
+fn viewport_context_menu_overlay(
+    pos: iced::Point,
+    has_cmd: bool,
+    has_selection: bool,
+    last_cmds: Vec<String>,
+) -> Element<'static, Message> {
+    const MENU_BG: Color = Color { r: 0.17, g: 0.17, b: 0.17, a: 1.0 };
+    const MENU_BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const ITEM_HOVER: Color = Color { r: 0.25, g: 0.45, b: 0.70, a: 1.0 };
+    const TEXT_COL: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const SEP_COL: Color = Color { r: 0.30, g: 0.30, b: 0.30, a: 1.0 };
+
+    let item = |label: String, msg: Message| -> Element<'static, Message> {
+        button(text(label).size(12).color(TEXT_COL))
+            .on_press(msg)
+            .style(|_: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered | button::Status::Pressed => ITEM_HOVER,
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT_COL,
+                border: Border::default(),
+                shadow: iced::Shadow::default(),
+                snap: false,
+            })
+            .padding([4, 12])
+            .width(Fill)
+            .into()
+    };
+
+    let sep = || -> Element<'static, Message> {
+        container(iced::widget::Space::new().width(Fill).height(1))
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(SEP_COL)),
+                ..Default::default()
+            })
+            .width(Fill)
+            .height(1)
+            .padding([0, 6])
+            .into()
+    };
+
+    let mut items: Vec<Element<'static, Message>> = Vec::new();
+
+    if has_cmd {
+        items.push(item("Cancel".to_string(), Message::CommandEscape));
+        items.push(item("Enter".to_string(), Message::CommandFinalize));
+    } else {
+        if !last_cmds.is_empty() {
+            let last = last_cmds[0].clone();
+            items.push(item(
+                format!("Repeat {last}"),
+                Message::Command(last.to_uppercase()),
+            ));
+            if last_cmds.len() > 1 {
+                for cmd in last_cmds.iter().skip(1) {
+                    let c = cmd.clone();
+                    items.push(item(c.clone(), Message::Command(c.to_uppercase())));
+                }
+            }
+            items.push(sep());
+        }
+        if has_selection {
+            items.push(item("Delete".to_string(), Message::DeleteSelected));
+            items.push(item("Move".to_string(), Message::Command("MOVE".to_string())));
+            items.push(item("Copy".to_string(), Message::Command("COPY".to_string())));
+            items.push(sep());
+        }
+        items.push(item("Select All".to_string(), Message::Command("SELECTALL".to_string())));
+        items.push(item("Zoom Extents".to_string(), Message::Command("ZOOM".to_string())));
+    }
+
+    let menu_col = column(items).spacing(0).width(180);
+
+    let menu = container(menu_col)
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(MENU_BG)),
+            border: Border { color: MENU_BORDER, width: 1.0, radius: 4.0.into() },
+            ..Default::default()
+        })
+        .padding([4, 0]);
+
+    // Click-catcher to close the menu when clicking outside.
+    let catcher = mouse_area(
+        container(Space::new()).width(Fill).height(Fill),
+    )
+    .on_press(Message::ViewportContextMenuClose)
+    .on_right_press(Message::ViewportContextMenuClose);
+
+    // Position using top/left spacing.
+    let positioned = column![
+        Space::new().height(pos.y),
+        row![Space::new().width(pos.x), menu],
+    ]
+    .width(Fill)
+    .height(Fill);
+
+    stack![catcher, positioned].into()
+}
 
 /// A small right-click context menu rendered above the status bar.
 /// The `name` is the layout tab that was right-clicked.

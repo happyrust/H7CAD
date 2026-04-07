@@ -96,7 +96,7 @@ Underlay (PDF/DWF/DGN)
 | SOLID (2D dolu dörtgen) | ✅ |
 | RECTANG (REC) | ✅ |
 | POLYGON (POL) | ✅ |
-| CONSTRUCTION LINE (tam sonsuz) | ⬜ |
+| CONSTRUCTION LINE (tam sonsuz) | ✅ |
 
 ---
 
@@ -276,7 +276,7 @@ Underlay (PDF/DWF/DGN)
 | MATCHPROP (özellik kopyala) | ✅ |
 | BYLAYER hızlı atama | ✅ |
 | Çoklu seçim (window/crossing) | ✅ |
-| Sağ tık bağlam menüsü | ⬜ |
+| Sağ tık bağlam menüsü | ✅ |
 | Araç çubuğu özelleştirme | ⬜ |
 | Tema / Renk şeması seçimi | ⬜ |
 | Klavye kısayol düzenleyici | ⬜ |

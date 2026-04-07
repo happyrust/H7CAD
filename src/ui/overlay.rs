@@ -385,49 +385,6 @@ impl canvas::Program<Message> for SelectionCanvas {
             }
         }
 
-        if let Some(p) = self.selection.context_menu {
-            let w = 140.0;
-            let h = 72.0;
-            let rect = canvas::Path::rectangle(Point::new(p.x, p.y), Size::new(w, h));
-            frame.fill(
-                &rect,
-                Color {
-                    r: 0.12,
-                    g: 0.12,
-                    b: 0.12,
-                    a: 0.95,
-                },
-            );
-            frame.stroke(
-                &rect,
-                canvas::Stroke {
-                    width: 1.0,
-                    style: canvas::Style::Solid(Color {
-                        r: 0.30,
-                        g: 0.30,
-                        b: 0.30,
-                        a: 1.0,
-                    }),
-                    ..Default::default()
-                },
-            );
-            let items = ["Open", "Properties", "Hide"];
-            for (i, item) in items.iter().enumerate() {
-                frame.fill_text(canvas::Text {
-                    content: item.to_string(),
-                    position: Point::new(p.x + 10.0, p.y + 10.0 + i as f32 * 20.0),
-                    color: Color::WHITE,
-                    size: iced::Pixels(11.0),
-                    font: iced::Font::DEFAULT,
-                    align_x: iced::alignment::Horizontal::Left.into(),
-                    align_y: iced::alignment::Vertical::Top.into(),
-                    max_width: f32::INFINITY,
-                    line_height: iced::widget::text::LineHeight::default(),
-                    shaping: iced::widget::text::Shaping::default(),
-                });
-            }
-        }
-
         // ── Grip markers ──────────────────────────────────────────────────
         for grip in &self.grips {
             let sp = grip.pos;

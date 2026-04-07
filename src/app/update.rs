@@ -498,7 +498,15 @@ impl H7CAD {
             }
 
             Message::CommandEscape => {
-                // Cancel layout rename / context menu first, then fall through.
+                // Cancel layout rename / context menus first, then fall through.
+                let i_e = self.active_tab;
+                {
+                    let mut sel = self.tabs[i_e].scene.selection.borrow_mut();
+                    if sel.context_menu.is_some() {
+                        sel.context_menu = None;
+                        return Task::none();
+                    }
+                }
                 if self.layout_rename_state.take().is_some() || self.layout_context_menu.take().is_some() {
                     return Task::none();
                 }
@@ -522,7 +530,12 @@ impl H7CAD {
                 Task::none()
             }
 
-            Message::Command(cmd) => self.dispatch_command(&cmd),
+            Message::Command(cmd) => {
+                // Close viewport context menu if open.
+                let i = self.active_tab;
+                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
+                self.dispatch_command(&cmd)
+            }
 
             Message::ToggleLayers => {
                 if let Some(id) = self.layer_window.take() {
@@ -1708,6 +1721,7 @@ impl H7CAD {
 
             Message::DeleteSelected => {
                 let i = self.active_tab;
+                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
                 let handles: Vec<_> = self.tabs[i].scene.selected.iter().cloned().collect();
                 if !handles.is_empty() {
                     self.push_undo_snapshot(i, "ERASE");
@@ -2124,6 +2138,12 @@ impl H7CAD {
 
             Message::LayoutContextMenuClose => {
                 self.layout_context_menu = None;
+                Task::none()
+            }
+
+            Message::ViewportContextMenuClose => {
+                let i = self.active_tab;
+                self.tabs[i].scene.selection.borrow_mut().context_menu = None;
                 Task::none()
             }
 

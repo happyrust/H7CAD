@@ -872,7 +872,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "XLINE"|"XL" => {
+            "XLINE"|"XL"|"CONSTRUCTIONLINE" => {
                 use crate::modules::home::draw::ray::XLineCommand;
                 let new_cmd = XLineCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());

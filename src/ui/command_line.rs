@@ -17,7 +17,7 @@ pub struct CommandLine {
     pub input: String,
     pub history: Vec<HistoryEntry>,
     /// Commands the user has typed (for ↑/↓ recall).
-    cmd_recall: Vec<String>,
+    pub cmd_recall: Vec<String>,
     /// Current position in `cmd_recall` while navigating (None = not navigating).
     recall_cursor: Option<usize>,
     /// Saved draft input before the user started navigating history.
