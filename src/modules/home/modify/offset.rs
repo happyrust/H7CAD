@@ -12,7 +12,8 @@
 use std::f64::consts::TAU;
 
 use acadrust::entities::LwVertex;
-use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
+use crate::modules::home::modify::spline_ops::{bspline_to_spline, spline_sample_xy, spline_to_bspline, spline_pts_wire};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
@@ -291,6 +292,72 @@ fn offset_ellipse(e: &EllipseEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
     Some(EntityType::Ellipse(new_e))
 }
 
+// ── Spline offset ──────────────────────────────────────────────────────────
+//
+// Strategy: sample the spline into N points, offset each sample point by
+// `dist` along the local perpendicular (based on the finite-difference
+// tangent), then fit a new spline through the offset points.
+
+fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
+    let (ts_knot, pts) = spline_sample_xy(spl, 64);
+    let n = pts.len();
+    if n < 2 { return None; }
+
+    // Determine offset sign from the first non-degenerate tangent.
+    let sign: f64 = (0..n - 1).find_map(|i| {
+        let dx = pts[i + 1][0] - pts[i][0];
+        let dy = pts[i + 1][1] - pts[i][1];
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-12 { return None; }
+        let vx = side_pt.x as f64 - pts[i][0];
+        let vy = side_pt.y as f64 - pts[i][1];
+        let cross = dx * vy - dy * vx;
+        Some(if cross >= 0.0 { 1.0 } else { -1.0 })
+    })?;
+
+    // Offset each sample point along the local normal.
+    let offset_pts: Vec<acadrust::types::Vector3> = pts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            // Tangent via central / forward / backward difference.
+            let (dx, dy) = if i == 0 {
+                let d = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]];
+                (d[0], d[1])
+            } else if i == n - 1 {
+                let d = [pts[n - 1][0] - pts[n - 2][0], pts[n - 1][1] - pts[n - 2][1]];
+                (d[0], d[1])
+            } else {
+                ((pts[i + 1][0] - pts[i - 1][0]) * 0.5,
+                 (pts[i + 1][1] - pts[i - 1][1]) * 0.5)
+            };
+            let len = (dx * dx + dy * dy).sqrt().max(1e-12);
+            let nx = -dy / len;  // left perpendicular
+            let ny =  dx / len;
+            let z = spl.control_points.first().map(|v| v.z).unwrap_or(0.0);
+            acadrust::types::Vector3::new(
+                p[0] + sign * nx * dist,
+                p[1] + sign * ny * dist,
+                z,
+            )
+        })
+        .collect();
+
+    let _ = ts_knot;
+    // Build a new spline from the offset control points (treat sample pts as fit pts → ctrl pts).
+    let degree = spl.degree.max(1) as usize;
+    let new_ctrl: Vec<acadrust::types::Vector3> = offset_pts;
+    let n_ctrl = new_ctrl.len();
+    let kv = truck_modeling::KnotVec::uniform_knot(degree, n_ctrl - 1);
+    let mut new_spl = spl.clone();
+    new_spl.common.handle = Handle::NULL;
+    new_spl.control_points = new_ctrl;
+    new_spl.knots = kv.iter().copied().collect();
+    new_spl.fit_points.clear();
+    new_spl.weights.clear();
+    Some(EntityType::Spline(new_spl))
+}
+
 // ── Dispatch ───────────────────────────────────────────────────────────────
 
 fn compute_offset(entity: &EntityType, dist: f64, side_pt: Vec3) -> Option<EntityType> {
@@ -300,6 +367,7 @@ fn compute_offset(entity: &EntityType, dist: f64, side_pt: Vec3) -> Option<Entit
         EntityType::Arc(a) => offset_arc(a, dist, side_pt),
         EntityType::LwPolyline(p) => offset_lwpolyline(p, dist, side_pt),
         EntityType::Ellipse(e) => offset_ellipse(e, dist, side_pt),
+        EntityType::Spline(s) => offset_spline(s, dist, side_pt),
         _ => None,
     }
 }
@@ -369,6 +437,7 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
                  e.center.z as f32]
             }).collect()
         }
+        EntityType::Spline(s) => spline_pts_wire(s),
         _ => vec![],
     }
 }

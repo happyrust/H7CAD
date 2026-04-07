@@ -10,13 +10,17 @@
 
 use std::f64::consts::TAU;
 
-use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, Ray as RayEnt, XLine as XLineEnt};
+use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, Ray as RayEnt, Spline as SplineEnt, XLine as XLineEnt};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
+use truck_modeling::base::{BoundedCurve, Cut, ParametricCurve};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
+use crate::modules::home::modify::spline_ops::{
+    bspline_to_spline, spline_nearest_t, spline_sample_xy, spline_to_bspline, spline_pts_wire, t_to_rel,
+};
 use crate::scene::wire_model::WireModel;
 
 // ── Dropdown constants ─────────────────────────────────────────────────────
@@ -233,6 +237,11 @@ enum Geo {
         t0: f64, // start parameter
         t1: f64, // end parameter (may be > 2π if wrapped)
     },
+    /// Spline represented as sampled polyline segments (DXF XY).
+    Spline {
+        handle: Handle,
+        segs: Vec<([f64; 2], [f64; 2])>,
+    },
 }
 
 fn build_geos(entities: &[EntityType]) -> Vec<Geo> {
@@ -285,6 +294,14 @@ fn build_geos(entities: &[EntityType]) -> Vec<Geo> {
                     let mut t1 = e.end_parameter;
                     if t1 <= t0 { t1 += TAU; }
                     Some(Geo::Ellipse { handle: h, cx: e.center.x, cy: e.center.y, a, b, nx, ny, t0, t1 })
+                }
+                EntityType::Spline(s) => {
+                    let (_, pts) = spline_sample_xy(s, 64);
+                    if pts.len() < 2 { return None; }
+                    let segs = pts.windows(2)
+                        .map(|w| ([w[0][0], w[0][1]], [w[1][0], w[1][1]]))
+                        .collect();
+                    Some(Geo::Spline { handle: h, segs })
                 }
                 _ => None,
             }
@@ -370,6 +387,18 @@ fn line_seg_ts(ax: f64, ay: f64, bx: f64, by: f64, target: Handle, geos: &[Geo])
                     }
                 }
             }
+            Geo::Spline { handle, segs } => {
+                if *handle == target { continue; }
+                for (p1, p2) in segs {
+                    let ex = p2[0] - p1[0];
+                    let ey = p2[1] - p1[1];
+                    if let Some((t, u)) = ll(ax, ay, dx, dy, p1[0], p1[1], ex, ey) {
+                        if (-1e-9..=1.0 + 1e-9).contains(&u) && (-1e-9..=1.0 + 1e-9).contains(&t) {
+                            ts.push(t.clamp(0.0, 1.0));
+                        }
+                    }
+                }
+            }
         }
     }
     ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -449,6 +478,22 @@ fn arc_seg_ts(
                 if *handle == target { continue; }
                 // Sample the arc and find where it crosses the ellipse boundary.
                 ellipse_boundary_angles_for_arc(cx, cy, r, a0, a1, *ecx, *ecy, *ea, *eb, *nx, *ny, *et0, *et1)
+            }
+            Geo::Spline { handle, segs } => {
+                if *handle == target { continue; }
+                // Intersect arc circle with each spline segment.
+                let mut hit_angles = vec![];
+                for (p1, p2) in segs {
+                    let ldx = p2[0] - p1[0];
+                    let ldy = p2[1] - p1[1];
+                    for u in lc(p1[0], p1[1], ldx, ldy, cx, cy, r) {
+                        if !(-1e-9..=1.0 + 1e-9).contains(&u) { continue; }
+                        let ix = p1[0] + u * ldx;
+                        let iy = p1[1] + u * ldy;
+                        hit_angles.push((iy - cy).atan2(ix - cx));
+                    }
+                }
+                hit_angles
             }
         };
         for a in angles {
@@ -657,6 +702,20 @@ fn ellipse_seg_ts(
                     }
                 }
             }
+            Geo::Spline { handle, segs } => {
+                if *handle == target { continue; }
+                // Ellipse × Spline: sign-change detection on each spline segment
+                for (p1, p2) in segs {
+                    let ldx = p2[0] - p1[0];
+                    let ldy = p2[1] - p1[1];
+                    for (s, t_ell) in le(p1[0], p1[1], ldx, ldy, cx, cy, a, b, nx, ny) {
+                        if !(-1e-9..=1.0 + 1e-9).contains(&s) { continue; }
+                        if in_arc(t_ell, t0, t1) {
+                            ts.push(arc_t(t_ell, t0, t0 + span));
+                        }
+                    }
+                }
+            }
         }
     }
     ts.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -732,6 +791,112 @@ fn ellipse_pts(cx: f64, cy: f64, a: f64, b: f64, nx: f64, ny: f64, t0: f64, t1: 
          z as f32,
          (cy + lx * ny + ly * nx) as f32]
     }).collect()
+}
+
+// ── Spline trim / extend ──────────────────────────────────────────────────
+
+/// Find normalised t-params ∈ [0,1] where a Spline intersects boundary geos.
+/// Uses sampled polyline segments for intersection detection.
+fn spline_seg_ts(spl: &SplineEnt, target: Handle, geos: &[Geo]) -> Vec<f64> {
+    let bs = match spline_to_bspline(spl) { Some(b) => b, None => return vec![] };
+    let (t0, t1) = bs.range_tuple();
+    let range = t1 - t0;
+    if range < 1e-12 { return vec![]; }
+
+    let (ts_spl, pts) = spline_sample_xy(spl, 64);
+    let mut out = vec![];
+    for i in 0..pts.len().saturating_sub(1) {
+        let ax = pts[i][0];
+        let ay = pts[i][1];
+        let bx = pts[i + 1][0];
+        let by = pts[i + 1][1];
+        let seg_ts = line_seg_ts(ax, ay, bx, by, target, geos);
+        for u in seg_ts {
+            // u is a t-param on this polyline segment; map to spline knot range, then normalise.
+            let t_spline = ts_spl[i] + u * (ts_spl[i + 1] - ts_spl[i]);
+            out.push(t_to_rel(t_spline, t0, t1));
+        }
+    }
+    out.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    out.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+    out
+}
+
+/// Trim a Spline entity. Returns surviving spline pieces (one or two).
+fn trim_spline(spl: &SplineEnt, ts: &[f64], t_click: f64) -> Vec<EntityType> {
+    let bs = match spline_to_bspline(spl) { Some(b) => b, None => return vec![] };
+    let (t0, t1) = bs.range_tuple();
+
+    trim_intervals(ts, t_click)
+        .into_iter()
+        .filter_map(|(ta, tb)| {
+            let t_lo = t0 + ta * (t1 - t0);
+            let t_hi = t0 + tb * (t1 - t0);
+            if t_hi - t_lo < 1e-9 { return None; }
+            let mut piece = bs.clone();
+            let right = piece.cut(t_lo);   // piece = [t0..t_lo] (discarded), right = [t_lo..t1]
+            let mut right = right;
+            let _tail = right.cut(t_hi);   // right = [t_lo..t_hi], _tail discarded
+            Some(EntityType::Spline(bspline_to_spline(&right, spl)))
+        })
+        .collect()
+}
+
+/// Extend a Spline toward the nearest boundary (nearest endpoint to pick).
+fn extend_spline(spl: &SplineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityType> {
+    // Sample spline and treat it like a polyline; look for intersections beyond
+    // the current start (t<0 virtual) or end (t>1 virtual).
+    // For splines we simply find whether the start (t=0) or end (t=1) is closer
+    // to the click, then walk along that tangent direction to the nearest boundary.
+    let bs = spline_to_bspline(spl)?;
+    let (t0, t1) = bs.range_tuple();
+    let extend_end = t_click >= 0.5;
+
+    // Tangent at the endpoint (numerical, Δ = 1e-4 of range)
+    let delta = (t1 - t0) * 1e-4;
+    let (ep_t, tang_dir) = if extend_end {
+        let p0 = bs.subs(t1 - delta);
+        let p1 = bs.subs(t1);
+        (t1, [p1.x - p0.x, p1.y - p0.y])
+    } else {
+        let p0 = bs.subs(t0);
+        let p1 = bs.subs(t0 + delta);
+        (t0, [p0.x - p1.x, p0.y - p1.y]) // reverse for "before start"
+    };
+    let ep = bs.subs(ep_t);
+    let (dx, dy) = (tang_dir[0], tang_dir[1]);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-12 { return None; }
+    let (dx, dy) = (dx / len, dy / len);
+
+    // Shoot a ray from the endpoint along the tangent and find nearest boundary.
+    let ray_end_x = ep.x + dx * TRIM_EXTENT;
+    let ray_end_y = ep.y + dy * TRIM_EXTENT;
+    let seg_ts = line_seg_ts(ep.x, ep.y, ray_end_x, ray_end_y, spl.common.handle, geos);
+
+    let best_t = seg_ts.into_iter()
+        .filter(|&t| t > 1e-6)
+        .reduce(f64::min)?;
+
+    let hit_x = ep.x + best_t * (ray_end_x - ep.x) * TRIM_EXTENT;
+    let hit_y = ep.y + best_t * (ray_end_y - ep.y) * TRIM_EXTENT;
+
+    // Add a new control point at the hit location by appending/prepending.
+    let z = spl.control_points.first().map(|v| v.z).unwrap_or(0.0);
+    let mut new_spl = spl.clone();
+    new_spl.common.handle = Handle::NULL;
+    new_spl.fit_points.clear();
+    if extend_end {
+        new_spl.control_points.push(acadrust::types::Vector3::new(hit_x, hit_y, z));
+    } else {
+        new_spl.control_points.insert(0, acadrust::types::Vector3::new(hit_x, hit_y, z));
+    }
+    // Rebuild knots (uniform) for the extended control polygon.
+    let degree = new_spl.degree as usize;
+    let n = new_spl.control_points.len();
+    let kv = truck_modeling::KnotVec::uniform_knot(degree, n - 1);
+    new_spl.knots = kv.iter().copied().collect();
+    Some(EntityType::Spline(new_spl))
 }
 
 // ── Trim helpers ──────────────────────────────────────────────────────────
@@ -909,6 +1074,18 @@ fn extend_line(orig: &LineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityType>
                     if !in_arc(t_ell, *et0, *et1) { continue; }
                     if extend_end && t > 1.0 + 1e-6 && t < best_t { best_t = t; }
                     if !extend_end && t < -1e-6 && t > best_t { best_t = t; }
+                }
+            }
+            Geo::Spline { handle, segs } => {
+                if *handle == target { continue; }
+                for (p1, p2) in segs {
+                    let ex = p2[0] - p1[0];
+                    let ey = p2[1] - p1[1];
+                    if let Some((t, u)) = ll(ax, ay, dx, dy, p1[0], p1[1], ex, ey) {
+                        if !(-1e-9..=1.0 + 1e-9).contains(&u) { continue; }
+                        if extend_end && t > 1.0 + 1e-6 && t < best_t { best_t = t; }
+                        if !extend_end && t < -1e-6 && t > best_t { best_t = t; }
+                    }
                 }
             }
         }
@@ -1090,6 +1267,7 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
             if t1 <= t0 { t1 += TAU; }
             ellipse_pts(e.center.x, e.center.y, a, b, nx, ny, t0, t1, e.center.z)
         }
+        EntityType::Spline(s) => spline_pts_wire(s),
         // For preview, show a 20-unit section of semi-infinite results
         EntityType::Ray(r) => {
             let bx = r.base_point.x;
@@ -1227,6 +1405,18 @@ impl CadCommand for TrimCommand {
                 let t_click = arc_t(t_ell, t0, t1);
                 Some(trim_ellipse(e, &ts, t_click))
             }
+            Some(EntityType::Spline(s)) => {
+                let ts = spline_seg_ts(s, handle, &self.geos);
+                if ts.is_empty() { return CmdResult::NeedPoint; }
+                let t_click = spline_nearest_t(s, pt.x as f64, pt.y as f64)
+                    .and_then(|t_actual| {
+                        let bs = spline_to_bspline(s)?;
+                        let (t0, t1) = bs.range_tuple();
+                        Some(t_to_rel(t_actual, t0, t1))
+                    })
+                    .unwrap_or(0.5);
+                Some(trim_spline(s, &ts, t_click))
+            }
             _ => None,
         };
 
@@ -1264,6 +1454,7 @@ impl CadCommand for TrimCommand {
                 EntityType::Ray(r) => r.common.handle = h,
                 EntityType::XLine(x) => x.common.handle = h,
                 EntityType::Ellipse(e) => e.common.handle = h,
+                EntityType::Spline(s) => s.common.handle = h,
                 _ => {}
             }
         }
@@ -1416,6 +1607,26 @@ impl CadCommand for TrimCommand {
                 }
                 out
             }
+            Some(EntityType::Spline(s)) => {
+                let ts = spline_seg_ts(s, handle, &self.geos);
+                if ts.is_empty() { return vec![]; }
+                let t_click = spline_nearest_t(s, pt.x as f64, pt.y as f64)
+                    .and_then(|t_actual| {
+                        let bs = spline_to_bspline(s)?;
+                        let (t0, t1) = bs.range_tuple();
+                        Some(t_to_rel(t_actual, t0, t1))
+                    })
+                    .unwrap_or(0.5);
+                let orig_pts = spline_pts_wire(s);
+                let removed = WireModel::solid("trim_rm".into(), orig_pts, DIM_RED, false);
+                let survivors = trim_spline(s, &ts, t_click);
+                let mut out = vec![removed];
+                for (i, ent) in survivors.iter().enumerate() {
+                    let pts = entity_pts(ent);
+                    out.push(WireModel::solid(format!("trim_keep_{i}"), pts, WireModel::CYAN, false));
+                }
+                out
+            }
             _ => vec![],
         }
     }
@@ -1513,6 +1724,16 @@ impl CadCommand for ExtendCommand {
                 let _ = span;
                 extend_ellipse(e, t_click, &self.geos)
             }
+            Some(EntityType::Spline(s)) => {
+                let t_click = spline_nearest_t(s, pt.x as f64, pt.y as f64)
+                    .and_then(|t_actual| {
+                        let bs = spline_to_bspline(s)?;
+                        let (t0, t1) = bs.range_tuple();
+                        Some(t_to_rel(t_actual, t0, t1))
+                    })
+                    .unwrap_or(0.5);
+                extend_spline(s, t_click, &self.geos)
+            }
             _ => None,
         };
 
@@ -1535,6 +1756,7 @@ impl CadCommand for ExtendCommand {
                 match &mut new_entity {
                     EntityType::Line(l) => l.common.handle = new_handle,
                     EntityType::Ellipse(e) => e.common.handle = new_handle,
+                    EntityType::Spline(s) => s.common.handle = new_handle,
                     _ => {}
                 }
                 if let Some(pos) = self
@@ -1586,6 +1808,18 @@ impl CadCommand for ExtendCommand {
                     if let Some(ext) = extend_ellipse(e, t_click, &self.geos) {
                         return vec![WireModel::solid("extend_prev".into(), entity_pts(&ext), WireModel::CYAN, false)];
                     }
+                }
+            }
+            Some(EntityType::Spline(s)) => {
+                let t_click = spline_nearest_t(s, pt.x as f64, pt.y as f64)
+                    .and_then(|t_actual| {
+                        let bs = spline_to_bspline(s)?;
+                        let (t0, t1) = bs.range_tuple();
+                        Some(t_to_rel(t_actual, t0, t1))
+                    })
+                    .unwrap_or(0.5);
+                if let Some(ext) = extend_spline(s, t_click, &self.geos) {
+                    return vec![WireModel::solid("extend_prev".into(), entity_pts(&ext), WireModel::CYAN, false)];
                 }
             }
             _ => {}

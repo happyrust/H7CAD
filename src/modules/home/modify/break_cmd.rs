@@ -7,7 +7,9 @@
 //
 //   BREAK @ (at-sign as second point) → Break at a single point (splits without gap).
 
-use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
+use truck_modeling::base::{BoundedCurve, Cut};
+use crate::modules::home::modify::spline_ops::{bspline_to_spline, spline_nearest_t, spline_to_bspline};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -39,6 +41,7 @@ pub fn break_entity(entity: &EntityType, p1: Vec3, p2: Vec3) -> Option<Vec<Entit
         EntityType::Circle(c)  => Some(break_circle(c, p1, p2)),
         EntityType::LwPolyline(p) => Some(break_lwpolyline(p, p1, p2)),
         EntityType::Ellipse(e)    => Some(break_ellipse(e, p1, p2)),
+        EntityType::Spline(s)     => Some(break_spline(s, p1, p2)),
         _ => None,
     }
 }
@@ -269,6 +272,52 @@ fn world_to_dxf(v: Vec3) -> Vec3 {
 
 fn vec3_to_v3(v: Vec3) -> Vector3 {
     Vector3::new(v.x as f64, v.y as f64, v.z as f64)
+}
+
+fn break_spline(spl: &SplineEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
+    // Find the two nearest parameters to p1 and p2 (DXF XY: world x, z).
+    let t1 = match spline_nearest_t(spl, p1.x as f64, p1.z as f64) {
+        Some(t) => t,
+        None => return vec![EntityType::Spline(spl.clone())],
+    };
+    let t2 = match spline_nearest_t(spl, p2.x as f64, p2.z as f64) {
+        Some(t) => t,
+        None => return vec![EntityType::Spline(spl.clone())],
+    };
+
+    let bs = match spline_to_bspline(spl) {
+        Some(b) => b,
+        None => return vec![EntityType::Spline(spl.clone())],
+    };
+    let (t0, t_end) = bs.range_tuple();
+
+    let (ta, tb) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
+
+    // Single-point break (ta ≈ tb): split into two segments at that point.
+    if (tb - ta).abs() < 1e-9 {
+        let mut piece = bs.clone();
+        let right = piece.cut(ta);
+        return vec![
+            EntityType::Spline(bspline_to_spline(&piece, spl)),
+            EntityType::Spline(bspline_to_spline(&right, spl)),
+        ];
+    }
+
+    // Two-point break: keep [t0..ta] and [tb..t_end], discard middle.
+    let mut result = vec![];
+    // Left piece [t0, ta]
+    if ta - t0 > 1e-9 {
+        let mut left = bs.clone();
+        let _right = left.cut(ta);   // left = [t0, ta]
+        result.push(EntityType::Spline(bspline_to_spline(&left, spl)));
+    }
+    // Right piece [tb, t_end]
+    if t_end - tb > 1e-9 {
+        let mut full = bs.clone();
+        let right = full.cut(tb);    // right = [tb, t_end]
+        result.push(EntityType::Spline(bspline_to_spline(&right, spl)));
+    }
+    result
 }
 
 // ── CadCommand (simplified — break logic via CmdResult::BreakEntity) ───────

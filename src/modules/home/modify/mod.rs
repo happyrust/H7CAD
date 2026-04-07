@@ -15,4 +15,5 @@ pub mod rotate;
 pub mod scale;
 pub mod stretch;
 pub mod translate;
+pub mod spline_ops;
 pub mod trim;

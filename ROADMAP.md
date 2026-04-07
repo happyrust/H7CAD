@@ -114,11 +114,11 @@ Underlay (PDF/DWF/DGN)
 | ARRAY Rectangular | ✅ | — |
 | ARRAY Polar | ✅ | — |
 | ARRAY Path | ✅ | — |
-| BREAK (BR) | 🔧 | Spline |
-| TRIM (TR) | 🔧 | Spline |
-| EXTEND (EX) | 🔧 | Spline, LwPolyline |
-| OFFSET (O) | 🔧 | Spline |
-| LENGTHEN (LEN) | 🔧 | Spline, LwPolyline |
+| BREAK (BR) | ✅ | — |
+| TRIM (TR) | ✅ | — |
+| EXTEND (EX) | 🔧 | LwPolyline |
+| OFFSET (O) | ✅ | — |
+| LENGTHEN (LEN) | 🔧 | LwPolyline |
 | FILLET (F) | ✅ | — |
 | CHAMFER (CHA) | ✅ | — |
 | JOIN (J) | ✅ | — |
@@ -302,7 +302,7 @@ Underlay (PDF/DWF/DGN)
 ## Öncelik Sırası (Bir Sonraki Adımlar)
 
 ### Yüksek Öncelik
-1. **TRIM / EXTEND / OFFSET / BREAK / LENGTHEN → Spline desteği**
+1. **EXTEND / LENGTHEN → LwPolyline desteği**
 
 ### Orta Öncelik
 5. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
