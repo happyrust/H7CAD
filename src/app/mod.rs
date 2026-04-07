@@ -43,8 +43,10 @@ pub(super) struct H7CAD {
     pre_cmd_tangent: Option<bool>,
     /// Orthogonal drawing constraint (F8): constrains picks to 0°/90°/180°/270°.
     ortho_mode: bool,
-    /// Polar tracking (F10): constrains picks to 45° angle increments.
+    /// Polar tracking (F10): constrains picks to configurable angle increments.
     polar_mode: bool,
+    /// Polar tracking angle increment in degrees (15 / 30 / 45 / 90).
+    polar_increment_deg: f32,
     /// Show grid lines in the viewport (F7).
     show_grid: bool,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
@@ -224,8 +226,10 @@ pub enum Message {
     ToggleGrid,
     /// Toggle orthogonal drawing constraint — F8 / ORTHO status-bar button.
     ToggleOrtho,
-    /// Toggle polar-angle constraint (45° increments) — F10 / POLAR status-bar button.
+    /// Toggle polar-angle constraint — F10 / POLAR status-bar button.
     TogglePolar,
+    /// Set polar tracking angle increment (right-click POLAR button).
+    SetPolarAngle(f32),
     /// Toggle an individual snap mode (from popup row click).
     ToggleSnap(crate::snap::SnapType),
     /// Open / close the OSNAP popup (▾ arrow click).
@@ -429,6 +433,7 @@ impl H7CAD {
             pre_cmd_tangent: None,
             ortho_mode: false,
             polar_mode: false,
+            polar_increment_deg: 45.0,
             show_grid: false,
             show_ucs_icon: true,
             last_point: None,

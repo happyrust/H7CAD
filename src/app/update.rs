@@ -814,7 +814,7 @@ impl H7CAD {
                         if self.ortho_mode {
                             snapped = ortho_constrain(snapped, base);
                         } else if self.polar_mode {
-                            snapped = polar_constrain(snapped, base, 45.0);
+                            snapped = polar_constrain(snapped, base, self.polar_increment_deg);
                         }
                     }
 
@@ -846,6 +846,9 @@ impl H7CAD {
                             .pick_on_target_plane(p, bounds)
                     };
                     let view_proj = self.tabs[i].scene.camera.borrow().view_proj(bounds);
+                    // Sync grid-snap spacing to the adaptive spacing of the visible grid.
+                    self.snapper.grid_spacing =
+                        crate::ui::overlay::compute_grid_step(view_proj, bounds);
                     // In MSPACE, map paper-space cursor to model space so that
                     // command previews and snapping work in the correct coordinate space.
                     let cursor_world = self.tabs[i].scene.paper_to_model(cursor_paper);
@@ -879,14 +882,14 @@ impl H7CAD {
                             if self.ortho_mode {
                                 pt = ortho_constrain(pt, base);
                             } else if self.polar_mode {
-                                pt = polar_constrain(pt, base, 45.0);
+                                pt = polar_constrain(pt, base, self.polar_increment_deg);
                             }
                         }
                         pt
                     };
                     self.tabs[i].last_cursor_world = effective;
 
-                    let previews = if needs_entity {
+                    let mut previews = if needs_entity {
                         let hover_handle =
                             scene::hit_test::click_hit(p, &all_wires, view_proj, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
@@ -899,6 +902,37 @@ impl H7CAD {
                             .map(|c| c.on_preview_wires(effective))
                             .unwrap_or_default()
                     };
+                    // Polar tracking guide line: dotted line from last_point along
+                    // the snapped angle direction, extending across the drawing.
+                    if self.polar_mode && !needs_entity {
+                        if let Some(base) = self.last_point {
+                            let dx = effective.x - base.x;
+                            let dy = effective.y - base.y;
+                            if (dx * dx + dy * dy).sqrt() > 1e-4 {
+                                let far = 1e5_f32;
+                                let dir = glam::Vec3::new(dx, dy, 0.0).normalize();
+                                let far_pos = base + dir * far;
+                                let far_neg = base - dir * far;
+                                let guide = crate::scene::WireModel {
+                                    name: "__polar_guide__".into(),
+                                    points: vec![
+                                        [far_neg.x, far_neg.y, far_neg.z],
+                                        [far_pos.x, far_pos.y, far_pos.z],
+                                    ],
+                                    color: [0.2, 0.7, 0.9, 0.6],
+                                    selected: false,
+                                    aci: 0,
+                                    pattern_length: 0.8,
+                                    pattern: [0.5, -0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                                    line_weight_px: 1.0,
+                                    snap_pts: vec![],
+                                    tangent_geoms: vec![],
+                                    key_vertices: vec![],
+                                };
+                                previews.push(guide);
+                            }
+                        }
+                    }
                     self.tabs[i].scene.set_preview_wires(previews);
                 } else {
                     self.tabs[i].snap_result = None;
@@ -1046,7 +1080,7 @@ impl H7CAD {
                             if self.ortho_mode {
                                 pt = ortho_constrain(pt, base);
                             } else if self.polar_mode {
-                                pt = polar_constrain(pt, base, 45.0);
+                                pt = polar_constrain(pt, base, self.polar_increment_deg);
                             }
                         }
                         pt
@@ -1479,6 +1513,12 @@ impl H7CAD {
             Message::TogglePolar => {
                 self.polar_mode ^= true;
                 if self.polar_mode { self.ortho_mode = false; }
+                Task::none()
+            }
+            Message::SetPolarAngle(deg) => {
+                self.polar_increment_deg = deg;
+                self.polar_mode = true;
+                self.ortho_mode = false;
                 Task::none()
             }
             Message::ToggleSnap(t) => { self.snapper.toggle(t); Task::none() }

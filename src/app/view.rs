@@ -177,6 +177,7 @@ impl H7CAD {
                     self.snap_popup_open,
                     self.ortho_mode,
                     self.polar_mode,
+                    self.polar_increment_deg,
                     self.show_grid,
                     tab.scene.layout_names(),
                     tab.scene.current_layout.clone(),

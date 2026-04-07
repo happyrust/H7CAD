@@ -207,8 +207,8 @@ Underlay (PDF/DWF/DGN)
 |---------|-------|
 | Endpoint / Midpoint / Center / Quadrant / Intersection | ✅ |
 | Perpendicular / Tangent / Nearest | ✅ |
-| Grid snap | ⬜ |
-| Polar tracking | ⬜ |
+| Grid snap | ✅ Zoom-adaptive spacing |
+| Polar tracking | ✅ Configurable angle, guide line |
 | Object snap tracking | ⬜ |
 
 ---
@@ -239,7 +239,7 @@ Underlay (PDF/DWF/DGN)
 | MVIEW (viewport oluşturma) | ✅ |
 | Per-viewport layer visibility | ✅ |
 | Plot ayarları (PlotSettings) | ✅ |
-| Çoklu named layout sekmeleri | ⬜ |
+| Çoklu named layout sekmeleri | ✅ |
 | VPLAYER — viewport katman override | 🔧 Altyapı var |
 | Layout Manager arayüzü | ⬜ |
 
@@ -302,15 +302,11 @@ Underlay (PDF/DWF/DGN)
 ## Öncelik Sırası (Bir Sonraki Adımlar)
 
 ### Yüksek Öncelik
-1. **Çoklu Layout sekmeleri** arayüzü
+1. **XREF yönetimi**
 
 ### Orta Öncelik
-5. **Grid snap + Polar tracking**
-6. **XREF yönetimi**
+5. **MASSPROP / DATAEXTRACTION**
 
 ### Düşük Öncelik
-11. Grid snap + Polar tracking
-12. XREF yönetimi
-13. MASSPROP / DATAEXTRACTION
-14. Fiziksel yazıcıya yazdırma
-15. Boolean 3D operasyonlar
+11. Fiziksel yazıcıya yazdırma
+12. Boolean 3D operasyonlar

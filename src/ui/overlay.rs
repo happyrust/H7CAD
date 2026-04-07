@@ -146,6 +146,40 @@ pub struct GridParams {
     pub plane: GridPlane,
 }
 
+/// Compute the adaptive grid step size (world units) that the grid renderer
+/// would use for a given view-projection matrix and viewport bounds.
+///
+/// Returns the smallest power-of-5 multiple of 1.0 that places grid lines at
+/// least `MIN_GRID_PX` pixels apart.  This matches exactly what `draw_grid`
+/// renders, so callers can sync snap spacing to the visible grid.
+pub fn compute_grid_step(vp: Mat4, bounds: iced::Rectangle) -> f32 {
+    use glam::Vec3;
+    let w2s = |world: Vec3| {
+        let ndc = vp.project_point3(world);
+        glam::Vec2::new(
+            (ndc.x + 1.0) * 0.5 * bounds.width,
+            (1.0 - ndc.y) * 0.5 * bounds.height,
+        )
+    };
+    let o = w2s(Vec3::ZERO);
+    let a1 = w2s(Vec3::X);
+    let a2 = w2s(Vec3::Y);
+    let d1 = (a1 - o).length();
+    let d2 = (a2 - o).length();
+    let px_per_unit = d1.max(d2);
+    if px_per_unit < 1e-6 {
+        return 1.0;
+    }
+    let mut s = 1.0_f32;
+    while s * px_per_unit < MIN_GRID_PX {
+        s *= 5.0;
+        if s > 1e9 {
+            return 1.0;
+        }
+    }
+    s
+}
+
 /// Parameters for the screen-space UCS icon drawn in the viewport corner.
 pub struct UcsIconParams {
     /// View-projection matrix used to project world axis directions to screen.

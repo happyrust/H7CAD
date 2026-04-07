@@ -26,6 +26,7 @@ impl StatusBar {
         popup_open: bool,
         ortho_mode: bool,
         polar_mode: bool,
+        polar_increment_deg: f32,
         show_grid: bool,
         layouts: Vec<String>,
         current_layout: String,
@@ -80,10 +81,7 @@ impl StatusBar {
                 toggle_pill("ORTHO", ortho_mode, Message::ToggleOrtho),
                 "Orthogonal Mode\nF8"
             ),
-            tip(
-                toggle_pill("POLAR", polar_mode, Message::TogglePolar),
-                "Polar Tracking (45°)\nF10"
-            ),
+            polar_pill(polar_mode, polar_increment_deg),
             osnap_btn(osnap_active, snapper.snap_enabled, popup_open),
             status_pill(space_label),
             status_pill(scale_label),
@@ -189,6 +187,76 @@ fn toggle_pill(label: &'static str, active: bool, msg: Message) -> Element<'stat
         snap: false,
     })
     .padding([2, 6])
+    .into()
+}
+
+// ── Polar tracking pill ───────────────────────────────────────────────────
+//
+// Left-click toggles polar on/off.
+// Right-click cycles through common angle increments: 15 → 30 → 45 → 90 → 15 …
+
+fn polar_pill(active: bool, increment_deg: f32) -> Element<'static, Message> {
+    let label = format!("POLAR {:.0}°", increment_deg);
+    let tooltip_text = format!(
+        "Polar Tracking ({}°)\nF10 — left-click on/off\nRight-click to change angle",
+        increment_deg as u32
+    );
+
+    let bg_color = move |hovered: bool| {
+        match (active, hovered) {
+            (true, true) => SNAP_ON_HOVER,
+            (true, false) => SNAP_ON_BG,
+            (false, true) => SNAP_OFF_HOVER,
+            (false, false) => SNAP_OFF_BG,
+        }
+    };
+
+    // Cycle to the next common angle on right-click.
+    let next_angle = match increment_deg as u32 {
+        15 => 30.0_f32,
+        30 => 45.0,
+        45 => 90.0,
+        _ => 15.0,
+    };
+
+    let inner = container(
+        text(label).size(10).color(if active { OSNAP_ON_TEXT } else { OSNAP_OFF_TEXT })
+    )
+    .style(move |_: &Theme| container::Style {
+        background: Some(Background::Color(bg_color(false))),
+        border: Border {
+            color: if active { SNAP_BORDER_ON } else { BORDER_COLOR },
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        ..Default::default()
+    })
+    .padding([2, 6]);
+
+    let pill = mouse_area(inner)
+        .on_press(Message::TogglePolar)
+        .on_right_press(Message::SetPolarAngle(next_angle));
+
+    tooltip(
+        pill,
+        container(text(tooltip_text).size(11).color(Color::WHITE))
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(Color {
+                    r: 0.13,
+                    g: 0.13,
+                    b: 0.13,
+                    a: 0.95,
+                })),
+                border: Border {
+                    color: Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            })
+            .padding([4, 8]),
+        TipPos::Top,
+    )
     .into()
 }
 
