@@ -4,14 +4,19 @@
 //   EXPLODE: Breaks compound objects into their constituent simple entities.
 //
 //   Supported:
-//     LwPolyline → Lines (straight segments) + Arcs (bulge segments)
+//     LwPolyline  → Lines (straight segments) + Arcs (bulge segments)
+//     Polyline2D  → Lines + Arcs
+//     Polyline3D  → Lines
+//     Polyline    → Lines
+//     Insert      → constituent entities (via acadrust explode_from_document)
+//     MLine       → Lines (spine + offset lines per miter direction)
 //
 //   Unsupported entity types are skipped silently.
 
 use std::f64::consts::TAU;
 
 use acadrust::entities::EntityCommon;
-use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Line as LineEnt, LwPolyline, MLine};
 use acadrust::entities::{Polyline, Polyline2D};
 use acadrust::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
@@ -46,6 +51,7 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
             .into_iter()
             .map(normalize_insert_entity)
             .collect(),
+        EntityType::MLine(ml) => explode_mline(ml),
         _ => vec![],
     }
 }
@@ -275,6 +281,56 @@ fn bulge_to_arc(
 fn norm_deg(a: f64) -> f64 {
     let t = TAU.to_degrees();
     ((a % t) + t) % t
+}
+
+fn explode_mline(ml: &MLine) -> Vec<EntityType> {
+    let n = ml.vertices.len();
+    if n < 2 {
+        return vec![];
+    }
+    let closed = ml.flags.contains(acadrust::entities::MLineFlags::CLOSED);
+    let scale = ml.scale_factor;
+    let n_segs = if closed { n } else { n - 1 };
+    let mut result = Vec::new();
+
+    // Helper: build a Line from two Vector3 positions.
+    let make_line = |common: &acadrust::entities::EntityCommon,
+                     s: &acadrust::types::Vector3,
+                     e: &acadrust::types::Vector3| -> EntityType {
+        let mut c = common.clone();
+        c.handle = Handle::NULL;
+        EntityType::Line(LineEnt { common: c, start: s.clone(), end: e.clone(), ..LineEnt::new() })
+    };
+
+    // For each segment, emit the center-spine line and the two ±scale/2 offset lines.
+    for i in 0..n_segs {
+        let v0 = &ml.vertices[i];
+        let v1 = &ml.vertices[(i + 1) % n];
+
+        // Spine line
+        result.push(make_line(&ml.common, &v0.position, &v1.position));
+
+        if scale.abs() > 1e-9 {
+            let half = scale * 0.5;
+            for &sign in &[-1.0_f64, 1.0_f64] {
+                let off = half * sign;
+                // Use miter direction at each vertex to offset the endpoints.
+                let s = Vector3::new(
+                    v0.position.x + v0.miter.x * off,
+                    v0.position.y + v0.miter.y * off,
+                    v0.position.z + v0.miter.z * off,
+                );
+                let e = Vector3::new(
+                    v1.position.x + v1.miter.x * off,
+                    v1.position.y + v1.miter.y * off,
+                    v1.position.z + v1.miter.z * off,
+                );
+                result.push(make_line(&ml.common, &s, &e));
+            }
+        }
+    }
+
+    result
 }
 
 // ── Command stub (kept for future interactive selection mode) ───────────────
