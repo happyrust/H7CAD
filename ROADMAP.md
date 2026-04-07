@@ -305,15 +305,13 @@ Underlay (PDF/DWF/DGN)
 1. **Crossing-window seçici** — STRETCH ve diğer komutlar için gerekli
 2. **TRIM / EXTEND / OFFSET / BREAK / LENGTHEN → Spline desteği**
 3. **EXPLODE → Dimension desteği**
-4. **DDEDIT** — çift tıkla metin düzenleme (Text/MText)
-5. **FILLET / CHAMFER** → Arc ve LwPolyline desteği
+4. **FILLET → LwPolyline desteği**
 
 ### Orta Öncelik
-6. **Named Views** (VIEW SAVE/RESTORE/LIST/DELETE)
-7. **HATCHEDIT** — mevcut tarama düzenleme
-8. **DDEDIT** — çift tıkla metin düzenleme
-9. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
-10. **Çoklu Layout sekmeleri** arayüzü
+5. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
+6. **Çoklu Layout sekmeleri** arayüzü
+7. **Grid snap + Polar tracking**
+8. **XREF yönetimi**
 
 ### Düşük Öncelik
 11. Grid snap + Polar tracking
