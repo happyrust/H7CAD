@@ -412,6 +412,11 @@ pub enum Message {
     ImagePick,
     /// Result of the image file picker + pixel dimension decode.
     ImagePickResult(Result<(std::path::PathBuf, u32, u32), String>),
+    // ── XREF ──────────────────────────────────────────────────────────────
+    /// Open file-picker dialog for XATTACH command (async).
+    XAttachPick,
+    /// Result of the XATTACH file picker.
+    XAttachPickResult(Result<std::path::PathBuf, String>),
 }
 
 impl H7CAD {

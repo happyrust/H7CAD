@@ -227,6 +227,12 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// If this command is XATTACH, returns the file path to attach.
+    /// Default: None.
+    fn xattach_path(&self) -> Option<String> {
+        None
+    }
+
     /// Called instead of `on_point` when the command needs a tangent pick
     /// and the snap system found a tangent object.
     fn on_tangent_point(&mut self, obj: TangentObject, hit: Vec3) -> CmdResult {

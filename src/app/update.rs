@@ -46,8 +46,33 @@ impl H7CAD {
                     idx
                 };
 
-                self.tabs[i].current_path = Some(path);
+                self.tabs[i].current_path = Some(path.clone());
                 self.tabs[i].scene.document = doc;
+
+                // Auto-resolve XREFs relative to the opened file's directory.
+                if let Some(base_dir) = path.parent() {
+                    let xrefs = crate::io::xref::resolve_xrefs(
+                        &mut self.tabs[i].scene.document,
+                        base_dir,
+                    );
+                    for info in &xrefs {
+                        match info.status {
+                            crate::io::xref::XrefStatus::Loaded => {
+                                self.command_line.push_output(&format!(
+                                    "XREF  Loaded \"{}\"",
+                                    info.name
+                                ));
+                            }
+                            crate::io::xref::XrefStatus::NotFound => {
+                                self.command_line.push_error(&format!(
+                                    "XREF  Not found: \"{}\" ({})",
+                                    info.name, info.path
+                                ));
+                            }
+                        }
+                    }
+                }
+
                 self.tabs[i].scene.populate_hatches_from_document();
                 self.tabs[i].scene.populate_images_from_document();
                 self.tabs[i].scene.populate_meshes_from_document();
@@ -99,6 +124,41 @@ impl H7CAD {
             Message::ImagePickResult(Err(e)) => {
                 if e != "Cancelled" {
                     self.command_line.push_error(&format!("IMAGE: {e}"));
+                }
+                Task::none()
+            }
+
+            Message::XAttachPick => Task::perform(
+                async {
+                    let handle = rfd::AsyncFileDialog::new()
+                        .set_title("Select External Reference File")
+                        .add_filter("CAD Files", &["dwg", "dxf", "DWG", "DXF"])
+                        .add_filter("DWG Files", &["dwg", "DWG"])
+                        .add_filter("DXF Files", &["dxf", "DXF"])
+                        .pick_file()
+                        .await;
+                    match handle {
+                        Some(h) => Ok(h.path().to_path_buf()),
+                        None => Err("Cancelled".to_string()),
+                    }
+                },
+                Message::XAttachPickResult,
+            ),
+
+            Message::XAttachPickResult(Ok(path)) => {
+                use crate::command::CadCommand;
+                use crate::modules::insert::xattach::XAttachCommand;
+                let path_str = path.to_string_lossy().into_owned();
+                let cmd = XAttachCommand::with_path(path_str);
+                let i = self.active_tab;
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                Task::none()
+            }
+
+            Message::XAttachPickResult(Err(e)) => {
+                if e != "Cancelled" {
+                    self.command_line.push_error(&format!("XATTACH: {e}"));
                 }
                 Task::none()
             }

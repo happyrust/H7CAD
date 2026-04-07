@@ -417,6 +417,74 @@ impl H7CAD {
                 }
             }
 
+            "XATTACH" | "XA" => {
+                // Launch the file picker; XAttachPickResult will start the command.
+                return Task::done(Message::XAttachPick);
+            }
+
+            "XREF" | "XR" => {
+                // List all xref blocks in the current drawing.
+                let xrefs: Vec<String> = self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .iter()
+                    .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+                    .map(|br| {
+                        format!(
+                            "  {} — {}",
+                            br.name,
+                            if br.xref_path.is_empty() {
+                                "(no path)".to_string()
+                            } else {
+                                br.xref_path.clone()
+                            }
+                        )
+                    })
+                    .collect();
+                if xrefs.is_empty() {
+                    self.command_line.push_output("XREF  No external references in this drawing.");
+                } else {
+                    self.command_line.push_output("XREF  External references:");
+                    for line in xrefs {
+                        self.command_line.push_output(&line);
+                    }
+                }
+            }
+
+            "XRELOAD" => {
+                // Reload all xrefs for the current drawing.
+                if let Some(path) = &self.tabs[i].current_path.clone() {
+                    if let Some(base_dir) = path.parent() {
+                        let infos = crate::io::xref::resolve_xrefs(
+                            &mut self.tabs[i].scene.document,
+                            base_dir,
+                        );
+                        for info in &infos {
+                            match info.status {
+                                crate::io::xref::XrefStatus::Loaded => {
+                                    self.command_line.push_output(&format!(
+                                        "XREF  Reloaded \"{}\"",
+                                        info.name
+                                    ));
+                                }
+                                crate::io::xref::XrefStatus::NotFound => {
+                                    self.command_line.push_error(&format!(
+                                        "XREF  Not found: \"{}\" ({})",
+                                        info.name, info.path
+                                    ));
+                                }
+                            }
+                        }
+                        self.tabs[i].scene.populate_hatches_from_document();
+                        self.tabs[i].scene.populate_images_from_document();
+                        self.tabs[i].scene.populate_meshes_from_document();
+                    }
+                } else {
+                    self.command_line.push_error("XREF  Save the drawing first to resolve relative XREF paths.");
+                }
+            }
+
             // ── Draw commands ──────────────────────────────────────────────
             "LINE"|"L" => {
                 use crate::modules::home::draw::line::LineCommand;

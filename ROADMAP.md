@@ -18,7 +18,7 @@ Durum simgeleri: ✅ Tamamlandı · 🔧 Kısmen yapıldı · ⬜ Yapılmadı
 | 1.6 | Undo / Redo (snapshot stack) | ✅ |
 | 1.7 | PDF dışa aktarma (CTB/STB plot style) | ✅ |
 | 1.8 | Fiziksel yazıcıya yazdırma | ⬜ |
-| 1.9 | XREF (dış referans) yönetimi | ⬜ |
+| 1.9 | XREF (dış referans) yönetimi | ✅ Auto-resolve on open, XATTACH/XREF/XRELOAD commands |
 | 1.10 | WBLOCK — bloğu dış dosyaya yazma | ⬜ |
 | 1.11 | Serde entegrasyonu (JSON/alternatif I/O) | ⬜ |
 | 1.12 | Bozuk DWG kurtarma (failsafe parse) | ⬜ |

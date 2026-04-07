@@ -65,6 +65,27 @@ impl H7CAD {
                 self.refresh_properties();
             }
             CmdResult::CommitAndExit(entity) => {
+                // For XATTACH: ensure the xref block definition exists before
+                // committing the INSERT entity that references it.
+                // Extract path early to avoid borrow conflicts.
+                let xattach_path: Option<String> = {
+                    let tab = &self.tabs[i];
+                    if let Some(cmd) = tab.active_cmd.as_ref() {
+                        if cmd.name() == "XATTACH" {
+                            cmd.xattach_path()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+                if let Some(path) = xattach_path {
+                    crate::modules::insert::xattach::prepare_xref_block(
+                        &mut self.tabs[i].scene,
+                        &path,
+                    );
+                }
                 let label = self.history_label_from_active_cmd(i, "ENTITY");
                 self.push_undo_snapshot(i, label);
                 self.commit_entity(entity);
