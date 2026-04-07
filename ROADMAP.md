@@ -294,7 +294,7 @@ Underlay (PDF/DWF/DGN)
 | Solid3D tessellation (acadrust ACIS) | ✅ |
 | Boolean operasyonlar (UNION/SUBTRACT/INTERSECT) | ⬜ |
 | EXTRUDE / REVOLVE / SWEEP / LOFT | ⬜ |
-| 3D ARRAY | ⬜ |
+| 3D ARRAY | ✅ |
 | STL / STEP dışa aktarma | ⬜ |
 
 ---

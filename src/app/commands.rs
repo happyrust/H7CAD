@@ -1268,6 +1268,22 @@ impl H7CAD {
                 }
             }
 
+            "ARRAY3D"|"3DARRAY" => {
+                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
+                    .into_iter().map(|(h, _)| h).collect();
+                if handles.is_empty() {
+                    use crate::modules::home::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("ARRAY3D");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    use crate::modules::home::modify::array::Array3DCommand;
+                    let new_cmd = Array3DCommand::new(handles);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                }
+            }
+
             "CHAMFER"|"CHA" => {
                 use crate::modules::home::modify::fillet::ChamferCommand;
                 let entities: Vec<_> = self.tabs[i].scene.entity_wires().iter()
