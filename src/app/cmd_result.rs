@@ -619,6 +619,112 @@ impl H7CAD {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
+            CmdResult::StretchEntities { handles, win_min, win_max, delta } => {
+                self.push_undo_snapshot(i, "STRETCH");
+                let mut count = 0usize;
+
+                // Helper: is DXF point (x, y) inside the world-space window?
+                // World XZ = DXF XY.
+                let in_win = |x: f64, y: f64| -> bool {
+                    let wx = x as f32;
+                    let wy = y as f32;
+                    wx >= win_min.x && wx <= win_max.x
+                        && wy >= win_min.z && wy <= win_max.z
+                };
+
+                let dx = delta.x as f64;
+                let dy = delta.z as f64; // world Z = DXF Y
+                let dz = delta.y as f64;
+
+                for handle in &handles {
+                    let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) else { continue };
+                    let mut stretched = false;
+                    match entity {
+                        acadrust::EntityType::Line(l) => {
+                            let s_in = in_win(l.start.x, l.start.y);
+                            let e_in = in_win(l.end.x, l.end.y);
+                            if s_in { l.start.x += dx; l.start.y += dy; l.start.z += dz; stretched = true; }
+                            if e_in { l.end.x += dx; l.end.y += dy; l.end.z += dz; stretched = true; }
+                        }
+                        acadrust::EntityType::LwPolyline(p) => {
+                            for v in &mut p.vertices {
+                                if in_win(v.location.x, v.location.y) {
+                                    v.location.x += dx;
+                                    v.location.y += dy;
+                                    stretched = true;
+                                }
+                            }
+                        }
+                        acadrust::EntityType::Polyline2D(p) => {
+                            for v in &mut p.vertices {
+                                if in_win(v.location.x, v.location.y) {
+                                    v.location.x += dx;
+                                    v.location.y += dy;
+                                    stretched = true;
+                                }
+                            }
+                        }
+                        acadrust::EntityType::Polyline(p) => {
+                            for v in &mut p.vertices {
+                                if in_win(v.location.x, v.location.z) {
+                                    v.location.x += dx;
+                                    v.location.z += dy;
+                                    stretched = true;
+                                }
+                            }
+                        }
+                        acadrust::EntityType::Arc(a) => {
+                            if in_win(a.center.x, a.center.y) {
+                                a.center.x += dx; a.center.y += dy; a.center.z += dz;
+                                stretched = true;
+                            }
+                        }
+                        acadrust::EntityType::Circle(c) => {
+                            if in_win(c.center.x, c.center.y) {
+                                c.center.x += dx; c.center.y += dy; c.center.z += dz;
+                                stretched = true;
+                            }
+                        }
+                        acadrust::EntityType::Ellipse(e) => {
+                            if in_win(e.center.x, e.center.y) {
+                                e.center.x += dx; e.center.y += dy; e.center.z += dz;
+                                stretched = true;
+                            }
+                        }
+                        acadrust::EntityType::Insert(ins) => {
+                            if in_win(ins.insert_point.x, ins.insert_point.y) {
+                                ins.insert_point.x += dx; ins.insert_point.y += dy; ins.insert_point.z += dz;
+                                stretched = true;
+                            }
+                        }
+                        acadrust::EntityType::Text(t) => {
+                            if in_win(t.insertion_point.x, t.insertion_point.y) {
+                                t.insertion_point.x += dx; t.insertion_point.y += dy; t.insertion_point.z += dz;
+                                stretched = true;
+                            }
+                        }
+                        acadrust::EntityType::MText(t) => {
+                            if in_win(t.insertion_point.x, t.insertion_point.y) {
+                                t.insertion_point.x += dx; t.insertion_point.y += dy; t.insertion_point.z += dz;
+                                stretched = true;
+                            }
+                        }
+                        _ => {
+                            // Generic: move entire entity (treat as block-level)
+                            stretched = false; // skip generic types
+                        }
+                    }
+                    if stretched { count += 1; }
+                }
+
+                self.tabs[i].dirty = true;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.command_line.push_output(&format!("STRETCH: {count} entity(ies) stretched."));
+                self.refresh_properties();
+            }
             CmdResult::HatcheditApply { handle, name, scale, angle } => {
                 if let Some(mut model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
                     // Update model fields

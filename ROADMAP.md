@@ -124,7 +124,7 @@ Underlay (PDF/DWF/DGN)
 | JOIN (J) | ✅ | — |
 | EXPLODE (X) | 🔧 | Dimension eksik |
 | PEDIT (PE) | ✅ | — |
-| STRETCH (SS) | 🔧 | Crossing-window seçici yok (MOVE gibi çalışıyor) |
+| STRETCH (SS) | ✅ | — |
 | SPLINEDIT | ⬜ | — |
 | HATCHEDIT | ✅ | — |
 | ATTEDIT | ⬜ | Attribute değerlerini düzenleme |
@@ -275,7 +275,7 @@ Underlay (PDF/DWF/DGN)
 | Grip düzenleme (tüm entity tipleri) | ✅ |
 | MATCHPROP (özellik kopyala) | ✅ |
 | BYLAYER hızlı atama | ✅ |
-| Çoklu seçim (window/crossing) | 🔧 Window var, crossing-window eksik |
+| Çoklu seçim (window/crossing) | ✅ |
 | Sağ tık bağlam menüsü | ⬜ |
 | Araç çubuğu özelleştirme | ⬜ |
 | Tema / Renk şeması seçimi | ⬜ |
@@ -302,10 +302,9 @@ Underlay (PDF/DWF/DGN)
 ## Öncelik Sırası (Bir Sonraki Adımlar)
 
 ### Yüksek Öncelik
-1. **Crossing-window seçici** — STRETCH ve diğer komutlar için gerekli
-2. **TRIM / EXTEND / OFFSET / BREAK / LENGTHEN → Spline desteği**
-3. **EXPLODE → Dimension desteği**
-4. **FILLET → LwPolyline desteği**
+1. **TRIM / EXTEND / OFFSET / BREAK / LENGTHEN → Spline desteği**
+2. **EXPLODE → Dimension desteği**
+3. **FILLET → LwPolyline desteği**
 
 ### Orta Öncelik
 5. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)

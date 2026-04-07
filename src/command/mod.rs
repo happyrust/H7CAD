@@ -128,6 +128,16 @@ pub enum CmdResult {
     DdeditEntity { handle: Handle, new_text: String },
     /// Apply new pattern/scale/angle to an existing hatch entity.
     HatcheditApply { handle: Handle, name: String, scale: f32, angle: f32 },
+    /// Stretch entities: move only vertices/endpoints inside the crossing window.
+    StretchEntities {
+        handles: Vec<Handle>,
+        /// Min corner of the crossing window in world XZ (= DXF XY).
+        win_min: Vec3,
+        /// Max corner of the crossing window in world XZ (= DXF XY).
+        win_max: Vec3,
+        /// Translation vector to apply to vertices inside the window.
+        delta: Vec3,
+    },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────
