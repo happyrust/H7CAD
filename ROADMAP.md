@@ -194,7 +194,7 @@ Underlay (PDF/DWF/DGN)
 | Plot Window önizleme | ✅ |
 | UCS (WCS↔UCS dönüşüm pipeline) | ✅ |
 | Named Views (VIEW komutu) | ✅ |
-| Named UCS kaydetme | ⬜ |
+| Named UCS kaydetme | ✅ UCS SAVE/DELETE/LIST |
 | VPORTS (viewport bölme) | ⬜ |
 | Nesne snap izleme (Object Snap Tracking) | ⬜ |
 | Dynamic Input overlay | ✅ F12 toggle, absolute XY + relative dist/angle |

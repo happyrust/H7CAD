@@ -1077,6 +1077,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "DIMORDINATE"|"DOR" => {
+                use crate::modules::annotate::ordinate_dim::OrdinateDimCommand;
+                let new_cmd = OrdinateDimCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
             "LEADER"|"LE" => {
                 use crate::modules::annotate::leader_cmd::LeaderCommand;
                 let new_cmd = LeaderCommand::new();

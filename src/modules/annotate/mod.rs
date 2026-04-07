@@ -13,6 +13,7 @@ pub mod mtext;
 pub mod radius_dim;
 pub mod table_cmd;
 pub mod text;
+pub mod ordinate_dim;
 pub mod tolerance_cmd;
 
 use crate::modules::{CadModule, RibbonGroup, RibbonItem};
@@ -55,6 +56,7 @@ impl CadModule for AnnotateModule {
                             (linear_dim::tool().id, linear_dim::tool().label, linear_dim::tool().icon),
                             (radius_dim::tool().id, radius_dim::tool().label, radius_dim::tool().icon),
                             (angular_dim::tool().id, angular_dim::tool().label, angular_dim::tool().icon),
+                            (ordinate_dim::tool().id, ordinate_dim::tool().label, ordinate_dim::tool().icon),
                         ],
                         default: "DIMLINEAR",
                     },
