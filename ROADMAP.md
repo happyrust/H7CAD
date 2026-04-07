@@ -295,7 +295,8 @@ Underlay (PDF/DWF/DGN)
 | Boolean operasyonlar (UNION/SUBTRACT/INTERSECT) | ⬜ |
 | EXTRUDE / REVOLVE / SWEEP / LOFT | ⬜ |
 | 3D ARRAY | ✅ |
-| STL / STEP dışa aktarma | ⬜ |
+| STL dışa aktarma (STLOUT) | ✅ |
+| STEP dışa aktarma | ⬜ |
 
 ---
 

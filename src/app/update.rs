@@ -246,6 +246,48 @@ impl H7CAD {
 
             Message::DataExtractionSaveResult(_, None) => Task::none(),
 
+            Message::StlExport => {
+                let i = self.active_tab;
+                if self.tabs[i].scene.meshes.is_empty() {
+                    self.command_line.push_error("STLOUT: no 3D mesh data in this drawing.");
+                    return Task::none();
+                }
+                Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Export STL")
+                            .set_file_name("export.stl")
+                            .add_filter("STL Files", &["stl"])
+                            .add_filter("All Files", &["*"])
+                            .save_file()
+                            .await
+                            .map(|h| h.path().to_path_buf())
+                    },
+                    Message::StlExportPath,
+                )
+            }
+
+            Message::StlExportPath(Some(path)) => {
+                // Re-build STL bytes (we can't easily pass them through the message).
+                let i = self.active_tab;
+                let meshes: Vec<crate::scene::mesh_model::MeshModel> =
+                    self.tabs[i].scene.meshes.values().cloned().collect();
+                let mesh_refs: Vec<&crate::scene::mesh_model::MeshModel> = meshes.iter().collect();
+                match crate::io::stl::build_stl(&mesh_refs) {
+                    Some(bytes) => match std::fs::write(&path, bytes) {
+                        Ok(()) => self.command_line.push_output(&format!(
+                            "STLOUT: exported to \"{}\"",
+                            path.display()
+                        )),
+                        Err(e) => self.command_line.push_error(&format!("STLOUT: write error: {e}")),
+                    },
+                    None => self.command_line.push_error("STLOUT: no mesh data to export."),
+                }
+                Task::none()
+            }
+
+            Message::StlExportPath(None) => Task::none(),
+
             Message::SaveFile => {
                 let i = self.active_tab;
                 if let Some(path) = &self.tabs[i].current_path {

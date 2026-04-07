@@ -5,6 +5,7 @@
 
 pub mod pdf_export;
 pub mod plot_style;
+pub mod stl;
 pub mod xref;
 
 use acadrust::io::dwg::DwgReader;

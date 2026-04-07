@@ -435,6 +435,11 @@ pub enum Message {
     DataExtractionSave(String),
     /// Path chosen (or None = cancelled).
     DataExtractionSaveResult(String, Option<std::path::PathBuf>),
+    // ── STL export ────────────────────────────────────────────────────────
+    /// Trigger STL export: collect meshes and show save dialog.
+    StlExport,
+    /// Callback after the user picks (or cancels) the STL save path.
+    StlExportPath(Option<std::path::PathBuf>),
 }
 
 impl H7CAD {

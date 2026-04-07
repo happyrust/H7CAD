@@ -3185,6 +3185,11 @@ impl H7CAD {
                 }
             }
 
+            // ── STL export ────────────────────────────────────────────────
+            "STLOUT"|"EXPORTSTL" => {
+                return Task::done(Message::StlExport);
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
