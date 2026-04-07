@@ -422,6 +422,23 @@ impl H7CAD {
                 return Task::done(Message::XAttachPick);
             }
 
+            cmd if cmd == "WBLOCK" || cmd == "WB" || cmd.starts_with("WBLOCK ") => {
+                let arg = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                if arg.is_empty() {
+                    // No argument: use selected entities (*) if any, else ask.
+                    let sel: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
+                    if sel.is_empty() {
+                        self.command_line.push_error(
+                            "WBLOCK  Select entities first, or: WBLOCK <block name>  or  WBLOCK *",
+                        );
+                    } else {
+                        return Task::done(Message::WblockSave("*".to_string()));
+                    }
+                } else {
+                    return Task::done(Message::WblockSave(arg.to_string()));
+                }
+            }
+
             "XREF" | "XR" => {
                 // List all xref blocks in the current drawing.
                 let xrefs: Vec<String> = self.tabs[i]

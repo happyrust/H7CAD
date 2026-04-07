@@ -417,6 +417,11 @@ pub enum Message {
     XAttachPick,
     /// Result of the XATTACH file picker.
     XAttachPickResult(Result<std::path::PathBuf, String>),
+    // ── WBLOCK ────────────────────────────────────────────────────────────
+    /// Trigger the WBLOCK save dialog for `block_name` (or `*` = selection).
+    WblockSave(String),
+    /// Result of the WBLOCK save path dialog.
+    WblockSaveResult(String, Option<std::path::PathBuf>),
 }
 
 impl H7CAD {

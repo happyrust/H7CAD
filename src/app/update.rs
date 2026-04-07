@@ -163,6 +163,50 @@ impl H7CAD {
                 Task::none()
             }
 
+            Message::WblockSave(block_name) => {
+                let name = block_name.clone();
+                Task::perform(
+                    async move {
+                        let path = crate::io::pick_save_path().await;
+                        (name, path)
+                    },
+                    |(name, path)| Message::WblockSaveResult(name, path),
+                )
+            }
+
+            Message::WblockSaveResult(block_name, Some(path)) => {
+                let i = self.active_tab;
+                let result = if block_name == "*" {
+                    let handles: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
+                    crate::modules::insert::wblock::extract_entities_to_doc(
+                        &self.tabs[i].scene.document,
+                        &handles,
+                    )
+                } else {
+                    crate::modules::insert::wblock::extract_block_to_doc(
+                        &self.tabs[i].scene.document,
+                        &block_name,
+                    )
+                };
+                match result {
+                    Ok(doc) => match crate::io::save(&doc, &path) {
+                        Ok(()) => {
+                            let fname = path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                            self.command_line
+                                .push_output(&format!("WBLOCK  Saved \"{block_name}\" → \"{fname}\""));
+                        }
+                        Err(e) => self.command_line.push_error(&format!("WBLOCK save failed: {e}")),
+                    },
+                    Err(e) => self.command_line.push_error(&format!("WBLOCK: {e}")),
+                }
+                Task::none()
+            }
+
+            Message::WblockSaveResult(_, None) => Task::none(),
+
             Message::SaveFile => {
                 let i = self.active_tab;
                 if let Some(path) = &self.tabs[i].current_path {
