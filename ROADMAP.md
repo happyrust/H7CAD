@@ -119,8 +119,8 @@ Underlay (PDF/DWF/DGN)
 | EXTEND (EX) | 🔧 | Spline, LwPolyline |
 | OFFSET (O) | 🔧 | Spline |
 | LENGTHEN (LEN) | 🔧 | Spline, LwPolyline |
-| FILLET (F) | 🔧 | Sadece Line–Line; Arc/Polyline yok |
-| CHAMFER (CHA) | 🔧 | Sadece Line–Line |
+| FILLET (F) | 🔧 | LwPolyline desteği yok |
+| CHAMFER (CHA) | ✅ | — |
 | JOIN (J) | ✅ | — |
 | EXPLODE (X) | 🔧 | Dimension eksik |
 | PEDIT (PE) | ✅ | — |
@@ -193,7 +193,7 @@ Underlay (PDF/DWF/DGN)
 | Top / Front / Right / Isometric standart görünümler | ✅ |
 | Plot Window önizleme | ✅ |
 | UCS (WCS↔UCS dönüşüm pipeline) | ✅ |
-| Named Views (VIEW komutu) | ⬜ |
+| Named Views (VIEW komutu) | ✅ |
 | Named UCS kaydetme | ⬜ |
 | VPORTS (viewport bölme) | ⬜ |
 | Nesne snap izleme (Object Snap Tracking) | ⬜ |
