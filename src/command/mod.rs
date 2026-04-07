@@ -138,6 +138,10 @@ pub enum CmdResult {
         /// Translation vector to apply to vertices inside the window.
         delta: Vec3,
     },
+    /// INSERT landed on a block that has AttributeDefinitions.
+    /// The host should look up the attdefs for `block_name` from the document
+    /// and call `attreq_set_attdefs()` on the command, then loop on text input.
+    AttreqNeeded { block_name: String },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────
@@ -241,6 +245,17 @@ pub trait CadCommand: Send {
 
     /// Inject attribute (tag, value) pairs into the command after entity pick.
     fn attedit_set_attrs(&mut self, _attrs: Vec<(String, String)>) {}
+
+    /// Inject attribute definitions (tag, prompt, default_value) for ATTREQ
+    /// attr-filling after INSERT point is picked.
+    fn attreq_set_attdefs(&mut self, _attdefs: Vec<(String, String, String)>) {}
+
+    /// Returns the INSERT entity built so far (pending attr fill) if this is an
+    /// ATTREQ-aware INSERT command waiting for attdef injection.
+    /// Called by the host after `AttreqNeeded` to commit the completed Insert.
+    fn attreq_take_insert(&mut self) -> Option<acadrust::EntityType> {
+        None
+    }
 
 
     /// Called instead of `on_point` when the command needs a tangent pick

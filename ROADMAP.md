@@ -154,7 +154,7 @@ Underlay (PDF/DWF/DGN)
 | MTEXT (T) | ✅ |
 | DIMSTYLE yöneticisi (DIMSTYLE/DDIM) | ✅ |
 | MLEADERSTYLE | ⬜ |
-| DIMORDINATE | ⬜ |
+| DIMORDINATE | ✅ |
 
 ---
 
@@ -227,7 +227,7 @@ Underlay (PDF/DWF/DGN)
 | OBJ dosyası içe aktarma | ✅ |
 | REFEDIT (block yerinde düzenleme) | ⬜ |
 | WBLOCK (bloğu dış dosyaya yaz) | ✅ |
-| Attributeli INSERT akışı (ATTREQ) | ⬜ |
+| Attributeli INSERT akışı (ATTREQ) | ✅ |
 
 ---
 

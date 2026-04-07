@@ -256,6 +256,50 @@ impl H7CAD {
                     self.command_line.push_info(&p);
                 }
             }
+            CmdResult::AttreqNeeded { block_name } => {
+                // Collect AttributeDefinitions owned by this block record.
+                let attdefs: Vec<(String, String, String)> = {
+                    let doc = &self.tabs[i].scene.document;
+                    if let Some(br) = doc.block_records.get(&block_name) {
+                        br.entity_handles.iter().filter_map(|&h| {
+                            if let Some(acadrust::EntityType::AttributeDefinition(ad)) =
+                                doc.get_entity(h)
+                            {
+                                Some((ad.tag.clone(), ad.prompt.clone(), ad.default_value.clone()))
+                            } else {
+                                None
+                            }
+                        }).collect()
+                    } else {
+                        vec![]
+                    }
+                };
+
+                if attdefs.is_empty() {
+                    // No attribute definitions — commit the INSERT directly.
+                    let entity = self.tabs[i].active_cmd.as_mut()
+                        .and_then(|c| c.attreq_take_insert());
+                    if let Some(entity) = entity {
+                        let label = self.history_label_from_active_cmd(i, "INSERT");
+                        self.push_undo_snapshot(i, label);
+                        self.commit_entity(entity);
+                        self.tabs[i].dirty = true;
+                        self.tabs[i].scene.clear_preview_wire();
+                        self.tabs[i].active_cmd = None;
+                        self.tabs[i].snap_result = None;
+                        self.restore_pre_cmd_tangent();
+                    }
+                } else {
+                    // Inject attdefs so the command enters attr-filling mode.
+                    if let Some(cmd) = &mut self.tabs[i].active_cmd {
+                        cmd.attreq_set_attdefs(attdefs);
+                    }
+                    let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                    if let Some(p) = prompt {
+                        self.command_line.push_info(&p);
+                    }
+                }
+            }
             CmdResult::Cancel => {
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
