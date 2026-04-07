@@ -126,7 +126,7 @@ Underlay (PDF/DWF/DGN)
 | PEDIT (PE) | ✅ | — |
 | STRETCH (SS) | 🔧 | Crossing-window seçici yok (MOVE gibi çalışıyor) |
 | SPLINEDIT | ⬜ | — |
-| HATCHEDIT | ⬜ | Var olan hatch'i düzenleme |
+| HATCHEDIT | ✅ | — |
 | ATTEDIT | ⬜ | Attribute değerlerini düzenleme |
 | DDEDIT (çift tık metin) | ✅ | — |
 | REFEDIT | ⬜ | Block in-place düzenleme |

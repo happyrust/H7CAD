@@ -3,6 +3,7 @@ pub mod attdef;
 pub mod circle;
 pub mod donut;
 pub mod ellipse;
+pub mod hatchedit;
 pub mod hatch;
 pub mod line;
 pub mod mline;

@@ -802,6 +802,28 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "HATCHEDIT"|"HE" => {
+                use crate::modules::home::draw::hatchedit::HatcheditCommand;
+                // If a single hatch is already selected, skip the pick step.
+                let sel = self.tabs[i].scene.selected_entities();
+                if sel.len() == 1 {
+                    let (h, _) = sel[0];
+                    if let Some(model) = self.tabs[i].scene.hatches.get(&h).cloned() {
+                        let cmd = HatcheditCommand::with_handle(
+                            h, model.name.clone(), model.scale, model.angle_offset,
+                        );
+                        self.command_line.push_info(&cmd.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    } else {
+                        self.command_line.push_error("HATCHEDIT: selected entity is not a hatch.");
+                    }
+                } else {
+                    let cmd = HatcheditCommand::new();
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
+            }
+
             "GRADIENT" => {
                 use crate::modules::home::draw::hatch::GradientCommand;
                 let outlines = self.tabs[i].scene.closed_outlines();

@@ -619,6 +619,38 @@ impl H7CAD {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
+            CmdResult::HatcheditApply { handle, name, scale, angle } => {
+                if let Some(mut model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
+                    // Update model fields
+                    if !name.is_empty() {
+                        use crate::scene::hatch_model::HatchPattern;
+                        use crate::scene::hatch_patterns;
+                        model.name = name.clone();
+                        if name.to_uppercase() == "SOLID" {
+                            model.pattern = HatchPattern::Solid;
+                        } else if let Some(entry) = hatch_patterns::find(&name) {
+                            model.pattern = entry.gpu.clone();
+                        }
+                        // If not found in catalog, keep existing pattern type
+                    }
+                    model.scale = scale;
+                    model.angle_offset = angle;
+
+                    self.push_undo_snapshot(i, "HATCHEDIT");
+                    // Remove old hatch (entity + GPU model)
+                    self.tabs[i].scene.erase_entities(&[handle]);
+                    // Re-add with updated model
+                    self.tabs[i].scene.add_hatch(model);
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output("HATCHEDIT: hatch updated.");
+                } else {
+                    self.command_line.push_error("HATCHEDIT: hatch entity not found.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
             CmdResult::DdeditEntity { handle, new_text } => {
                 let mut updated = false;
                 if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {

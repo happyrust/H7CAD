@@ -126,6 +126,8 @@ pub enum CmdResult {
     SetPlotWindow { p1: Vec3, p2: Vec3 },
     /// Replace the text content of a Text/MText entity in-place.
     DdeditEntity { handle: Handle, new_text: String },
+    /// Apply new pattern/scale/angle to an existing hatch entity.
+    HatcheditApply { handle: Handle, name: String, scale: f32, angle: f32 },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

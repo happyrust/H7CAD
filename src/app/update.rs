@@ -1059,7 +1059,23 @@ impl H7CAD {
                         let hit = scene::hit_test::click_hit(p, &all_wires2, vp_mat2, bounds)
                             .and_then(|s| Scene::handle_from_wire_name(s));
                         if let Some(handle) = hit {
-                            self.tabs[i].active_cmd.as_mut().map(|c| c.on_entity_pick(handle, world_pt))
+                            let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_entity_pick(handle, world_pt));
+                            // HATCHEDIT: after pick, inject hatch model data into the command.
+                            if self.tabs[i].active_cmd.as_ref().map(|c| c.name() == "HATCHEDIT").unwrap_or(false) {
+                                if let Some(model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
+                                    use crate::command::CadCommand;
+                                    use crate::modules::home::draw::hatchedit::HatcheditCommand;
+                                    let cmd: Box<dyn CadCommand> = Box::new(HatcheditCommand::with_handle(
+                                        handle, model.name.clone(), model.scale, model.angle_offset,
+                                    ));
+                                    self.command_line.push_info(&cmd.prompt());
+                                    self.tabs[i].active_cmd = Some(cmd);
+                                } else {
+                                    self.command_line.push_error("HATCHEDIT: not a hatch entity.");
+                                    self.tabs[i].active_cmd = None;
+                                }
+                            }
+                            result
                         } else {
                             self.command_line.push_info("Nothing found at that point.");
                             None
