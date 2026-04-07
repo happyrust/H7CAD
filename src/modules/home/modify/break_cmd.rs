@@ -7,7 +7,7 @@
 //
 //   BREAK @ (at-sign as second point) → Break at a single point (splits without gap).
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -38,6 +38,7 @@ pub fn break_entity(entity: &EntityType, p1: Vec3, p2: Vec3) -> Option<Vec<Entit
         EntityType::Arc(arc)   => Some(break_arc(arc, p1, p2)),
         EntityType::Circle(c)  => Some(break_circle(c, p1, p2)),
         EntityType::LwPolyline(p) => Some(break_lwpolyline(p, p1, p2)),
+        EntityType::Ellipse(e)    => Some(break_ellipse(e, p1, p2)),
         _ => None,
     }
 }
@@ -177,6 +178,56 @@ fn break_lwpolyline(p: &LwPolyline, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     } else {
         result
     }
+}
+
+fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
+    // Compute the eccentric-anomaly parameter of a world point relative to ellipse.
+    // World coords use XZ plane (Y-up), so DXF X→world X, DXF Y→world Z.
+    let cx = ell.center.x;
+    let cy = ell.center.y;
+    let a = (ell.major_axis.x.powi(2) + ell.major_axis.y.powi(2)).sqrt();
+    if a < 1e-9 { return vec![EntityType::Ellipse(ell.clone())]; }
+    let b = a * ell.minor_axis_ratio;
+    let nx = ell.major_axis.x / a;
+    let ny = ell.major_axis.y / a;
+
+    // Project a point onto the ellipse parameter (eccentric anomaly)
+    let param_of = |pt: Vec3| -> f64 {
+        let rx = pt.x as f64 - cx;
+        let ry = pt.z as f64 - cy; // Y-up: DXF Y → world Z
+        let xl =  rx * nx + ry * ny;
+        let yl = -rx * ny + ry * nx;
+        yl.atan2(xl) // atan2(yl/b*b, xl/a*a) simplifies to atan2(yl,xl) for ordering
+    };
+
+    let t0 = ell.start_parameter;
+    let t1 = ell.end_parameter;
+
+    let pa1 = param_of(p1);
+    let pa2 = param_of(p2);
+
+    // Clamp both params to arc range (same logic as clamp_to_arc for arcs)
+    let span_deg = {
+        let s = t1 - t0;
+        if s <= 0.0 { s + std::f64::consts::TAU } else { s }
+    };
+    let clamp = |a: f64| -> f64 {
+        let rel = ((a - t0) % std::f64::consts::TAU + std::f64::consts::TAU) % std::f64::consts::TAU;
+        if rel <= span_deg { a } else if rel < span_deg + (std::f64::consts::TAU - span_deg) / 2.0 { t1 } else { t0 }
+    };
+    let a1_on = clamp(pa1);
+    let a2_on = clamp(pa2);
+
+    if (a1_on - a2_on).abs() < 1e-4 {
+        return vec![EntityType::Ellipse(ell.clone())];
+    }
+
+    // Remove CCW from a1_on to a2_on → result goes from a2_on to a1_on
+    let mut result = ell.clone();
+    result.common.handle = Handle::NULL;
+    result.start_parameter = a2_on;
+    result.end_parameter   = a1_on;
+    vec![EntityType::Ellipse(result)]
 }
 
 // ── Small utilities ────────────────────────────────────────────────────────
