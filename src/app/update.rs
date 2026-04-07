@@ -1215,6 +1215,49 @@ impl H7CAD {
                     }
                 }
 
+                // ── Double-click in Model Space: DDEDIT for Text/MText ────
+                if is_click
+                    && is_down
+                    && self.tabs[i].active_cmd.is_none()
+                    && self.tabs[i].scene.current_layout == "Model"
+                {
+                    let now = Instant::now();
+                    let is_double_model = self
+                        .last_vp_click_time
+                        .map(|t| {
+                            let dt = now.duration_since(t).as_millis();
+                            let last = self.last_vp_click_pos.unwrap_or(p);
+                            let d = (p.x - last.x).hypot(p.y - last.y);
+                            dt < 400 && d < 8.0
+                        })
+                        .unwrap_or(false);
+
+                    self.last_vp_click_time = Some(now);
+                    self.last_vp_click_pos = Some(p);
+
+                    if is_double_model {
+                        let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
+                        let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
+                        let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
+                        let all_wires = self.tabs[i].scene.hit_test_wires();
+                        let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
+                            .and_then(|s| Scene::handle_from_wire_name(s));
+                        if let Some(handle) = hit {
+                            if let Some(entity) = self.tabs[i].scene.document.get_entity(handle) {
+                                use crate::modules::annotate::ddedit::{DdeditCommand, entity_text};
+                                if let Some(cur) = entity_text(entity) {
+                                    let cmd = DdeditCommand::with_handle(handle, cur.clone());
+                                    self.command_line.push_info(
+                                        &format!("DDEDIT  Enter new text <{cur}>:")
+                                    );
+                                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                                    return self.focus_cmd_input();
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // ── Double-click: enter/exit MSPACE ───────────────────────
                 // Only when no command is running, no drag, and we're in paper space.
                 if is_click

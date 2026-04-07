@@ -906,6 +906,28 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "DDEDIT"|"ED" => {
+                use crate::modules::annotate::ddedit::{DdeditCommand, entity_text};
+                // If a single text/mtext entity is already selected, skip the pick step.
+                let sel = self.tabs[i].scene.selected_entities();
+                if sel.len() == 1 {
+                    let (h, _) = sel[0];
+                    if let Some(e) = self.tabs[i].scene.document.get_entity(h) {
+                        if let Some(cur) = entity_text(e) {
+                            let cmd = DdeditCommand::with_handle(h, cur.clone());
+                            self.command_line.push_info(&format!("DDEDIT  Enter new text <{cur}>:"));
+                            self.tabs[i].active_cmd = Some(Box::new(cmd));
+                        } else {
+                            self.command_line.push_error("DDEDIT: selected entity is not text.");
+                        }
+                    }
+                } else {
+                    let cmd = DdeditCommand::new();
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
+            }
+
             "MTEXT"|"MT" => {
                 use crate::modules::annotate::mtext::MTextCommand;
                 let new_cmd = MTextCommand::new();

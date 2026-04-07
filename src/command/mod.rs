@@ -124,6 +124,8 @@ pub enum CmdResult {
     },
     /// Set the plot window on the active layout's PlotSettings.
     SetPlotWindow { p1: Vec3, p2: Vec3 },
+    /// Replace the text content of a Text/MText entity in-place.
+    DdeditEntity { handle: Handle, new_text: String },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

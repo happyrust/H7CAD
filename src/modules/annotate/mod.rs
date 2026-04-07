@@ -2,6 +2,7 @@
 
 pub mod aligned_dim;
 pub mod angular_dim;
+pub mod ddedit;
 pub mod diameter_dim;
 pub mod dim_baseline;
 pub mod dim_continue;

@@ -619,6 +619,29 @@ impl H7CAD {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
+            CmdResult::DdeditEntity { handle, new_text } => {
+                let mut updated = false;
+                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    match entity {
+                        acadrust::EntityType::Text(t) => { t.value = new_text; updated = true; }
+                        acadrust::EntityType::MText(t) => { t.value = new_text; updated = true; }
+                        acadrust::EntityType::AttributeDefinition(a) => { a.default_value = new_text; updated = true; }
+                        acadrust::EntityType::AttributeEntity(a) => { a.set_value(new_text); updated = true; }
+                        _ => {}
+                    }
+                }
+                if updated {
+                    self.push_undo_snapshot(i, "DDEDIT");
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output("DDEDIT: text updated.");
+                } else {
+                    self.command_line.push_error("DDEDIT: entity type not supported.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
         }
         // Focus the command-line input while a command is active; blur it when the command ends.
         if self.tabs[i].active_cmd.is_some() {

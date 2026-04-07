@@ -128,7 +128,7 @@ Underlay (PDF/DWF/DGN)
 | SPLINEDIT | ⬜ | — |
 | HATCHEDIT | ⬜ | Var olan hatch'i düzenleme |
 | ATTEDIT | ⬜ | Attribute değerlerini düzenleme |
-| DDEDIT (çift tık metin) | ⬜ | In-place metin düzenleme |
+| DDEDIT (çift tık metin) | ✅ | — |
 | REFEDIT | ⬜ | Block in-place düzenleme |
 | DIVIDE (DIV) | ✅ | — |
 | MEASURE (ME) | ✅ | — |
