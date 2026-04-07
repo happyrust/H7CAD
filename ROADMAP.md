@@ -257,7 +257,7 @@ Underlay (PDF/DWF/DGN)
 | COUNT — entity istatistiği | ✅ |
 | QSELECT — özelliğe göre seç | ✅ |
 | FLATTEN (Z=0 düzleme) | ✅ |
-| MASSPROP (alan merkezi, atalet) | ⬜ |
+| MASSPROP (alan merkezi, atalet) | ✅ |
 | DATAEXTRACTION | ⬜ |
 
 ---
@@ -311,7 +311,7 @@ Underlay (PDF/DWF/DGN)
 ### Orta Öncelik
 6. **Named Views** (VIEW SAVE/RESTORE/LIST/DELETE)
 7. **HATCHEDIT** — mevcut tarama düzenleme
-8. **MASSPROP** — alan, çevre, ağırlık merkezi
+8. **DDEDIT** — çift tıkla metin düzenleme
 9. **Solid3D tessellation** tamamlama (ACIS → truck pipeline)
 10. **Çoklu Layout sekmeleri** arayüzü
 

@@ -1356,6 +1356,31 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // ── MASSPROP — area, perimeter, centroid of selected entities ────
+            "MASSPROP" => {
+                let selected = self.tabs[i].scene.selected_entities();
+                if selected.is_empty() {
+                    self.command_line.push_error(
+                        "MASSPROP: no entities selected. Select entities first."
+                    );
+                } else {
+                    for (handle, _) in &selected {
+                        if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
+                            if let Some(props) = massprop_entity(entity) {
+                                self.command_line.push_output(&format!(
+                                    "{}  Area={:.4}  Perimeter={:.4}  Centroid=({:.4},{:.4})",
+                                    entity_type_name(entity),
+                                    props.area,
+                                    props.perimeter,
+                                    props.cx,
+                                    props.cy,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── FLATTEN — move selected (or all) entities to Z=0 ─────────────
             "FLATTEN" => {
                 let handles: Vec<acadrust::Handle> = {
@@ -3291,6 +3316,142 @@ fn entity_text_content(entity: &acadrust::EntityType) -> Option<String> {
         acadrust::EntityType::MText(t) => Some(t.value.clone()),
         acadrust::EntityType::AttributeDefinition(a) => Some(a.default_value.clone()),
         acadrust::EntityType::AttributeEntity(a) => Some(a.get_value().to_string()),
+        _ => None,
+    }
+}
+
+// ── MASSPROP helpers ───────────────────────────────────────────────────────
+
+struct MassProps {
+    area: f64,
+    perimeter: f64,
+    cx: f64,
+    cy: f64,
+}
+
+fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
+    use std::f64::consts::{PI, TAU};
+
+    match entity {
+        acadrust::EntityType::Circle(c) => {
+            let r = c.radius;
+            Some(MassProps {
+                area: PI * r * r,
+                perimeter: TAU * r,
+                cx: c.center.x,
+                cy: c.center.y,
+            })
+        }
+        acadrust::EntityType::Arc(a) => {
+            let r = a.radius;
+            let span = {
+                let s = ((a.end_angle - a.start_angle) + 360.0) % 360.0;
+                if s < 1e-6 { 360.0 } else { s }
+            };
+            let span_rad = span.to_radians();
+            // Sector area (pie slice)
+            let area = 0.5 * r * r * span_rad;
+            let arc_len = r * span_rad;
+            // Centroid of arc (chord midpoint direction)
+            let mid_rad = (a.start_angle + span / 2.0).to_radians();
+            Some(MassProps {
+                area,
+                perimeter: arc_len,
+                cx: a.center.x + r * mid_rad.cos(),
+                cy: a.center.y + r * mid_rad.sin(),
+            })
+        }
+        acadrust::EntityType::Line(l) => {
+            let dx = l.end.x - l.start.x;
+            let dy = l.end.y - l.start.y;
+            let len = (dx * dx + dy * dy).sqrt();
+            Some(MassProps {
+                area: 0.0,
+                perimeter: len,
+                cx: (l.start.x + l.end.x) / 2.0,
+                cy: (l.start.y + l.end.y) / 2.0,
+            })
+        }
+        acadrust::EntityType::LwPolyline(p) => {
+            let n = p.vertices.len();
+            if n < 2 { return None; }
+            // Shoelace area + perimeter
+            let mut area_sum = 0.0f64;
+            let mut perimeter = 0.0f64;
+            let mut cx_sum = 0.0f64;
+            let mut cy_sum = 0.0f64;
+            let n_segs = if p.is_closed { n } else { n - 1 };
+            for idx in 0..n_segs {
+                let v0 = &p.vertices[idx];
+                let v1 = &p.vertices[(idx + 1) % n];
+                let x0 = v0.location.x;
+                let y0 = v0.location.y;
+                let x1 = v1.location.x;
+                let y1 = v1.location.y;
+                area_sum += x0 * y1 - x1 * y0;
+                perimeter += ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+                cx_sum += (x0 + x1) * (x0 * y1 - x1 * y0);
+                cy_sum += (y0 + y1) * (x0 * y1 - x1 * y0);
+            }
+            let area = (area_sum / 2.0).abs();
+            let (cx, cy) = if area > 1e-12 {
+                (cx_sum / (6.0 * area), cy_sum / (6.0 * area))
+            } else {
+                let sx: f64 = p.vertices.iter().map(|v| v.location.x).sum::<f64>() / n as f64;
+                let sy: f64 = p.vertices.iter().map(|v| v.location.y).sum::<f64>() / n as f64;
+                (sx, sy)
+            };
+            Some(MassProps { area, perimeter, cx, cy })
+        }
+        acadrust::EntityType::Ellipse(e) => {
+            let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
+            let b = a * e.minor_axis_ratio;
+            let t0 = e.start_parameter;
+            let t1 = {
+                let mut t = e.end_parameter;
+                if t <= t0 { t += TAU; }
+                t
+            };
+            let span = t1 - t0;
+            let is_full = (span - TAU).abs() < 1e-6;
+            let area = if is_full {
+                PI * a * b
+            } else {
+                // Sector area of ellipse approximated via 256-pt integration
+                let n = 256usize;
+                let mut s = 0.0f64;
+                for k in 0..n {
+                    let t = t0 + span * (k as f64 / n as f64);
+                    let tp = t0 + span * ((k + 1) as f64 / n as f64);
+                    let nx = e.major_axis.x / a;
+                    let ny = e.major_axis.y / a;
+                    let x0 = a * t.cos() * nx - b * t.sin() * ny;
+                    let y0 = a * t.cos() * ny + b * t.sin() * nx;
+                    let x1 = a * tp.cos() * nx - b * tp.sin() * ny;
+                    let y1 = a * tp.cos() * ny + b * tp.sin() * nx;
+                    s += x0 * y1 - x1 * y0;
+                }
+                (s / 2.0).abs()
+            };
+            // Arc length via 256-pt numerical integration
+            let nx = e.major_axis.x / a.max(1e-12);
+            let ny = e.major_axis.y / a.max(1e-12);
+            let perimeter = {
+                let n = 256usize;
+                let mut len = 0.0f64;
+                for k in 0..n {
+                    let t = t0 + span * (k as f64 / n as f64);
+                    let tp = t0 + span * ((k + 1) as f64 / n as f64);
+                    let x0 = e.center.x + a * t.cos() * nx - b * t.sin() * ny;
+                    let y0 = e.center.y + a * t.cos() * ny + b * t.sin() * nx;
+                    let x1 = e.center.x + a * tp.cos() * nx - b * tp.sin() * ny;
+                    let y1 = e.center.y + a * tp.cos() * ny + b * tp.sin() * nx;
+                    len += (x1 - x0).hypot(y1 - y0);
+                }
+                len
+            };
+            Some(MassProps { area, perimeter, cx: e.center.x, cy: e.center.y })
+        }
         _ => None,
     }
 }
