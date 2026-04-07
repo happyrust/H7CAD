@@ -83,13 +83,3 @@ pub fn entity_text(entity: &EntityType) -> Option<String> {
     }
 }
 
-/// Apply new text content to a cloned entity, returning the updated entity.
-pub fn set_entity_text(mut entity: EntityType, new_text: &str) -> Option<EntityType> {
-    match &mut entity {
-        EntityType::Text(t)  => { t.value = new_text.to_string(); Some(entity) }
-        EntityType::MText(t) => { t.value = new_text.to_string(); Some(entity) }
-        EntityType::AttributeDefinition(a) => { a.default_value = new_text.to_string(); Some(entity) }
-        EntityType::AttributeEntity(a)     => { a.set_value(new_text.to_string()); Some(entity) }
-        _ => None,
-    }
-}
