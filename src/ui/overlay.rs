@@ -190,12 +190,20 @@ pub struct UcsIconParams {
 
 // ── Selection overlay ───────────────────────────────────────────────────
 
+/// An acquired OST tracking point with its screen position.
+#[derive(Clone, Debug)]
+pub struct OstTrackPoint {
+    pub screen: Point,
+}
+
 pub fn selection_overlay<'a>(
     selection: SelectionState,
     snap: Option<(Point, SnapType)>,
     grips: Vec<GripMarker>,
     grid: Option<GridParams>,
     ucs_icon: Option<UcsIconParams>,
+    ost_points: Vec<OstTrackPoint>,
+    cursor_screen: Point,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
@@ -203,6 +211,8 @@ pub fn selection_overlay<'a>(
         grips,
         grid,
         ucs_icon,
+        ost_points,
+        cursor_screen,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -215,6 +225,8 @@ struct SelectionCanvas {
     grips: Vec<GripMarker>,
     grid: Option<GridParams>,
     ucs_icon: Option<UcsIconParams>,
+    ost_points: Vec<OstTrackPoint>,
+    cursor_screen: Point,
 }
 
 impl canvas::Program<Message> for SelectionCanvas {
@@ -586,6 +598,40 @@ impl canvas::Program<Message> for SelectionCanvas {
         // ── UCS icon ──────────────────────────────────────────────────────
         if let Some(ref ucs) = self.ucs_icon {
             draw_ucs_icon(&mut frame, ucs.view_proj, ucs.bounds);
+        }
+
+        // ── Object Snap Tracking lines ────────────────────────────────────
+        for ost in &self.ost_points {
+            let tp = ost.screen;
+            let cx = self.cursor_screen.x;
+            let cy = self.cursor_screen.y;
+            let track_color = Color { r: 0.15, g: 0.85, b: 0.95, a: 0.7 };
+            let dash_stroke = canvas::Stroke::default()
+                .with_color(track_color)
+                .with_width(1.0);
+
+            // Draw horizontal line from tracking point to cursor.
+            if (cy - tp.y).abs() < 8.0 {
+                let path = canvas::Path::line(tp, Point { x: cx, y: tp.y });
+                frame.stroke(&path, dash_stroke.clone());
+            }
+            // Draw vertical line.
+            if (cx - tp.x).abs() < 8.0 {
+                let path = canvas::Path::line(tp, Point { x: tp.x, y: cy });
+                frame.stroke(&path, dash_stroke.clone());
+            }
+            // Small cross at the tracking point.
+            let sz = 5.0_f32;
+            let h = canvas::Path::line(
+                Point { x: tp.x - sz, y: tp.y },
+                Point { x: tp.x + sz, y: tp.y },
+            );
+            let v = canvas::Path::line(
+                Point { x: tp.x, y: tp.y - sz },
+                Point { x: tp.x, y: tp.y + sz },
+            );
+            frame.stroke(&h, dash_stroke.clone());
+            frame.stroke(&v, dash_stroke);
         }
 
         vec![frame.into_geometry()]

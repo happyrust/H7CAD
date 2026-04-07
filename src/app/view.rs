@@ -83,7 +83,23 @@ impl H7CAD {
                 None
             };
 
-            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon)
+            // OST tracking points → screen positions.
+            let ost_points: Vec<overlay::OstTrackPoint> = if self.snapper.otrack_enabled {
+                let vp_mat = tab.scene.camera.borrow().view_proj(vp_bounds);
+                self.snapper.tracking_points.iter().map(|&wp| {
+                    let ndc = vp_mat.project_point3(wp);
+                    overlay::OstTrackPoint {
+                        screen: iced::Point::new(
+                            (ndc.x + 1.0) * 0.5 * vp_bounds.width,
+                            (1.0 - ndc.y) * 0.5 * vp_bounds.height,
+                        ),
+                    }
+                }).collect()
+            } else {
+                vec![]
+            };
+
+            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon, ost_points, tab.last_cursor_screen)
         };
 
         let nav = container(overlay::nav_toolbar())
@@ -202,6 +218,7 @@ impl H7CAD {
                     self.polar_increment_deg,
                     self.show_grid,
                     self.dyn_input,
+                    self.snapper.otrack_enabled,
                     tab.scene.layout_names(),
                     tab.scene.current_layout.clone(),
                     self.layout_rename_state.as_ref(),
@@ -364,6 +381,9 @@ impl H7CAD {
                             }
                             keyboard::Key::Named(keyboard::key::Named::F10) => {
                                 Some(Message::TogglePolar)
+                            }
+                            keyboard::Key::Named(keyboard::key::Named::F11) => {
+                                Some(Message::ToggleOTrack)
                             }
                             keyboard::Key::Named(keyboard::key::Named::F12) => {
                                 Some(Message::ToggleDynInput)

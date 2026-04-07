@@ -29,6 +29,7 @@ impl StatusBar {
         polar_increment_deg: f32,
         show_grid: bool,
         dyn_input: bool,
+        otrack: bool,
         layouts: Vec<String>,
         current_layout: String,
         // If `Some((original, edit_value))`, the named tab shows a text input.
@@ -86,6 +87,10 @@ impl StatusBar {
             tip(
                 toggle_pill("DYN", dyn_input, Message::ToggleDynInput),
                 "Dynamic Input\nF12"
+            ),
+            tip(
+                toggle_pill("OTRACK", otrack, Message::ToggleOTrack),
+                "Object Snap Tracking\nF11"
             ),
             osnap_btn(osnap_active, snapper.snap_enabled, popup_open),
             status_pill(space_label),

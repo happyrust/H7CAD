@@ -234,6 +234,8 @@ pub enum Message {
     SetPolarAngle(f32),
     /// Toggle dynamic input overlay (F12).
     ToggleDynInput,
+    /// Toggle object snap tracking (F11).
+    ToggleOTrack,
     /// Toggle an individual snap mode (from popup row click).
     ToggleSnap(crate::snap::SnapType),
     /// Open / close the OSNAP popup (▾ arrow click).

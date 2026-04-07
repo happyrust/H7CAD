@@ -75,6 +75,14 @@ pub struct Snapper {
     pub grid_spacing: f32,
     /// Pixel-radius threshold.
     pub snap_radius_px: f32,
+    /// Object Snap Tracking on/off (F11).
+    pub otrack_enabled: bool,
+    /// Acquired OST points (world XZ, Y=0 plane).
+    pub tracking_points: Vec<Vec3>,
+    /// Last snap world position (for dwell detection).
+    pub last_snap_world: Option<Vec3>,
+    /// How many consecutive moves the cursor has been near last_snap_world.
+    pub dwell_count: u32,
 }
 
 impl Default for Snapper {
@@ -92,6 +100,10 @@ impl Default for Snapper {
             enabled,
             grid_spacing: 1.0,
             snap_radius_px: CROSSHAIR_ARM,
+            otrack_enabled: false,
+            tracking_points: Vec::new(),
+            last_snap_world: None,
+            dwell_count: 0,
         }
     }
 }
@@ -134,6 +146,100 @@ impl Snapper {
         self.enabled.clear();
     }
 
+    /// Update dwell tracking and possibly acquire a new OST point.
+    /// Should be called on every ViewportMove when snap is active.
+    /// `snap_world` is the current snap result world point (if any).
+    pub fn update_otrack_dwell(&mut self, snap_world: Option<Vec3>, view_proj: glam::Mat4, bounds: iced::Rectangle) {
+        if !self.otrack_enabled {
+            self.dwell_count = 0;
+            self.last_snap_world = None;
+            return;
+        }
+        const DWELL_THRESHOLD: u32 = 4;
+        const DWELL_PX: f32 = 8.0;
+
+        match snap_world {
+            None => {
+                self.dwell_count = 0;
+                self.last_snap_world = None;
+            }
+            Some(p) => {
+                // Convert to screen to measure pixel distance.
+                let is_same = if let Some(prev) = self.last_snap_world {
+                    let dp = world_to_screen(p, view_proj, bounds);
+                    let dp2 = world_to_screen(prev, view_proj, bounds);
+                    let dx = dp.x - dp2.x;
+                    let dy = dp.y - dp2.y;
+                    (dx * dx + dy * dy).sqrt() < DWELL_PX
+                } else {
+                    false
+                };
+                if is_same {
+                    self.dwell_count += 1;
+                    if self.dwell_count == DWELL_THRESHOLD {
+                        // Acquire this point (max 4 tracked points).
+                        if !self.tracking_points.iter().any(|t| {
+                            let d = (*t - p).length();
+                            d < self.grid_spacing * 0.1
+                        }) {
+                            if self.tracking_points.len() >= 4 {
+                                self.tracking_points.remove(0);
+                            }
+                            self.tracking_points.push(p);
+                        }
+                    }
+                } else {
+                    self.dwell_count = 1;
+                    self.last_snap_world = Some(p);
+                }
+            }
+        }
+    }
+
+    /// Given the current cursor world position, check if it aligns with any
+    /// tracking point horizontally or vertically.  Returns the snapped world
+    /// position (and index of the tracking point) if alignment is found within
+    /// `snap_radius_px` screen pixels.
+    pub fn otrack_snap(
+        &self,
+        cursor_world: Vec3,
+        view_proj: glam::Mat4,
+        bounds: iced::Rectangle,
+    ) -> Option<(Vec3, usize)> {
+        if !self.otrack_enabled || self.tracking_points.is_empty() {
+            return None;
+        }
+
+        let cursor_screen = world_to_screen(cursor_world, view_proj, bounds);
+        let r = self.snap_radius_px;
+
+        for (idx, &tp) in self.tracking_points.iter().enumerate() {
+            // Horizontal alignment: cursor.z ≈ tp.z
+            let aligned_h = Vec3::new(cursor_world.x, 0.0, tp.z);
+            let s = world_to_screen(aligned_h, view_proj, bounds);
+            let dy = (s.y - cursor_screen.y).abs();
+            if dy < r {
+                return Some((aligned_h, idx));
+            }
+
+            // Vertical alignment: cursor.x ≈ tp.x
+            let aligned_v = Vec3::new(tp.x, 0.0, cursor_world.z);
+            let s = world_to_screen(aligned_v, view_proj, bounds);
+            let dx = (s.x - cursor_screen.x).abs();
+            if dx < r {
+                return Some((aligned_v, idx));
+            }
+        }
+        None
+    }
+
+    /// Clear all acquired tracking points (e.g. when command ends).
+    pub fn clear_tracking(&mut self) {
+        self.tracking_points.clear();
+        self.dwell_count = 0;
+        self.last_snap_world = None;
+    }
+
     /// Only runs Tangent snap — used when a command needs object picks via tangent.
     pub fn snap_tangent_only(
         &self,
@@ -152,6 +258,10 @@ impl Snapper {
             },
             grid_spacing: self.grid_spacing,
             snap_radius_px: self.snap_radius_px,
+            otrack_enabled: false,
+            tracking_points: Vec::new(),
+            last_snap_world: None,
+            dwell_count: 0,
         };
         tmp.snap(cursor_world, cursor_screen, wires, view_proj, bounds)
     }

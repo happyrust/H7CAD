@@ -1010,6 +1010,24 @@ impl H7CAD {
                     } else {
                         self.snapper.snap(cursor_world, p, &all_wires, view_proj, bounds)
                     };
+
+                    // Object Snap Tracking: update dwell and override snap if tracking.
+                    let otrack_snap_world = {
+                        let snap_world = self.tabs[i].snap_result.map(|s| s.world);
+                        self.snapper.update_otrack_dwell(snap_world, view_proj, bounds);
+                        if self.tabs[i].snap_result.is_none() {
+                            self.snapper.otrack_snap(cursor_world, view_proj, bounds)
+                                .map(|(w, _)| w)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(ow) = otrack_snap_world {
+                        // Override the effective point with the OST alignment.
+                        // (don't set snap_result so the normal snap marker stays hidden)
+                        self.tabs[i].last_cursor_world = ow;
+                    }
+
                     let effective = {
                         // snap.world is paper-space for viewport-projected wires; convert
                         // to model-space so previews use consistent coordinates.
@@ -1660,6 +1678,13 @@ impl H7CAD {
                 Task::none()
             }
             Message::ToggleDynInput => { self.dyn_input ^= true; Task::none() }
+            Message::ToggleOTrack => {
+                self.snapper.otrack_enabled ^= true;
+                if !self.snapper.otrack_enabled {
+                    self.snapper.clear_tracking();
+                }
+                Task::none()
+            }
             Message::SetPolarAngle(deg) => {
                 self.polar_increment_deg = deg;
                 self.polar_mode = true;

@@ -196,7 +196,7 @@ Underlay (PDF/DWF/DGN)
 | Named Views (VIEW komutu) | ✅ |
 | Named UCS kaydetme | ✅ UCS SAVE/DELETE/LIST |
 | VPORTS (viewport bölme) | ⬜ |
-| Nesne snap izleme (Object Snap Tracking) | ⬜ |
+| Nesne snap izleme (Object Snap Tracking) | ✅ F11 toggle, dwell-acquire tracking lines |
 | Dynamic Input overlay | ✅ F12 toggle, absolute XY + relative dist/angle |
 
 ---
@@ -209,7 +209,7 @@ Underlay (PDF/DWF/DGN)
 | Perpendicular / Tangent / Nearest | ✅ |
 | Grid snap | ✅ Zoom-adaptive spacing |
 | Polar tracking | ✅ Configurable angle, guide line |
-| Object snap tracking | ⬜ |
+| Object snap tracking | ✅ Dwell-acquire, H/V tracking lines, alignment snap |
 
 ---
 
