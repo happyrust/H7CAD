@@ -28,6 +28,7 @@ impl StatusBar {
         polar_mode: bool,
         polar_increment_deg: f32,
         show_grid: bool,
+        dyn_input: bool,
         layouts: Vec<String>,
         current_layout: String,
         // If `Some((original, edit_value))`, the named tab shows a text input.
@@ -82,6 +83,10 @@ impl StatusBar {
                 "Orthogonal Mode\nF8"
             ),
             polar_pill(polar_mode, polar_increment_deg),
+            tip(
+                toggle_pill("DYN", dyn_input, Message::ToggleDynInput),
+                "Dynamic Input\nF12"
+            ),
             osnap_btn(osnap_active, snapper.snap_enabled, popup_open),
             status_pill(space_label),
             status_pill(scale_label),

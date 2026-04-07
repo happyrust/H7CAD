@@ -135,7 +135,26 @@ impl H7CAD {
                 .unwrap_or(Color { r: 0.11, g: 0.11, b: 0.11, a: 1.0 })
         };
 
-        let viewport_stack = stack![
+        // Dynamic input overlay — shown when a command is active and DYN is on.
+        let dyn_input_overlay: Option<Element<'_, Message>> =
+            if self.dyn_input && tab.active_cmd.is_some() {
+                let w = tab.last_cursor_world;
+                let label = if let Some(base) = self.last_point {
+                    // Show relative distance + angle when we have a base point.
+                    let dx = (w.x - base.x) as f64;
+                    let dy = (w.z - base.z) as f64;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    let ang = dy.atan2(dx).to_degrees();
+                    format!("d={:.3}  <{:.1}°", dist, ang)
+                } else {
+                    format!("X:{:.3}  Y:{:.3}", w.x, w.z)
+                };
+                Some(overlay::dynamic_input_overlay(tab.last_cursor_screen, label))
+            } else {
+                None
+            };
+
+        let mut viewport_stack = stack![
             container(viewport_3d)
                 .style(move |_: &Theme| container::Style {
                     background: Some(Background::Color(bg_color)),
@@ -151,6 +170,9 @@ impl H7CAD {
         ]
         .width(Fill)
         .height(Fill);
+        if let Some(dyn_ol) = dyn_input_overlay {
+            viewport_stack = viewport_stack.push(dyn_ol);
+        }
 
         let center_stack = iced::widget::stack![
             row![tab.properties.view(), viewport_stack]
@@ -179,6 +201,7 @@ impl H7CAD {
                     self.polar_mode,
                     self.polar_increment_deg,
                     self.show_grid,
+                    self.dyn_input,
                     tab.scene.layout_names(),
                     tab.scene.current_layout.clone(),
                     self.layout_rename_state.as_ref(),
@@ -341,6 +364,9 @@ impl H7CAD {
                             }
                             keyboard::Key::Named(keyboard::key::Named::F10) => {
                                 Some(Message::TogglePolar)
+                            }
+                            keyboard::Key::Named(keyboard::key::Named::F12) => {
+                                Some(Message::ToggleDynInput)
                             }
                             keyboard::Key::Character(c) if ctrl => match c.as_str() {
                                 "n" => Some(Message::ClearScene),

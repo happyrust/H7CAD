@@ -1031,6 +1031,7 @@ impl H7CAD {
                         pt
                     };
                     self.tabs[i].last_cursor_world = effective;
+                    self.tabs[i].last_cursor_screen = p;
 
                     let mut previews = if needs_entity {
                         let hover_handle =
@@ -1658,6 +1659,7 @@ impl H7CAD {
                 if self.polar_mode { self.ortho_mode = false; }
                 Task::none()
             }
+            Message::ToggleDynInput => { self.dyn_input ^= true; Task::none() }
             Message::SetPolarAngle(deg) => {
                 self.polar_increment_deg = deg;
                 self.polar_mode = true;

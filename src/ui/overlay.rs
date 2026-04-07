@@ -849,3 +849,87 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
     let circle = canvas::Path::circle(icon_origin, 3.0);
     frame.fill(&circle, Color { r: 0.9, g: 0.9, b: 0.9, a: 0.9 });
 }
+
+// ── Dynamic Input overlay ─────────────────────────────────────────────────
+
+/// Draw a small coordinate / distance-angle tooltip near the cursor.
+///
+/// `cursor_screen` — cursor position in viewport pixels.
+/// `label` — text to display (e.g. "X: 12.34  Y: 56.78").
+pub fn dynamic_input_overlay<'a>(
+    cursor_screen: Point,
+    label: String,
+) -> Element<'a, Message> {
+    canvas(DynInputCanvas { cursor_screen, label })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+struct DynInputCanvas {
+    cursor_screen: Point,
+    label: String,
+}
+
+impl canvas::Program<Message> for DynInputCanvas {
+    type State = ();
+
+    fn mouse_interaction(
+        &self,
+        _state: &(),
+        _bounds: iced::Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        mouse::Interaction::None
+    }
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        // Offset the box 14 px right and 20 px below the cursor.
+        const OFFSET_X: f32 = 14.0;
+        const OFFSET_Y: f32 = 20.0;
+        const PAD: f32 = 4.0;
+        const FONT_SIZE: f32 = 11.0;
+        const BOX_W: f32 = 160.0;
+        const BOX_H: f32 = FONT_SIZE + PAD * 2.0;
+
+        let mut bx = self.cursor_screen.x + OFFSET_X;
+        let mut by = self.cursor_screen.y + OFFSET_Y;
+
+        // Keep box inside viewport.
+        if bx + BOX_W > bounds.width { bx = self.cursor_screen.x - BOX_W - 4.0; }
+        if by + BOX_H > bounds.height { by = self.cursor_screen.y - BOX_H - 4.0; }
+
+        let bg = canvas::Path::rectangle(
+            Point { x: bx, y: by },
+            Size { width: BOX_W, height: BOX_H },
+        );
+        frame.fill(
+            &bg,
+            Color { r: 0.05, g: 0.05, b: 0.12, a: 0.85 },
+        );
+        frame.stroke(
+            &bg,
+            canvas::Stroke::default()
+                .with_color(Color { r: 0.35, g: 0.55, b: 0.90, a: 0.9 })
+                .with_width(1.0),
+        );
+        frame.fill_text(canvas::Text {
+            content: self.label.clone(),
+            position: Point { x: bx + PAD, y: by + PAD },
+            color: Color { r: 0.90, g: 0.90, b: 0.90, a: 1.0 },
+            size: iced::Pixels(FONT_SIZE),
+            ..Default::default()
+        });
+
+        vec![frame.into_geometry()]
+    }
+}

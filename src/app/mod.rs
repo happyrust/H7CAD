@@ -49,6 +49,8 @@ pub(super) struct H7CAD {
     polar_increment_deg: f32,
     /// Show grid lines in the viewport (F7).
     show_grid: bool,
+    /// Dynamic input overlay (F12): show coordinate tooltip near cursor.
+    dyn_input: bool,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
     /// Last point committed by a drawing command — used as ortho/polar base.
@@ -230,6 +232,8 @@ pub enum Message {
     TogglePolar,
     /// Set polar tracking angle increment (right-click POLAR button).
     SetPolarAngle(f32),
+    /// Toggle dynamic input overlay (F12).
+    ToggleDynInput,
     /// Toggle an individual snap mode (from popup row click).
     ToggleSnap(crate::snap::SnapType),
     /// Open / close the OSNAP popup (▾ arrow click).
@@ -450,6 +454,7 @@ impl H7CAD {
             polar_mode: false,
             polar_increment_deg: 45.0,
             show_grid: false,
+            dyn_input: true,
             show_ucs_icon: true,
             last_point: None,
             layer_window: None,

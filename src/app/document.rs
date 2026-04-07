@@ -8,6 +8,7 @@ use acadrust::{CadDocument, Handle};
 use acadrust::tables::Ucs;
 use crate::linetypes;
 use std::path::PathBuf;
+use iced;
 
 // ── Per-document tab state ─────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ pub(super) struct DocumentTab {
     pub(super) wireframe: bool,
     pub(super) visual_style: String,
     pub(super) last_cursor_world: glam::Vec3,
+    pub(super) last_cursor_screen: iced::Point,
     pub(super) history: HistoryState,
     pub(super) active_layer: String,
     /// Currently active UCS. `None` means WCS (identity transform).
@@ -57,6 +59,7 @@ impl DocumentTab {
             wireframe: false,
             visual_style: "Shaded".into(),
             last_cursor_world: glam::Vec3::ZERO,
+            last_cursor_screen: iced::Point::ORIGIN,
             history: HistoryState::default(),
             active_layer: "0".to_string(),
             active_ucs: None,

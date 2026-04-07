@@ -197,7 +197,7 @@ Underlay (PDF/DWF/DGN)
 | Named UCS kaydetme | ⬜ |
 | VPORTS (viewport bölme) | ⬜ |
 | Nesne snap izleme (Object Snap Tracking) | ⬜ |
-| Dynamic Input overlay | ⬜ |
+| Dynamic Input overlay | ✅ F12 toggle, absolute XY + relative dist/angle |
 
 ---
 
