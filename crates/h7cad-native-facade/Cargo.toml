@@ -1,0 +1,12 @@
+[package]
+name = "h7cad-native-facade"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+h7cad-native-dwg = { path = "../h7cad-native-dwg" }
+h7cad-native-dxf = { path = "../h7cad-native-dxf" }
+h7cad-native-model = { path = "../h7cad-native-model" }
+
+[lib]
+path = "src/lib.rs"

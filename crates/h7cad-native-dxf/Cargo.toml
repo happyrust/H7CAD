@@ -1,0 +1,10 @@
+[package]
+name = "h7cad-native-dxf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+h7cad-native-model = { path = "../h7cad-native-model" }
+
+[lib]
+path = "src/lib.rs"

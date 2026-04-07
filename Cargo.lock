@@ -1933,6 +1933,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "h7cad-native-builder"
+version = "0.1.0"
+dependencies = [
+ "h7cad-native-model",
+]
+
+[[package]]
+name = "h7cad-native-dwg"
+version = "0.1.0"
+dependencies = [
+ "h7cad-native-model",
+]
+
+[[package]]
+name = "h7cad-native-dxf"
+version = "0.1.0"
+dependencies = [
+ "h7cad-native-model",
+]
+
+[[package]]
+name = "h7cad-native-facade"
+version = "0.1.0"
+dependencies = [
+ "h7cad-native-dwg",
+ "h7cad-native-dxf",
+ "h7cad-native-model",
+]
+
+[[package]]
+name = "h7cad-native-model"
+version = "0.1.0"
+
+[[package]]
+name = "h7cad-native-testkit"
+version = "0.1.0"
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
