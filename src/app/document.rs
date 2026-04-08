@@ -4,6 +4,7 @@ use crate::command::CadCommand;
 use crate::snap::SnapResult;
 use crate::scene::grip::GripEdit;
 use crate::scene::GripDef;
+use crate::modules::home::modify::refedit::RefEditSession;
 use acadrust::{CadDocument, Handle};
 use acadrust::tables::Ucs;
 use crate::linetypes;
@@ -37,6 +38,8 @@ pub(super) struct DocumentTab {
     pub(super) bg_color: Option<[f32; 4]>,
     /// Custom paper-space background color.  `None` = default off-white grey.
     pub(super) paper_bg_color: Option<[f32; 4]>,
+    /// Active REFEDIT session, if any.
+    pub(super) refedit_session: Option<RefEditSession>,
 }
 
 impl DocumentTab {
@@ -65,6 +68,7 @@ impl DocumentTab {
             active_ucs: None,
             bg_color: None,
             paper_bg_color: None,
+            refedit_session: None,
         }
     }
 

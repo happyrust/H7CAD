@@ -18,4 +18,5 @@ pub mod stretch;
 pub mod translate;
 pub mod spline_ops;
 pub mod splinedit;
+pub mod refedit;
 pub mod trim;

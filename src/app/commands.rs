@@ -1472,6 +1472,223 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
+            // ── REFEDIT — in-place block editing ─────────────────────────────
+            "REFEDIT" => {
+                use crate::modules::home::modify::refedit::RefEditPickCommand;
+                // If a session is already active, tell the user.
+                if self.tabs[i].refedit_session.is_some() {
+                    self.command_line.push_error(
+                        "REFEDIT: a session is already active. Use REFCLOSE first."
+                    );
+                } else {
+                    // Check if a single INSERT is already selected.
+                    let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
+                    if selected.len() == 1 {
+                        if let Some(acadrust::EntityType::Insert(_)) = selected.first().map(|(_, e)| e) {
+                            let handle = selected[0].0;
+                            // Skip pick phase — jump straight to begin.
+                            let _ = self.dispatch_command(&format!("REFEDIT_BEGIN:{}", handle.value()));
+                            return Task::none();
+                        }
+                    }
+                    let cmd_obj = RefEditPickCommand::new();
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                }
+            }
+
+            cmd if cmd.starts_with("REFEDIT_BEGIN:") => {
+                use crate::modules::home::modify::refedit::{RefEditSession, apply_insert_transform};
+                use acadrust::Handle;
+
+                let handle_u64: u64 = cmd["REFEDIT_BEGIN:".len()..]
+                    .parse().unwrap_or(0);
+                let insert_handle = Handle::new(handle_u64);
+
+                // Get INSERT entity.
+                let insert = match self.tabs[i].scene.document.get_entity(insert_handle) {
+                    Some(acadrust::EntityType::Insert(ins)) => ins.clone(),
+                    _ => {
+                        self.command_line.push_error("REFEDIT: selected object is not an INSERT.");
+                        return Task::none();
+                    }
+                };
+
+                // Validate: non-uniform scale is not supported.
+                let sx = insert.x_scale();
+                let sy = insert.y_scale();
+                let sz = insert.z_scale();
+                if (sx - sy).abs() > 1e-6 || (sx - sz).abs() > 1e-6 {
+                    self.command_line.push_error(
+                        "REFEDIT: non-uniform scale inserts are not supported."
+                    );
+                    return Task::none();
+                }
+
+                // Find the block record.
+                let br_handle = match self.tabs[i].scene.document.block_records.get(&insert.block_name) {
+                    Some(br) => br.handle,
+                    None => {
+                        self.command_line.push_error(&format!(
+                            "REFEDIT: block \"{}\" not found.", insert.block_name
+                        ));
+                        return Task::none();
+                    }
+                };
+
+                // Collect block-local entities (skip structural Block/BlockEnd/AttDef).
+                let block_entities: Vec<_> = {
+                    let br = self.tabs[i].scene.document.block_records.get(&insert.block_name).unwrap();
+                    br.entity_handles
+                        .iter()
+                        .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
+                        .filter(|e| !matches!(e,
+                            acadrust::EntityType::Block(_) |
+                            acadrust::EntityType::BlockEnd(_) |
+                            acadrust::EntityType::AttributeDefinition(_)
+                        ))
+                        .collect()
+                };
+
+                if block_entities.is_empty() {
+                    self.command_line.push_error("REFEDIT: block is empty.");
+                    return Task::none();
+                }
+
+                let session = RefEditSession {
+                    insert_handle,
+                    block_name: insert.block_name.clone(),
+                    br_handle,
+                    temp_handles: vec![],
+                    insert_x: insert.insert_point.x,
+                    insert_y: insert.insert_point.y,
+                    insert_z: insert.insert_point.z,
+                    rotation_deg: insert.rotation.to_degrees(),
+                    scale: sx,
+                };
+
+                self.push_undo_snapshot(i, "REFEDIT");
+                self.tabs[i].refedit_session = Some(session.clone());
+
+                // Add block entities to model space with INSERT transform applied.
+                let mut temp_handles = Vec::new();
+                for mut entity in block_entities {
+                    apply_insert_transform(&mut entity, &session);
+                    entity.common_mut().handle = acadrust::Handle::NULL;
+                    entity.common_mut().owner_handle = acadrust::Handle::NULL;
+                    let h = self.tabs[i].scene.add_entity(entity);
+                    temp_handles.push(h);
+                }
+                self.tabs[i].refedit_session.as_mut().unwrap().temp_handles = temp_handles.clone();
+
+                // Select the temp entities so user can see what they're editing.
+                self.tabs[i].scene.deselect_all();
+                for h in &temp_handles {
+                    self.tabs[i].scene.select_entity(*h, false);
+                }
+                self.tabs[i].dirty = true;
+
+                self.command_line.push_info(&format!(
+                    "REFEDIT: Editing block \"{}\". Use REFCLOSE when done.",
+                    insert.block_name
+                ));
+                use crate::modules::home::modify::refedit::RefCloseCommand;
+                let cmd_obj = RefCloseCommand::new();
+                self.command_line.push_info(&cmd_obj.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            }
+
+            "REFCLOSE" => {
+                if self.tabs[i].refedit_session.is_some() {
+                    use crate::modules::home::modify::refedit::RefCloseCommand;
+                    let cmd_obj = RefCloseCommand::new();
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                } else {
+                    self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                }
+            }
+
+            "REFCLOSE_SAVE" => {
+                use crate::modules::home::modify::refedit::apply_insert_inverse_transform;
+                use crate::modules::home::modify::explode::normalize_entity_for_block;
+
+                let session = match self.tabs[i].refedit_session.take() {
+                    Some(s) => s,
+                    None => {
+                        self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                        return Task::none();
+                    }
+                };
+
+                self.push_undo_snapshot(i, "REFCLOSE");
+
+                // Collect the edited temp entities.
+                let mut new_entities: Vec<acadrust::EntityType> = session.temp_handles
+                    .iter()
+                    .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
+                    .collect();
+
+                // Remove temp entities from model space.
+                self.tabs[i].scene.erase_entities(&session.temp_handles);
+
+                // Apply inverse INSERT transform → block-local coordinates.
+                let new_entities: Vec<_> = new_entities
+                    .into_iter()
+                    .map(|mut entity| {
+                        apply_insert_inverse_transform(&mut entity, &session);
+                        let mut entity = normalize_entity_for_block(entity);
+                        entity.common_mut().handle = acadrust::Handle::NULL;
+                        entity.common_mut().owner_handle = session.br_handle;
+                        entity
+                    })
+                    .collect();
+
+                // Remove old block entities from the document.
+                let old_handles: Vec<_> = match self.tabs[i].scene.document
+                    .block_records.get(&session.block_name)
+                {
+                    Some(br) => br.entity_handles.clone(),
+                    None => vec![],
+                };
+                for h in &old_handles {
+                    self.tabs[i].scene.document.remove_entity(*h);
+                }
+                // Flush the entity_handles list from the block record.
+                if let Some(br) = self.tabs[i].scene.document
+                    .block_records.get_mut(&session.block_name)
+                {
+                    br.entity_handles.clear();
+                }
+
+                // Add the new block entities.
+                for entity in new_entities {
+                    let _ = self.tabs[i].scene.document.add_entity(entity);
+                }
+
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(&format!(
+                    "REFCLOSE: Block \"{}\" saved. All references updated.",
+                    session.block_name
+                ));
+                // Rebuild hatch/image/mesh caches since block content changed.
+                self.tabs[i].scene.rebuild_derived_caches();
+            }
+
+            "REFCLOSE_DISCARD" => {
+                let session = match self.tabs[i].refedit_session.take() {
+                    Some(s) => s,
+                    None => {
+                        self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                        return Task::none();
+                    }
+                };
+                // Remove temp entities without modifying the block.
+                self.tabs[i].scene.erase_entities(&session.temp_handles);
+                self.tabs[i].scene.deselect_all();
+                self.command_line.push_output("REFCLOSE: Changes discarded.");
+            }
+
             "ALIGN"|"AL" => {
                 use crate::modules::home::modify::align::AlignCommand;
                 let cmd = AlignCommand::new();

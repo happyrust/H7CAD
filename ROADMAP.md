@@ -129,7 +129,7 @@ Underlay (PDF/DWF/DGN)
 | HATCHEDIT | ✅ | — |
 | ATTEDIT | ✅ Interactive tag-by-tag value editing | — |
 | DDEDIT (çift tık metin) | ✅ | — |
-| REFEDIT | ⬜ | Block in-place düzenleme |
+| REFEDIT | ✅ | Block in-place düzenleme |
 | DIVIDE (DIV) | ✅ | — |
 | MEASURE (ME) | ✅ | — |
 
@@ -225,7 +225,7 @@ Underlay (PDF/DWF/DGN)
 | 3D Sphere primitive | ✅ |
 | 3D Cylinder primitive | ✅ |
 | OBJ dosyası içe aktarma | ✅ |
-| REFEDIT (block yerinde düzenleme) | ⬜ |
+| REFEDIT (block yerinde düzenleme) | ✅ |
 | WBLOCK (bloğu dış dosyaya yaz) | ✅ |
 | Attributeli INSERT akışı (ATTREQ) | ✅ |
 

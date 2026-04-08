@@ -1600,6 +1600,14 @@ impl Scene {
         }
     }
 
+    /// Rebuild hatch / image / mesh caches after the document is modified
+    /// outside the normal `add_entity` path (e.g. REFCLOSE SAVE).
+    pub fn rebuild_derived_caches(&mut self) {
+        self.populate_hatches_from_document();
+        self.populate_images_from_document();
+        self.populate_meshes_from_document();
+    }
+
     /// Build a solid-fill HatchModel for a DXF Solid entity.
     /// DXF SOLID corners are in "Z-order": p0-p1 top, p2-p3 bottom.
     /// Visual quad is p0→p1→p3→p2 (closed).
