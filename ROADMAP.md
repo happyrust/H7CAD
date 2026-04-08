@@ -279,7 +279,7 @@ Underlay (PDF/DWF/DGN)
 | Sağ tık bağlam menüsü | ✅ |
 | Araç çubuğu özelleştirme | ⬜ |
 | Tema / Renk şeması seçimi | ✅ |
-| Klavye kısayol düzenleyici | ⬜ |
+| Klavye kısayol düzenleyici | ✅ |
 | Komut geçmişi gezinme (↑↓) | ✅ |
 
 ---

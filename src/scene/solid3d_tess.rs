@@ -18,7 +18,7 @@ use acadrust::entities::acis::{
     SatPointer, SatSphereSurface, SatTorusSurface, SatVertex,
 };
 use acadrust::entities::acis::types::Sense;
-use acadrust::entities::Solid3D;
+use acadrust::entities::{Body, Region, Solid3D};
 
 use crate::scene::mesh_model::MeshModel;
 
@@ -30,32 +30,24 @@ const GRID_V: usize = 16;
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-/// Tessellate a `Solid3D` entity into a GPU-ready `MeshModel`.
-///
-/// Returns `None` when the entity has no parseable SAT data or produces no
-/// triangles (e.g. the solid uses only unsupported surface types).
-pub fn tessellate_solid3d(solid: &Solid3D, color: [f32; 4]) -> Option<MeshModel> {
-    let sat = solid.parse_sat()?;
-
+/// Tessellate a SAT document into mesh buffers — shared by all ACIS entities.
+fn tessellate_sat(sat: &SatDocument, name: String, color: [f32; 4]) -> Option<MeshModel> {
     let mut verts: Vec<[f32; 3]> = Vec::new();
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
     for face in sat.faces() {
         let surf_ptr = face.surface();
-        let Some(surf_rec) = sat.resolve(surf_ptr) else {
-            continue;
-        };
-
+        let Some(surf_rec) = sat.resolve(surf_ptr) else { continue };
         match surf_rec.entity_type.as_str() {
             "plane-surface" => {
                 if let Some(plane) = SatPlaneSurface::from_record(surf_rec) {
-                    tess_plane_face(&sat, &face, &plane, &mut verts, &mut normals, &mut indices);
+                    tess_plane_face(sat, &face, &plane, &mut verts, &mut normals, &mut indices);
                 }
             }
             "cone-surface" => {
                 if let Some(cone) = SatConeSurface::from_record(surf_rec) {
-                    tess_cone_face(&sat, &face, &cone, &mut verts, &mut normals, &mut indices);
+                    tess_cone_face(sat, &face, &cone, &mut verts, &mut normals, &mut indices);
                 }
             }
             "sphere-surface" => {
@@ -71,19 +63,32 @@ pub fn tessellate_solid3d(solid: &Solid3D, color: [f32; 4]) -> Option<MeshModel>
             _ => {}
         }
     }
+    if indices.is_empty() { return None; }
+    Some(MeshModel { name, verts, normals, indices, color, selected: false })
+}
 
-    if indices.is_empty() {
-        return None;
-    }
+/// Tessellate a `Region` entity (2D planar ACIS body) into a `MeshModel`.
+pub fn tessellate_region(region: &Region, color: [f32; 4]) -> Option<MeshModel> {
+    let sat = region.parse_sat()?;
+    let name = region.common.handle.value().to_string();
+    tessellate_sat(&sat, name, color)
+}
 
-    Some(MeshModel {
-        name: solid.common.handle.value().to_string(),
-        verts,
-        normals,
-        indices,
-        color,
-        selected: false,
-    })
+/// Tessellate a `Body` entity (3D ACIS body) into a `MeshModel`.
+pub fn tessellate_body(body: &Body, color: [f32; 4]) -> Option<MeshModel> {
+    let sat = body.parse_sat()?;
+    let name = body.common.handle.value().to_string();
+    tessellate_sat(&sat, name, color)
+}
+
+/// Tessellate a `Solid3D` entity into a GPU-ready `MeshModel`.
+///
+/// Returns `None` when the entity has no parseable SAT data or produces no
+/// triangles (e.g. the solid uses only unsupported surface types).
+pub fn tessellate_solid3d(solid: &Solid3D, color: [f32; 4]) -> Option<MeshModel> {
+    let sat = solid.parse_sat()?;
+    let name = solid.common.handle.value().to_string();
+    tessellate_sat(&sat, name, color)
 }
 
 // ── Topology helpers ──────────────────────────────────────────────────────────

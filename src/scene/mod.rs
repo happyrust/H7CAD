@@ -1094,11 +1094,20 @@ impl Scene {
         } else {
             None
         };
-        let mesh_seed = if let EntityType::Solid3D(s3d) = &entity {
-            let color = self.render_style(&entity).0;
-            solid3d_tess::tessellate_solid3d(s3d, color)
-        } else {
-            None
+        let mesh_seed = match &entity {
+            EntityType::Solid3D(s3d) => {
+                let color = self.render_style(&entity).0;
+                solid3d_tess::tessellate_solid3d(s3d, color)
+            }
+            EntityType::Region(r) => {
+                let color = self.render_style(&entity).0;
+                solid3d_tess::tessellate_region(r, color)
+            }
+            EntityType::Body(b) => {
+                let color = self.render_style(&entity).0;
+                solid3d_tess::tessellate_body(b, color)
+            }
+            _ => None,
         };
 
         // Auto-create an ImageDefinition object for new RasterImage entities
@@ -1605,25 +1614,30 @@ impl Scene {
     /// `Solid3D` entity is represented in the mesh cache.
     pub fn populate_meshes_from_document(&mut self) {
         self.meshes.clear();
-        let entries: Vec<(Handle, Solid3D)> = self
+        // Collect all ACIS-bearing entities: Solid3D, Region, Body.
+        let entries: Vec<(Handle, EntityType)> = self
             .document
             .entities()
-            .filter_map(|e| {
-                if let EntityType::Solid3D(s) = e {
-                    Some((s.common.handle, s.clone()))
-                } else {
-                    None
-                }
+            .filter_map(|e| match e {
+                EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) =>
+                    Some((e.common().handle, e.clone())),
+                _ => None,
             })
             .collect();
-        for (handle, solid) in entries {
+        for (handle, entity) in entries {
             let color = if let Some(e) = self.document.get_entity(handle) {
                 tessellate::aci_to_rgba(&e.common().color)
             } else {
                 [0.7, 0.7, 0.7, 1.0]
             };
-            if let Some(model) = solid3d_tess::tessellate_solid3d(&solid, color) {
-                self.meshes.insert(handle, model);
+            let model = match &entity {
+                EntityType::Solid3D(s) => solid3d_tess::tessellate_solid3d(s, color),
+                EntityType::Region(r)  => solid3d_tess::tessellate_region(r, color),
+                EntityType::Body(b)    => solid3d_tess::tessellate_body(b, color),
+                _ => None,
+            };
+            if let Some(m) = model {
+                self.meshes.insert(handle, m);
             }
         }
     }
