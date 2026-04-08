@@ -35,7 +35,7 @@ pub use wire_model::WireModel;
 
 use crate::command::EntityTransform;
 use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid};
-use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert, Solid3D};
+use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
 use acadrust::objects::ObjectType;
 use acadrust::types::Vector2;
 use acadrust::{CadDocument, EntityType, Handle, TableEntry};

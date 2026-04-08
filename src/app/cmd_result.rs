@@ -1002,7 +1002,7 @@ impl H7CAD {
                 use crate::scene::truck_tess;
                 use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use truck_modeling::builder;
-                use truck_modeling::{Point3, Rad, Vector3 as TruckVec3};
+                use truck_modeling::Vector3 as TruckVec3;
 
                 let profile_ent = self.tabs[i].scene.document.get_entity(profile_handle).cloned();
                 let path_ent    = self.tabs[i].scene.document.get_entity(path_handle).cloned();

@@ -23,7 +23,8 @@ use crate::command::{CadCommand, CmdResult};
 /// Active REFEDIT session.  Lives in `DocumentTab::refedit_session`.
 #[derive(Debug, Clone)]
 pub struct RefEditSession {
-    /// The INSERT entity being edited.
+    /// The INSERT entity being edited (kept for future REFCLOSE DISCARD).
+    #[allow(dead_code)]
     pub insert_handle: Handle,
     /// Name of the block being edited.
     pub block_name: String,

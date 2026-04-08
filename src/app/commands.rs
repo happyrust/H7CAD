@@ -1624,7 +1624,7 @@ impl H7CAD {
                 self.push_undo_snapshot(i, "REFCLOSE");
 
                 // Collect the edited temp entities.
-                let mut new_entities: Vec<acadrust::EntityType> = session.temp_handles
+                let new_entities: Vec<acadrust::EntityType> = session.temp_handles
                     .iter()
                     .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
                     .collect();
