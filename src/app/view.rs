@@ -311,6 +311,21 @@ impl H7CAD {
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        // ── Layout Manager Panel ─────────────────────────────────────────
+        let layout_manager_layer: Element<'_, Message> = if self.layout_manager_open {
+            let i = self.active_tab;
+            let layouts = self.tabs[i].scene.layout_names();
+            let current = self.tabs[i].scene.current_layout.clone();
+            layout_manager_overlay(
+                layouts,
+                &self.layout_manager_selected,
+                &self.layout_manager_rename_buf,
+                current,
+            )
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+
         // ── Plot Style Panel ──────────────────────────────────────────────
         let plotstyle_layer: Element<'_, Message> = if self.plotstyle_panel_open {
             plotstyle_panel_overlay(
@@ -352,7 +367,7 @@ impl H7CAD {
             }
         };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, plotstyle_layer, dimstyle_layer, viewport_ctx_layer].into()
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, plotstyle_layer, layout_manager_layer, dimstyle_layer, viewport_ctx_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -1975,6 +1990,204 @@ fn plotstyle_panel_overlay<'a>(
             ..Default::default()
         })
     ).on_press(Message::PlotStylePanelClose);
+
+    let positioned = container(panel)
+        .width(Fill).height(Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    stack![catcher, positioned].into()
+}
+
+// ── Layout Manager Panel ───────────────────────────────────────────────────
+
+fn layout_manager_overlay<'a>(
+    layouts: Vec<String>,
+    selected: &'a str,
+    rename_buf: &'a str,
+    current: String,
+) -> Element<'a, Message> {
+    use iced::Length::Fill;
+    use iced::Color;
+
+    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
+    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
+    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
+    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
+    const WARN_COL:  Color = Color { r: 0.80, g: 0.35, b: 0.25, a: 1.0 };
+
+    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
+        background: Some(Background::Color(match (accent, status) {
+            (true,  button::Status::Hovered | button::Status::Pressed) => Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
+            (false, button::Status::Hovered | button::Status::Pressed) => Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
+            (true, _) => ACCENT,
+            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+        })),
+        text_color: TEXT_COL,
+        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        ..Default::default()
+    };
+
+    let field_style = |_: &Theme, _: text_input::Status| text_input::Style {
+        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
+        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+        icon: TEXT_COL,
+        placeholder: DIM_COL,
+        value: TEXT_COL,
+        selection: ACCENT,
+    };
+
+    // Layout list
+    let list_items: Vec<Element<'_, Message>> = layouts.iter().map(|name| {
+        let is_sel = name.as_str() == selected;
+        let is_cur = name.as_str() == current.as_str();
+        let label = if is_cur { format!("{} ◀", name) } else { name.clone() };
+        button(text(label).size(12).color(TEXT_COL))
+            .on_press(Message::LayoutManagerSelect(name.clone()))
+            .style(move |_: &Theme, st| button::Style {
+                background: Some(Background::Color(match (is_sel, st) {
+                    (true, _) => ACTIVE_BG,
+                    (false, button::Status::Hovered | button::Status::Pressed) =>
+                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT_COL,
+                ..Default::default()
+            })
+            .padding([5, 10])
+            .width(Fill)
+            .into()
+    }).collect();
+
+    let list_panel = container(
+        column(list_items).spacing(2)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
+        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        ..Default::default()
+    })
+    .padding(4)
+    .width(200)
+    .height(260);
+
+    let is_model = selected == "Model";
+
+    let right_panel = column![
+        text(if is_model { "Model Space" } else { "Paper Space Layout" })
+            .size(12).color(TEXT_COL),
+        Space::new().height(4),
+        row![
+            text("Name:").size(11).color(DIM_COL).width(70),
+            text(selected).size(11).color(TEXT_COL),
+        ].spacing(8).align_y(iced::Center),
+        row![
+            text("Status:").size(11).color(DIM_COL).width(70),
+            text(if selected == current.as_str() { "Active ◀" } else { "Inactive" })
+                .size(11)
+                .color(if selected == current.as_str() { ACCENT } else { DIM_COL }),
+        ].spacing(8).align_y(iced::Center),
+        Space::new().height(12),
+        text("Rename:").size(11).color(DIM_COL),
+        row![
+            text_input("New name…", rename_buf)
+                .on_input(Message::LayoutManagerRenameBuf)
+                .on_submit(Message::LayoutManagerRenameCommit)
+                .style(field_style)
+                .size(11)
+                .padding([4, 8]),
+            button(text("OK").size(11))
+                .on_press(Message::LayoutManagerRenameCommit)
+                .style(btn_style(true))
+                .padding([4, 8]),
+        ].spacing(6).align_y(iced::Center),
+        Space::new().height(Fill),
+        row![
+            button(text("◀").size(11))
+                .on_press(Message::LayoutManagerMoveLeft)
+                .style(btn_style(false))
+                .padding([4, 8]),
+            button(text("▶").size(11))
+                .on_press(Message::LayoutManagerMoveRight)
+                .style(btn_style(false))
+                .padding([4, 8]),
+            Space::new().width(Fill),
+            button(text("Set Current").size(11))
+                .on_press(Message::LayoutManagerSetCurrent)
+                .style(btn_style(true))
+                .padding([5, 10]),
+        ].spacing(6).align_y(iced::Center),
+    ]
+    .spacing(6)
+    .width(240)
+    .height(260);
+
+    let panel = container(
+        column![
+            row![
+                text("Layout Manager").size(13).color(TEXT_COL),
+                Space::new().width(Fill),
+                button(text("✕").size(12).color(DIM_COL))
+                    .on_press(Message::LayoutManagerClose)
+                    .style(|_: &Theme, _| button::Style {
+                        background: Some(Background::Color(Color::TRANSPARENT)),
+                        text_color: DIM_COL,
+                        ..Default::default()
+                    })
+                    .padding([2, 6]),
+            ].align_y(iced::Center),
+            Space::new().height(8),
+            row![
+                list_panel,
+                Space::new().width(12),
+                right_panel,
+            ].align_y(iced::alignment::Vertical::Top),
+            Space::new().height(8),
+            row![
+                button(text("New Layout").size(11))
+                    .on_press(Message::LayoutManagerNew)
+                    .style(btn_style(false))
+                    .padding([5, 10]),
+                button(text("Delete").size(11))
+                    .on_press(Message::LayoutManagerDelete)
+                    .style(move |_: &Theme, st| button::Style {
+                        background: Some(Background::Color(match st {
+                            button::Status::Hovered | button::Status::Pressed =>
+                                Color { r: 0.60, g: 0.20, b: 0.18, a: 1.0 },
+                            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+                        })),
+                        text_color: if is_model { DIM_COL } else { WARN_COL },
+                        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    })
+                    .padding([5, 10]),
+                Space::new().width(Fill),
+                button(text("Close").size(11))
+                    .on_press(Message::LayoutManagerClose)
+                    .style(btn_style(false))
+                    .padding([5, 10]),
+            ].spacing(8),
+        ]
+        .spacing(6)
+        .padding(16)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(PANEL_BG)),
+        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
+        ..Default::default()
+    })
+    .width(490)
+    .height(370);
+
+    let catcher = mouse_area(container(Space::new().width(Fill).height(Fill))
+        .width(Fill).height(Fill)
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.45 })),
+            ..Default::default()
+        })
+    ).on_press(Message::LayoutManagerClose);
 
     let positioned = container(panel)
         .width(Fill).height(Fill)

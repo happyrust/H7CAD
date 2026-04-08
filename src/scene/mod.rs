@@ -1057,6 +1057,26 @@ impl Scene {
         true
     }
 
+    /// Swap the `tab_order` of two paper layouts so they appear in swapped order.
+    pub fn swap_layout_order(&mut self, name_a: &str, name_b: &str) {
+        let mut order_a: Option<i16> = None;
+        let mut order_b: Option<i16> = None;
+        for obj in self.document.objects.values() {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == name_a { order_a = Some(l.tab_order); }
+                if l.name == name_b { order_b = Some(l.tab_order); }
+            }
+        }
+        if let (Some(oa), Some(ob)) = (order_a, order_b) {
+            for obj in self.document.objects.values_mut() {
+                if let ObjectType::Layout(l) = obj {
+                    if l.name == name_a { l.tab_order = ob; }
+                    else if l.name == name_b { l.tab_order = oa; }
+                }
+            }
+        }
+    }
+
     // ── Entity management ─────────────────────────────────────────────────
 
     pub fn add_entity(&mut self, mut entity: EntityType) -> Handle {

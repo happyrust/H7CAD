@@ -178,7 +178,7 @@ Underlay (PDF/DWF/DGN)
 | MLSTYLE | ✅ |
 | TABLESTYLE | ✅ |
 | PLOTSTYLE (CTB/STB) | ✅ |
-| Plot style arayüzü (GUI) | ⬜ |
+| Plot style arayüzü (GUI) | ✅ |
 
 ---
 

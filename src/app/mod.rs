@@ -112,6 +112,11 @@ pub(super) struct H7CAD {
     /// Edit buffer for oblique angle (degrees).
     textstyle_oblique: String,
 
+    // ── Layout Manager Panel ──────────────────────────────────────────────
+    layout_manager_open: bool,
+    layout_manager_selected: String,
+    layout_manager_rename_buf: String,
+
     // ── Plot Style Panel ──────────────────────────────────────────────────
     plotstyle_panel_open: bool,
     /// Selected ACI index in the panel (1-255).
@@ -338,6 +343,17 @@ pub enum Message {
     LayoutContextMenu(String),
     /// Close the layout context menu.
     LayoutContextMenuClose,
+    // ── Layout Manager Panel ────────────────────────────────────────────
+    LayoutManagerOpen,
+    LayoutManagerClose,
+    LayoutManagerSelect(String),
+    LayoutManagerRenameBuf(String),
+    LayoutManagerRenameCommit,
+    LayoutManagerNew,
+    LayoutManagerDelete,
+    LayoutManagerMoveLeft,
+    LayoutManagerMoveRight,
+    LayoutManagerSetCurrent,
     /// Close the viewport right-click context menu without performing any action.
     ViewportContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
@@ -514,6 +530,10 @@ impl H7CAD {
             page_setup_scale: "Fit".to_string(),
             // Plot style
             active_plot_style: None,
+            // Layout Manager
+            layout_manager_open: false,
+            layout_manager_selected: "Model".to_string(),
+            layout_manager_rename_buf: String::new(),
             plotstyle_panel_open: false,
             plotstyle_panel_aci: 1,
             ps_color_buf: String::new(),

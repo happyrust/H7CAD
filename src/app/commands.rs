@@ -1972,6 +1972,11 @@ impl H7CAD {
                 self.command_line.push_info("Opening Patreon page...");
             }
 
+            // ── Layout Manager GUI ─────────────────────────────────────────
+            "LAYOUTMANAGER"|"LAYOUTPANEL" => {
+                return Task::done(Message::LayoutManagerOpen);
+            }
+
             // ── Layout / viewport ──────────────────────────────────────────
             "MVIEW"|"MV" => {
                 if self.tabs[i].scene.current_layout == "Model" {

@@ -2238,6 +2238,133 @@ impl H7CAD {
                 Task::none()
             }
 
+            // ── Layout Manager Panel ──────────────────────────────────────────
+            Message::LayoutManagerOpen => {
+                let i = self.active_tab;
+                let current = self.tabs[i].scene.current_layout.clone();
+                self.layout_manager_selected = current.clone();
+                self.layout_manager_rename_buf = if current == "Model" {
+                    String::new()
+                } else {
+                    current
+                };
+                self.layout_manager_open = true;
+                Task::none()
+            }
+            Message::LayoutManagerClose => {
+                self.layout_manager_open = false;
+                Task::none()
+            }
+            Message::LayoutManagerSelect(name) => {
+                self.layout_manager_rename_buf = if name == "Model" { String::new() } else { name.clone() };
+                self.layout_manager_selected = name;
+                Task::none()
+            }
+            Message::LayoutManagerRenameBuf(s) => {
+                self.layout_manager_rename_buf = s;
+                Task::none()
+            }
+            Message::LayoutManagerRenameCommit => {
+                let i = self.active_tab;
+                let old_name = self.layout_manager_selected.clone();
+                let new_name = self.layout_manager_rename_buf.trim().to_string();
+                if old_name == "Model" {
+                    self.command_line.push_error("Cannot rename the Model layout.");
+                } else if new_name.is_empty() {
+                    self.command_line.push_error("Layout name cannot be empty.");
+                } else if new_name == old_name {
+                    // no-op
+                } else {
+                    self.push_undo_snapshot(i, "LAYOUT RENAME");
+                    self.tabs[i].scene.rename_layout(&old_name, &new_name);
+                    if self.tabs[i].scene.current_layout == old_name {
+                        self.tabs[i].scene.current_layout = new_name.clone();
+                    }
+                    self.layout_manager_selected = new_name.clone();
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("Layout renamed: '{old_name}' → '{new_name}'"));
+                }
+                Task::none()
+            }
+            Message::LayoutManagerNew => {
+                let i = self.active_tab;
+                let existing = self.tabs[i].scene.layout_names();
+                let n = (1usize..).find(|n| !existing.contains(&format!("Layout{n}"))).unwrap_or(1);
+                let name = format!("Layout{n}");
+                self.push_undo_snapshot(i, "LAYOUT NEW");
+                match self.tabs[i].scene.document.add_layout(&name) {
+                    Ok(_) => {
+                        self.tabs[i].dirty = true;
+                        self.layout_manager_selected = name.clone();
+                        self.layout_manager_rename_buf = name.clone();
+                        self.command_line.push_output(&format!("Layout '{name}' created."));
+                    }
+                    Err(e) => self.command_line.push_error(&format!("LAYOUT: {e}")),
+                }
+                Task::none()
+            }
+            Message::LayoutManagerDelete => {
+                let i = self.active_tab;
+                let name = self.layout_manager_selected.clone();
+                if name == "Model" {
+                    self.command_line.push_error("Cannot delete the Model layout.");
+                } else {
+                    self.push_undo_snapshot(i, "LAYOUT DELETE");
+                    self.tabs[i].scene.delete_layout(&name);
+                    self.tabs[i].dirty = true;
+                    // Switch to Model if active layout was deleted.
+                    if self.tabs[i].scene.current_layout == name {
+                        self.tabs[i].scene.current_layout = "Model".to_string();
+                    }
+                    self.layout_manager_selected = "Model".to_string();
+                    self.layout_manager_rename_buf = String::new();
+                    self.command_line.push_output(&format!("Layout '{name}' deleted."));
+                }
+                Task::none()
+            }
+            Message::LayoutManagerMoveLeft => {
+                let i = self.active_tab;
+                let name = self.layout_manager_selected.clone();
+                if name == "Model" {
+                    return Task::none();
+                }
+                let names = self.tabs[i].scene.layout_names();
+                // Find position among paper layouts only.
+                let paper: Vec<&str> = names.iter().skip(1).map(|s| s.as_str()).collect();
+                if let Some(pos) = paper.iter().position(|&n| n == name) {
+                    if pos > 0 {
+                        self.push_undo_snapshot(i, "LAYOUT REORDER");
+                        self.tabs[i].scene.swap_layout_order(&name, paper[pos - 1]);
+                        self.tabs[i].dirty = true;
+                    }
+                }
+                Task::none()
+            }
+            Message::LayoutManagerMoveRight => {
+                let i = self.active_tab;
+                let name = self.layout_manager_selected.clone();
+                if name == "Model" {
+                    return Task::none();
+                }
+                let names = self.tabs[i].scene.layout_names();
+                let paper: Vec<&str> = names.iter().skip(1).map(|s| s.as_str()).collect();
+                if let Some(pos) = paper.iter().position(|&n| n == name) {
+                    if pos + 1 < paper.len() {
+                        self.push_undo_snapshot(i, "LAYOUT REORDER");
+                        self.tabs[i].scene.swap_layout_order(&name, paper[pos + 1]);
+                        self.tabs[i].dirty = true;
+                    }
+                }
+                Task::none()
+            }
+            Message::LayoutManagerSetCurrent => {
+                let i = self.active_tab;
+                let name = self.layout_manager_selected.clone();
+                self.tabs[i].scene.current_layout = name.clone();
+                self.command_line.push_output(&format!("Switched to layout '{name}'."));
+                Task::none()
+            }
+
             Message::ViewportContextMenuClose => {
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().context_menu = None;
