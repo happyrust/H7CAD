@@ -1,6 +1,6 @@
 # H7CAD — Geliştirme Yol Haritası
 
-> Sürüm: 0.1.3 | Güncelleme: 2026-04-06
+> Sürüm: 0.1.4 | Güncelleme: 2026-04-08
 
 Durum simgeleri: ✅ Tamamlandı · 🔧 Kısmen yapıldı · ⬜ Yapılmadı
 
@@ -17,10 +17,9 @@ Durum simgeleri: ✅ Tamamlandı · 🔧 Kısmen yapıldı · ⬜ Yapılmadı
 | 1.5 | Çoklu sekme (tab) desteği | ✅ |
 | 1.6 | Undo / Redo (snapshot stack) | ✅ |
 | 1.7 | PDF dışa aktarma (CTB/STB plot style) | ✅ |
-| 1.8 | Fiziksel yazıcıya yazdırma | ⬜ |
+| 1.8 | Fiziksel yazıcıya yazdırma | ✅ PRINT komutu — lp/lpr (Linux/macOS), ShellExecute (Windows) |
 | 1.9 | XREF (dış referans) yönetimi | ✅ Auto-resolve on open, XATTACH/XREF/XRELOAD commands |
 | 1.10 | WBLOCK — bloğu dış dosyaya yazma | ✅ Block name or selected entities → DWG/DXF |
-| 1.11 | Serde entegrasyonu (JSON/alternatif I/O) | ⬜ |
 | 1.12 | Bozuk DWG kurtarma (failsafe parse) | ⬜ |
 
 ---
@@ -41,7 +40,7 @@ Durum simgeleri: ✅ Tamamlandı · 🔧 Kısmen yapıldı · ⬜ Yapılmadı
 | 2.10 | ViewCube (3D yönelim küpü) | ✅ |
 | 2.11 | UCS simgesi (XYZ tripod) | ✅ |
 | 2.12 | Solid3D / 3DSOLID tessellation (truck pipeline) | ✅ |
-| 2.13 | Region / Body / Wire / Silhouette entity render | ⬜ |
+| 2.13 | Region / Body / Wire / Silhouette entity render | ✅ Region+Body ACIS tessellation; Wire/Silhouette polyline fallback render |
 | 2.14 | Anti-aliasing / MSAA (4×) | ✅ |
 
 ---
@@ -60,9 +59,10 @@ Underlay (PDF/DWF/DGN)
 | Entity | Durum |
 |--------|-------|
 | Solid3D (3DSOLID) | ✅ ACIS SAT tessellation |
-| Region | ⬜ Tanınmıyor |
-| Body / Wire / Silhouette | ⬜ Tanınmıyor |
-| Ole2Frame | ⬜ Tanınmıyor |
+| Region | ✅ ACIS SAT tessellation |
+| Body | ✅ ACIS SAT tessellation |
+| Wire / Silhouette | ✅ Pre-computed polyline render (from Solid3D.wires / silhouettes) |
+| Ole2Frame | ✅ Bounding rectangle placeholder (X-through-box) |
 
 ### 3.3 XDATA (Genişletilmiş Veri)
 ✅ LIST / SET / CLEAR komutları tam entegre
@@ -195,7 +195,7 @@ Underlay (PDF/DWF/DGN)
 | UCS (WCS↔UCS dönüşüm pipeline) | ✅ |
 | Named Views (VIEW komutu) | ✅ |
 | Named UCS kaydetme | ✅ UCS SAVE/DELETE/LIST |
-| VPORTS (viewport bölme) | ⬜ |
+| VPORTS (viewport bölme) | ✅ VPORTS 2H / 2V / 4 / SINGLE preset konfigürasyonlar |
 | Nesne snap izleme (Object Snap Tracking) | ✅ F11 toggle, dwell-acquire tracking lines |
 | Dynamic Input overlay | ✅ F12 toggle, absolute XY + relative dist/angle |
 
@@ -240,7 +240,7 @@ Underlay (PDF/DWF/DGN)
 | Per-viewport layer visibility | ✅ |
 | Plot ayarları (PlotSettings) | ✅ |
 | Çoklu named layout sekmeleri | ✅ |
-| VPLAYER — viewport katman override | 🔧 Altyapı var |
+| VPLAYER — viewport katman override | ✅ F/T subcommands, freeze/thaw per viewport |
 | Layout Manager arayüzü | ✅ |
 
 ---
@@ -297,18 +297,13 @@ Underlay (PDF/DWF/DGN)
 | SWEEP / LOFT | ✅ |
 | 3D ARRAY | ✅ |
 | STL dışa aktarma (STLOUT) | ✅ |
-| STEP dışa aktarma | ⬜ |
+| STEP dışa aktarma | ✅ STEPOUT/STPOUT/EXPORTSTEP — AP203 ASCII, her üçgen ADVANCED_FACE |
 
 ---
 
 ## Öncelik Sırası (Bir Sonraki Adımlar)
 
-### Yüksek Öncelik
-1. **XREF yönetimi**
-
-### Orta Öncelik
-5. **MASSPROP / DATAEXTRACTION**
-
 ### Düşük Öncelik
-11. Fiziksel yazıcıya yazdırma
-12. Boolean 3D operasyonlar
+1. Bozuk DWG kurtarma (failsafe parse) — acadrust kütüphanesi desteği gerektirir
+2. Boolean 3D operasyonlar (UNION/SUBTRACT/INTERSECT) — truck BREP desteği gerektirir
+3. Araç çubuğu özelleştirme (ribbon öğe gizleme/sıralama)
