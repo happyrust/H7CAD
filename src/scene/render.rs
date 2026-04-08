@@ -132,9 +132,16 @@ impl shader::Primitive for Primitive {
         viewport: &Viewport,
     ) {
         let phys = viewport.physical_size();
-        let size = Size::new(phys.width, phys.height);
-        pipeline.ensure_depth_texture(device, size);
-        pipeline.viewcube.ensure_depth_texture(device, size);
+        let full_size = Size::new(phys.width, phys.height);
+        // MSAA and depth textures are sized to the shader widget's clip bounds,
+        // not the full surface — so the MSAA resolve can't overwrite other widgets.
+        let scale = viewport.scale_factor() as f32;
+        let clip_size = Size::new(
+            (_bounds.width * scale).ceil() as u32,
+            (_bounds.height * scale).ceil() as u32,
+        );
+        pipeline.ensure_depth_texture(device, clip_size);
+        pipeline.viewcube.ensure_depth_texture(device, full_size);
         pipeline.upload_uniforms(queue, &self.uniforms);
         pipeline.upload_hatches(device, &self.hatches);
         pipeline.upload_wipeouts(device, &self.wipeout_hatches);
