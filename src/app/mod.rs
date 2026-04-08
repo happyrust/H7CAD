@@ -112,6 +112,9 @@ pub(super) struct H7CAD {
     /// Edit buffer for oblique angle (degrees).
     textstyle_oblique: String,
 
+    // ── Color Scheme ──────────────────────────────────────────────────────
+    active_theme: Theme,
+
     // ── Layout Manager Panel ──────────────────────────────────────────────
     layout_manager_open: bool,
     layout_manager_selected: String,
@@ -354,6 +357,8 @@ pub enum Message {
     LayoutManagerMoveLeft,
     LayoutManagerMoveRight,
     LayoutManagerSetCurrent,
+    /// Switch the UI color scheme.
+    SetTheme(Theme),
     /// Close the viewport right-click context menu without performing any action.
     ViewportContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
@@ -530,6 +535,8 @@ impl H7CAD {
             page_setup_scale: "Fit".to_string(),
             // Plot style
             active_plot_style: None,
+            // Color scheme (default: dark CAD-style)
+            active_theme: Theme::Dark,
             // Layout Manager
             layout_manager_open: false,
             layout_manager_selected: "Model".to_string(),
@@ -609,6 +616,6 @@ pub fn run() -> iced::Result {
                 "H7CAD".to_string()
             }
         })
-        .theme(Theme::Dark)
+        .theme(|state: &H7CAD, _| state.active_theme.clone())
         .run()
 }

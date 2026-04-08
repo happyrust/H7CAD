@@ -241,7 +241,7 @@ Underlay (PDF/DWF/DGN)
 | Plot ayarları (PlotSettings) | ✅ |
 | Çoklu named layout sekmeleri | ✅ |
 | VPLAYER — viewport katman override | 🔧 Altyapı var |
-| Layout Manager arayüzü | ⬜ |
+| Layout Manager arayüzü | ✅ |
 
 ---
 

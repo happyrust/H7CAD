@@ -2365,6 +2365,11 @@ impl H7CAD {
                 Task::none()
             }
 
+            Message::SetTheme(theme) => {
+                self.active_theme = theme;
+                Task::none()
+            }
+
             Message::ViewportContextMenuClose => {
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().context_menu = None;

@@ -1972,6 +1972,51 @@ impl H7CAD {
                 self.command_line.push_info("Opening Patreon page...");
             }
 
+            // ── Color Scheme / Theme selector ─────────────────────────────
+            cmd if cmd == "COLORSCHEME" || cmd.starts_with("COLORSCHEME ") => {
+                use iced::Theme;
+                let sub = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("").to_uppercase();
+                // Map name to Theme variant.
+                let theme: Option<Theme> = match sub.as_str() {
+                    "DARK"             => Some(Theme::Dark),
+                    "LIGHT"            => Some(Theme::Light),
+                    "DRACULA"          => Some(Theme::Dracula),
+                    "NORD"             => Some(Theme::Nord),
+                    "SOLARIZED_LIGHT" | "SOLARIZEDLIGHT"  => Some(Theme::SolarizedLight),
+                    "SOLARIZED_DARK"  | "SOLARIZEDDARK"   => Some(Theme::SolarizedDark),
+                    "GRUVBOX_LIGHT"   | "GRUVBOXLIGHT"    => Some(Theme::GruvboxLight),
+                    "GRUVBOX_DARK"    | "GRUVBOXDARK"     => Some(Theme::GruvboxDark),
+                    "TOKYONIGHT"      | "TOKYO_NIGHT"     => Some(Theme::TokyoNight),
+                    "TOKYONIGHTSTORM" | "TOKYO_NIGHT_STORM" => Some(Theme::TokyoNightStorm),
+                    "TOKYONIGHTLIGHT" | "TOKYO_NIGHT_LIGHT" => Some(Theme::TokyoNightLight),
+                    "KANAGAWAWAVE"    | "KANAGAWA_WAVE"   => Some(Theme::KanagawaWave),
+                    "KANAGAWADRAGON"  | "KANAGAWA_DRAGON" => Some(Theme::KanagawaDragon),
+                    "KANAGAWALOTUS"   | "KANAGAWA_LOTUS"  => Some(Theme::KanagawaLotus),
+                    "MOONFLY"         => Some(Theme::Moonfly),
+                    "NIGHTFLY"        => Some(Theme::Nightfly),
+                    "OXOCARBON"       => Some(Theme::Oxocarbon),
+                    "FERRA"           => Some(Theme::Ferra),
+                    "" | "LIST" | "?" => {
+                        self.command_line.push_output(
+                            "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
+                             GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
+                             KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA"
+                        );
+                        return Task::none();
+                    }
+                    _ => {
+                        self.command_line.push_error(&format!("COLORSCHEME: unknown theme '{}'. Type COLORSCHEME LIST for options.", sub));
+                        return Task::none();
+                    }
+                };
+                if let Some(t) = theme {
+                    let name = format!("{:?}", t);
+                    self.command_line.push_output(&format!("Color scheme set to '{name}'."));
+                    return Task::done(Message::SetTheme(t));
+                }
+                return Task::none();
+            }
+
             // ── Layout Manager GUI ─────────────────────────────────────────
             "LAYOUTMANAGER"|"LAYOUTPANEL" => {
                 return Task::done(Message::LayoutManagerOpen);
