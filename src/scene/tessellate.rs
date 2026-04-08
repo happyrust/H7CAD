@@ -181,8 +181,12 @@ pub fn tessellate(
             }
 
             TruckObject::Volume(_) => {
-                // Solid3D → handled by tessellate_mesh(), not WireModel.
-                return WireModel::solid(name, vec![], color, selected);
+                // Solid3D / Region / Body → handled by tessellate_mesh().
+                // As a wire fallback, render the pre-computed edge wires
+                // stored in the entity when present (e.g. from SOLVIEW output
+                // or when the SAT kernel cannot parse the ACIS data).
+                let wire_pts = solid_wire_fallback(entity);
+                return WireModel::solid(name, wire_pts, color, selected);
             }
         }
     }
@@ -561,11 +565,70 @@ fn legacy_geometry(entity: &EntityType) -> Geometry {
             }
             (pts, vec![], vec![], vec![])
         }
+        EntityType::Ole2Frame(ole) => {
+            // OLE objects carry a bounding rectangle in model space.
+            // Render a simple X-through-rectangle placeholder.
+            let x0 = ole.upper_left_corner.x as f32;
+            let y0 = ole.lower_right_corner.y as f32;
+            let x1 = ole.lower_right_corner.x as f32;
+            let y1 = ole.upper_left_corner.y as f32;
+            let z  = ole.upper_left_corner.z as f32;
+            if (x1 - x0).abs() < 1e-6 && (y1 - y0).abs() < 1e-6 {
+                // Degenerate / unknown size — show a small cross.
+                let s = 0.5_f32;
+                return (vec![[-s, 0.0, 0.0], [s, 0.0, 0.0]], vec![], vec![], vec![]);
+            }
+            let pts = vec![
+                // Outer rectangle
+                [x0, y0, z], [x1, y0, z], [x1, y0, z], [x1, y1, z],
+                [x1, y1, z], [x0, y1, z], [x0, y1, z], [x0, y0, z],
+                // Diagonal X
+                [x0, y0, z], [x1, y1, z],
+                [f32::NAN, f32::NAN, f32::NAN],
+                [x1, y0, z], [x0, y1, z],
+            ];
+            (pts, vec![], vec![], vec![[x0, y0, z], [x1, y1, z]])
+        }
         _ => {
             let s = 0.5_f32;
             (vec![[-s, 0.0, 0.0], [s, 0.0, 0.0]], vec![], vec![], vec![])
         }
     }
+}
+
+/// Extract pre-computed edge-wire points from Solid3D / Region / Body entities.
+///
+/// AutoCAD stores explicit wire geometry (from SOLVIEW / 3DPLOT) alongside the
+/// ACIS data.  We use this as a visible fallback when the SAT tessellator
+/// produces no mesh (e.g. binary SAB data or unsupported geometry).
+fn solid_wire_fallback(entity: &EntityType) -> Vec<[f32; 3]> {
+    let wires: &[acadrust::entities::Wire] = match entity {
+        EntityType::Solid3D(s) => &s.wires,
+        EntityType::Region(r)  => &r.wires,
+        EntityType::Body(b)    => &b.wires,
+        _ => return vec![],
+    };
+
+    if wires.is_empty() {
+        return vec![];
+    }
+
+    let mut pts: Vec<[f32; 3]> = Vec::new();
+    for wire in wires {
+        if wire.points.len() < 2 {
+            continue;
+        }
+        for (i, v) in wire.points.iter().enumerate() {
+            if i > 0 {
+                // Connect segments: repeat previous point then add current so
+                // the wire renderer draws a continuous polyline per wire.
+            }
+            pts.push([v.x as f32, v.y as f32, v.z as f32]);
+        }
+        // NaN sentinel separates distinct wire segments.
+        pts.push([f32::NAN, f32::NAN, f32::NAN]);
+    }
+    pts
 }
 
 fn dimension_geometry(dim: &Dimension) -> Vec<[f32; 3]> {
