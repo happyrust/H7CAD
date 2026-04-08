@@ -2079,12 +2079,14 @@ impl H7CAD {
                 return Task::done(Message::PspaceCommand);
             }
 
-            // ── VPORTS — list viewports in current layout ─────────────────
-            "VPORTS" => {
+            // ── VPORTS — list or create preset viewport configurations ────
+            cmd if cmd == "VPORTS" || cmd.starts_with("VPORTS ") => {
+                let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
                 let scene = &self.tabs[i].scene;
                 if scene.current_layout == "Model" {
                     self.command_line.push_error("VPORTS: switch to a paper space layout first.");
-                } else {
+                } else if sub.is_empty() {
+                    // ── List existing viewports ──────────────────────────
                     let layout_block = scene.current_layout_block_handle_pub();
                     let viewports: Vec<_> = scene.document.entities()
                         .filter_map(|e| {
@@ -2096,7 +2098,7 @@ impl H7CAD {
                         })
                         .collect();
                     if viewports.is_empty() {
-                        self.command_line.push_info("No viewports in current layout. Use MVIEW to create one.");
+                        self.command_line.push_info("No viewports. Use MVIEW to create one, or VPORTS 2H / 2V / 4 / SINGLE.");
                     } else {
                         self.command_line.push_output(&format!("{} viewport(s) in layout \"{}\":", viewports.len(), scene.current_layout));
                         for (id, center, w, h, scale, is_on, locked) in &viewports {
@@ -2110,6 +2112,126 @@ impl H7CAD {
                                 center.x, center.y
                             ));
                         }
+                    }
+                } else {
+                    // ── Preset viewport layout ───────────────────────────
+                    // Determine paper dimensions from PlotSettings (fallback A4 landscape).
+                    let layout_name = scene.current_layout.clone();
+                    let (paper_w, paper_h) = {
+                        use acadrust::objects::ObjectType;
+                        let mut pw = 297.0_f64;
+                        let mut ph = 210.0_f64;
+                        for (_, obj) in &scene.document.objects {
+                            if let ObjectType::PlotSettings(ps) = obj {
+                                if ps.page_name == layout_name && ps.paper_width > 0.0 {
+                                    pw = ps.paper_width;
+                                    ph = ps.paper_height;
+                                    break;
+                                }
+                            }
+                        }
+                        (pw, ph)
+                    };
+                    let margin = 5.0_f64; // mm margin around the usable area
+                    let uw = paper_w - 2.0 * margin; // usable width
+                    let uh = paper_h - 2.0 * margin; // usable height
+                    // Collect rectangle specs: (cx, cz, w, h) in mm
+                    let rects: Vec<(f64, f64, f64, f64)> = match sub.as_str() {
+                        "2H" => {
+                            // Two viewports side by side (horizontal split)
+                            let vw = (uw - 2.0) / 2.0;
+                            vec![
+                                (margin + vw / 2.0,          margin + uh / 2.0, vw, uh),
+                                (margin + vw + 2.0 + vw / 2.0, margin + uh / 2.0, vw, uh),
+                            ]
+                        }
+                        "2V" => {
+                            // Two viewports stacked (vertical split)
+                            let vh = (uh - 2.0) / 2.0;
+                            vec![
+                                (margin + uw / 2.0, margin + vh + 2.0 + vh / 2.0, uw, vh),
+                                (margin + uw / 2.0, margin + vh / 2.0,            uw, vh),
+                            ]
+                        }
+                        "4" => {
+                            // Four equal viewports (2×2 grid)
+                            let vw = (uw - 2.0) / 2.0;
+                            let vh = (uh - 2.0) / 2.0;
+                            vec![
+                                (margin + vw / 2.0,              margin + vh + 2.0 + vh / 2.0, vw, vh),
+                                (margin + vw + 2.0 + vw / 2.0,  margin + vh + 2.0 + vh / 2.0, vw, vh),
+                                (margin + vw / 2.0,              margin + vh / 2.0,             vw, vh),
+                                (margin + vw + 2.0 + vw / 2.0,  margin + vh / 2.0,             vw, vh),
+                            ]
+                        }
+                        "SINGLE" | "1" => {
+                            // Single full-page viewport
+                            vec![(margin + uw / 2.0, margin + uh / 2.0, uw, uh)]
+                        }
+                        _ => {
+                            self.command_line.push_error(
+                                "VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE"
+                            );
+                            vec![]
+                        }
+                    };
+                    if !rects.is_empty() {
+                        // Remove existing user viewports in this layout first.
+                        let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
+                        let to_erase: Vec<acadrust::Handle> = self.tabs[i].scene.document.entities()
+                            .filter_map(|e| {
+                                if let acadrust::EntityType::Viewport(vp) = e {
+                                    if vp.id > 1 && vp.common.owner_handle == layout_block {
+                                        Some(vp.common.handle)
+                                    } else { None }
+                                } else { None }
+                            })
+                            .collect();
+                        self.push_undo_snapshot(i, "VPORTS");
+                        self.tabs[i].scene.erase_entities(&to_erase);
+                        // Create new viewports.
+                        for (cx, cz, w, h) in &rects {
+                            let mut vp = acadrust::entities::Viewport::new();
+                            vp.center = acadrust::types::Vector3::new(*cx, 0.0, *cz);
+                            vp.width  = *w;
+                            vp.height = *h;
+                            vp.id     = 2; // commit_entity will assign unique IDs
+                            match self.tabs[i].scene.document.add_entity_to_layout(
+                                acadrust::EntityType::Viewport(vp),
+                                &layout_name,
+                            ) {
+                                Ok(handle) => {
+                                    self.tabs[i].scene.auto_fit_viewport(handle);
+                                }
+                                Err(e) => {
+                                    self.command_line.push_error(&format!("VPORTS: {e}"));
+                                }
+                            }
+                        }
+                        // Re-assign unique IDs (1 + existing max per viewport).
+                        let layout_block2 = self.tabs[i].scene.current_layout_block_handle_pub();
+                        let mut id_counter = 2_i16;
+                        let handles: Vec<acadrust::Handle> = self.tabs[i].scene.document.entities()
+                            .filter_map(|e| {
+                                if let acadrust::EntityType::Viewport(vp) = e {
+                                    if vp.id >= 2 && vp.common.owner_handle == layout_block2 {
+                                        Some(vp.common.handle)
+                                    } else { None }
+                                } else { None }
+                            })
+                            .collect();
+                        for h in handles {
+                            if let Some(acadrust::EntityType::Viewport(vp)) =
+                                self.tabs[i].scene.document.get_entity_mut(h)
+                            {
+                                vp.id = id_counter;
+                                id_counter += 1;
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!(
+                            "VPORTS: created {} viewport(s) [{}].", rects.len(), sub
+                        ));
                     }
                 }
             }
