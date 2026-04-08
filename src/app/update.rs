@@ -695,9 +695,15 @@ impl H7CAD {
                 if self.main_window == Some(id) {
                     return iced::exit();
                 }
-                if self.layer_window == Some(id) {
-                    self.layer_window = None;
-                }
+                if self.layer_window         == Some(id) { self.layer_window         = None; }
+                if self.page_setup_window    == Some(id) { self.page_setup_window    = None; }
+                if self.textstyle_window     == Some(id) { self.textstyle_window     = None; }
+                if self.tablestyle_window    == Some(id) { self.tablestyle_window    = None; }
+                if self.mlstyle_window       == Some(id) { self.mlstyle_window       = None; }
+                if self.layout_manager_window == Some(id) { self.layout_manager_window = None; }
+                if self.plotstyle_window     == Some(id) { self.plotstyle_window     = None; }
+                if self.dimstyle_window      == Some(id) { self.dimstyle_window      = None; }
+                if self.shortcuts_window     == Some(id) { self.shortcuts_window     = None; }
                 Task::none()
             }
 
@@ -2290,12 +2296,23 @@ impl H7CAD {
                 } else {
                     current
                 };
-                self.layout_manager_open = true;
-                Task::none()
+                if let Some(id) = self.layout_manager_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(640.0, 320.0),
+                    resizable: true,
+                    ..Default::default()
+                });
+                self.layout_manager_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::LayoutManagerClose => {
-                self.layout_manager_open = false;
-                Task::none()
+                if let Some(id) = self.layout_manager_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
             Message::LayoutManagerSelect(name) => {
                 self.layout_manager_rename_buf = if name == "Model" { String::new() } else { name.clone() };
@@ -2414,12 +2431,23 @@ impl H7CAD {
 
             // ── Keyboard Shortcuts Panel ──────────────────────────────────────
             Message::ShortcutsPanelOpen => {
-                self.shortcuts_panel_open = true;
-                Task::none()
+                if let Some(id) = self.shortcuts_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(720.0, 520.0),
+                    resizable: true,
+                    ..Default::default()
+                });
+                self.shortcuts_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::ShortcutsPanelClose => {
-                self.shortcuts_panel_open = false;
-                Task::none()
+                if let Some(id) = self.shortcuts_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
 
             Message::ViewportContextMenuClose => {
@@ -2499,12 +2527,23 @@ impl H7CAD {
                 };
                 self.page_setup_w = format!("{w:.1}");
                 self.page_setup_h = format!("{h:.1}");
-                self.page_setup_open = true;
-                Task::none()
+                if let Some(id) = self.page_setup_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(520.0, 460.0),
+                    resizable: false,
+                    ..Default::default()
+                });
+                self.page_setup_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::PageSetupClose => {
-                self.page_setup_open = false;
-                Task::none()
+                if let Some(id) = self.page_setup_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
             Message::PageSetupWidthEdit(s) => {
                 self.page_setup_w = s;
@@ -2642,7 +2681,9 @@ impl H7CAD {
                          center={center}  rot={rotation}°"
                     ));
                 }
-                self.page_setup_open = false;
+                if let Some(id) = self.page_setup_window.take() {
+                    return window::close(id);
+                }
                 Task::none()
             }
 
@@ -2853,7 +2894,6 @@ impl H7CAD {
 
             // ── Plot Style Panel ──────────────────────────────────────────────
             Message::PlotStylePanelOpen => {
-                self.plotstyle_panel_open = true;
                 // Initialise edit buffers for ACI 1.
                 self.plotstyle_panel_aci = 1;
                 let entry = self.active_plot_style.as_ref()
@@ -2861,11 +2901,23 @@ impl H7CAD {
                 self.ps_color_buf = entry.and_then(|e| e.color.map(|[r,g,b]| format!("#{:02X}{:02X}{:02X}", r, g, b))).unwrap_or_default();
                 self.ps_lineweight_buf = entry.map(|e| e.lineweight.to_string()).unwrap_or("255".into());
                 self.ps_screening_buf = entry.map(|e| e.screening.to_string()).unwrap_or("100".into());
-                Task::none()
+                if let Some(id) = self.plotstyle_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(780.0, 540.0),
+                    resizable: true,
+                    ..Default::default()
+                });
+                self.plotstyle_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::PlotStylePanelClose => {
-                self.plotstyle_panel_open = false;
-                Task::none()
+                if let Some(id) = self.plotstyle_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
             Message::PlotStylePanelSelectAci(aci) => {
                 self.plotstyle_panel_aci = aci;
@@ -2970,12 +3022,23 @@ impl H7CAD {
                         .unwrap_or_else(|| "Standard".to_string())
                 };
                 self.load_textstyle_bufs(i);
-                self.textstyle_open = true;
-                Task::none()
+                if let Some(id) = self.textstyle_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(620.0, 460.0),
+                    resizable: true,
+                    ..Default::default()
+                });
+                self.textstyle_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::TextStyleDialogClose => {
-                self.textstyle_open = false;
-                Task::none()
+                if let Some(id) = self.textstyle_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
             Message::TextStyleDialogSelect(name) => {
                 let i = self.active_tab;
@@ -3080,12 +3143,23 @@ impl H7CAD {
                 self.tablestyle_selected = self.tabs[i].scene.document.objects.values()
                     .find_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
                     .unwrap_or_else(|| "Standard".to_string());
-                self.tablestyle_open = true;
-                Task::none()
+                if let Some(id) = self.tablestyle_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(620.0, 420.0),
+                    resizable: true,
+                    ..Default::default()
+                });
+                self.tablestyle_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::TableStyleDialogClose => {
-                self.tablestyle_open = false;
-                Task::none()
+                if let Some(id) = self.tablestyle_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
             Message::TableStyleDialogSelect(name) => {
                 self.tablestyle_selected = name;
@@ -3155,12 +3229,23 @@ impl H7CAD {
                         .find_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
                         .unwrap_or_else(|| "Standard".to_string())
                 };
-                self.mlstyle_open = true;
-                Task::none()
+                if let Some(id) = self.mlstyle_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(620.0, 420.0),
+                    resizable: true,
+                    ..Default::default()
+                });
+                self.mlstyle_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::MlStyleDialogClose => {
-                self.mlstyle_open = false;
-                Task::none()
+                if let Some(id) = self.mlstyle_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
             Message::MlStyleDialogSelect(name) => {
                 self.mlstyle_selected = name;
@@ -3245,13 +3330,24 @@ impl H7CAD {
                         .unwrap_or_else(|| "Standard".to_string())
                 };
                 self.dimstyle_selected = selected.clone();
-                self.dimstyle_open = true;
                 self.load_dimstyle_bufs(i);
-                Task::none()
+                if let Some(id) = self.dimstyle_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(720.0, 560.0),
+                    resizable: true,
+                    ..Default::default()
+                });
+                self.dimstyle_window = Some(id);
+                task.map(|_| Message::Noop)
             }
             Message::DimStyleDialogClose => {
-                self.dimstyle_open = false;
-                Task::none()
+                if let Some(id) = self.dimstyle_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
             }
             Message::DimStyleDialogApply => {
                 let i = self.active_tab;
@@ -3271,7 +3367,9 @@ impl H7CAD {
             Message::DimStyleDialogNew => {
                 // Delegate to the DIMSTYLE NEW command via command line prompt.
                 self.command_line.push_info("Enter new DimStyle name:");
-                self.dimstyle_open = false;
+                if let Some(id) = self.dimstyle_window.take() {
+                    return window::close(id);
+                }
                 Task::none()
             }
             Message::DimStyleDialogSetCurrent => {

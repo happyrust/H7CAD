@@ -13,10 +13,72 @@ const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_DRAW_PX;
 
 impl H7CAD {
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
-        // ── Layer Properties Manager window ───────────────────────────────
+        // ── Floating panel windows ─────────────────────────────────────────
         if Some(window_id) == self.layer_window {
             let tab = &self.tabs[self.active_tab];
             return tab.layers.view_window();
+        }
+        if Some(window_id) == self.page_setup_window {
+            return page_setup_overlay(
+                &self.page_setup_w, &self.page_setup_h,
+                &self.page_setup_plot_area, self.page_setup_center,
+                &self.page_setup_offset_x, &self.page_setup_offset_y,
+                &self.page_setup_rotation, &self.page_setup_scale,
+            );
+        }
+        if Some(window_id) == self.textstyle_window {
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.text_styles
+                .iter().map(|s| s.name.clone()).collect();
+            return textstyle_overlay(styles, &self.textstyle_selected,
+                &self.textstyle_font, &self.textstyle_width, &self.textstyle_oblique);
+        }
+        if Some(window_id) == self.tablestyle_window {
+            use acadrust::objects::ObjectType;
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.objects.values()
+                .filter_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
+                .collect();
+            let selected_style = tab.scene.document.objects.values()
+                .find_map(|o| if let ObjectType::TableStyle(s) = o {
+                    if s.name == self.tablestyle_selected { Some(s) } else { None }
+                } else { None });
+            return tablestyle_overlay(styles, &self.tablestyle_selected, selected_style);
+        }
+        if Some(window_id) == self.mlstyle_window {
+            use acadrust::objects::ObjectType;
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.objects.values()
+                .filter_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
+                .collect();
+            let selected_style = tab.scene.document.objects.values()
+                .find_map(|o| if let ObjectType::MLineStyle(s) = o {
+                    if s.name == self.mlstyle_selected { Some(s) } else { None }
+                } else { None });
+            return mlstyle_overlay(styles, &self.mlstyle_selected, selected_style,
+                tab.scene.document.header.multiline_style.clone());
+        }
+        if Some(window_id) == self.layout_manager_window {
+            let i = self.active_tab;
+            let layouts = self.tabs[i].scene.layout_names();
+            let current = self.tabs[i].scene.current_layout.clone();
+            return layout_manager_overlay(layouts, &self.layout_manager_selected,
+                &self.layout_manager_rename_buf, current);
+        }
+        if Some(window_id) == self.plotstyle_window {
+            return plotstyle_panel_overlay(
+                self.active_plot_style.as_ref(), self.plotstyle_panel_aci,
+                &self.ps_color_buf, &self.ps_lineweight_buf, &self.ps_screening_buf,
+            );
+        }
+        if Some(window_id) == self.dimstyle_window {
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.dim_styles
+                .iter().map(|s| s.name.clone()).collect();
+            return dimstyle_overlay(styles, &self.dimstyle_selected, self.dimstyle_tab, self);
+        }
+        if Some(window_id) == self.shortcuts_window {
+            return shortcuts_panel_overlay(&self.shortcut_overrides);
         }
 
         let i = self.active_tab;
@@ -257,102 +319,6 @@ impl H7CAD {
                 iced::widget::Space::new().width(0).height(0).into()
             };
 
-        let page_setup_layer: Element<'_, Message> = if self.page_setup_open {
-            page_setup_overlay(
-                &self.page_setup_w,
-                &self.page_setup_h,
-                &self.page_setup_plot_area,
-                self.page_setup_center,
-                &self.page_setup_offset_x,
-                &self.page_setup_offset_y,
-                &self.page_setup_rotation,
-                &self.page_setup_scale,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let textstyle_layer: Element<'_, Message> = if self.textstyle_open {
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.text_styles
-                .iter().map(|s| s.name.clone()).collect();
-            textstyle_overlay(styles, &self.textstyle_selected, &self.textstyle_font, &self.textstyle_width, &self.textstyle_oblique)
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let tablestyle_layer: Element<'_, Message> = if self.tablestyle_open {
-            use acadrust::objects::ObjectType;
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.objects.values()
-                .filter_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
-                .collect();
-            let selected_style = tab.scene.document.objects.values()
-                .find_map(|o| if let ObjectType::TableStyle(s) = o {
-                    if s.name == self.tablestyle_selected { Some(s) } else { None }
-                } else { None });
-            tablestyle_overlay(styles, &self.tablestyle_selected, selected_style)
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let mlstyle_layer: Element<'_, Message> = if self.mlstyle_open {
-            use acadrust::objects::ObjectType;
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.objects.values()
-                .filter_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
-                .collect();
-            let selected_style = tab.scene.document.objects.values()
-                .find_map(|o| if let ObjectType::MLineStyle(s) = o {
-                    if s.name == self.mlstyle_selected { Some(s) } else { None }
-                } else { None });
-            mlstyle_overlay(styles, &self.mlstyle_selected, selected_style, tab.scene.document.header.multiline_style.clone())
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        // ── Layout Manager Panel ─────────────────────────────────────────
-        let layout_manager_layer: Element<'_, Message> = if self.layout_manager_open {
-            let i = self.active_tab;
-            let layouts = self.tabs[i].scene.layout_names();
-            let current = self.tabs[i].scene.current_layout.clone();
-            layout_manager_overlay(
-                layouts,
-                &self.layout_manager_selected,
-                &self.layout_manager_rename_buf,
-                current,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        // ── Plot Style Panel ──────────────────────────────────────────────
-        let plotstyle_layer: Element<'_, Message> = if self.plotstyle_panel_open {
-            plotstyle_panel_overlay(
-                self.active_plot_style.as_ref(),
-                self.plotstyle_panel_aci,
-                &self.ps_color_buf,
-                &self.ps_lineweight_buf,
-                &self.ps_screening_buf,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let dimstyle_layer: Element<'_, Message> = if self.dimstyle_open {
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.dim_styles
-                .iter().map(|s| s.name.clone()).collect();
-            dimstyle_overlay(
-                styles,
-                &self.dimstyle_selected,
-                self.dimstyle_tab,
-                self,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
         // ── Viewport right-click context menu ─────────────────────────────
         let viewport_ctx_layer: Element<'_, Message> = {
             let ctx_pos = tab.scene.selection.borrow().context_menu;
@@ -367,13 +333,7 @@ impl H7CAD {
             }
         };
 
-        let shortcuts_layer: Element<'_, Message> = if self.shortcuts_panel_open {
-            shortcuts_panel_overlay(&self.shortcut_overrides)
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, plotstyle_layer, layout_manager_layer, shortcuts_layer, dimstyle_layer, viewport_ctx_layer].into()
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, viewport_ctx_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

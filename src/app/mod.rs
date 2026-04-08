@@ -59,6 +59,15 @@ pub(super) struct H7CAD {
     layer_window: Option<window::Id>,
     /// OS window Id of the primary application window.
     main_window: Option<window::Id>,
+    // ── Floating panel windows ────────────────────────────────────────────
+    page_setup_window:      Option<window::Id>,
+    textstyle_window:       Option<window::Id>,
+    tablestyle_window:      Option<window::Id>,
+    mlstyle_window:         Option<window::Id>,
+    layout_manager_window:  Option<window::Id>,
+    plotstyle_window:       Option<window::Id>,
+    dimstyle_window:        Option<window::Id>,
+    shortcuts_window:       Option<window::Id>,
     /// In-memory clipboard: cloned entities waiting to be pasted.
     clipboard: Vec<acadrust::EntityType>,
     /// Centroid of the clipboard entities (XZ plane, Y-up).
@@ -71,8 +80,7 @@ pub(super) struct H7CAD {
     last_vp_click_time: Option<Instant>,
     /// Screen position of the previous viewport left-click release.
     last_vp_click_pos: Option<Point>,
-    /// Page Setup overlay open/closed.
-    page_setup_open: bool,
+    // page_setup_open: moved to page_setup_window: Option<window::Id>
     /// Editable paper width buffer for the Page Setup panel (string while typing).
     page_setup_w: String,
     /// Editable paper height buffer for the Page Setup panel (string while typing).
@@ -95,15 +103,12 @@ pub(super) struct H7CAD {
     active_plot_style: Option<crate::io::plot_style::PlotStyleTable>,
 
     // ── MLineStyle Dialog ─────────────────────────────────────────────────
-    mlstyle_open: bool,
     mlstyle_selected: String,
 
     // ── TableStyle Dialog ─────────────────────────────────────────────────
-    tablestyle_open: bool,
     tablestyle_selected: String,
 
     // ── TextStyle Font Browser ────────────────────────────────────────────
-    textstyle_open: bool,
     textstyle_selected: String,
     /// Edit buffer for font file name.
     textstyle_font: String,
@@ -116,17 +121,14 @@ pub(super) struct H7CAD {
     active_theme: Theme,
 
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
-    shortcuts_panel_open: bool,
     /// User-defined function-key overrides: "F3" → command string.
     shortcut_overrides: std::collections::HashMap<String, String>,
 
     // ── Layout Manager Panel ──────────────────────────────────────────────
-    layout_manager_open: bool,
     layout_manager_selected: String,
     layout_manager_rename_buf: String,
 
     // ── Plot Style Panel ──────────────────────────────────────────────────
-    plotstyle_panel_open: bool,
     /// Selected ACI index in the panel (1-255).
     plotstyle_panel_aci: u8,
     /// Edit buffers for the selected entry.
@@ -135,7 +137,6 @@ pub(super) struct H7CAD {
     ps_screening_buf: String,
 
     // ── DimStyle Dialog ───────────────────────────────────────────────────
-    dimstyle_open: bool,
     /// Name of the style currently shown in the dialog.
     dimstyle_selected: String,
     /// Active tab: 0=Lines, 1=Arrows, 2=Text, 3=Scale/Units, 4=Tolerances.
@@ -535,13 +536,20 @@ impl H7CAD {
             last_point: None,
             layer_window: None,
             main_window: None,
+            page_setup_window:     None,
+            textstyle_window:      None,
+            tablestyle_window:     None,
+            mlstyle_window:        None,
+            layout_manager_window: None,
+            plotstyle_window:      None,
+            dimstyle_window:       None,
+            shortcuts_window:      None,
             clipboard: Vec::new(),
             clipboard_centroid: glam::Vec3::ZERO,
             layout_context_menu: None,
             layout_rename_state: None,
             last_vp_click_time: None,
             last_vp_click_pos: None,
-            page_setup_open: false,
             page_setup_w: String::new(),
             page_setup_h: String::new(),
             page_setup_plot_area: "Layout".to_string(),
@@ -555,31 +563,24 @@ impl H7CAD {
             // Color scheme (default: dark CAD-style)
             active_theme: Theme::Dark,
             // Keyboard shortcuts
-            shortcuts_panel_open: false,
             shortcut_overrides: std::collections::HashMap::new(),
             // Layout Manager
-            layout_manager_open: false,
             layout_manager_selected: "Model".to_string(),
             layout_manager_rename_buf: String::new(),
-            plotstyle_panel_open: false,
             plotstyle_panel_aci: 1,
             ps_color_buf: String::new(),
             ps_lineweight_buf: "255".to_string(),
             ps_screening_buf: "100".to_string(),
             // TextStyle font browser
-            textstyle_open: false,
             textstyle_selected: "Standard".to_string(),
             textstyle_font: String::new(),
             textstyle_width: "1.0".to_string(),
             textstyle_oblique: "0.0".to_string(),
             // TableStyle dialog
-            tablestyle_open: false,
             tablestyle_selected: "Standard".to_string(),
             // MLineStyle dialog
-            mlstyle_open: false,
             mlstyle_selected: "Standard".to_string(),
             // DimStyle dialog
-            dimstyle_open: false,
             dimstyle_selected: "Standard".to_string(),
             dimstyle_tab: 0,
             ds_dimdle: "0".to_string(),       ds_dimdli: "3.75".to_string(),
@@ -626,9 +627,16 @@ pub fn run() -> iced::Result {
     iced::daemon(H7CAD::boot, H7CAD::update, H7CAD::view)
         .subscription(H7CAD::subscription)
         .title(|state: &H7CAD, window_id: window::Id| {
-            if Some(window_id) == state.layer_window {
-                "Layer Properties Manager".to_string()
-            } else if let Some(tab) = state.tabs.get(state.active_tab) {
+            if Some(window_id) == state.layer_window         { return "Layer Properties Manager".into(); }
+            if Some(window_id) == state.page_setup_window    { return "Page Setup".into(); }
+            if Some(window_id) == state.textstyle_window     { return "Text Style".into(); }
+            if Some(window_id) == state.tablestyle_window    { return "Table Style".into(); }
+            if Some(window_id) == state.mlstyle_window       { return "Multiline Style".into(); }
+            if Some(window_id) == state.layout_manager_window { return "Layout Manager".into(); }
+            if Some(window_id) == state.plotstyle_window     { return "Plot Style Table Editor".into(); }
+            if Some(window_id) == state.dimstyle_window      { return "Dimension Style Manager".into(); }
+            if Some(window_id) == state.shortcuts_window     { return "Keyboard Shortcuts".into(); }
+            if let Some(tab) = state.tabs.get(state.active_tab) {
                 let dot = if tab.dirty { "● " } else { "" };
                 let name = tab.tab_display_name();
                 format!("{}H7CAD — {}", dot, name)
