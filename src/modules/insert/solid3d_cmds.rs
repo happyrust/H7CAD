@@ -415,6 +415,49 @@ impl CadCommand for SweepCommand {
     fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
 }
 
+// ── LOFT command ───────────────────────────────────────────────────────────
+
+pub struct LoftCommand {
+    profiles: Vec<acadrust::Handle>,
+    color: [f32; 4],
+}
+
+impl LoftCommand {
+    pub fn new(color: [f32; 4]) -> Self {
+        Self { profiles: Vec::new(), color }
+    }
+}
+
+impl CadCommand for LoftCommand {
+    fn name(&self) -> &'static str { "LOFT" }
+    fn prompt(&self) -> String {
+        if self.profiles.is_empty() {
+            "LOFT  Select first cross-section:".into()
+        } else {
+            format!("LOFT  Select next cross-section ({} selected, Enter to finish):", self.profiles.len())
+        }
+    }
+    fn needs_entity_pick(&self) -> bool { true }
+    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: Vec3) -> CmdResult {
+        if handle.is_null() { return CmdResult::NeedPoint; }
+        // Avoid duplicate picks.
+        if !self.profiles.contains(&handle) {
+            self.profiles.push(handle);
+        }
+        CmdResult::NeedPoint
+    }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
+    fn wants_text_input(&self) -> bool { self.profiles.len() >= 2 }
+    fn on_text_input(&mut self, _text: &str) -> Option<CmdResult> { None }
+    fn on_enter(&mut self) -> CmdResult {
+        if self.profiles.len() < 2 {
+            CmdResult::Cancel
+        } else {
+            CmdResult::LoftEntities { handles: self.profiles.clone(), color: self.color }
+        }
+    }
+}
+
 // ── Placeholder Solid3D entity construction ────────────────────────────────
 
 /// Create a minimal Solid3D entity with empty ACIS data (placeholder only).

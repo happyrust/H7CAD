@@ -1107,6 +1107,75 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
             }
 
+            // ── LOFT ───────────────────────────────────────────────────────
+            CmdResult::LoftEntities { handles, color } => {
+                use crate::entities::traits::EntityTypeOps;
+                use crate::scene::acad_to_truck::TruckObject;
+                use crate::scene::truck_tess;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                use truck_modeling::builder;
+
+                // Collect wires from each profile.
+                let mut wires: Vec<truck_modeling::Wire> = Vec::new();
+                for h in &handles {
+                    if let Some(ent) = self.tabs[i].scene.document.get_entity(*h).cloned() {
+                        if let Some(te) = ent.to_truck_entity(&self.tabs[i].scene.document) {
+                            let wire = match te.object {
+                                TruckObject::Contour(w) => Some(w),
+                                TruckObject::Curve(e)   => Some(std::iter::once(e).collect()),
+                                _ => None,
+                            };
+                            if let Some(w) = wire { wires.push(w); }
+                        }
+                    }
+                }
+
+                let result: Option<crate::scene::mesh_model::MeshModel> = (|| {
+                    if wires.len() < 2 { return None; }
+
+                    // Build ruled shells between consecutive profile pairs.
+                    let mut all_faces: Vec<truck_modeling::Face> = Vec::new();
+
+                    for pair in wires.windows(2) {
+                        let shell = builder::try_wire_homotopy(&pair[0], &pair[1]).ok()?;
+                        for face in shell.into_iter() { all_faces.push(face); }
+                    }
+
+                    // Cap the first and last profiles if they are closed.
+                    if let Ok(cap) = builder::try_attach_plane(&[wires.first()?.clone()]) {
+                        all_faces.push(cap);
+                    }
+                    if let Ok(cap) = builder::try_attach_plane(&[wires.last()?.clone()]) {
+                        all_faces.push(cap);
+                    }
+
+                    let shell = truck_modeling::Shell::from(all_faces);
+                    match truck_tess::tessellate_shell(&shell) {
+                        truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
+                            Some(crate::scene::mesh_model::MeshModel {
+                                name: String::new(), verts, normals, indices, color, selected: false,
+                            }),
+                        _ => None,
+                    }
+                })();
+
+                if let Some(mut mesh) = result {
+                    self.push_undo_snapshot(i, "LOFT");
+                    let new_entity = empty_solid3d();
+                    let new_handle = self.tabs[i].scene.add_entity(new_entity);
+                    mesh.name = format!("{}", new_handle.value());
+                    self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!("LOFT: solid created from {} profiles.", handles.len()));
+                } else {
+                    self.command_line.push_error("LOFT: could not loft profiles. Ensure sections have the same edge count and are compatible.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+
             CmdResult::HatcheditApply { handle, name, scale, angle } => {
                 if let Some(mut model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
                     // Update model fields
