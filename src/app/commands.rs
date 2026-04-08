@@ -2781,6 +2781,100 @@ impl H7CAD {
                 }
             }
 
+            // ── MLeader Style management ──────────────────────────────────
+            cmd if cmd == "MLEADERSTYLE" || cmd.starts_with("MLEADERSTYLE ") => {
+                use acadrust::objects::{ObjectType, MultiLeaderStyle};
+                let raw_rest = cmd.trim_start_matches("MLEADERSTYLE").trim();
+                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let styles: Vec<String> = self.tabs[i].scene.document
+                            .objects.values()
+                            .filter_map(|o| if let ObjectType::MultiLeaderStyle(s) = o { Some(format!("{}(txt:{:.2} asz:{:.2})", s.name, s.text_height, s.arrowhead_size)) } else { None })
+                            .collect();
+                        let current = &self.tabs[i].active_mleader_style;
+                        if styles.is_empty() {
+                            self.command_line.push_output(&format!("MLeader styles: (none)  active: {current}"));
+                        } else {
+                            self.command_line.push_output(&format!("MLeader styles: {}  active: {current}", styles.join(", ")));
+                        }
+                    }
+                    "NEW" | "N" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: MLEADERSTYLE NEW <name>");
+                        } else {
+                            let already_exists = self.tabs[i].scene.document.objects.values()
+                                .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
+                            if already_exists {
+                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' already exists.", name));
+                            } else {
+                                let handle = self.tabs[i].scene.document.allocate_handle();
+                                let mut style = MultiLeaderStyle::new(&name);
+                                style.handle = handle;
+                                self.tabs[i].scene.document.objects.insert(handle, ObjectType::MultiLeaderStyle(style));
+                                self.push_undo_snapshot(i, "MLEADERSTYLE NEW");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("MLEADERSTYLE: '{}' created.", name));
+                            }
+                        }
+                    }
+                    "SET" | "S" => {
+                        // MLEADERSTYLE SET <name> <property> <value>
+                        // Properties: text_height arrowhead_size landing_distance landing_gap
+                        let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let prop = parts.get(2).map(|s| s.to_lowercase()).unwrap_or_default();
+                        let val_str = parts.get(3).map(|s| s.trim()).unwrap_or("");
+                        if let Ok(val) = val_str.parse::<f64>() {
+                            let style_entry = self.tabs[i].scene.document.objects.values_mut()
+                                .find_map(|o| if let ObjectType::MultiLeaderStyle(s) = o { if s.name == style_name { Some(s) } else { None } } else { None });
+                            if let Some(s) = style_entry {
+                                match prop.as_str() {
+                                    "text_height" | "textheight" | "txth" => { s.text_height = val; }
+                                    "arrowhead_size" | "arrowsize" | "asz" => { s.arrowhead_size = val; }
+                                    "landing_distance" | "landing" | "dogleg" => { s.landing_distance = val; }
+                                    "landing_gap" | "gap" => { s.landing_gap = val; }
+                                    _ => {
+                                        self.command_line.push_error(&format!(
+                                            "MLEADERSTYLE: unknown property '{}'. Try: text_height arrowhead_size landing_distance landing_gap", prop
+                                        ));
+                                        return Task::none();
+                                    }
+                                }
+                                self.push_undo_snapshot(i, "MLEADERSTYLE SET");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("MLEADERSTYLE: '{style_name}'.{prop} = {val:.3}"));
+                            } else {
+                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' not found.", style_name));
+                            }
+                        } else {
+                            self.command_line.push_error("Usage: MLEADERSTYLE SET <name> <property> <value>");
+                        }
+                    }
+                    "CURRENT" | "C" | "ACTIVE" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_output(&format!("Current MLeader style: {}", self.tabs[i].active_mleader_style));
+                        } else {
+                            let exists = name == "Standard" || self.tabs[i].scene.document.objects.values()
+                                .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
+                            if exists {
+                                self.tabs[i].active_mleader_style = name.clone();
+                                self.command_line.push_output(&format!("MLEADERSTYLE: current style set to '{name}'."));
+                            } else {
+                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' not found.", name));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info(
+                            "Usage: MLEADERSTYLE LIST | NEW <name> | SET <name> <prop> <val> | CURRENT [<name>]"
+                        );
+                    }
+                }
+            }
+
             // ── TextStyle / Style management ──────────────────────────────
             cmd if cmd == "STYLE" || cmd == "TEXTSTYLE" || cmd.starts_with("STYLE ") || cmd.starts_with("TEXTSTYLE ") => {
                 let (prefix, rest) = if cmd.starts_with("TEXTSTYLE") {

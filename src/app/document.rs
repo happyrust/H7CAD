@@ -40,6 +40,8 @@ pub(super) struct DocumentTab {
     pub(super) paper_bg_color: Option<[f32; 4]>,
     /// Active REFEDIT session, if any.
     pub(super) refedit_session: Option<RefEditSession>,
+    /// Currently active MLeader style name.
+    pub(super) active_mleader_style: String,
 }
 
 impl DocumentTab {
@@ -69,6 +71,7 @@ impl DocumentTab {
             bg_color: None,
             paper_bg_color: None,
             refedit_session: None,
+            active_mleader_style: "Standard".to_string(),
         }
     }
 
