@@ -6,6 +6,7 @@ pub(crate) mod create_block;
 mod cylinder;
 pub(crate) mod insert_block;
 mod open_obj;
+pub(crate) mod solid3d_cmds;
 mod sphere;
 pub(crate) mod wblock;
 pub(crate) mod xattach;

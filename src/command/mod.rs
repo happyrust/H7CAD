@@ -138,6 +138,21 @@ pub enum CmdResult {
         /// Translation vector to apply to vertices inside the window.
         delta: Vec3,
     },
+    /// Create a Solid3D placeholder entity + associated MeshModel.
+    /// `mesh_fn` is called with the entity's handle string to build the mesh.
+    CommitSolid3D {
+        mesh_fn: Box<dyn FnOnce(String) -> Option<crate::scene::mesh_model::MeshModel> + Send>,
+    },
+    /// Extrude the profile entity `handle` by `height` along Z.
+    ExtrudeEntity { handle: Handle, height: f32, color: [f32; 4] },
+    /// Revolve the profile entity `handle` around the given axis by `angle_deg`.
+    RevolveEntity {
+        handle: Handle,
+        axis_start: glam::Vec3,
+        axis_end: glam::Vec3,
+        angle_deg: f32,
+        color: [f32; 4],
+    },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document
     /// and call `attreq_set_attdefs()` on the command, then loop on text input.

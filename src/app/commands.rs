@@ -3402,6 +3402,61 @@ impl H7CAD {
                 }
             }
 
+            // ── 3D Primitive — BOX ────────────────────────────────────────
+            "BOX" => {
+                use crate::modules::insert::solid3d_cmds::BoxCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = BoxCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── 3D Primitive — SPHERE ─────────────────────────────────────
+            "SPHERE" => {
+                use crate::modules::insert::solid3d_cmds::SphereCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = SphereCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── 3D Primitive — CYLINDER ───────────────────────────────────
+            "CYLINDER" => {
+                use crate::modules::insert::solid3d_cmds::CylinderCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = CylinderCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── EXTRUDE ────────────────────────────────────────────────────
+            "EXTRUDE"|"EXT" => {
+                use crate::modules::insert::solid3d_cmds::ExtrudeCommand;
+                // If a single entity is already selected, skip the pick step.
+                let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                if selected.len() == 1 {
+                    let handle = selected[0].0;
+                    let mut cmd = ExtrudeCommand::new(color);
+                    cmd.on_entity_pick(handle, glam::Vec3::ZERO);
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    let cmd = ExtrudeCommand::new(color);
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
+            }
+
+            // ── REVOLVE ────────────────────────────────────────────────────
+            "REVOLVE"|"REV" => {
+                use crate::modules::insert::solid3d_cmds::RevolveCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = RevolveCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             // ── STL export ────────────────────────────────────────────────
             "STLOUT"|"EXPORTSTL" => {
                 return Task::done(Message::StlExport);

@@ -860,6 +860,141 @@ impl H7CAD {
                 self.command_line.push_output(&format!("STRETCH: {count} entity(ies) stretched."));
                 self.refresh_properties();
             }
+            // ── Solid3D creation (BOX / SPHERE / CYLINDER) ────────────────
+            CmdResult::CommitSolid3D { mesh_fn } => {
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                self.push_undo_snapshot(i, "SOLID3D");
+                let entity = empty_solid3d();
+                let handle = self.tabs[i].scene.add_entity(entity);
+                if !handle.is_null() {
+                    let name = format!("{}", handle.value());
+                    let color = [0.6f32, 0.6, 0.8, 1.0]; // default colour; command embedded it
+                    let _ = color; // color is captured inside mesh_fn
+                    if let Some(mesh) = mesh_fn(name) {
+                        self.tabs[i].scene.meshes.insert(handle, mesh);
+                    }
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output("Solid created.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+
+            // ── EXTRUDE ────────────────────────────────────────────────────
+            CmdResult::ExtrudeEntity { handle, height, color } => {
+                use crate::entities::traits::EntityTypeOps;
+                use crate::scene::acad_to_truck::TruckObject;
+                use crate::scene::truck_tess;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                use truck_modeling::builder;
+                use truck_modeling::Vector3 as TruckVec3;
+
+                let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
+                if let Some(entity) = entity_opt {
+                    let truck_entity = entity.to_truck_entity(&self.tabs[i].scene.document);
+                    let result = truck_entity.and_then(|te| {
+                        match te.object {
+                            TruckObject::Contour(wire) => {
+                                // Attach a planar face to the wire profile, then sweep.
+                                let face = builder::try_attach_plane(&[wire]).ok()?;
+                                // tsweep(Face) → Solid
+                                let solid = builder::tsweep(&face, TruckVec3::new(0.0, 0.0, height as f64));
+                                match truck_tess::tessellate_solid(&solid) {
+                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } => {
+                                        Some(crate::scene::mesh_model::MeshModel {
+                                            name: String::new(),
+                                            verts, normals, indices,
+                                            color,
+                                            selected: false,
+                                        })
+                                    }
+                                    _ => None,
+                                }
+                            }
+                            _ => None,
+                        }
+                    });
+                    if let Some(mut mesh) = result {
+                        self.push_undo_snapshot(i, "EXTRUDE");
+                        let new_entity = empty_solid3d();
+                        let new_handle = self.tabs[i].scene.add_entity(new_entity);
+                        mesh.name = format!("{}", new_handle.value());
+                        self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output("EXTRUDE: solid created.");
+                    } else {
+                        self.command_line.push_error("EXTRUDE: could not build profile. Select a closed 2D entity (Circle, LwPolyline, etc.).");
+                    }
+                } else {
+                    self.command_line.push_error("EXTRUDE: entity not found.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+
+            // ── REVOLVE ────────────────────────────────────────────────────
+            CmdResult::RevolveEntity { handle, axis_start, axis_end, angle_deg, color } => {
+                use crate::entities::traits::EntityTypeOps;
+                use crate::scene::acad_to_truck::TruckObject;
+                use crate::scene::truck_tess;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                use truck_modeling::builder;
+                use truck_modeling::{Point3, Rad, Vector3 as TruckVec3};
+
+                let entity_opt = self.tabs[i].scene.document.get_entity(handle).cloned();
+                if let Some(entity) = entity_opt {
+                    let truck_entity = entity.to_truck_entity(&self.tabs[i].scene.document);
+                    let result = truck_entity.and_then(|te| {
+                        let wire: Option<truck_modeling::Wire> = match te.object {
+                            TruckObject::Contour(w) => Some(w),
+                            TruckObject::Curve(e) => Some(std::iter::once(e).collect()),
+                            _ => None,
+                        };
+                        let wire = wire?;
+                        let origin = Point3::new(
+                            axis_start.x as f64,
+                            axis_start.z as f64,
+                            axis_start.y as f64,
+                        );
+                        let dir = (axis_end - axis_start).normalize();
+                        let axis = TruckVec3::new(dir.x as f64, dir.z as f64, dir.y as f64);
+                        let shell = builder::rsweep(&wire, origin, axis, Rad(angle_deg.to_radians() as f64));
+                        match truck_tess::tessellate_shell(&shell) {
+                            truck_tess::TruckTessResult::Mesh { verts, normals, indices } => {
+                                Some(crate::scene::mesh_model::MeshModel {
+                                    name: String::new(),
+                                    verts, normals, indices,
+                                    color,
+                                    selected: false,
+                                })
+                            }
+                            _ => None,
+                        }
+                    });
+                    if let Some(mut mesh) = result {
+                        self.push_undo_snapshot(i, "REVOLVE");
+                        let new_entity = empty_solid3d();
+                        let new_handle = self.tabs[i].scene.add_entity(new_entity);
+                        mesh.name = format!("{}", new_handle.value());
+                        self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!("REVOLVE: solid created ({:.0}°).", angle_deg));
+                    } else {
+                        self.command_line.push_error("REVOLVE: could not revolve profile.");
+                    }
+                } else {
+                    self.command_line.push_error("REVOLVE: entity not found.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+
             CmdResult::HatcheditApply { handle, name, scale, angle } => {
                 if let Some(mut model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
                     // Update model fields

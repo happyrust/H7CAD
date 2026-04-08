@@ -293,7 +293,8 @@ Underlay (PDF/DWF/DGN)
 | OBJ mesh içe aktarma | ✅ |
 | Solid3D tessellation (acadrust ACIS) | ✅ |
 | Boolean operasyonlar (UNION/SUBTRACT/INTERSECT) | ⬜ |
-| EXTRUDE / REVOLVE / SWEEP / LOFT | ⬜ |
+| EXTRUDE / REVOLVE | ✅ |
+| SWEEP / LOFT | ⬜ |
 | 3D ARRAY | ✅ |
 | STL dışa aktarma (STLOUT) | ✅ |
 | STEP dışa aktarma | ⬜ |

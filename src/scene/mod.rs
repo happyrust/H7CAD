@@ -1127,6 +1127,14 @@ impl Scene {
         handle
     }
 
+    /// Returns the RGBA color for the given layer name.
+    pub fn layer_color(&self, layer: &str) -> [f32; 4] {
+        let layer_entry = self.document.layers.get(layer);
+        let color = layer_entry.map(|l| &l.color).unwrap_or(&acadrust::types::Color::WHITE);
+        let [r, g, b, _] = crate::scene::tessellate::aci_to_rgba(color);
+        [r, g, b, 1.0]
+    }
+
     pub fn custom_block_names(&self) -> Vec<String> {
         self.document
             .block_records
