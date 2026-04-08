@@ -153,6 +153,12 @@ pub enum CmdResult {
         angle_deg: f32,
         color: [f32; 4],
     },
+    /// Sweep the profile entity `profile_handle` along `path_handle`.
+    SweepEntity {
+        profile_handle: Handle,
+        path_handle: Handle,
+        color: [f32; 4],
+    },
     /// INSERT landed on a block that has AttributeDefinitions.
     /// The host should look up the attdefs for `block_name` from the document
     /// and call `attreq_set_attdefs()` on the command, then loop on text input.

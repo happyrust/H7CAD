@@ -995,6 +995,118 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
             }
 
+            // ── SWEEP ──────────────────────────────────────────────────────
+            CmdResult::SweepEntity { profile_handle, path_handle, color } => {
+                use crate::entities::traits::EntityTypeOps;
+                use crate::scene::acad_to_truck::TruckObject;
+                use crate::scene::truck_tess;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                use truck_modeling::builder;
+                use truck_modeling::{Point3, Rad, Vector3 as TruckVec3};
+
+                let profile_ent = self.tabs[i].scene.document.get_entity(profile_handle).cloned();
+                let path_ent    = self.tabs[i].scene.document.get_entity(path_handle).cloned();
+
+                let result = profile_ent.zip(path_ent).and_then(|(prof_e, path_e)| {
+                    let prof_truck = prof_e.to_truck_entity(&self.tabs[i].scene.document)?;
+                    let path_truck = path_e.to_truck_entity(&self.tabs[i].scene.document)?;
+
+                    // Profile must be a wire (closed or open).
+                    let profile_wire: truck_modeling::Wire = match prof_truck.object {
+                        TruckObject::Contour(w) => w,
+                        TruckObject::Curve(e)   => std::iter::once(e).collect(),
+                        _ => return None,
+                    };
+
+                    // Path determines the sweep operation.
+                    let mesh = match path_truck.object {
+                        // Linear path: translate profile along the line direction.
+                        TruckObject::Curve(edge) => {
+                            let p_start = edge.front().point();
+                            let p_end   = edge.back().point();
+                            let dir = TruckVec3::new(
+                                p_end.x - p_start.x,
+                                p_end.y - p_start.y,
+                                p_end.z - p_start.z,
+                            );
+                            // Try to build a face from the profile; if it's a closed
+                            // wire we get a Solid, otherwise a Shell.
+                            if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
+                                let solid = builder::tsweep(&face, dir);
+                                match truck_tess::tessellate_solid(&solid) {
+                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
+                                        Some(crate::scene::mesh_model::MeshModel {
+                                            name: String::new(), verts, normals, indices, color, selected: false,
+                                        }),
+                                    _ => None,
+                                }
+                            } else {
+                                let shell = builder::tsweep(&profile_wire, dir);
+                                match truck_tess::tessellate_shell(&shell) {
+                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
+                                        Some(crate::scene::mesh_model::MeshModel {
+                                            name: String::new(), verts, normals, indices, color, selected: false,
+                                        }),
+                                    _ => None,
+                                }
+                            }
+                        }
+
+                        // Contour path (polyline): sweep along the polyline using the
+                        // first edge's direction as approximation (multi-segment sweep
+                        // requires NURBS deformation — not supported here).
+                        TruckObject::Contour(path_wire) => {
+                            // Use start→end of the whole wire as translation vector.
+                            let p_start = path_wire.front_vertex()?.point();
+                            let p_end   = path_wire.back_vertex()?.point();
+                            let dir = TruckVec3::new(
+                                p_end.x - p_start.x,
+                                p_end.y - p_start.y,
+                                p_end.z - p_start.z,
+                            );
+                            if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
+                                let solid = builder::tsweep(&face, dir);
+                                match truck_tess::tessellate_solid(&solid) {
+                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
+                                        Some(crate::scene::mesh_model::MeshModel {
+                                            name: String::new(), verts, normals, indices, color, selected: false,
+                                        }),
+                                    _ => None,
+                                }
+                            } else {
+                                let shell = builder::tsweep(&profile_wire, dir);
+                                match truck_tess::tessellate_shell(&shell) {
+                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
+                                        Some(crate::scene::mesh_model::MeshModel {
+                                            name: String::new(), verts, normals, indices, color, selected: false,
+                                        }),
+                                    _ => None,
+                                }
+                            }
+                        }
+
+                        _ => None,
+                    };
+                    mesh
+                });
+
+                if let Some(mut mesh) = result {
+                    self.push_undo_snapshot(i, "SWEEP");
+                    let new_entity = empty_solid3d();
+                    let new_handle = self.tabs[i].scene.add_entity(new_entity);
+                    mesh.name = format!("{}", new_handle.value());
+                    self.tabs[i].scene.meshes.insert(new_handle, mesh);
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output("SWEEP: solid created.");
+                } else {
+                    self.command_line.push_error("SWEEP: could not sweep profile along path. Use a closed 2D profile and a Line or Polyline path.");
+                }
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+            }
+
             CmdResult::HatcheditApply { handle, name, scale, angle } => {
                 if let Some(mut model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
                     // Update model fields

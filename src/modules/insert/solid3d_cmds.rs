@@ -368,6 +368,53 @@ impl RevolveCommand {
     }
 }
 
+// ── SWEEP command ──────────────────────────────────────────────────────────
+
+pub struct SweepCommand {
+    step: SweepStep,
+    profile_handle: acadrust::Handle,
+    color: [f32; 4],
+}
+
+#[derive(PartialEq)]
+enum SweepStep { PickProfile, PickPath }
+
+impl SweepCommand {
+    pub fn new(color: [f32; 4]) -> Self {
+        Self { step: SweepStep::PickProfile, profile_handle: acadrust::Handle::NULL, color }
+    }
+}
+
+impl CadCommand for SweepCommand {
+    fn name(&self) -> &'static str { "SWEEP" }
+    fn prompt(&self) -> String {
+        match self.step {
+            SweepStep::PickProfile => "SWEEP  Select profile to sweep:".into(),
+            SweepStep::PickPath    => "SWEEP  Select path (Line, Arc, LwPolyline):".into(),
+        }
+    }
+    fn needs_entity_pick(&self) -> bool { true }
+    fn on_entity_pick(&mut self, handle: acadrust::Handle, _pt: Vec3) -> CmdResult {
+        if handle.is_null() { return CmdResult::NeedPoint; }
+        match self.step {
+            SweepStep::PickProfile => {
+                self.profile_handle = handle;
+                self.step = SweepStep::PickPath;
+                CmdResult::NeedPoint
+            }
+            SweepStep::PickPath => {
+                CmdResult::SweepEntity {
+                    profile_handle: self.profile_handle,
+                    path_handle: handle,
+                    color: self.color,
+                }
+            }
+        }
+    }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
+    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+}
+
 // ── Placeholder Solid3D entity construction ────────────────────────────────
 
 /// Create a minimal Solid3D entity with empty ACIS data (placeholder only).

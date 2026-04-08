@@ -3457,6 +3457,15 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // ── SWEEP ──────────────────────────────────────────────────────
+            "SWEEP" => {
+                use crate::modules::insert::solid3d_cmds::SweepCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = SweepCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             // ── OBJ import ───────────────────────────────────────────────
             "IMPORTOBJ"|"OBJIMPORT" => {
                 return Task::done(Message::ObjImport);
