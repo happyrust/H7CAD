@@ -2603,6 +2603,112 @@ impl H7CAD {
                 Task::none()
             }
 
+            // ── Plot Style Panel ──────────────────────────────────────────────
+            Message::PlotStylePanelOpen => {
+                self.plotstyle_panel_open = true;
+                // Initialise edit buffers for ACI 1.
+                self.plotstyle_panel_aci = 1;
+                let entry = self.active_plot_style.as_ref()
+                    .and_then(|t| t.aci_entries.get(1));
+                self.ps_color_buf = entry.and_then(|e| e.color.map(|[r,g,b]| format!("#{:02X}{:02X}{:02X}", r, g, b))).unwrap_or_default();
+                self.ps_lineweight_buf = entry.map(|e| e.lineweight.to_string()).unwrap_or("255".into());
+                self.ps_screening_buf = entry.map(|e| e.screening.to_string()).unwrap_or("100".into());
+                Task::none()
+            }
+            Message::PlotStylePanelClose => {
+                self.plotstyle_panel_open = false;
+                Task::none()
+            }
+            Message::PlotStylePanelSelectAci(aci) => {
+                self.plotstyle_panel_aci = aci;
+                let entry = self.active_plot_style.as_ref()
+                    .and_then(|t| t.aci_entries.get(aci as usize));
+                self.ps_color_buf = entry.and_then(|e| e.color.map(|[r,g,b]| format!("#{:02X}{:02X}{:02X}", r, g, b))).unwrap_or_default();
+                self.ps_lineweight_buf = entry.map(|e| e.lineweight.to_string()).unwrap_or("255".into());
+                self.ps_screening_buf = entry.map(|e| e.screening.to_string()).unwrap_or("100".into());
+                Task::none()
+            }
+            Message::PlotStylePanelColorBuf(s) => { self.ps_color_buf = s; Task::none() }
+            Message::PlotStylePanelLwBuf(s)    => { self.ps_lineweight_buf = s; Task::none() }
+            Message::PlotStylePanelScreenBuf(s) => { self.ps_screening_buf = s; Task::none() }
+
+            Message::PlotStylePanelApply => {
+                let aci = self.plotstyle_panel_aci as usize;
+                if let Some(table) = self.active_plot_style.as_mut() {
+                    if let Some(entry) = table.aci_entries.get_mut(aci) {
+                        // Parse color.
+                        let color_str = self.ps_color_buf.trim();
+                        if color_str.is_empty() {
+                            entry.color = None;
+                        } else if color_str.starts_with('#') && color_str.len() == 7 {
+                            let r = u8::from_str_radix(&color_str[1..3], 16).unwrap_or(0);
+                            let g = u8::from_str_radix(&color_str[3..5], 16).unwrap_or(0);
+                            let b = u8::from_str_radix(&color_str[5..7], 16).unwrap_or(0);
+                            entry.color = Some([r, g, b]);
+                        }
+                        if let Ok(lw) = self.ps_lineweight_buf.trim().parse::<u8>() {
+                            entry.lineweight = lw;
+                        }
+                        if let Ok(sc) = self.ps_screening_buf.trim().parse::<u8>() {
+                            entry.screening = sc.min(100);
+                        }
+                        self.command_line.push_output(&format!("Plot style ACI {aci} updated."));
+                    }
+                } else {
+                    // No table loaded: create an identity table and apply.
+                    let mut table = crate::io::plot_style::PlotStyleTable::identity("Custom.ctb");
+                    if let Some(entry) = table.aci_entries.get_mut(aci) {
+                        let color_str = self.ps_color_buf.trim();
+                        if color_str.starts_with('#') && color_str.len() == 7 {
+                            let r = u8::from_str_radix(&color_str[1..3], 16).unwrap_or(0);
+                            let g = u8::from_str_radix(&color_str[3..5], 16).unwrap_or(0);
+                            let b = u8::from_str_radix(&color_str[5..7], 16).unwrap_or(0);
+                            entry.color = Some([r, g, b]);
+                        }
+                        if let Ok(lw) = self.ps_lineweight_buf.trim().parse::<u8>() { entry.lineweight = lw; }
+                        if let Ok(sc) = self.ps_screening_buf.trim().parse::<u8>() { entry.screening = sc.min(100); }
+                    }
+                    self.active_plot_style = Some(table);
+                    self.command_line.push_output(&format!("Created new CTB table, ACI {aci} updated."));
+                }
+                Task::none()
+            }
+
+            Message::PlotStylePanelSave => {
+                if self.active_plot_style.is_none() {
+                    self.command_line.push_error("No plot style table loaded. Load or create one first.");
+                    return Task::none();
+                }
+                let default_name = self.active_plot_style.as_ref()
+                    .map(|t| t.name.clone()).unwrap_or("export.ctb".into());
+                Task::perform(
+                    async move {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save Plot Style Table")
+                            .set_file_name(&default_name)
+                            .add_filter("Plot Style Files", &["ctb", "stb", "CTB", "STB"])
+                            .add_filter("All Files", &["*"])
+                            .save_file()
+                            .await
+                            .map(|h| h.path().to_path_buf())
+                    },
+                    Message::PlotStylePanelSavePath,
+                )
+            }
+
+            Message::PlotStylePanelSavePath(Some(path)) => {
+                if let Some(table) = &self.active_plot_style {
+                    match table.save(&path) {
+                        Ok(()) => self.command_line.push_output(&format!(
+                            "Plot style table saved to \"{}\".", path.display()
+                        )),
+                        Err(e) => self.command_line.push_error(&format!("Save error: {e}")),
+                    }
+                }
+                Task::none()
+            }
+            Message::PlotStylePanelSavePath(None) => Task::none(),
+
             // ── TextStyle Font Browser ────────────────────────────────────────
             Message::TextStyleDialogOpen => {
                 let i = self.active_tab;

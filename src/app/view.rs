@@ -311,6 +311,19 @@ impl H7CAD {
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        // ── Plot Style Panel ──────────────────────────────────────────────
+        let plotstyle_layer: Element<'_, Message> = if self.plotstyle_panel_open {
+            plotstyle_panel_overlay(
+                self.active_plot_style.as_ref(),
+                self.plotstyle_panel_aci,
+                &self.ps_color_buf,
+                &self.ps_lineweight_buf,
+                &self.ps_screening_buf,
+            )
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+
         let dimstyle_layer: Element<'_, Message> = if self.dimstyle_open {
             let tab = &self.tabs[self.active_tab];
             let styles: Vec<String> = tab.scene.document.dim_styles
@@ -339,7 +352,7 @@ impl H7CAD {
             }
         };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, dimstyle_layer, viewport_ctx_layer].into()
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, plotstyle_layer, dimstyle_layer, viewport_ctx_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -1745,6 +1758,223 @@ fn mlstyle_overlay<'a>(
     let catcher = mouse_area(
         container(iced::widget::Space::new().width(Fill).height(Fill))
     ).on_press(Message::MlStyleDialogClose);
+
+    let positioned = container(panel)
+        .width(Fill).height(Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    stack![catcher, positioned].into()
+}
+
+// ── Plot Style Panel ───────────────────────────────────────────────────────
+
+fn plotstyle_panel_overlay<'a>(
+    table: Option<&'a crate::io::plot_style::PlotStyleTable>,
+    selected_aci: u8,
+    color_buf: &'a str,
+    lw_buf: &'a str,
+    screen_buf: &'a str,
+) -> Element<'a, Message> {
+    use iced::Length::Fill;
+    use iced::Color;
+    use iced::widget::scrollable;
+
+    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
+    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
+    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
+    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
+
+    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
+        background: Some(Background::Color(match (accent, status) {
+            (true,  button::Status::Hovered | button::Status::Pressed) => Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
+            (false, button::Status::Hovered | button::Status::Pressed) => Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
+            (true, _) => ACCENT,
+            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+        })),
+        text_color: TEXT_COL,
+        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        ..Default::default()
+    };
+
+    let field_style = |_: &Theme, _: text_input::Status| text_input::Style {
+        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
+        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+        icon: TEXT_COL,
+        placeholder: DIM_COL,
+        value: TEXT_COL,
+        selection: ACCENT,
+    };
+
+    // ACI color list (1..=255)
+    let aci_items: Vec<Element<'_, Message>> = (1u8..=255).map(|aci| {
+        let is_sel = aci == selected_aci;
+        let has_override = table.and_then(|t| t.aci_entries.get(aci as usize))
+            .map(|e| e.color.is_some() || e.lineweight != 255 || e.screening != 100)
+            .unwrap_or(false);
+        let lw_str = table.and_then(|t| t.aci_entries.get(aci as usize))
+            .and_then(|e| {
+                if e.lineweight != 255 {
+                    crate::io::plot_style::LW_TABLE.get(e.lineweight as usize)
+                        .map(|lw| format!("{:.2}mm", lw))
+                } else { None }
+            }).unwrap_or_default();
+        let color_str = table.and_then(|t| t.aci_entries.get(aci as usize))
+            .and_then(|e| e.color.map(|[r, g, b]| format!("#{:02X}{:02X}{:02X}", r, g, b)))
+            .unwrap_or_default();
+        let label = if has_override {
+            format!("{aci:>3}  {color_str:<9} {lw_str}")
+        } else {
+            format!("{aci:>3}  (default)")
+        };
+        button(text(label).size(10).color(TEXT_COL).font(iced::Font::MONOSPACE))
+            .on_press(Message::PlotStylePanelSelectAci(aci))
+            .style(move |_: &Theme, st| button::Style {
+                background: Some(Background::Color(match (is_sel, st) {
+                    (true, _) => ACTIVE_BG,
+                    (false, button::Status::Hovered | button::Status::Pressed) =>
+                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT_COL,
+                ..Default::default()
+            })
+            .padding([2, 8])
+            .width(Fill)
+            .into()
+    }).collect();
+
+    let list_panel = container(
+        scrollable(column(aci_items).spacing(1)).height(300)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
+        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        ..Default::default()
+    })
+    .padding(4)
+    .width(260);
+
+    // Right panel: edit selected entry
+    let entry = table.and_then(|t| t.aci_entries.get(selected_aci as usize));
+    let edit_panel: Element<'_, Message> = {
+        let lbl = |s: &'static str| text(s).size(11).color(DIM_COL);
+        column![
+            row![
+                text("ACI:").size(11).color(DIM_COL).width(90),
+                text(format!("{selected_aci}")).size(11).color(TEXT_COL),
+            ].spacing(8).align_y(iced::Center),
+            lbl("Color override (#RRGGBB):"),
+            text_input("#RRGGBB or blank", color_buf)
+                .on_input(Message::PlotStylePanelColorBuf)
+                .style(field_style)
+                .size(11)
+                .padding([4, 8]),
+            lbl("Lineweight index (0-24, 255=obj):"),
+            text_input("255", lw_buf)
+                .on_input(Message::PlotStylePanelLwBuf)
+                .style(field_style)
+                .size(11)
+                .padding([4, 8]),
+            lbl("Screening (0-100):"),
+            text_input("100", screen_buf)
+                .on_input(Message::PlotStylePanelScreenBuf)
+                .style(field_style)
+                .size(11)
+                .padding([4, 8]),
+            Space::new().height(8),
+            {
+                let cur_color = entry.and_then(|e| e.color.map(|[r,g,b]| format!("#{:02X}{:02X}{:02X}", r,g,b))).unwrap_or("(none)".into());
+                let cur_lw = entry.map(|e| if e.lineweight == 255 { "object".into() } else {
+                    crate::io::plot_style::LW_TABLE.get(e.lineweight as usize)
+                        .map(|lw| format!("{:.2}mm (idx {})", lw, e.lineweight))
+                        .unwrap_or_else(|| format!("idx {}", e.lineweight))
+                }).unwrap_or("—".into());
+                let cur_scr = entry.map(|e| format!("{}%", e.screening)).unwrap_or("—".into());
+                let vals: Element<'_, Message> = column![
+                    text("Current values:").size(10).color(DIM_COL),
+                    text(format!("  Color: {cur_color}")).size(10).color(TEXT_COL),
+                    text(format!("  Lweight: {cur_lw}")).size(10).color(TEXT_COL),
+                    text(format!("  Screening: {cur_scr}")).size(10).color(TEXT_COL),
+                ].spacing(3).into();
+                vals
+            },
+            Space::new().height(Fill),
+            button(text("Apply to ACI").size(11))
+                .on_press(Message::PlotStylePanelApply)
+                .style(btn_style(true))
+                .padding([5, 10]),
+        ]
+        .spacing(6)
+        .width(220)
+        .height(300)
+        .into()
+    };
+
+    let table_name = table.map(|t| t.name.as_str()).unwrap_or("(no table loaded)");
+
+    let panel = container(
+        column![
+            row![
+                text("Plot Style Table Editor").size(13).color(TEXT_COL),
+                Space::new().width(Fill),
+                button(text("✕").size(12).color(DIM_COL))
+                    .on_press(Message::PlotStylePanelClose)
+                    .style(|_: &Theme, _| button::Style {
+                        background: Some(Background::Color(Color::TRANSPARENT)),
+                        text_color: DIM_COL,
+                        ..Default::default()
+                    })
+                    .padding([2, 6]),
+            ].align_y(iced::Center),
+            text(format!("Table: {table_name}")).size(11).color(DIM_COL),
+            Space::new().height(8),
+            row![
+                list_panel,
+                Space::new().width(12),
+                edit_panel,
+            ].align_y(iced::alignment::Vertical::Top),
+            Space::new().height(8),
+            row![
+                button(text("Load CTB/STB").size(11))
+                    .on_press(Message::PlotStyleLoad)
+                    .style(btn_style(false))
+                    .padding([5, 10]),
+                button(text("Save As…").size(11))
+                    .on_press(Message::PlotStylePanelSave)
+                    .style(btn_style(false))
+                    .padding([5, 10]),
+                button(text("Clear Table").size(11))
+                    .on_press(Message::PlotStyleClear)
+                    .style(btn_style(false))
+                    .padding([5, 10]),
+                Space::new().width(Fill),
+                button(text("Close").size(11))
+                    .on_press(Message::PlotStylePanelClose)
+                    .style(btn_style(false))
+                    .padding([5, 10]),
+            ].spacing(8),
+        ]
+        .spacing(6)
+        .padding(16)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(PANEL_BG)),
+        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
+        ..Default::default()
+    })
+    .width(520)
+    .height(430);
+
+    let catcher = mouse_area(container(Space::new().width(Fill).height(Fill))
+        .width(Fill).height(Fill)
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.45 })),
+            ..Default::default()
+        })
+    ).on_press(Message::PlotStylePanelClose);
 
     let positioned = container(panel)
         .width(Fill).height(Fill)

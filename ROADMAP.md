@@ -153,7 +153,7 @@ Underlay (PDF/DWF/DGN)
 | TEXT (DT) | ✅ |
 | MTEXT (T) | ✅ |
 | DIMSTYLE yöneticisi (DIMSTYLE/DDIM) | ✅ |
-| MLEADERSTYLE | ⬜ |
+| MLEADERSTYLE | ✅ |
 | DIMORDINATE | ✅ |
 
 ---
@@ -294,7 +294,7 @@ Underlay (PDF/DWF/DGN)
 | Solid3D tessellation (acadrust ACIS) | ✅ |
 | Boolean operasyonlar (UNION/SUBTRACT/INTERSECT) | ⬜ |
 | EXTRUDE / REVOLVE | ✅ |
-| SWEEP / LOFT | ⬜ |
+| SWEEP / LOFT | ✅ |
 | 3D ARRAY | ✅ |
 | STL dışa aktarma (STLOUT) | ✅ |
 | STEP dışa aktarma | ⬜ |

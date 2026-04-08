@@ -112,6 +112,15 @@ pub(super) struct H7CAD {
     /// Edit buffer for oblique angle (degrees).
     textstyle_oblique: String,
 
+    // ── Plot Style Panel ──────────────────────────────────────────────────
+    plotstyle_panel_open: bool,
+    /// Selected ACI index in the panel (1-255).
+    plotstyle_panel_aci: u8,
+    /// Edit buffers for the selected entry.
+    ps_color_buf: String,
+    ps_lineweight_buf: String,
+    ps_screening_buf: String,
+
     // ── DimStyle Dialog ───────────────────────────────────────────────────
     dimstyle_open: bool,
     /// Name of the style currently shown in the dialog.
@@ -371,6 +380,21 @@ pub enum Message {
     PlotStyleLoaded(Option<crate::io::plot_style::PlotStyleTable>),
     /// Clear the active plot style table.
     PlotStyleClear,
+    /// Open/close the Plot Style panel.
+    PlotStylePanelOpen,
+    PlotStylePanelClose,
+    /// Select an ACI entry in the panel.
+    PlotStylePanelSelectAci(u8),
+    /// Edit buffers changed.
+    PlotStylePanelColorBuf(String),
+    PlotStylePanelLwBuf(String),
+    PlotStylePanelScreenBuf(String),
+    /// Apply current edit buffers to the selected ACI entry.
+    PlotStylePanelApply,
+    /// Save the modified table back to disk.
+    PlotStylePanelSave,
+    /// Save callback.
+    PlotStylePanelSavePath(Option<std::path::PathBuf>),
     // ── TextStyle Font Browser ────────────────────────────────────────────
     TextStyleDialogOpen,
     TextStyleDialogClose,
@@ -490,6 +514,11 @@ impl H7CAD {
             page_setup_scale: "Fit".to_string(),
             // Plot style
             active_plot_style: None,
+            plotstyle_panel_open: false,
+            plotstyle_panel_aci: 1,
+            ps_color_buf: String::new(),
+            ps_lineweight_buf: "255".to_string(),
+            ps_screening_buf: "100".to_string(),
             // TextStyle font browser
             textstyle_open: false,
             textstyle_selected: "Standard".to_string(),

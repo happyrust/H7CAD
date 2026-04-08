@@ -3579,6 +3579,11 @@ impl H7CAD {
                 return Task::done(Message::StlExport);
             }
 
+            // ── Plot Style Editor GUI ─────────────────────────────────────
+            "PLOTSTYLEPANEL"|"PLOTSTYLEEDITOR"|"STYLESMANAGER" => {
+                return Task::done(Message::PlotStylePanelOpen);
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
             "PRINT"|"PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
