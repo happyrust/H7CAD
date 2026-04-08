@@ -1972,6 +1972,43 @@ impl H7CAD {
                 self.command_line.push_info("Opening Patreon page...");
             }
 
+            // ── Keyboard Shortcuts panel ──────────────────────────────────
+            cmd if cmd == "SHORTCUTS" || cmd.starts_with("SHORTCUTS ") => {
+                let raw_rest = cmd.trim_start_matches("SHORTCUTS").trim();
+                let parts: Vec<&str> = raw_rest.splitn(3, ' ').collect();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        return Task::done(Message::ShortcutsPanelOpen);
+                    }
+                    "SET" | "S" => {
+                        // SHORTCUTS SET <key> <command>
+                        // e.g. SHORTCUTS SET CTRL+D DIST
+                        let key = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                        let cmd_str = parts.get(2).map(|s| s.to_uppercase()).unwrap_or_default();
+                        if key.is_empty() || cmd_str.is_empty() {
+                            self.command_line.push_error("Usage: SHORTCUTS SET <key> <command>  e.g. SHORTCUTS SET CTRL+D DIST");
+                        } else {
+                            self.shortcut_overrides.insert(key.clone(), cmd_str.clone());
+                            self.command_line.push_output(&format!("Shortcut set: {key} → {cmd_str}"));
+                        }
+                    }
+                    "CLEAR" | "DELETE" | "REMOVE" => {
+                        let key = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                        if key.is_empty() {
+                            self.command_line.push_error("Usage: SHORTCUTS CLEAR <key>");
+                        } else if self.shortcut_overrides.remove(&key).is_some() {
+                            self.command_line.push_output(&format!("Shortcut '{key}' removed."));
+                        } else {
+                            self.command_line.push_error(&format!("Shortcut '{key}' not found."));
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info("Usage: SHORTCUTS LIST | SET <key> <cmd> | CLEAR <key>");
+                    }
+                }
+            }
+
             // ── Color Scheme / Theme selector ─────────────────────────────
             cmd if cmd == "COLORSCHEME" || cmd.starts_with("COLORSCHEME ") => {
                 use iced::Theme;

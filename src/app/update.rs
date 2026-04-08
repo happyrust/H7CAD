@@ -2370,6 +2370,16 @@ impl H7CAD {
                 Task::none()
             }
 
+            // ── Keyboard Shortcuts Panel ──────────────────────────────────────
+            Message::ShortcutsPanelOpen => {
+                self.shortcuts_panel_open = true;
+                Task::none()
+            }
+            Message::ShortcutsPanelClose => {
+                self.shortcuts_panel_open = false;
+                Task::none()
+            }
+
             Message::ViewportContextMenuClose => {
                 let i = self.active_tab;
                 self.tabs[i].scene.selection.borrow_mut().context_menu = None;

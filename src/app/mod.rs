@@ -115,6 +115,11 @@ pub(super) struct H7CAD {
     // ── Color Scheme ──────────────────────────────────────────────────────
     active_theme: Theme,
 
+    // ── Keyboard Shortcut Editor ──────────────────────────────────────────
+    shortcuts_panel_open: bool,
+    /// User-defined function-key overrides: "F3" → command string.
+    shortcut_overrides: std::collections::HashMap<String, String>,
+
     // ── Layout Manager Panel ──────────────────────────────────────────────
     layout_manager_open: bool,
     layout_manager_selected: String,
@@ -359,6 +364,9 @@ pub enum Message {
     LayoutManagerSetCurrent,
     /// Switch the UI color scheme.
     SetTheme(Theme),
+    // ── Keyboard Shortcut Editor ────────────────────────────────────────
+    ShortcutsPanelOpen,
+    ShortcutsPanelClose,
     /// Close the viewport right-click context menu without performing any action.
     ViewportContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
@@ -537,6 +545,9 @@ impl H7CAD {
             active_plot_style: None,
             // Color scheme (default: dark CAD-style)
             active_theme: Theme::Dark,
+            // Keyboard shortcuts
+            shortcuts_panel_open: false,
+            shortcut_overrides: std::collections::HashMap::new(),
             // Layout Manager
             layout_manager_open: false,
             layout_manager_selected: "Model".to_string(),

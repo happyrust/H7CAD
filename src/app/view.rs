@@ -367,7 +367,13 @@ impl H7CAD {
             }
         };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, plotstyle_layer, layout_manager_layer, dimstyle_layer, viewport_ctx_layer].into()
+        let shortcuts_layer: Element<'_, Message> = if self.shortcuts_panel_open {
+            shortcuts_panel_overlay(&self.shortcut_overrides)
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, plotstyle_layer, layout_manager_layer, shortcuts_layer, dimstyle_layer, viewport_ctx_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -2188,6 +2194,158 @@ fn layout_manager_overlay<'a>(
             ..Default::default()
         })
     ).on_press(Message::LayoutManagerClose);
+
+    let positioned = container(panel)
+        .width(Fill).height(Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    stack![catcher, positioned].into()
+}
+
+// ── Keyboard Shortcuts Reference Panel ────────────────────────────────────
+
+fn shortcuts_panel_overlay<'a>(
+    overrides: &'a std::collections::HashMap<String, String>,
+) -> Element<'a, Message> {
+    use iced::Length::Fill;
+    use iced::Color;
+    use iced::widget::scrollable;
+
+    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
+    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
+    const HEAD_COL:  Color = Color { r: 0.40, g: 0.70, b: 1.00, a: 1.0 };
+
+    let shortcut_row = |key: &'static str, action: &'static str| -> Element<'_, Message> {
+        row![
+            text(key).size(11).color(HEAD_COL).font(iced::Font::MONOSPACE).width(120),
+            text(action).size(11).color(TEXT_COL),
+        ].spacing(8).align_y(iced::Center).padding([2, 0]).into()
+    };
+
+    let section = |title: &'static str| -> Element<'_, Message> {
+        text(title).size(12).color(DIM_COL).into()
+    };
+
+    let builtins: Vec<Element<'_, Message>> = vec![
+        section("── Function Keys ──────────────────────────────"),
+        shortcut_row("F3",          "Toggle Object Snap"),
+        shortcut_row("F7",          "Toggle Grid"),
+        shortcut_row("F8",          "Toggle Ortho"),
+        shortcut_row("F9",          "Toggle Grid Snap"),
+        shortcut_row("F10",         "Toggle Polar Tracking"),
+        shortcut_row("F11",         "Toggle Object Snap Tracking"),
+        shortcut_row("F12",         "Toggle Dynamic Input"),
+        section("── Ctrl Shortcuts ─────────────────────────────"),
+        shortcut_row("Ctrl+N",      "New Drawing"),
+        shortcut_row("Ctrl+O",      "Open File"),
+        shortcut_row("Ctrl+S",      "Save"),
+        shortcut_row("Ctrl+Shift+S","Save As"),
+        shortcut_row("Ctrl+Z",      "Undo"),
+        shortcut_row("Ctrl+Shift+Z / Ctrl+Y", "Redo"),
+        shortcut_row("Ctrl+C",      "Copy to Clipboard"),
+        shortcut_row("Ctrl+X",      "Cut to Clipboard"),
+        shortcut_row("Ctrl+V",      "Paste from Clipboard"),
+        section("── Other Keys ──────────────────────────────────"),
+        shortcut_row("Enter / Space", "Finalize command / Repeat last"),
+        shortcut_row("Escape",      "Cancel active command"),
+        shortcut_row("Delete",      "Delete selected entities"),
+        shortcut_row("↑ / ↓",       "Command history navigation"),
+    ];
+
+    // User-defined overrides
+    let mut override_rows: Vec<Element<'_, Message>> = vec![
+        section("── Custom Overrides (SHORTCUTS SET) ─────────"),
+    ];
+    if overrides.is_empty() {
+        override_rows.push(
+            text("  (none — use: SHORTCUTS SET <key> <command>)")
+                .size(11).color(DIM_COL).into()
+        );
+    } else {
+        let mut sorted: Vec<_> = overrides.iter().collect();
+        sorted.sort_by_key(|(k, _)| k.as_str());
+        for (key, cmd) in sorted {
+            let label: &str = key.as_str();
+            let cmd_str: &str = cmd.as_str();
+            override_rows.push(
+                row![
+                    text(label).size(11).color(HEAD_COL).font(iced::Font::MONOSPACE).width(120),
+                    text(cmd_str).size(11).color(TEXT_COL),
+                ].spacing(8).align_y(iced::Center).padding([2, 0]).into()
+            );
+        }
+    }
+
+    let mut all_rows = builtins;
+    all_rows.extend(override_rows);
+
+    let panel = container(
+        column![
+            row![
+                text("Keyboard Shortcuts").size(13).color(TEXT_COL),
+                Space::new().width(Fill),
+                button(text("✕").size(12).color(DIM_COL))
+                    .on_press(Message::ShortcutsPanelClose)
+                    .style(|_: &Theme, _| button::Style {
+                        background: Some(Background::Color(Color::TRANSPARENT)),
+                        text_color: DIM_COL,
+                        ..Default::default()
+                    })
+                    .padding([2, 6]),
+            ].align_y(iced::Center),
+            text("Type SHORTCUTS SET <key> <cmd> to add custom shortcuts.")
+                .size(10).color(DIM_COL),
+            Space::new().height(8),
+            container(
+                scrollable(
+                    column(all_rows).spacing(4).padding([0, 8])
+                ).height(360)
+            )
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
+                border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+                ..Default::default()
+            })
+            .padding(8),
+            Space::new().height(8),
+            row![
+                Space::new().width(Fill),
+                button(text("Close").size(11))
+                    .on_press(Message::ShortcutsPanelClose)
+                    .style(|_: &Theme, status| button::Style {
+                        background: Some(Background::Color(match status {
+                            button::Status::Hovered | button::Status::Pressed =>
+                                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
+                            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+                        })),
+                        text_color: TEXT_COL,
+                        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    })
+                    .padding([5, 12]),
+            ],
+        ]
+        .spacing(6)
+        .padding(16)
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(PANEL_BG)),
+        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
+        ..Default::default()
+    })
+    .width(520)
+    .height(480);
+
+    let catcher = mouse_area(container(Space::new().width(Fill).height(Fill))
+        .width(Fill).height(Fill)
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.45 })),
+            ..Default::default()
+        })
+    ).on_press(Message::ShortcutsPanelClose);
 
     let positioned = container(panel)
         .width(Fill).height(Fill)
