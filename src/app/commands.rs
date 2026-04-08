@@ -3457,6 +3457,11 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            // ── OBJ import ───────────────────────────────────────────────
+            "IMPORTOBJ"|"OBJIMPORT" => {
+                return Task::done(Message::ObjImport);
+            }
+
             // ── STL export ────────────────────────────────────────────────
             "STLOUT"|"EXPORTSTL" => {
                 return Task::done(Message::StlExport);

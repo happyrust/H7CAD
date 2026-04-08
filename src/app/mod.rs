@@ -440,6 +440,11 @@ pub enum Message {
     StlExport,
     /// Callback after the user picks (or cancels) the STL save path.
     StlExportPath(Option<std::path::PathBuf>),
+    // ── OBJ import ────────────────────────────────────────────────────────
+    /// Trigger OBJ import: show open-file dialog.
+    ObjImport,
+    /// Callback after the user picks (or cancels) the OBJ file path.
+    ObjImportPath(Option<std::path::PathBuf>),
 }
 
 impl H7CAD {

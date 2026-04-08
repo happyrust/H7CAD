@@ -288,6 +288,61 @@ impl H7CAD {
 
             Message::StlExportPath(None) => Task::none(),
 
+            // ── OBJ import ────────────────────────────────────────────────
+            Message::ObjImport => {
+                Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Import OBJ Mesh")
+                            .add_filter("Wavefront OBJ", &["obj", "OBJ"])
+                            .add_filter("All Files", &["*"])
+                            .pick_file()
+                            .await
+                            .map(|h| h.path().to_path_buf())
+                    },
+                    Message::ObjImportPath,
+                )
+            }
+
+            Message::ObjImportPath(Some(path)) => {
+                let src = match std::fs::read_to_string(&path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        self.command_line.push_error(&format!("IMPORTOBJ: read error: {e}"));
+                        return Task::none();
+                    }
+                };
+                let color = [0.7f32, 0.7, 0.85, 1.0];
+                match crate::io::obj::parse_obj(&src, color) {
+                    None => {
+                        self.command_line.push_error("IMPORTOBJ: no usable geometry in file.");
+                    }
+                    Some(mut mesh) => {
+                        let i = self.active_tab;
+                        let file_stem = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "obj_mesh".into());
+                        mesh.name = file_stem.clone();
+                        self.push_undo_snapshot(i, "IMPORTOBJ");
+                        use crate::modules::insert::solid3d_cmds::empty_solid3d;
+                        let entity = empty_solid3d();
+                        let handle = self.tabs[i].scene.add_entity(entity);
+                        if !handle.is_null() {
+                            self.tabs[i].scene.meshes.insert(handle, mesh);
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(&format!(
+                                "IMPORTOBJ: imported \"{}\" as mesh.",
+                                file_stem
+                            ));
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::ObjImportPath(None) => Task::none(),
+
             Message::SaveFile => {
                 let i = self.active_tab;
                 if let Some(path) = &self.tabs[i].current_path {

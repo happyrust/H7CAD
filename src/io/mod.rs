@@ -3,6 +3,7 @@
 // All file reading/writing goes through acadrust.
 // Default save format: DWG (AC1032 / R2018+).
 
+pub mod obj;
 pub mod pdf_export;
 pub mod plot_style;
 pub mod stl;
