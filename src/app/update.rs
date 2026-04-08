@@ -2722,6 +2722,70 @@ impl H7CAD {
                 Task::none()
             }
 
+            // ── Print to system printer ───────────────────────────────────────
+            Message::PrintToPrinter => {
+                let i = self.active_tab;
+                let scene = &self.tabs[i].scene;
+                let layout_name = scene.current_layout.clone();
+                let wires = scene.entity_wires();
+                use acadrust::objects::{ObjectType, PlotType};
+                let ps_snap = scene.document.objects.values().find_map(|obj| {
+                    if let ObjectType::PlotSettings(ps) = obj {
+                        if ps.page_name == layout_name { Some(ps.clone()) } else { None }
+                    } else { None }
+                });
+                let (paper_w, paper_h, draw_ox, draw_oy, rotation_deg) =
+                    if let Some(((x0, y0), (x1, y1))) = scene.paper_limits() {
+                        let (pw, ph) = (x1 - x0, y1 - y0);
+                        let use_extents = ps_snap.as_ref()
+                            .map(|ps| matches!(ps.plot_type, PlotType::Extents))
+                            .unwrap_or(false);
+                        let (ox, oy) = if use_extents {
+                            if let Some((mn, _mx)) = scene.model_space_extents() {
+                                (-mn.x as f64, -mn.y as f64)
+                            } else { (-x0, -y0) }
+                        } else { (-x0, -y0) };
+                        let rot = ps_snap.as_ref()
+                            .map(|ps| ps.rotation.to_degrees() as i32)
+                            .unwrap_or(0);
+                        (pw, ph, ox, oy, rot)
+                    } else {
+                        if let Some((mn, mx)) = scene.model_space_extents() {
+                            let margin = 1.05_f64;
+                            let w = ((mx.x - mn.x) as f64 * margin).max(1.0);
+                            let h = ((mx.y - mn.y) as f64 * margin).max(1.0);
+                            let pad_x = (w - (mx.x - mn.x) as f64) * 0.5;
+                            let pad_y = (h - (mx.y - mn.y) as f64) * 0.5;
+                            (w, h, -(mn.x as f64) + pad_x, -(mn.y as f64) + pad_y, 0)
+                        } else { (297.0, 210.0, 0.0, 0.0, 0) }
+                    };
+                let (eff_w, eff_h) = match rotation_deg {
+                    90 | 270 => (paper_h, paper_w),
+                    _        => (paper_w, paper_h),
+                };
+                let plot_style = self.active_plot_style.clone();
+                self.command_line.push_info("Sending to system printer…");
+                Task::perform(
+                    async move {
+                        crate::io::print_to_printer::print_wires(
+                            wires, eff_w, eff_h,
+                            draw_ox as f32, draw_oy as f32,
+                            rotation_deg, plot_style,
+                        )
+                        .await
+                    },
+                    Message::PrintResult,
+                )
+            }
+            Message::PrintResult(Ok(printer)) => {
+                self.command_line.push_info(&format!("Sent to printer: {printer}"));
+                Task::none()
+            }
+            Message::PrintResult(Err(e)) => {
+                self.command_line.push_error(&format!("Print failed: {e}"));
+                Task::none()
+            }
+
             // ── Plot Style Table ──────────────────────────────────────────────
             Message::PlotStyleLoad => {
                 Task::perform(

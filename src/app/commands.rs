@@ -3794,8 +3794,12 @@ impl H7CAD {
             }
 
             // ── Plot / Page Setup ──────────────────────────────────────────
-            "PRINT"|"PLOT"|"EXPORT" => {
+            "PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
+            }
+            // PRINT — send current layout to the system default printer.
+            "PRINT" => {
+                return Task::done(Message::PrintToPrinter);
             }
             // PLOTSTYLE — load or clear CTB/STB plot style table
             cmd if cmd == "PLOTSTYLE" || cmd.starts_with("PLOTSTYLE ") => {

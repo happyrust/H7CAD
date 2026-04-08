@@ -402,6 +402,10 @@ pub enum Message {
     PlotExport,
     /// Callback after the user picks (or cancels) the export path.
     PlotExportPath(Option<std::path::PathBuf>),
+    /// Send current layout to the system printer (via lp / lpr).
+    PrintToPrinter,
+    /// Callback from the async printer job.
+    PrintResult(Result<String, String>),
     // ── Plot Style Table ─────────────────────────────────────────────────
     /// Open file dialog to load a CTB/STB plot style table.
     PlotStyleLoad,
