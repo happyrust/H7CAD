@@ -497,6 +497,11 @@ pub enum Message {
     StlExport,
     /// Callback after the user picks (or cancels) the STL save path.
     StlExportPath(Option<std::path::PathBuf>),
+    // ── STEP export ───────────────────────────────────────────────────────
+    /// Trigger STEP AP203 export: show save dialog.
+    StepExport,
+    /// Callback after the user picks (or cancels) the STEP save path.
+    StepExportPath(Option<std::path::PathBuf>),
     // ── OBJ import ────────────────────────────────────────────────────────
     /// Trigger OBJ import: show open-file dialog.
     ObjImport,

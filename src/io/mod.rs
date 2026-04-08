@@ -7,6 +7,7 @@ pub mod obj;
 pub mod pdf_export;
 pub mod plot_style;
 pub mod print_to_printer;
+pub mod step;
 pub mod stl;
 pub mod xref;
 

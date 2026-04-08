@@ -3788,6 +3788,11 @@ impl H7CAD {
                 return Task::done(Message::StlExport);
             }
 
+            // STEPOUT — export 3D meshes to STEP AP203 format
+            "STEPOUT"|"EXPORTSTEP"|"STPOUT" => {
+                return Task::done(Message::StepExport);
+            }
+
             // ── Plot Style Editor GUI ─────────────────────────────────────
             "PLOTSTYLEPANEL"|"PLOTSTYLEEDITOR"|"STYLESMANAGER" => {
                 return Task::done(Message::PlotStylePanelOpen);

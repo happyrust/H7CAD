@@ -288,6 +288,48 @@ impl H7CAD {
 
             Message::StlExportPath(None) => Task::none(),
 
+            // ── STEP AP203 export ─────────────────────────────────────────
+            Message::StepExport => {
+                let i = self.active_tab;
+                if self.tabs[i].scene.meshes.is_empty() {
+                    self.command_line.push_error("STEPOUT: no 3D mesh data in this drawing.");
+                    return Task::none();
+                }
+                Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Export STEP AP203")
+                            .set_file_name("export.step")
+                            .add_filter("STEP Files", &["step", "stp"])
+                            .add_filter("All Files", &["*"])
+                            .save_file()
+                            .await
+                            .map(|h| h.path().to_path_buf())
+                    },
+                    Message::StepExportPath,
+                )
+            }
+
+            Message::StepExportPath(Some(path)) => {
+                let i = self.active_tab;
+                let meshes: Vec<crate::scene::mesh_model::MeshModel> =
+                    self.tabs[i].scene.meshes.values().cloned().collect();
+                let mesh_refs: Vec<&crate::scene::mesh_model::MeshModel> = meshes.iter().collect();
+                match crate::io::step::build_step(&mesh_refs) {
+                    Some(text) => match std::fs::write(&path, text.as_bytes()) {
+                        Ok(()) => self.command_line.push_output(&format!(
+                            "STEPOUT: exported to \"{}\"",
+                            path.display()
+                        )),
+                        Err(e) => self.command_line.push_error(&format!("STEPOUT: write error: {e}")),
+                    },
+                    None => self.command_line.push_error("STEPOUT: no mesh data to export."),
+                }
+                Task::none()
+            }
+
+            Message::StepExportPath(None) => Task::none(),
+
             // ── OBJ import ────────────────────────────────────────────────
             Message::ObjImport => {
                 Task::perform(
