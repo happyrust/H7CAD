@@ -765,6 +765,12 @@ pub struct Entity {
     pub invisible: bool,
     /// Transparency (code 440), 0=fully opaque
     pub transparency: i32,
+    /// Thickness (code 39), 0.0 = no thickness
+    pub thickness: f64,
+    /// Extrusion direction (codes 210/220/230), default [0,0,1]
+    pub extrusion: [f64; 3],
+    /// Raw XData keyed by application name (code 1001)
+    pub xdata: Vec<(String, Vec<(i16, String)>)>,
     pub data: EntityData,
 }
 
@@ -780,6 +786,9 @@ impl Entity {
             lineweight: -1, // ByLayer
             invisible: false,
             transparency: 0,
+            thickness: 0.0,
+            extrusion: [0.0, 0.0, 1.0],
+            xdata: Vec::new(),
             data,
         }
     }
@@ -813,6 +822,7 @@ pub enum EntityData {
         height: f64,
         value: String,
         rotation: f64,
+        style_name: String,
     },
     Ellipse {
         center: [f64; 3],
@@ -851,6 +861,8 @@ pub enum EntityData {
         width: f64,
         value: String,
         rotation: f64,
+        style_name: String,
+        attachment_point: i16,
     },
     Insert {
         block_name: String,

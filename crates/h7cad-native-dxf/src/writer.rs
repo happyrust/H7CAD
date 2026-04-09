@@ -399,8 +399,23 @@ fn write_entity(w: &mut DxfWriter, entity: &Entity) {
     if entity.transparency != 0 {
         w.pair_i32(440, entity.transparency);
     }
+    if entity.thickness != 0.0 {
+        w.pair_f64(39, entity.thickness);
+    }
+    if entity.extrusion != [0.0, 0.0, 1.0] {
+        w.pair_f64(210, entity.extrusion[0]);
+        w.pair_f64(220, entity.extrusion[1]);
+        w.pair_f64(230, entity.extrusion[2]);
+    }
 
     write_entity_data(w, entity);
+
+    for (app, pairs) in &entity.xdata {
+        w.pair_str(1001, app);
+        for (code, val) in pairs {
+            w.pair(*code, val);
+        }
+    }
 }
 
 fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
@@ -456,12 +471,16 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             height,
             value,
             rotation,
+            style_name,
         } => {
             w.point3d(10, *insertion);
             w.pair_f64(40, *height);
             w.pair_str(1, value);
             if *rotation != 0.0 {
                 w.pair_f64(50, *rotation);
+            }
+            if !style_name.is_empty() {
+                w.pair_str(7, style_name);
             }
         }
         EntityData::MText {
@@ -470,13 +489,21 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             width,
             value,
             rotation,
+            style_name,
+            attachment_point,
         } => {
             w.point3d(10, *insertion);
             w.pair_f64(40, *height);
             w.pair_f64(41, *width);
+            if *attachment_point != 0 {
+                w.pair_i16(71, *attachment_point);
+            }
             w.pair_str(1, value);
             if *rotation != 0.0 {
                 w.pair_f64(50, *rotation);
+            }
+            if !style_name.is_empty() {
+                w.pair_str(7, style_name);
             }
         }
         EntityData::Insert {

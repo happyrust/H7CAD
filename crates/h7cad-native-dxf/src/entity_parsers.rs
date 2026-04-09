@@ -596,6 +596,8 @@ pub(crate) fn parse_mtext(codes: &[(i16, String)]) -> EntityData {
     let mut width = 0.0;
     let mut rotation = 0.0;
     let mut value = String::new();
+    let mut style_name = String::new();
+    let mut attachment_point: i16 = 0;
     for &(code, ref val) in codes {
         match code {
             10 => x = val.parse().unwrap_or(0.0),
@@ -604,6 +606,8 @@ pub(crate) fn parse_mtext(codes: &[(i16, String)]) -> EntityData {
             40 => height = val.parse().unwrap_or(0.0),
             41 => width = val.parse().unwrap_or(0.0),
             50 => rotation = val.parse().unwrap_or(0.0),
+            71 => attachment_point = val.parse().unwrap_or(0),
+            7 => style_name = val.clone(),
             1 | 3 => value.push_str(val),
             _ => {}
         }
@@ -614,6 +618,8 @@ pub(crate) fn parse_mtext(codes: &[(i16, String)]) -> EntityData {
         width,
         value,
         rotation,
+        style_name,
+        attachment_point,
     }
 }
 
@@ -942,6 +948,7 @@ pub(crate) fn parse_text(codes: &[(i16, String)]) -> EntityData {
     let mut height = 0.0;
     let mut rotation = 0.0;
     let mut value = String::new();
+    let mut style_name = String::new();
     for &(code, ref val) in codes {
         match code {
             10 => x = val.parse().unwrap_or(0.0),
@@ -950,6 +957,7 @@ pub(crate) fn parse_text(codes: &[(i16, String)]) -> EntityData {
             40 => height = val.parse().unwrap_or(0.0),
             50 => rotation = val.parse().unwrap_or(0.0),
             1 => value = val.clone(),
+            7 => style_name = val.clone(),
             _ => {}
         }
     }
@@ -958,5 +966,6 @@ pub(crate) fn parse_text(codes: &[(i16, String)]) -> EntityData {
         height,
         value,
         rotation,
+        style_name,
     }
 }

@@ -653,7 +653,21 @@ fn read_entity(
         ));
     }
 
+    let mut xdata_app: Option<String> = None;
+    let mut xdata_pairs: Vec<(i16, String)> = Vec::new();
+
     for &(code, ref val) in &codes {
+        if code >= 1000 {
+            if code == 1001 {
+                if let Some(app) = xdata_app.take() {
+                    entity.xdata.push((app, std::mem::take(&mut xdata_pairs)));
+                }
+                xdata_app = Some(val.clone());
+            } else if xdata_app.is_some() {
+                xdata_pairs.push((code, val.clone()));
+            }
+            continue;
+        }
         match code {
             5 => {
                 entity.handle =
@@ -670,8 +684,15 @@ fn read_entity(
             370 => entity.lineweight = val.parse().unwrap_or(-1),
             60 => entity.invisible = val.parse::<i16>().unwrap_or(0) != 0,
             440 => entity.transparency = val.parse().unwrap_or(0),
+            39 => entity.thickness = val.parse().unwrap_or(0.0),
+            210 => entity.extrusion[0] = val.parse().unwrap_or(0.0),
+            220 => entity.extrusion[1] = val.parse().unwrap_or(0.0),
+            230 => entity.extrusion[2] = val.parse().unwrap_or(1.0),
             _ => {}
         }
+    }
+    if let Some(app) = xdata_app.take() {
+        entity.xdata.push((app, xdata_pairs));
     }
 
     entity.data = match type_name {
@@ -2460,6 +2481,57 @@ mod tests {
         }
         eprintln!("INSERT: {} resolved to block records", insert_resolved);
         assert!(insert_resolved > 0, "some INSERTs should resolve to blocks");
+    }
+
+    #[test]
+    fn entity_extended_properties_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+
+        let mut text_with_style = 0;
+        let mut mtext_with_style = 0;
+        let mut with_xdata = 0;
+        let mut xdata_apps: std::collections::BTreeSet<String> = Default::default();
+
+        for entity in doc.entities.iter().chain(
+            doc.block_records.values().flat_map(|br| br.entities.iter()),
+        ) {
+            match &entity.data {
+                h7cad_native_model::EntityData::Text { style_name, .. } => {
+                    if !style_name.is_empty() {
+                        text_with_style += 1;
+                    }
+                }
+                h7cad_native_model::EntityData::MText { style_name, .. } => {
+                    if !style_name.is_empty() {
+                        mtext_with_style += 1;
+                    }
+                }
+                _ => {}
+            }
+            if !entity.xdata.is_empty() {
+                with_xdata += 1;
+                for (app, _) in &entity.xdata {
+                    xdata_apps.insert(app.clone());
+                }
+            }
+        }
+
+        eprintln!(
+            "STYLES: {} TEXT with style, {} MTEXT with style",
+            text_with_style, mtext_with_style,
+        );
+        eprintln!(
+            "XDATA: {} entities with xdata, apps: {:?}",
+            with_xdata, xdata_apps,
+        );
     }
 
     #[test]
