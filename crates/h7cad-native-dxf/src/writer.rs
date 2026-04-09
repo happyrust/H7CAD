@@ -829,25 +829,77 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             arrowhead_size,
             landing_gap,
             dogleg_length,
+            property_override_flags,
+            path_type,
+            line_color,
+            leader_line_weight,
+            enable_landing,
+            enable_dogleg,
+            enable_annotation_scale,
+            scale_factor,
+            text_attachment_direction,
+            text_bottom_attachment_type,
+            text_top_attachment_type,
+            text_location,
+            leader_vertices,
         } => {
+            w.pair_i32(90, *property_override_flags as i32);
+            w.pair_i16(170, *path_type);
             w.pair_i16(172, *content_type);
+            w.pair_i32(91, *line_color);
+            w.pair_i16(171, *leader_line_weight);
+            w.pair_i16(290, if *enable_landing { 1 } else { 0 });
+            w.pair_i16(291, if *enable_dogleg { 1 } else { 0 });
+            w.pair_i16(293, if *enable_annotation_scale { 1 } else { 0 });
             if !text_label.is_empty() {
                 w.pair_str(304, text_label);
             }
             if !style_name.is_empty() {
                 w.pair_str(3, style_name);
             }
-            if *arrowhead_size != 0.0 {
-                w.pair_f64(42, *arrowhead_size);
+            w.pair_f64(41, *landing_gap);
+            w.pair_f64(42, *arrowhead_size);
+            w.pair_f64(43, *dogleg_length);
+            w.pair_f64(45, *scale_factor);
+            w.pair_i16(271, *text_attachment_direction);
+            w.pair_i16(272, *text_bottom_attachment_type);
+            w.pair_i16(273, *text_top_attachment_type);
+            if let Some(loc) = text_location {
+                w.pair_str(300, "CONTEXT_DATA{");
+                w.pair_f64(12, loc[0]);
+                w.pair_f64(22, loc[1]);
+                w.pair_f64(32, loc[2]);
+                w.pair_str(301, "}");
             }
-            if *landing_gap != 0.0 {
-                w.pair_f64(41, *landing_gap);
-            }
-            if *dogleg_length != 0.0 {
-                w.pair_f64(43, *dogleg_length);
+            if !leader_vertices.is_empty() {
+                w.pair_str(302, "LEADER_LINE{");
+                for v in leader_vertices {
+                    w.pair_f64(10, v[0]);
+                    w.pair_f64(20, v[1]);
+                    w.pair_f64(30, v[2]);
+                }
+                w.pair_str(303, "}");
             }
         }
-        EntityData::Table {} => {}
+        EntityData::Table {
+            num_rows,
+            num_cols,
+            insertion,
+            horizontal_direction,
+            version,
+            value_flag,
+        } => {
+            w.pair_i32(90, *value_flag);
+            w.pair_i16(280, *version);
+            w.pair_f64(10, insertion[0]);
+            w.pair_f64(20, insertion[1]);
+            w.pair_f64(30, insertion[2]);
+            w.pair_f64(11, horizontal_direction[0]);
+            w.pair_f64(21, horizontal_direction[1]);
+            w.pair_f64(31, horizontal_direction[2]);
+            w.pair_i32(91, *num_rows);
+            w.pair_i32(92, *num_cols);
+        }
         EntityData::Mesh {
             vertex_count,
             face_count,

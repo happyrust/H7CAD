@@ -1950,6 +1950,7 @@ dependencies = [
 name = "h7cad-native-dxf"
 version = "0.1.0"
 dependencies = [
+ "encoding_rs",
  "h7cad-native-model",
 ]
 

@@ -1015,9 +1015,37 @@ pub enum EntityData {
         arrowhead_size: f64,
         landing_gap: f64,
         dogleg_length: f64,
+        /// Property override flags (bitfield)
+        property_override_flags: u32,
+        /// 1=Straight, 2=Spline
+        path_type: i16,
+        /// Leader line color (ACI or true color int)
+        line_color: i32,
+        /// Leader line weight (-3=default, -2=byblock, -1=bylayer, or hundredths of mm)
+        leader_line_weight: i16,
+        enable_landing: bool,
+        enable_dogleg: bool,
+        enable_annotation_scale: bool,
+        /// Overall scale factor
+        scale_factor: f64,
+        /// 0=Horizontal, 1=Vertical
+        text_attachment_direction: i16,
+        /// Bottom text attachment type
+        text_bottom_attachment_type: i16,
+        /// Top text attachment type
+        text_top_attachment_type: i16,
+        /// Text location from ContextData (code 12,22,32)
+        text_location: Option<[f64; 3]>,
+        /// Leader line vertices from ContextData (code 10,20,30 after LEADER_LINE marker)
+        leader_vertices: Vec<[f64; 3]>,
     },
     Table {
-        // Simplified — full ACAD_TABLE parsing is TODO
+        num_rows: i32,
+        num_cols: i32,
+        insertion: [f64; 3],
+        horizontal_direction: [f64; 3],
+        version: i16,
+        value_flag: i32,
     },
     Mesh {
         vertex_count: i32,

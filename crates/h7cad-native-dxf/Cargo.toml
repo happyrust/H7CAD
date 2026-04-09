@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+encoding_rs = "0.8.35"
 h7cad-native-model = { path = "../h7cad-native-model" }
 
 [lib]

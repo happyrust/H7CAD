@@ -24,6 +24,7 @@ pub enum DxfReadError {
         context: &'static str,
     },
     UnknownSection(String),
+    UnsupportedFormat(String),
 }
 
 impl From<DxfParseError> for DxfReadError {
@@ -46,6 +47,7 @@ impl fmt::Display for DxfReadError {
             ),
             Self::UnexpectedEof { context } => write!(f, "unexpected EOF: {context}"),
             Self::UnknownSection(name) => write!(f, "unknown section `{name}` (skipped)"),
+            Self::UnsupportedFormat(msg) => write!(f, "unsupported format: {msg}"),
         }
     }
 }
@@ -755,7 +757,7 @@ fn read_entity(
         "3DSOLID" | "BODY" => parse_solid3d(&codes),
         "REGION" => parse_region(&codes),
         "MULTILEADER" => parse_multileader(&codes),
-        "ACAD_TABLE" => EntityData::Table {},
+        "ACAD_TABLE" => parse_acad_table(&codes),
         "MESH" => parse_mesh(&codes),
         "PDFUNDERLAY" | "DWFUNDERLAY" | "DGNUNDERLAY" => parse_underlay(&codes),
         "SEQEND" => {
@@ -1266,7 +1268,65 @@ fn read_objects_section(
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Read a text-format DXF string into a `CadDocument`.
+/// Read a DXF file from a byte slice (auto-detects text vs binary, handles encoding).
+pub fn read_dxf_bytes(input: &[u8]) -> Result<CadDocument, DxfReadError> {
+    if is_binary_dxf(input) {
+        return read_binary_dxf(input);
+    }
+    if let Ok(text) = std::str::from_utf8(input) {
+        return read_dxf(text);
+    }
+    let codepage = detect_codepage(input);
+    let encoding = codepage_to_encoding(codepage.as_deref());
+    let (decoded, _, _) = encoding.decode(input);
+    read_dxf(&decoded)
+}
+
+fn detect_codepage(data: &[u8]) -> Option<String> {
+    let haystack = if data.len() > 4096 { &data[..4096] } else { data };
+    let lossy = String::from_utf8_lossy(haystack);
+    for line in lossy.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("ANSI_") || trimmed.starts_with("ansi_") {
+            return Some(trimmed.to_uppercase());
+        }
+    }
+    None
+}
+
+fn codepage_to_encoding(codepage: Option<&str>) -> &'static encoding_rs::Encoding {
+    match codepage {
+        Some("ANSI_936") => encoding_rs::GBK,
+        Some("ANSI_950") => encoding_rs::BIG5,
+        Some("ANSI_932") => encoding_rs::SHIFT_JIS,
+        Some("ANSI_949") => encoding_rs::EUC_KR,
+        Some("ANSI_874") => encoding_rs::WINDOWS_874,
+        Some("ANSI_1250") => encoding_rs::WINDOWS_1250,
+        Some("ANSI_1251") => encoding_rs::WINDOWS_1251,
+        Some("ANSI_1252") => encoding_rs::WINDOWS_1252,
+        Some("ANSI_1253") => encoding_rs::WINDOWS_1253,
+        Some("ANSI_1254") => encoding_rs::WINDOWS_1254,
+        Some("ANSI_1255") => encoding_rs::WINDOWS_1255,
+        Some("ANSI_1256") => encoding_rs::WINDOWS_1256,
+        Some("ANSI_1257") => encoding_rs::WINDOWS_1257,
+        Some("ANSI_1258") => encoding_rs::WINDOWS_1258,
+        _ => encoding_rs::WINDOWS_1252,
+    }
+}
+
+/// Read a binary DXF file by converting tokens to text-equivalent representation.
+fn read_binary_dxf(input: &[u8]) -> Result<CadDocument, DxfReadError> {
+    let tokenizer = BinaryDxfTokenizer::new(input)?;
+    let mut lines = Vec::new();
+    for token_result in tokenizer {
+        let token = token_result?;
+        lines.push(format!("{:>3}", token.code.value()));
+        lines.push(token.raw_value);
+    }
+    let text = lines.join("\n");
+    read_dxf(&text)
+}
+
 pub fn read_dxf(input: &str) -> Result<CadDocument, DxfReadError> {
     let mut stream = DxfStreamReader::new(input);
     let mut doc = CadDocument::new();
@@ -2794,5 +2854,23 @@ mod tests {
             let c2 = counts2.get(typ).copied().unwrap_or(0);
             assert_eq!(c2, c1, "type {typ}: wrote {c1}, read back {c2}");
         }
+    }
+
+    #[test]
+    fn binary_dxf_sentinel_detected() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"AutoCAD Binary DXF\r\n\x1a\x00");
+        // group 0, value "EOF\0"
+        data.push(0u8);
+        data.extend_from_slice(b"EOF\x00");
+        let doc = read_dxf_bytes(&data).unwrap();
+        assert!(doc.entities.is_empty());
+    }
+
+    #[test]
+    fn legacy_encoding_fallback_windows_1252() {
+        let latin1_bytes: &[u8] = b"  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1015\n  9\n$DWGCODEPAGE\n  3\nANSI_1252\n  0\nENDSEC\n  0\nEOF\n";
+        let doc = read_dxf_bytes(latin1_bytes).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2000);
     }
 }

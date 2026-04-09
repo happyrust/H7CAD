@@ -1,7 +1,7 @@
 # H7CAD DXF Native Port — 开发计划
 
 > 基准：ACadSharp (C#) → h7cad-native-dxf (Rust)
-> 更新：2026-04-09 (第4轮更新)
+> 更新：2026-04-09 (第5轮更新)
 > 状态标记：✅ 已完成 · 🔨 进行中 · ⬜ 未开始
 
 ---
@@ -35,7 +35,11 @@
 | Entity 属性 | thickness/extrusion/style_name |
 | DXF Writer | ✅ 完整写入 + roundtrip 验证 |
 | VPORT 表 | ✅ view_center/height/direction |
-| M1 完成度 | **~90%** |
+| MULTILEADER | ✅ 17 字段（property_override/path_type/line_color/leader_weight/enable_*/scale/text_attachment） |
+| Binary DXF | ✅ BinaryDxfTokenizer 自动检测+解码 |
+| ACAD_TABLE | ✅ 简化解析（num_rows/cols/insertion/direction/version） |
+| Legacy 编码 | ✅ $DWGCODEPAGE 检测 + encoding_rs 转码（14 种 codepage） |
+| M1 完成度 | **~98%** |
 | M2 完成度 | **~90%** (基础 roundtrip 已通过) |
 
 ---
@@ -115,7 +119,7 @@ DICTIONARY, XRECORD, GROUP, LAYOUT, PLOTSETTINGS, DICTIONARYVAR, SCALE, VISUALST
 | 交叉引用 API | ✅ | resolve_color/linetype/lineweight, model/paper space, resolve_insert_block |
 | 便捷 API | ✅ | entity_type_counts, compute_extents, model_space_entities |
 | Entity 属性增强 | ✅ | thickness, extrusion, TEXT/MTEXT style_name, XData |
-| Binary DXF | ⬜ | sentinel + Int16 组码 |
+| Binary DXF | ✅ | BinaryDxfTokenizer + 自动检测 |
 | Legacy 编码 | ⬜ | AC1009 + 非 UTF-8 |
 
 ---
@@ -158,13 +162,13 @@ h7cad-native-facade/src/
 
 | 项目 | 优先级 | 复杂度 | 说明 |
 |------|--------|--------|------|
-| MULTILEADER 详细解析 | 中 | ★★★★ | 当前简化处理 |
+| ~~MULTILEADER 详细解析~~ | ~~中~~ | ~~★★★★~~ | ✅ 17 字段，基本完成 |
 | ~~VPORT 表~~ | ~~低~~ | ~~★★~~ | ✅ 已完成 |
 | ~~XData 读取~~ | ~~中~~ | ~~★★★~~ | ✅ 已完成（原始捕获） |
-| Binary DXF | 中 | ★★★ | sentinel + Int16 组码 |
-| ACAD_TABLE | 低 | ★★★ | 表格实体 |
+| ~~Binary DXF~~ | ~~中~~ | ~~★★★~~ | ✅ BinaryDxfTokenizer 实现，自动检测+解码 |
+| ~~ACAD_TABLE~~ | ~~低~~ | ~~★★★~~ | ✅ 简化解析（表级元数据） |
 | ~~MESH 详细~~ | ~~低~~ | ~~★★~~ | ✅ 已完成（vertices + face_indices） |
-| 编码支持 | 低 | ★★ | UTF-8 / legacy codepage |
+| ~~编码支持~~ | ~~低~~ | ~~★★~~ | ✅ $DWGCODEPAGE + encoding_rs 14 codepages |
 
 ---
 

@@ -242,6 +242,174 @@ where
         .map_err(|_| DxfDecodeError::new(code, raw, "invalid numeric value"))
 }
 
+// ---------------------------------------------------------------------------
+// Binary DXF Tokenizer
+// ---------------------------------------------------------------------------
+
+pub const BINARY_DXF_SENTINEL: &[u8] = b"AutoCAD Binary DXF\r\n\x1a\x00";
+
+pub struct BinaryDxfTokenizer<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> BinaryDxfTokenizer<'a> {
+    pub fn new(data: &'a [u8]) -> Result<Self, DxfParseError> {
+        if data.len() < BINARY_DXF_SENTINEL.len()
+            || &data[..BINARY_DXF_SENTINEL.len()] != BINARY_DXF_SENTINEL
+        {
+            return Err(DxfParseError::InvalidGroupCode(
+                "missing Binary DXF sentinel".into(),
+            ));
+        }
+        Ok(Self {
+            data,
+            pos: BINARY_DXF_SENTINEL.len(),
+        })
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len() - self.pos
+    }
+
+    fn read_u8(&mut self) -> Option<u8> {
+        if self.pos < self.data.len() {
+            let b = self.data[self.pos];
+            self.pos += 1;
+            Some(b)
+        } else {
+            None
+        }
+    }
+
+    fn read_i16_le(&mut self) -> Option<i16> {
+        if self.remaining() < 2 {
+            return None;
+        }
+        let val = i16::from_le_bytes([self.data[self.pos], self.data[self.pos + 1]]);
+        self.pos += 2;
+        Some(val)
+    }
+
+    fn read_i32_le(&mut self) -> Option<i32> {
+        if self.remaining() < 4 {
+            return None;
+        }
+        let bytes: [u8; 4] = self.data[self.pos..self.pos + 4].try_into().ok()?;
+        self.pos += 4;
+        Some(i32::from_le_bytes(bytes))
+    }
+
+    fn read_i64_le(&mut self) -> Option<i64> {
+        if self.remaining() < 8 {
+            return None;
+        }
+        let bytes: [u8; 8] = self.data[self.pos..self.pos + 8].try_into().ok()?;
+        self.pos += 8;
+        Some(i64::from_le_bytes(bytes))
+    }
+
+    fn read_f64_le(&mut self) -> Option<f64> {
+        if self.remaining() < 8 {
+            return None;
+        }
+        let bytes: [u8; 8] = self.data[self.pos..self.pos + 8].try_into().ok()?;
+        self.pos += 8;
+        Some(f64::from_le_bytes(bytes))
+    }
+
+    fn read_null_terminated_string(&mut self) -> Option<String> {
+        let start = self.pos;
+        while self.pos < self.data.len() {
+            if self.data[self.pos] == 0 {
+                let s = String::from_utf8_lossy(&self.data[start..self.pos]).into_owned();
+                self.pos += 1;
+                return Some(s);
+            }
+            self.pos += 1;
+        }
+        None
+    }
+
+    fn read_binary_chunk(&mut self) -> Option<Vec<u8>> {
+        let len = self.read_u8()? as usize;
+        if self.remaining() < len {
+            return None;
+        }
+        let chunk = self.data[self.pos..self.pos + len].to_vec();
+        self.pos += len;
+        Some(chunk)
+    }
+
+    fn read_group_code(&mut self) -> Option<Result<i16, DxfParseError>> {
+        let first = self.read_u8()?;
+        if first == 255 {
+            Some(self.read_i16_le().ok_or_else(|| {
+                DxfParseError::UnexpectedEndOfInput {
+                    expected: "extended group code",
+                    line: self.pos,
+                }
+            }))
+        } else {
+            Some(Ok(first as i16))
+        }
+    }
+
+    fn read_value_for_code(&mut self, code: i16) -> Option<String> {
+        let gc = GroupCode(code);
+        match gc.value_kind() {
+            GroupValueKind::Str => self.read_null_terminated_string(),
+            GroupValueKind::Double => self.read_f64_le().map(|v| format!("{v}")),
+            GroupValueKind::Short => self.read_i16_le().map(|v| format!("{v}")),
+            GroupValueKind::Long | GroupValueKind::Int => self.read_i32_le().map(|v| format!("{v}")),
+            GroupValueKind::Bool => self.read_u8().map(|v| format!("{v}")),
+            GroupValueKind::Binary => {
+                self.read_binary_chunk().map(|bytes| {
+                    bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()
+                })
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for BinaryDxfTokenizer<'a> {
+    type Item = Result<DxfToken, DxfParseError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining() == 0 {
+            return None;
+        }
+
+        let code_result = self.read_group_code()?;
+        let code = match code_result {
+            Ok(c) => c,
+            Err(e) => return Some(Err(e)),
+        };
+
+        let gc = match GroupCode::new(code) {
+            Ok(gc) => gc,
+            Err(e) => return Some(Err(e)),
+        };
+
+        let value = match self.read_value_for_code(code) {
+            Some(v) => v,
+            None => {
+                return Some(Err(DxfParseError::UnexpectedEndOfInput {
+                    expected: "value for group code",
+                    line: self.pos,
+                }))
+            }
+        };
+
+        Some(Ok(DxfToken::new(gc, value)))
+    }
+}
+
+pub fn is_binary_dxf(data: &[u8]) -> bool {
+    data.len() >= BINARY_DXF_SENTINEL.len()
+        && &data[..BINARY_DXF_SENTINEL.len()] == BINARY_DXF_SENTINEL
+}
+
 fn decode_hex(raw: &str, code: GroupCode) -> Result<Vec<u8>, DxfDecodeError> {
     if raw.len() % 2 != 0 {
         return Err(DxfDecodeError::new(

@@ -996,6 +996,38 @@ pub(crate) fn parse_text(codes: &[(i16, String)]) -> EntityData {
     }
 }
 
+pub(crate) fn parse_acad_table(codes: &[(i16, String)]) -> EntityData {
+    let mut num_rows: i32 = 0;
+    let mut num_cols: i32 = 0;
+    let mut insertion = [0.0f64; 3];
+    let mut horizontal_direction = [1.0f64, 0.0, 0.0];
+    let mut version: i16 = 0;
+    let mut value_flag: i32 = 0;
+    for &(code, ref val) in codes {
+        match code {
+            91 => num_rows = val.parse().unwrap_or(0),
+            92 => num_cols = val.parse().unwrap_or(0),
+            10 => insertion[0] = val.parse().unwrap_or(0.0),
+            20 => insertion[1] = val.parse().unwrap_or(0.0),
+            30 => insertion[2] = val.parse().unwrap_or(0.0),
+            11 => horizontal_direction[0] = val.parse().unwrap_or(1.0),
+            21 => horizontal_direction[1] = val.parse().unwrap_or(0.0),
+            31 => horizontal_direction[2] = val.parse().unwrap_or(0.0),
+            280 => version = val.parse().unwrap_or(0),
+            90 => value_flag = val.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    EntityData::Table {
+        num_rows,
+        num_cols,
+        insertion,
+        horizontal_direction,
+        version,
+        value_flag,
+    }
+}
+
 pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
     let mut content_type: i16 = 0;
     let mut text_label = String::new();
@@ -1003,7 +1035,65 @@ pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
     let mut arrowhead_size = 0.0;
     let mut landing_gap = 0.0;
     let mut dogleg_length = 0.0;
+    let mut property_override_flags: u32 = 0;
+    let mut path_type: i16 = 1;
+    let mut line_color: i32 = 0;
+    let mut leader_line_weight: i16 = -1;
+    let mut enable_landing = true;
+    let mut enable_dogleg = true;
+    let mut enable_annotation_scale = false;
+    let mut scale_factor = 1.0;
+    let mut text_attachment_direction: i16 = 0;
+    let mut text_bottom_attachment_type: i16 = 9;
+    let mut text_top_attachment_type: i16 = 9;
+    let mut text_location: Option<[f64; 3]> = None;
+    let mut leader_vertices: Vec<[f64; 3]> = Vec::new();
+    let mut in_context_data = false;
+    let mut in_leader_line = false;
+    let mut ctx_x = 0.0f64;
+    let mut ctx_y = 0.0f64;
+    let mut lv_x = 0.0f64;
+    let mut lv_y = 0.0f64;
     for &(code, ref val) in codes {
+        if code == 300 && val.trim() == "CONTEXT_DATA{" {
+            in_context_data = true;
+            continue;
+        }
+        if code == 302 && val.trim() == "LEADER_LINE{" {
+            in_leader_line = true;
+            continue;
+        }
+        if code == 303 || code == 304 && val.trim().ends_with('}') {
+            if in_leader_line {
+                in_leader_line = false;
+            } else {
+                in_context_data = false;
+            }
+        }
+        if in_leader_line {
+            match code {
+                10 => lv_x = val.parse().unwrap_or(0.0),
+                20 => lv_y = val.parse().unwrap_or(0.0),
+                30 => {
+                    let z: f64 = val.parse().unwrap_or(0.0);
+                    leader_vertices.push([lv_x, lv_y, z]);
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if in_context_data {
+            match code {
+                12 => ctx_x = val.parse().unwrap_or(0.0),
+                22 => ctx_y = val.parse().unwrap_or(0.0),
+                32 => {
+                    let z: f64 = val.parse().unwrap_or(0.0);
+                    text_location = Some([ctx_x, ctx_y, z]);
+                }
+                _ => {}
+            }
+            continue;
+        }
         match code {
             172 => content_type = val.parse().unwrap_or(0),
             304 => text_label = val.clone(),
@@ -1011,6 +1101,17 @@ pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
             42 => arrowhead_size = val.parse().unwrap_or(0.0),
             41 => landing_gap = val.parse().unwrap_or(0.0),
             43 => dogleg_length = val.parse().unwrap_or(0.0),
+            90 => property_override_flags = val.parse().unwrap_or(0),
+            170 => path_type = val.parse().unwrap_or(1),
+            91 => line_color = val.parse().unwrap_or(0),
+            171 => leader_line_weight = val.parse().unwrap_or(-1),
+            290 => enable_landing = val.trim() == "1",
+            291 => enable_dogleg = val.trim() == "1",
+            293 => enable_annotation_scale = val.trim() == "1",
+            45 => scale_factor = val.parse().unwrap_or(1.0),
+            271 => text_attachment_direction = val.parse().unwrap_or(0),
+            272 => text_bottom_attachment_type = val.parse().unwrap_or(9),
+            273 => text_top_attachment_type = val.parse().unwrap_or(9),
             _ => {}
         }
     }
@@ -1021,5 +1122,18 @@ pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
         arrowhead_size,
         landing_gap,
         dogleg_length,
+        property_override_flags,
+        path_type,
+        line_color,
+        leader_line_weight,
+        enable_landing,
+        enable_dogleg,
+        enable_annotation_scale,
+        scale_factor,
+        text_attachment_direction,
+        text_bottom_attachment_type,
+        text_top_attachment_type,
+        text_location,
+        leader_vertices,
     }
 }
