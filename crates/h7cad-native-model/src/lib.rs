@@ -443,6 +443,78 @@ impl CadDocument {
             false
         }
     }
+
+    /// Iterate over model-space entities only
+    pub fn model_space_entities(&self) -> impl Iterator<Item = &Entity> {
+        self.entities.iter().filter(|e| self.is_model_space_entity(e))
+    }
+
+    /// Iterate over paper-space entities only
+    pub fn paper_space_entities(&self) -> impl Iterator<Item = &Entity> {
+        self.entities.iter().filter(|e| {
+            e.owner_handle != Handle::NULL && !self.is_model_space_entity(e)
+        })
+    }
+
+    /// Compute drawing extents from entity geometry (useful when header EXTMIN/EXTMAX is stale)
+    pub fn compute_extents(&self) -> Option<([f64; 3], [f64; 3])> {
+        let mut min = [f64::MAX; 3];
+        let mut max = [f64::MIN; 3];
+        let mut found = false;
+
+        let mut update = |pt: &[f64; 3]| {
+            found = true;
+            for i in 0..3 {
+                min[i] = min[i].min(pt[i]);
+                max[i] = max[i].max(pt[i]);
+            }
+        };
+
+        for entity in self.model_space_entities() {
+            match &entity.data {
+                EntityData::Line { start, end } => {
+                    update(start);
+                    update(end);
+                }
+                EntityData::Circle { center, .. }
+                | EntityData::Arc { center, .. } => {
+                    update(center);
+                }
+                EntityData::Point { position } => {
+                    update(position);
+                }
+                EntityData::Ellipse { center, .. } => {
+                    update(center);
+                }
+                EntityData::Insert { insertion, .. } => {
+                    update(insertion);
+                }
+                EntityData::Text { insertion, .. } => {
+                    update(insertion);
+                }
+                EntityData::MText { insertion, .. } => {
+                    update(insertion);
+                }
+                _ => {}
+            }
+        }
+
+        if found {
+            Some((min, max))
+        } else {
+            None
+        }
+    }
+
+    /// Count entities by type (for diagnostics)
+    pub fn entity_type_counts(&self) -> BTreeMap<String, usize> {
+        let mut counts = BTreeMap::new();
+        for entity in &self.entities {
+            let type_name = entity.data.type_name();
+            *counts.entry(type_name).or_insert(0) += 1;
+        }
+        counts
+    }
 }
 
 impl Default for CadDocument {
@@ -884,6 +956,46 @@ pub enum EntityData {
     Unknown {
         entity_type: String,
     },
+}
+
+impl EntityData {
+    pub fn type_name(&self) -> String {
+        match self {
+            Self::Line { .. } => "LINE".into(),
+            Self::Circle { .. } => "CIRCLE".into(),
+            Self::Arc { .. } => "ARC".into(),
+            Self::Point { .. } => "POINT".into(),
+            Self::Ellipse { .. } => "ELLIPSE".into(),
+            Self::LwPolyline { .. } => "LWPOLYLINE".into(),
+            Self::Text { .. } => "TEXT".into(),
+            Self::MText { .. } => "MTEXT".into(),
+            Self::Insert { .. } => "INSERT".into(),
+            Self::Hatch { .. } => "HATCH".into(),
+            Self::Dimension { .. } => "DIMENSION".into(),
+            Self::Viewport { .. } => "VIEWPORT".into(),
+            Self::Spline { .. } => "SPLINE".into(),
+            Self::Face3D { .. } => "3DFACE".into(),
+            Self::Solid { .. } => "SOLID".into(),
+            Self::Ray { .. } => "RAY".into(),
+            Self::Polyline { .. } => "POLYLINE".into(),
+            Self::Attrib { .. } => "ATTRIB".into(),
+            Self::AttDef { .. } => "ATTDEF".into(),
+            Self::Leader { .. } => "LEADER".into(),
+            Self::MLine { .. } => "MLINE".into(),
+            Self::Image { .. } => "IMAGE".into(),
+            Self::Wipeout { .. } => "WIPEOUT".into(),
+            Self::Tolerance { .. } => "TOLERANCE".into(),
+            Self::Shape { .. } => "SHAPE".into(),
+            Self::XLine { .. } => "XLINE".into(),
+            Self::Solid3D { .. } => "3DSOLID".into(),
+            Self::Region { .. } => "REGION".into(),
+            Self::Table { .. } => "ACAD_TABLE".into(),
+            Self::Mesh { .. } => "MESH".into(),
+            Self::PdfUnderlay { .. } => "PDFUNDERLAY".into(),
+            Self::MultiLeader { .. } => "MULTILEADER".into(),
+            Self::Unknown { entity_type } => entity_type.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
