@@ -1,7 +1,7 @@
 # H7CAD DXF Native Port — 开发计划
 
 > 基准：ACadSharp (C#) → h7cad-native-dxf (Rust)
-> 更新：2026-04-09 (第3轮更新)
+> 更新：2026-04-09 (第4轮更新)
 > 状态标记：✅ 已完成 · 🔨 进行中 · ⬜ 未开始
 
 ---
@@ -16,7 +16,7 @@
 | 里程碑 | 目标 | 门槛 |
 |--------|------|------|
 | **M1** — DXF Read Core | 能读取标准 DXF 文件，产出完整 `CadDocument` | ACadSharp 测试样例 100% 通过 |
-| **M2** — DXF Write | `CadDocument` → DXF 文件往返 | roundtrip 基础实体无损 |
+| **M2** — DXF Write | `CadDocument` → DXF 文件往返 | roundtrip 基础实体无损 ✅ |
 | **M3** — DWG Read | 最小 DWG 读取 | 基础 DWG R2000+ 可读 |
 | **M4** — 主程序切换 | H7CAD 主程序接入 native 栈 | 桌面 smoke 通过 |
 
@@ -24,14 +24,16 @@
 
 | 维度 | 数据 |
 |------|------|
-| Rust 代码量 | ~2600 行 (dxf) + ~900 行 (model) = ~3500 行 |
-| 测试数 | 50 (46 DXF + 4 Model) |
+| Rust 代码量 | ~3200 行 (dxf, 含 writer) + ~1050 行 (model) = ~4250 行 |
+| 测试数 | 55 (51 DXF + 4 Model) |
 | 实体类型 | 33+ 种，0 Unknown (AC1015) |
 | 对象类型 | 17 种，92% 覆盖 (AC1018) |
 | 表属性 | LAYER/LTYPE/STYLE/DIMSTYLE 详细解析 |
 | Header 变量 | 16 个 ($ACADVER...$HANDSEED) |
 | 交叉引用 | owner_handle + resolve API |
-| M1 完成度 | **~78%** |
+| DXF Writer | ✅ 完整写入 + roundtrip 验证 |
+| M1 完成度 | **~85%** |
+| M2 完成度 | **~90%** (基础 roundtrip 已通过) |
 
 ---
 
@@ -100,16 +102,33 @@ DICTIONARY, XRECORD, GROUP, LAYOUT, PLOTSETTINGS, DICTIONARYVAR, SCALE, VISUALST
 | 文档构建器 | ⬜ | 句柄→对象、owner 归属 |
 | XData 读取 | ⬜ | 1000-1071 系列组码 |
 
-### Phase 13：整合与验证
+### Phase 13：整合与验证 ✅
 
 | Feature | 状态 | 说明 |
 |---------|------|------|
-| Facade 接通 | ✅ | load(Dxf, bytes) → read_dxf |
+| Facade 接通 | ✅ | load(Dxf, bytes) + save(Dxf, doc) |
 | ACadSharp 样本 | ✅ | 7 个样本全部通过 (AC1009~AC1032) |
 | 后处理 | ✅ | handle seed 同步 + pre-seeded 清理 |
-| 交叉引用 API | ✅ | resolve_color/linetype/lineweight, is_model_space_entity, resolve_insert_block |
+| 交叉引用 API | ✅ | resolve_color/linetype/lineweight, model/paper space, resolve_insert_block |
+| 便捷 API | ✅ | entity_type_counts, compute_extents, model_space_entities |
 | Binary DXF | ⬜ | sentinel + Int16 组码 |
 | Legacy 编码 | ⬜ | AC1009 + 非 UTF-8 |
+
+---
+
+## M2：DXF Write ✅ (基础完成)
+
+| Feature | 状态 | 说明 |
+|---------|------|------|
+| DxfWriter 核心 | ✅ | group code/value 写入、f64 精度处理 |
+| HEADER 写入 | ✅ | $ACADVER + 15 个变量 + $HANDSEED |
+| CLASSES 写入 | ✅ | 全部字段 |
+| TABLES 写入 | ✅ | VPORT/LTYPE/LAYER/STYLE/DIMSTYLE/BLOCK_RECORD |
+| BLOCKS 写入 | ✅ | BLOCK…ENDBLK + 块内实体 |
+| ENTITIES 写入 | ✅ | 33+ 种实体完整写入 |
+| OBJECTS 写入 | ✅ | 17 种对象完整写入 |
+| Facade save() | ✅ | DXF 格式写入接通 |
+| Roundtrip 测试 | ✅ | 最小文档 + 实体 + AC1015 真实文件 |
 
 ---
 
@@ -119,15 +138,19 @@ DICTIONARY, XRECORD, GROUP, LAYOUT, PLOTSETTINGS, DICTIONARYVAR, SCALE, VISUALST
 h7cad-native-dxf/src/
 ├── lib.rs              (~1500 行) Section readers, API, tests
 ├── tokenizer.rs        (~233 行)  DxfToken, GroupCode, DxfValue, DxfTokenizer
-└── entity_parsers.rs   (~800 行)  30+ parse_* 纯函数
+├── entity_parsers.rs   (~800 行)  30+ parse_* 纯函数
+└── writer.rs           (~600 行)  DXF 文本写入器
 
 h7cad-native-model/src/
-└── lib.rs              (~900 行)  CadDocument, Entity, EntityData, tables, objects
+└── lib.rs              (~1050 行) CadDocument, Entity, EntityData, tables, objects
+
+h7cad-native-facade/src/
+└── lib.rs              (~25 行)   load/save 统一接口
 ```
 
 ---
 
-## 剩余工作（M1 完成需要）
+## 剩余工作（M1 完全完成需要）
 
 | 项目 | 优先级 | 复杂度 | 说明 |
 |------|--------|--------|------|
@@ -136,7 +159,7 @@ h7cad-native-model/src/
 | XData 读取 | 中 | ★★★ | 应用扩展数据 |
 | Binary DXF | 中 | ★★★ | sentinel + Int16 组码 |
 | ACAD_TABLE | 低 | ★★★ | 表格实体 |
-| MESH | 低 | ★★ | 面片网格 |
+| MESH 详细 | 低 | ★★ | 顶点/面片数据 |
 | 编码支持 | 低 | ★★ | UTF-8 / legacy codepage |
 
 ---
@@ -146,4 +169,5 @@ h7cad-native-model/src/
 1. 每个 Feature：`cargo test -p h7cad-native-dxf` 通过
 2. 每个 Phase：ACadSharp 样本端到端验证
 3. M1 门槛：7 个 ACadSharp DXF 样本全部正确解析 ✅
-4. 交叉验证：model/paper space 分类、ByLayer 颜色解析、INSERT→Block 引用
+4. M2 门槛：roundtrip 基础实体无损 ✅
+5. 交叉验证：model/paper space 分类、ByLayer 颜色解析、INSERT→Block 引用
