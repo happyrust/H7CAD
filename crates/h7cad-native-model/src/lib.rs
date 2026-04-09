@@ -286,11 +286,14 @@ impl SymbolTable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockRecord {
     pub handle: Handle,
     pub name: String,
     pub layout_handle: Option<Handle>,
+    pub entities: Vec<Entity>,
+    /// Base point from BLOCK entity (codes 10/20/30)
+    pub base_point: [f64; 3],
 }
 
 impl BlockRecord {
@@ -299,6 +302,8 @@ impl BlockRecord {
             handle,
             name: name.into(),
             layout_handle: None,
+            entities: Vec::new(),
+            base_point: [0.0; 3],
         }
     }
 

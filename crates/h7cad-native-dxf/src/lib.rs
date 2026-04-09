@@ -358,6 +358,7 @@ fn read_blocks_section(
             "BLOCK" => {
                 let mut handle = Handle::NULL;
                 let mut name = String::new();
+                let mut base_point = [0.0f64; 3];
 
                 while stream.read_next()? {
                     if stream.current_code() == 0 {
@@ -375,14 +376,14 @@ fn read_blocks_section(
                                 name = stream.current_value_trimmed().to_string();
                             }
                         }
+                        10 => base_point[0] = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        20 => base_point[1] = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        30 => base_point[2] = stream.current_value_trimmed().parse().unwrap_or(0.0),
                         _ => {}
                     }
                 }
 
-                if !name.is_empty() && !doc.block_records.contains_key(&handle) {
-                    let record = BlockRecord::new(handle, &name);
-                    doc.insert_block_record(record);
-                }
+                let mut block_entities = Vec::new();
 
                 loop {
                     if stream.current().is_none() {
@@ -390,15 +391,31 @@ fn read_blocks_section(
                             context: "expected ENDBLK",
                         });
                     }
-                    let is_endblk = stream.current_value_trimmed() == "ENDBLK";
-                    while stream.read_next()? {
-                        if stream.current_code() == 0 {
-                            break;
+                    let entity_type = stream.current_value_trimmed().to_string();
+                    if entity_type == "ENDBLK" {
+                        while stream.read_next()? {
+                            if stream.current_code() == 0 {
+                                break;
+                            }
                         }
-                    }
-                    if is_endblk {
                         break;
                     }
+                    if let Some(ent) = read_entity(stream, &entity_type)? {
+                        block_entities.push(ent);
+                    }
+                }
+
+                if !name.is_empty() {
+                    let mut record = if let Some(existing) = doc.block_records.get_mut(&handle) {
+                        existing.base_point = base_point;
+                        existing.entities = block_entities;
+                        continue;
+                    } else {
+                        BlockRecord::new(handle, &name)
+                    };
+                    record.base_point = base_point;
+                    record.entities = block_entities;
+                    doc.insert_block_record(record);
                 }
             }
             _ => {
@@ -1951,6 +1968,39 @@ mod tests {
             }
         }
         eprintln!("Geometry data integrity: all {} entities passed", doc.entities.len());
+    }
+
+    #[test]
+    fn block_entities_parsed_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        let mut blocks_with_entities = 0;
+        let mut total_block_entities = 0;
+        for (_, record) in &doc.block_records {
+            if !record.entities.is_empty() {
+                blocks_with_entities += 1;
+                total_block_entities += record.entities.len();
+                eprintln!(
+                    "  Block '{}': {} entities",
+                    record.name,
+                    record.entities.len(),
+                );
+            }
+        }
+        eprintln!(
+            "BLOCKS: {} with entities, {} total block entities, {} block_records total",
+            blocks_with_entities,
+            total_block_entities,
+            doc.block_records.len(),
+        );
+        assert!(blocks_with_entities > 0, "some blocks should have entities");
     }
 
     #[test]
