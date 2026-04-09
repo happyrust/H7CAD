@@ -645,6 +645,64 @@ pub enum ObjectData {
         description: String,
         entity_handles: Vec<Handle>,
     },
+    Layout {
+        name: String,
+        tab_order: i32,
+        block_record_handle: Handle,
+        plot_paper_size: [f64; 2],
+        plot_origin: [f64; 2],
+    },
+    DictionaryVar {
+        schema: String,
+        value: String,
+    },
+    Scale {
+        name: String,
+        paper_units: f64,
+        drawing_units: f64,
+        is_unit_scale: bool,
+    },
+    VisualStyle {
+        description: String,
+        style_type: i32,
+    },
+    Material {
+        name: String,
+    },
+    ImageDef {
+        file_name: String,
+        image_size: [f64; 2],
+    },
+    ImageDefReactor {
+        image_handle: Handle,
+    },
+    MLineStyle {
+        name: String,
+        description: String,
+        element_count: i16,
+    },
+    MLeaderStyle {
+        name: String,
+        content_type: i16,
+        text_style_handle: Handle,
+    },
+    TableStyle {
+        name: String,
+        description: String,
+    },
+    SortEntsTable {
+        entity_handles: Vec<Handle>,
+        sort_handles: Vec<Handle>,
+    },
+    DimAssoc {
+        associativity: i32,
+        dimension_handle: Handle,
+    },
+    PlotSettings {
+        page_name: String,
+        printer_name: String,
+        paper_size: String,
+    },
     Unknown {
         object_type: String,
     },

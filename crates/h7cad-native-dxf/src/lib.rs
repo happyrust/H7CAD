@@ -782,6 +782,234 @@ fn read_objects_section(
                     entity_handles,
                 }
             }
+            "LAYOUT" => {
+                let mut name = String::new();
+                let mut tab_order: i32 = 0;
+                let mut block_record_handle = Handle::NULL;
+                let (mut pw, mut ph) = (0.0, 0.0);
+                let (mut ox, mut oy) = (0.0, 0.0);
+                for &(code, ref val) in &codes {
+                    match code {
+                        1 => name = val.clone(),
+                        71 => tab_order = val.parse().unwrap_or(0),
+                        330 => {} // already parsed as owner
+                        340 => {
+                            block_record_handle = Handle::new(
+                                u64::from_str_radix(val, 16).unwrap_or(0),
+                            );
+                        }
+                        44 => pw = val.parse().unwrap_or(0.0),
+                        45 => ph = val.parse().unwrap_or(0.0),
+                        46 => ox = val.parse().unwrap_or(0.0),
+                        47 => oy = val.parse().unwrap_or(0.0),
+                        _ => {}
+                    }
+                }
+                ObjectData::Layout {
+                    name,
+                    tab_order,
+                    block_record_handle,
+                    plot_paper_size: [pw, ph],
+                    plot_origin: [ox, oy],
+                }
+            }
+            "PLOTSETTINGS" => {
+                let mut page_name = String::new();
+                let mut printer_name = String::new();
+                let mut paper_size = String::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        1 => page_name = val.clone(),
+                        2 => printer_name = val.clone(),
+                        4 => paper_size = val.clone(),
+                        _ => {}
+                    }
+                }
+                ObjectData::PlotSettings {
+                    page_name,
+                    printer_name,
+                    paper_size,
+                }
+            }
+            "DICTIONARYVAR" => {
+                let mut schema = String::new();
+                let mut value = String::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        280 => schema = val.clone(),
+                        1 => value = val.clone(),
+                        _ => {}
+                    }
+                }
+                ObjectData::DictionaryVar { schema, value }
+            }
+            "SCALE" => {
+                let mut name = String::new();
+                let mut paper_units: f64 = 1.0;
+                let mut drawing_units: f64 = 1.0;
+                let mut is_unit_scale = false;
+                for &(code, ref val) in &codes {
+                    match code {
+                        300 => name = val.clone(),
+                        140 => paper_units = val.parse().unwrap_or(1.0),
+                        141 => drawing_units = val.parse().unwrap_or(1.0),
+                        290 => is_unit_scale = val.parse::<i16>().unwrap_or(0) != 0,
+                        _ => {}
+                    }
+                }
+                ObjectData::Scale {
+                    name,
+                    paper_units,
+                    drawing_units,
+                    is_unit_scale,
+                }
+            }
+            "VISUALSTYLE" => {
+                let mut description = String::new();
+                let mut style_type: i32 = 0;
+                for &(code, ref val) in &codes {
+                    match code {
+                        2 => description = val.clone(),
+                        70 => style_type = val.parse().unwrap_or(0),
+                        _ => {}
+                    }
+                }
+                ObjectData::VisualStyle {
+                    description,
+                    style_type,
+                }
+            }
+            "MATERIAL" => {
+                let mut name = String::new();
+                for &(code, ref val) in &codes {
+                    if code == 1 {
+                        name = val.clone();
+                    }
+                }
+                ObjectData::Material { name }
+            }
+            "IMAGEDEF" => {
+                let mut file_name = String::new();
+                let (mut w, mut h) = (0.0, 0.0);
+                for &(code, ref val) in &codes {
+                    match code {
+                        1 => file_name = val.clone(),
+                        10 => w = val.parse().unwrap_or(0.0),
+                        20 => h = val.parse().unwrap_or(0.0),
+                        _ => {}
+                    }
+                }
+                ObjectData::ImageDef {
+                    file_name,
+                    image_size: [w, h],
+                }
+            }
+            "IMAGEDEF_REACTOR" => {
+                let mut image_handle = Handle::NULL;
+                for &(code, ref val) in &codes {
+                    if code == 330 {
+                        image_handle = Handle::new(
+                            u64::from_str_radix(val, 16).unwrap_or(0),
+                        );
+                    }
+                }
+                ObjectData::ImageDefReactor { image_handle }
+            }
+            "MLINESTYLE" => {
+                let mut name = String::new();
+                let mut description = String::new();
+                let mut element_count: i16 = 0;
+                for &(code, ref val) in &codes {
+                    match code {
+                        2 => name = val.clone(),
+                        3 => description = val.clone(),
+                        71 => element_count = val.parse().unwrap_or(0),
+                        _ => {}
+                    }
+                }
+                ObjectData::MLineStyle {
+                    name,
+                    description,
+                    element_count,
+                }
+            }
+            "MLEADERSTYLE" => {
+                let mut name = String::new();
+                let mut content_type: i16 = 0;
+                let mut text_style_handle = Handle::NULL;
+                for &(code, ref val) in &codes {
+                    match code {
+                        // MLEADERSTYLE uses code 3 for name in some versions
+                        3 => name = val.clone(),
+                        170 => content_type = val.parse().unwrap_or(0),
+                        341 => {
+                            text_style_handle = Handle::new(
+                                u64::from_str_radix(val, 16).unwrap_or(0),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                ObjectData::MLeaderStyle {
+                    name,
+                    content_type,
+                    text_style_handle,
+                }
+            }
+            "TABLESTYLE" => {
+                let mut name = String::new();
+                let mut description = String::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        3 => name = val.clone(),
+                        300 => description = val.clone(),
+                        _ => {}
+                    }
+                }
+                ObjectData::TableStyle { name, description }
+            }
+            "SORTENTSTABLE" => {
+                let mut entity_handles = Vec::new();
+                let sort_handles = Vec::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        331 => {
+                            entity_handles.push(Handle::new(
+                                u64::from_str_radix(val, 16).unwrap_or(0),
+                            ));
+                        }
+                        5 => {} // already parsed
+                        _ => {
+                            if (code == 330) && !sort_handles.is_empty() {
+                                // additional owner refs after first
+                            }
+                        }
+                    }
+                }
+                ObjectData::SortEntsTable {
+                    entity_handles,
+                    sort_handles,
+                }
+            }
+            "DIMASSOC" => {
+                let mut associativity: i32 = 0;
+                let mut dimension_handle = Handle::NULL;
+                for &(code, ref val) in &codes {
+                    match code {
+                        1 => associativity = val.parse().unwrap_or(0),
+                        330 => {
+                            dimension_handle = Handle::new(
+                                u64::from_str_radix(val, 16).unwrap_or(0),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                ObjectData::DimAssoc {
+                    associativity,
+                    dimension_handle,
+                }
+            }
             _ => ObjectData::Unknown {
                 object_type: type_name.clone(),
             },
@@ -1600,6 +1828,56 @@ mod tests {
             }
             _ => panic!("expected Dimension"),
         }
+    }
+
+    #[test]
+    fn object_type_distribution_ac1018() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1018_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        let mut type_counts = std::collections::BTreeMap::new();
+        for obj in &doc.objects {
+            let name = match &obj.data {
+                h7cad_native_model::ObjectData::Dictionary { .. } => "DICTIONARY",
+                h7cad_native_model::ObjectData::XRecord { .. } => "XRECORD",
+                h7cad_native_model::ObjectData::Group { .. } => "GROUP",
+                h7cad_native_model::ObjectData::Layout { .. } => "LAYOUT",
+                h7cad_native_model::ObjectData::PlotSettings { .. } => "PLOTSETTINGS",
+                h7cad_native_model::ObjectData::DictionaryVar { .. } => "DICTIONARYVAR",
+                h7cad_native_model::ObjectData::Scale { .. } => "SCALE",
+                h7cad_native_model::ObjectData::VisualStyle { .. } => "VISUALSTYLE",
+                h7cad_native_model::ObjectData::Material { .. } => "MATERIAL",
+                h7cad_native_model::ObjectData::ImageDef { .. } => "IMAGEDEF",
+                h7cad_native_model::ObjectData::ImageDefReactor { .. } => "IMAGEDEF_REACTOR",
+                h7cad_native_model::ObjectData::MLineStyle { .. } => "MLINESTYLE",
+                h7cad_native_model::ObjectData::MLeaderStyle { .. } => "MLEADERSTYLE",
+                h7cad_native_model::ObjectData::TableStyle { .. } => "TABLESTYLE",
+                h7cad_native_model::ObjectData::SortEntsTable { .. } => "SORTENTSTABLE",
+                h7cad_native_model::ObjectData::DimAssoc { .. } => "DIMASSOC",
+                h7cad_native_model::ObjectData::Unknown { object_type } => object_type.as_str(),
+            };
+            *type_counts.entry(name.to_string()).or_insert(0u32) += 1;
+        }
+        let unknown_count: u32 = doc.objects.iter().filter(|o| matches!(&o.data, h7cad_native_model::ObjectData::Unknown { .. })).count() as u32;
+        let known_count = doc.objects.len() as u32 - unknown_count;
+        eprintln!("OBJECTS type distribution (AC1018, {} total):", doc.objects.len());
+        for (name, count) in &type_counts {
+            let is_unknown = matches!(&name.as_str(), &n if {
+                let _doc_objs = &doc.objects;
+                !matches!(n, "DICTIONARY" | "XRECORD" | "GROUP" | "LAYOUT" | "PLOTSETTINGS" |
+                    "DICTIONARYVAR" | "SCALE" | "VISUALSTYLE" | "MATERIAL" |
+                    "IMAGEDEF" | "IMAGEDEF_REACTOR" | "MLINESTYLE" | "MLEADERSTYLE" |
+                    "TABLESTYLE" | "SORTENTSTABLE" | "DIMASSOC")
+            });
+            eprintln!("  {}: {}{}", name, count, if is_unknown { " [unknown]" } else { "" });
+        }
+        eprintln!("  >> {} known, {} unknown", known_count, unknown_count);
     }
 
     #[test]
