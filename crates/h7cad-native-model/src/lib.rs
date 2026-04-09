@@ -597,6 +597,21 @@ impl DxfVersion {
         }
     }
 
+    pub fn to_dxf(self) -> &'static str {
+        match self {
+            Self::R12 => "AC1009",
+            Self::R13 => "AC1012",
+            Self::R14 => "AC1014",
+            Self::R2000 => "AC1015",
+            Self::R2004 => "AC1018",
+            Self::R2007 => "AC1021",
+            Self::R2010 => "AC1024",
+            Self::R2013 => "AC1027",
+            Self::R2018 => "AC1032",
+            Self::Unknown => "AC1015",
+        }
+    }
+
     pub fn is_utf8(self) -> bool {
         self >= Self::R2007
     }

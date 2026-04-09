@@ -17,6 +17,12 @@ pub fn load(format: NativeFormat, bytes: &[u8]) -> Result<CadDocument, String> {
     }
 }
 
-pub fn save(_format: NativeFormat, _doc: &CadDocument) -> Result<Vec<u8>, String> {
-    Err("native save not implemented yet".to_string())
+pub fn save(format: NativeFormat, doc: &CadDocument) -> Result<Vec<u8>, String> {
+    match format {
+        NativeFormat::Dxf => {
+            let text = h7cad_native_dxf::write_dxf(doc)?;
+            Ok(text.into_bytes())
+        }
+        NativeFormat::Dwg => Err("native DWG writer not implemented yet".to_string()),
+    }
 }

@@ -1,9 +1,11 @@
 pub mod tokenizer;
+pub mod writer;
 mod entity_parsers;
 
 use std::fmt;
 
 pub use tokenizer::*;
+pub use writer::write_dxf_string;
 use h7cad_native_model::CadDocument;
 
 // ---------------------------------------------------------------------------
@@ -1307,8 +1309,8 @@ fn post_process(doc: &mut CadDocument) {
     }
 }
 
-pub fn write_dxf(_doc: &CadDocument) -> Result<String, String> {
-    Err("native DXF writer not implemented yet".to_string())
+pub fn write_dxf(doc: &CadDocument) -> Result<String, String> {
+    write_dxf_string(doc)
 }
 
 #[cfg(test)]
@@ -2599,5 +2601,102 @@ mod tests {
             err,
             DxfDecodeError::new(GroupCode::new(290).unwrap(), "2", "expected boolean 0 or 1")
         );
+    }
+
+    #[test]
+    fn roundtrip_minimal_document() {
+        let doc = h7cad_native_model::CadDocument::new();
+        let output = write_dxf(&doc).unwrap();
+        let doc2 = read_dxf(&output).unwrap();
+        assert_eq!(doc2.header.version, doc.header.version);
+        assert_eq!(doc2.block_records.len(), doc.block_records.len());
+    }
+
+    #[test]
+    fn roundtrip_with_entities() {
+        use h7cad_native_model::*;
+        let mut doc = CadDocument::new();
+        doc.entities.push(Entity::new(EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [10.0, 20.0, 0.0],
+        }));
+        doc.entities.push(Entity::new(EntityData::Circle {
+            center: [5.0, 5.0, 0.0],
+            radius: 3.5,
+        }));
+        doc.entities.push(Entity::new(EntityData::Arc {
+            center: [1.0, 2.0, 3.0],
+            radius: 7.5,
+            start_angle: 0.0,
+            end_angle: 90.0,
+        }));
+
+        let output = write_dxf(&doc).unwrap();
+        let doc2 = read_dxf(&output).unwrap();
+
+        assert_eq!(doc2.entities.len(), 3, "should roundtrip 3 entities");
+        match &doc2.entities[0].data {
+            EntityData::Line { start, end } => {
+                assert_eq!(*start, [0.0, 0.0, 0.0]);
+                assert_eq!(*end, [10.0, 20.0, 0.0]);
+            }
+            other => panic!("expected Line, got {:?}", other),
+        }
+        match &doc2.entities[1].data {
+            EntityData::Circle { center, radius } => {
+                assert_eq!(*center, [5.0, 5.0, 0.0]);
+                assert!((radius - 3.5).abs() < 1e-6);
+            }
+            other => panic!("expected Circle, got {:?}", other),
+        }
+        match &doc2.entities[2].data {
+            EntityData::Arc { center, radius, start_angle, end_angle } => {
+                assert_eq!(*center, [1.0, 2.0, 3.0]);
+                assert!((radius - 7.5).abs() < 1e-6);
+                assert!((start_angle - 0.0).abs() < 1e-6);
+                assert!((end_angle - 90.0).abs() < 1e-6);
+            }
+            other => panic!("expected Arc, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn roundtrip_real_file_entity_count() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found at {path}");
+            return;
+        };
+        let doc1 = read_dxf(&input).unwrap();
+        let output = write_dxf(&doc1).unwrap();
+        let doc2 = read_dxf(&output).unwrap();
+
+        assert_eq!(
+            doc2.header.version, doc1.header.version,
+            "version mismatch"
+        );
+        assert_eq!(
+            doc2.entities.len(),
+            doc1.entities.len(),
+            "entity count mismatch: wrote {} entities, read back {}",
+            doc1.entities.len(),
+            doc2.entities.len()
+        );
+        assert_eq!(
+            doc2.layers.len(),
+            doc1.layers.len(),
+            "layer count mismatch"
+        );
+
+        let counts1 = doc1.entity_type_counts();
+        let counts2 = doc2.entity_type_counts();
+        for (typ, &c1) in &counts1 {
+            let c2 = counts2.get(typ).copied().unwrap_or(0);
+            assert_eq!(c2, c1, "type {typ}: wrote {c1}, read back {c2}");
+        }
     }
 }
