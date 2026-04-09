@@ -356,6 +356,7 @@ pub enum Message {
     LayoutContextMenuClose,
     // ── Layout Manager Panel ────────────────────────────────────────────
     LayoutManagerOpen,
+    #[allow(dead_code)]
     LayoutManagerClose,
     LayoutManagerSelect(String),
     LayoutManagerRenameBuf(String),
@@ -369,6 +370,7 @@ pub enum Message {
     SetTheme(Theme),
     // ── Keyboard Shortcut Editor ────────────────────────────────────────
     ShortcutsPanelOpen,
+    #[allow(dead_code)]
     ShortcutsPanelClose,
     /// Close the viewport right-click context menu without performing any action.
     ViewportContextMenuClose,
@@ -418,6 +420,7 @@ pub enum Message {
     PlotStyleClear,
     /// Open/close the Plot Style panel.
     PlotStylePanelOpen,
+    #[allow(dead_code)]
     PlotStylePanelClose,
     /// Select an ACI entry in the panel.
     PlotStylePanelSelectAci(u8),
@@ -433,6 +436,7 @@ pub enum Message {
     PlotStylePanelSavePath(Option<std::path::PathBuf>),
     // ── TextStyle Font Browser ────────────────────────────────────────────
     TextStyleDialogOpen,
+    #[allow(dead_code)]
     TextStyleDialogClose,
     TextStyleDialogSelect(String),
     TextStyleDialogSetCurrent,
@@ -446,12 +450,14 @@ pub enum Message {
     TextStyleFontPick(String),
     // ── TableStyle Dialog ─────────────────────────────────────────────────
     TableStyleDialogOpen,
+    #[allow(dead_code)]
     TableStyleDialogClose,
     TableStyleDialogSelect(String),
     TableStyleDialogNew,
     TableStyleDialogDelete,
     // ── MLineStyle Dialog ─────────────────────────────────────────────────
     MlStyleDialogOpen,
+    #[allow(dead_code)]
     MlStyleDialogClose,
     MlStyleDialogSelect(String),
     MlStyleDialogSetCurrent,

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Multi-view: 3 perspective projections of a block -->
+  <!-- Top view -->
+  <rect x="2" y="2" width="8" height="8" rx="0.5"/>
+  <!-- Front view -->
+  <rect x="2" y="14" width="8" height="8" rx="0.5"/>
+  <!-- Isometric block -->
+  <polygon points="14,8 20,5 20,15 14,18"/>
+  <polygon points="14,8 20,5 22,7 16,10"/>
+  <polygon points="16,10 22,7 22,17 16,20"/>
+  <line x1="14" y1="8" x2="16" y2="10"/>
+  <line x1="14" y1="18" x2="16" y2="20"/>
+  <line x1="20" y1="15" x2="22" y2="17"/>
+</svg>

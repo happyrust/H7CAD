@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Image/underlay rectangle -->
+  <rect x="3" y="4" width="14" height="14" rx="1"/>
+  <!-- Brightness/contrast sliders -->
+  <line x1="19" y1="6" x2="19" y2="18"/>
+  <circle cx="19" cy="10" r="2" fill="currentColor" stroke="none"/>
+  <line x1="17" y1="10" x2="21" y2="10"/>
+</svg>
