@@ -160,8 +160,8 @@ impl CadModule for AnnotateModule {
             RibbonGroup {
                 title: "Markup",
                 tools: vec![
-                    RibbonItem::Tool(wipeout::tool()),
-                    RibbonItem::Tool(revcloud::tool()),
+                    RibbonItem::LargeTool(wipeout::tool()),
+                    RibbonItem::LargeTool(revcloud::tool()),
                 ],
             },
             // ── Annotation Scaling ───────────────────────────────────────
