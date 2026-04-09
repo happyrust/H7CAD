@@ -62,10 +62,7 @@ pub fn load_file(path: &Path) -> Result<CadDocument, String> {
             let mut reader = DwgReader::from_file(path).map_err(|e| e.to_string())?;
             reader.read().map_err(|e| e.to_string())
         }
-        "dxf" => DxfReader::from_file(path)
-            .map_err(|e| e.to_string())?
-            .read()
-            .map_err(|e| e.to_string()),
+        "dxf" => load_dxf_native(path),
         _ => Err(format!("Unsupported file format: .{ext}")),
     }
 }
@@ -157,6 +154,14 @@ pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
 
 pub fn save_dwg(doc: &CadDocument, path: &Path) -> Result<(), String> {
     DwgWriter::write_to_file(path, doc).map_err(|e| e.to_string())
+}
+
+/// Load a DXF file via the native reader, converting to acadrust CadDocument.
+fn load_dxf_native(path: &Path) -> Result<CadDocument, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("failed to read DXF: {e}"))?;
+    let native_doc =
+        h7cad_native_dxf::read_dxf_bytes(&bytes).map_err(|e| format!("native DXF: {e}"))?;
+    Ok(native_bridge::native_doc_to_acadrust(&native_doc))
 }
 
 pub fn save_dxf(doc: &CadDocument, path: &Path) -> Result<(), String> {
