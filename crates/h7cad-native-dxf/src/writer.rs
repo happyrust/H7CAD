@@ -822,8 +822,30 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
                 w.pair_str(1, line);
             }
         }
-        EntityData::MultiLeader {} => {
-            // Minimal — full MULTILEADER write is TODO
+        EntityData::MultiLeader {
+            content_type,
+            text_label,
+            style_name,
+            arrowhead_size,
+            landing_gap,
+            dogleg_length,
+        } => {
+            w.pair_i16(172, *content_type);
+            if !text_label.is_empty() {
+                w.pair_str(304, text_label);
+            }
+            if !style_name.is_empty() {
+                w.pair_str(3, style_name);
+            }
+            if *arrowhead_size != 0.0 {
+                w.pair_f64(42, *arrowhead_size);
+            }
+            if *landing_gap != 0.0 {
+                w.pair_f64(41, *landing_gap);
+            }
+            if *dogleg_length != 0.0 {
+                w.pair_f64(43, *dogleg_length);
+            }
         }
         EntityData::Table {} => {}
         EntityData::Mesh {

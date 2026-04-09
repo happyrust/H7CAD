@@ -995,3 +995,31 @@ pub(crate) fn parse_text(codes: &[(i16, String)]) -> EntityData {
         style_name,
     }
 }
+
+pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
+    let mut content_type: i16 = 0;
+    let mut text_label = String::new();
+    let mut style_name = String::new();
+    let mut arrowhead_size = 0.0;
+    let mut landing_gap = 0.0;
+    let mut dogleg_length = 0.0;
+    for &(code, ref val) in codes {
+        match code {
+            172 => content_type = val.parse().unwrap_or(0),
+            304 => text_label = val.clone(),
+            3 => style_name = val.clone(),
+            42 => arrowhead_size = val.parse().unwrap_or(0.0),
+            41 => landing_gap = val.parse().unwrap_or(0.0),
+            43 => dogleg_length = val.parse().unwrap_or(0.0),
+            _ => {}
+        }
+    }
+    EntityData::MultiLeader {
+        content_type,
+        text_label,
+        style_name,
+        arrowhead_size,
+        landing_gap,
+        dogleg_length,
+    }
+}

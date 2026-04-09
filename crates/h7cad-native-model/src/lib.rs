@@ -1008,7 +1008,13 @@ pub enum EntityData {
         acis_data: String,
     },
     MultiLeader {
-        // Simplified — full nested context parsing is TODO
+        /// 1=MText, 2=Block, 3=Tolerance
+        content_type: i16,
+        text_label: String,
+        style_name: String,
+        arrowhead_size: f64,
+        landing_gap: f64,
+        dogleg_length: f64,
     },
     Table {
         // Simplified — full ACAD_TABLE parsing is TODO

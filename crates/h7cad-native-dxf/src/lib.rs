@@ -754,7 +754,7 @@ fn read_entity(
         "SHAPE" => parse_shape(&codes),
         "3DSOLID" | "BODY" => parse_solid3d(&codes),
         "REGION" => parse_region(&codes),
-        "MULTILEADER" => EntityData::MultiLeader {},
+        "MULTILEADER" => parse_multileader(&codes),
         "ACAD_TABLE" => EntityData::Table {},
         "MESH" => parse_mesh(&codes),
         "PDFUNDERLAY" | "DWFUNDERLAY" | "DGNUNDERLAY" => parse_underlay(&codes),
