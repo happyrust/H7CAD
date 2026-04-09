@@ -422,7 +422,10 @@ pub enum EntityData {
         closed: bool,
         knots: Vec<f64>,
         control_points: Vec<[f64; 3]>,
+        weights: Vec<f64>,
         fit_points: Vec<[f64; 3]>,
+        start_tangent: [f64; 3],
+        end_tangent: [f64; 3],
     },
     Face3D {
         corners: [[f64; 3]; 4],

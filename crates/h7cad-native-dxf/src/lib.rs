@@ -1881,6 +1881,75 @@ mod tests {
     }
 
     #[test]
+    fn geometry_data_integrity_ac1015() {
+        use h7cad_native_model::EntityData;
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+
+        for ent in &doc.entities {
+            match &ent.data {
+                EntityData::Line { start, end } => {
+                    assert!(start.iter().all(|v| v.is_finite()), "LINE start must be finite");
+                    assert!(end.iter().all(|v| v.is_finite()), "LINE end must be finite");
+                }
+                EntityData::Circle { center, radius } => {
+                    assert!(center.iter().all(|v| v.is_finite()));
+                    assert!(*radius > 0.0, "CIRCLE radius must be positive, got {radius}");
+                }
+                EntityData::Arc { center, radius, start_angle, end_angle } => {
+                    assert!(center.iter().all(|v| v.is_finite()));
+                    assert!(*radius > 0.0, "ARC radius must be positive");
+                    assert!(start_angle.is_finite() && end_angle.is_finite());
+                }
+                EntityData::Ellipse { center, major_axis, ratio, .. } => {
+                    assert!(center.iter().all(|v| v.is_finite()));
+                    let axis_len = (major_axis[0].powi(2) + major_axis[1].powi(2) + major_axis[2].powi(2)).sqrt();
+                    assert!(axis_len > 0.0, "ELLIPSE major_axis length must be > 0");
+                    assert!(*ratio > 0.0 && *ratio <= 1.0, "ELLIPSE ratio must be in (0,1], got {ratio}");
+                }
+                EntityData::Spline { degree, knots, control_points, weights, .. } => {
+                    assert!(*degree >= 1, "SPLINE degree must be >= 1, got {degree}");
+                    assert!(!control_points.is_empty(), "SPLINE must have control points");
+                    assert!(!knots.is_empty(), "SPLINE must have knots");
+                    if !weights.is_empty() {
+                        assert_eq!(weights.len(), control_points.len(),
+                            "SPLINE weights count must match control_points count");
+                    }
+                }
+                EntityData::LwPolyline { vertices, .. } => {
+                    assert!(!vertices.is_empty(), "LWPOLYLINE must have vertices");
+                }
+                EntityData::Polyline { vertices, .. } => {
+                    assert!(!vertices.is_empty(), "POLYLINE must have vertices");
+                }
+                EntityData::Hatch { boundary_paths, .. } => {
+                    for bp in boundary_paths {
+                        assert!(!bp.edges.is_empty(), "HATCH boundary path must have edges");
+                    }
+                }
+                EntityData::Insert { block_name, attribs, has_attribs, .. } => {
+                    assert!(!block_name.is_empty(), "INSERT must have block_name");
+                    if *has_attribs {
+                        assert!(!attribs.is_empty(), "INSERT with has_attribs should have attribs");
+                    }
+                }
+                EntityData::Dimension { block_name, .. } => {
+                    assert!(!block_name.is_empty(), "DIMENSION must have block_name");
+                }
+                _ => {}
+            }
+        }
+        eprintln!("Geometry data integrity: all {} entities passed", doc.entities.len());
+    }
+
+    #[test]
     fn read_dxf_parses_insert_with_attribs() {
         let input = concat!(
             "  0\nSECTION\n  2\nENTITIES\n",

@@ -425,8 +425,11 @@ pub(crate) fn parse_spline(codes: &[(i16, String)]) -> EntityData {
     let mut degree: i32 = 3;
     let mut closed = false;
     let mut knots: Vec<f64> = Vec::new();
+    let mut weights: Vec<f64> = Vec::new();
     let mut control_points: Vec<[f64; 3]> = Vec::new();
     let mut fit_points: Vec<[f64; 3]> = Vec::new();
+    let mut start_tangent = [0.0f64; 3];
+    let mut end_tangent = [0.0f64; 3];
     let (mut cx, mut cy, mut cz) = (0.0, 0.0, 0.0);
     let (mut fx, mut fy, mut fz) = (0.0, 0.0, 0.0);
     let mut in_control = false;
@@ -437,6 +440,13 @@ pub(crate) fn parse_spline(codes: &[(i16, String)]) -> EntityData {
             71 => degree = val.parse().unwrap_or(3),
             70 => closed = val.parse::<i16>().unwrap_or(0) & 1 != 0,
             40 => knots.push(val.parse().unwrap_or(0.0)),
+            41 => weights.push(val.parse().unwrap_or(1.0)),
+            12 => start_tangent[0] = val.parse().unwrap_or(0.0),
+            22 => start_tangent[1] = val.parse().unwrap_or(0.0),
+            32 => start_tangent[2] = val.parse().unwrap_or(0.0),
+            13 => end_tangent[0] = val.parse().unwrap_or(0.0),
+            23 => end_tangent[1] = val.parse().unwrap_or(0.0),
+            33 => end_tangent[2] = val.parse().unwrap_or(0.0),
             10 => {
                 if in_control {
                     control_points.push([cx, cy, cz]);
@@ -499,7 +509,10 @@ pub(crate) fn parse_spline(codes: &[(i16, String)]) -> EntityData {
         closed,
         knots,
         control_points,
+        weights,
         fit_points,
+        start_tangent,
+        end_tangent,
     }
 }
 
