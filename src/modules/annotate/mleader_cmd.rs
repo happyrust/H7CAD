@@ -14,7 +14,7 @@ use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
 
-pub const ICON: IconKind = IconKind::Glyph("↙");
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/mleader.svg"));
 
 pub fn tool() -> ToolDef {
     ToolDef {

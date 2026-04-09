@@ -21,7 +21,7 @@ pub fn tool() -> ToolDef {
     ToolDef {
         id: "DIMORDINATE",
         label: "Ordinate",
-        icon: IconKind::Glyph("Φ"),
+        icon: IconKind::Svg(include_bytes!("../../../assets/icons/dim_ordinate.svg")),
         event: ModuleEvent::Command("DIMORDINATE".to_string()),
     }
 }

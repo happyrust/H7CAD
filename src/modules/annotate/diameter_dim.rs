@@ -6,7 +6,19 @@ use acadrust::EntityType;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
+
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_diameter.svg"));
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "DIMDIAMETER",
+        label: "Diameter",
+        icon: ICON,
+        event: ModuleEvent::Command("DIMDIAMETER".to_string()),
+    }
+}
 
 enum Step {
     CenterPoint,

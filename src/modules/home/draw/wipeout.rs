@@ -10,7 +10,19 @@ use acadrust::EntityType;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
+
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/wipeout.svg"));
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "WIPEOUT",
+        label: "Wipeout",
+        icon: ICON,
+        event: ModuleEvent::Command("WIPEOUT".to_string()),
+    }
+}
 
 pub struct WipeoutCommand {
     mode: WipeoutMode,

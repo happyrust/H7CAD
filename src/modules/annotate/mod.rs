@@ -1,4 +1,4 @@
-// Annotate module — dimension and text annotation tools.
+// Annotate module — dimension, text, leader, table, and markup tools.
 
 pub mod aligned_dim;
 pub mod angular_dim;
@@ -29,52 +29,108 @@ impl CadModule for AnnotateModule {
     }
 
     fn ribbon_groups(&self) -> Vec<RibbonGroup> {
+        use crate::modules::home::draw::{wipeout, revcloud};
+
         vec![
+            // ── Text ─────────────────────────────────────────────────────
             RibbonGroup {
                 title: "Text",
                 tools: vec![
                     RibbonItem::LargeDropdown {
                         id: "ANNOTATE_TEXT",
                         label: "Text",
-                        icon: text::ICON,
+                        icon: mtext::ICON,
                         items: vec![
-                            (text::tool().id, text::tool().label, text::tool().icon),
                             (mtext::tool().id, mtext::tool().label, mtext::tool().icon),
+                            (text::tool().id,  text::tool().label,  text::tool().icon),
+                            (ddedit::tool().id, ddedit::tool().label, ddedit::tool().icon),
                         ],
-                        default: "TEXT",
+                        default: "MTEXT",
                     },
                 ],
             },
+            // ── Dimensions ───────────────────────────────────────────────
             RibbonGroup {
                 title: "Dimensions",
                 tools: vec![
                     RibbonItem::LargeDropdown {
                         id: "ANNOTATE_DIM",
-                        label: "Dimensions",
+                        label: "Dimension",
                         icon: linear_dim::ICON,
                         items: vec![
-                            (linear_dim::tool().id, linear_dim::tool().label, linear_dim::tool().icon),
-                            (radius_dim::tool().id, radius_dim::tool().label, radius_dim::tool().icon),
+                            (linear_dim::tool().id,  linear_dim::tool().label,  linear_dim::tool().icon),
+                            (aligned_dim::tool().id, aligned_dim::tool().label, aligned_dim::tool().icon),
                             (angular_dim::tool().id, angular_dim::tool().label, angular_dim::tool().icon),
+                            (radius_dim::tool().id,  radius_dim::tool().label,  radius_dim::tool().icon),
+                            (diameter_dim::tool().id, diameter_dim::tool().label, diameter_dim::tool().icon),
                             (ordinate_dim::tool().id, ordinate_dim::tool().label, ordinate_dim::tool().icon),
                         ],
                         default: "DIMLINEAR",
                     },
+                    RibbonItem::Tool(dim_continue::tool()),
+                    RibbonItem::Tool(dim_baseline::tool()),
+                    RibbonItem::Tool(tolerance_cmd::tool()),
                 ],
             },
+            // ── Leaders ──────────────────────────────────────────────────
             RibbonGroup {
                 title: "Leaders",
                 tools: vec![
                     RibbonItem::LargeDropdown {
                         id: "ANNOTATE_LEADER",
-                        label: "Leader",
-                        icon: leader_cmd::ICON,
+                        label: "Multileader",
+                        icon: mleader_cmd::ICON,
                         items: vec![
                             (mleader_cmd::tool().id, mleader_cmd::tool().label, mleader_cmd::tool().icon),
-                            (leader_cmd::tool().id, leader_cmd::tool().label, leader_cmd::tool().icon),
+                            (leader_cmd::tool().id,  leader_cmd::tool().label,  leader_cmd::tool().icon),
                         ],
                         default: "MLEADER",
                     },
+                ],
+            },
+            // ── Tables ───────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Tables",
+                tools: vec![
+                    RibbonItem::LargeTool(table_cmd::tool()),
+                ],
+            },
+            // ── Markup ───────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Markup",
+                tools: vec![
+                    RibbonItem::Tool(wipeout::tool()),
+                    RibbonItem::Tool(revcloud::tool()),
+                ],
+            },
+            // ── Annotation Scaling ───────────────────────────────────────
+            RibbonGroup {
+                title: "Annotation Scaling",
+                tools: vec![
+                    RibbonItem::Tool(crate::modules::ToolDef {
+                        id: "ANNOSCALE",
+                        label: "Scale List",
+                        icon: crate::modules::IconKind::Glyph("⬡"),
+                        event: crate::modules::ModuleEvent::Command("ANNOSCALE".to_string()),
+                    }),
+                    RibbonItem::Tool(crate::modules::ToolDef {
+                        id: "OBJECTSCALE",
+                        label: "Add Scale",
+                        icon: crate::modules::IconKind::Glyph("⊕"),
+                        event: crate::modules::ModuleEvent::Command("OBJECTSCALE".to_string()),
+                    }),
+                    RibbonItem::Tool(crate::modules::ToolDef {
+                        id: "SCALELISTEDIT",
+                        label: "Scale Edit",
+                        icon: crate::modules::IconKind::Glyph("≡"),
+                        event: crate::modules::ModuleEvent::Command("SCALELISTEDIT".to_string()),
+                    }),
+                    RibbonItem::Tool(crate::modules::ToolDef {
+                        id: "SYNCPVIEWPORTS",
+                        label: "Sync Scales",
+                        icon: crate::modules::IconKind::Glyph("⇄"),
+                        event: crate::modules::ModuleEvent::Command("SYNCPVIEWPORTS".to_string()),
+                    }),
                 ],
             },
         ]

@@ -10,7 +10,19 @@ use acadrust::{EntityType, entities::LwVertex};
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
+
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/revcloud.svg"));
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "REVCLOUD",
+        label: "Rev Cloud",
+        icon: ICON,
+        event: ModuleEvent::Command("REVCLOUD".to_string()),
+    }
+}
 
 const DEFAULT_ARC_LEN: f64 = 1.0; // default arc bump length
 

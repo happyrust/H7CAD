@@ -8,6 +8,18 @@ use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
+
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/ddedit.svg"));
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "DDEDIT",
+        label: "Edit Text",
+        icon: ICON,
+        event: ModuleEvent::Command("DDEDIT".to_string()),
+    }
+}
 
 enum DdeditStep {
     PickEntity,
