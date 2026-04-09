@@ -5,7 +5,7 @@ use super::helpers::grid_plane_from_camera;
 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
 use crate::scene::grip::grips_to_screen;
 use crate::ui::overlay;
-use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, text_input, Row, Space};
+use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, Row, Space};
 use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 
@@ -13,10 +13,88 @@ const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_DRAW_PX;
 
 impl H7CAD {
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
-        // ── Layer Properties Manager window ───────────────────────────────
+        // ── Floating panel windows ─────────────────────────────────────────
         if Some(window_id) == self.layer_window {
             let tab = &self.tabs[self.active_tab];
             return tab.layers.view_window();
+        }
+        if Some(window_id) == self.page_setup_window {
+            return crate::ui::page_setup::view_window(
+                &self.page_setup_w, &self.page_setup_h,
+                &self.page_setup_plot_area, self.page_setup_center,
+                &self.page_setup_offset_x, &self.page_setup_offset_y,
+                &self.page_setup_rotation, &self.page_setup_scale,
+            );
+        }
+        if Some(window_id) == self.textstyle_window {
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.text_styles
+                .iter().map(|s| s.name.clone()).collect();
+            return crate::ui::textstyle::view_window(styles, &self.textstyle_selected,
+                &self.textstyle_font, &self.textstyle_width, &self.textstyle_oblique);
+        }
+        if Some(window_id) == self.tablestyle_window {
+            use acadrust::objects::ObjectType;
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.objects.values()
+                .filter_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
+                .collect();
+            let selected_style = tab.scene.document.objects.values()
+                .find_map(|o| if let ObjectType::TableStyle(s) = o {
+                    if s.name == self.tablestyle_selected { Some(s) } else { None }
+                } else { None });
+            return crate::ui::tablestyle::view_window(styles, &self.tablestyle_selected, selected_style);
+        }
+        if Some(window_id) == self.mlstyle_window {
+            use acadrust::objects::ObjectType;
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.objects.values()
+                .filter_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
+                .collect();
+            let selected_style = tab.scene.document.objects.values()
+                .find_map(|o| if let ObjectType::MLineStyle(s) = o {
+                    if s.name == self.mlstyle_selected { Some(s) } else { None }
+                } else { None });
+            return crate::ui::mlstyle::view_window(styles, &self.mlstyle_selected, selected_style,
+                tab.scene.document.header.multiline_style.clone());
+        }
+        if Some(window_id) == self.layout_manager_window {
+            let i = self.active_tab;
+            let layouts = self.tabs[i].scene.layout_names();
+            let current = self.tabs[i].scene.current_layout.clone();
+            return crate::ui::layout_manager::view_window(layouts, &self.layout_manager_selected,
+                &self.layout_manager_rename_buf, current);
+        }
+        if Some(window_id) == self.plotstyle_window {
+            return crate::ui::plotstyle::view_window(
+                self.active_plot_style.as_ref(), self.plotstyle_panel_aci,
+                &self.ps_color_buf, &self.ps_lineweight_buf, &self.ps_screening_buf,
+            );
+        }
+        if Some(window_id) == self.dimstyle_window {
+            let tab = &self.tabs[self.active_tab];
+            let styles: Vec<String> = tab.scene.document.dim_styles
+                .iter().map(|s| s.name.clone()).collect();
+            return crate::ui::dimstyle::view_window(
+                styles, &self.dimstyle_selected, self.dimstyle_tab,
+                crate::ui::dimstyle::DimStyleValues {
+                    dimdle: &self.ds_dimdle,   dimdli: &self.ds_dimdli,  dimgap: &self.ds_dimgap,
+                    dimexe: &self.ds_dimexe,   dimexo: &self.ds_dimexo,
+                    dimsd1: self.ds_dimsd1,    dimsd2: self.ds_dimsd2,
+                    dimse1: self.ds_dimse1,    dimse2: self.ds_dimse2,
+                    dimasz: &self.ds_dimasz,   dimcen: &self.ds_dimcen,  dimtsz: &self.ds_dimtsz,
+                    dimtxt: &self.ds_dimtxt,   dimtxsty: &self.ds_dimtxsty, dimtad: &self.ds_dimtad,
+                    dimtih: self.ds_dimtih,    dimtoh: self.ds_dimtoh,
+                    dimscale: &self.ds_dimscale, dimlfac: &self.ds_dimlfac,
+                    dimlunit: &self.ds_dimlunit, dimdec: &self.ds_dimdec, dimpost: &self.ds_dimpost,
+                    dimtol: self.ds_dimtol,    dimlim: self.ds_dimlim,
+                    dimtp: &self.ds_dimtp,     dimtm: &self.ds_dimtm,
+                    dimtdec: &self.ds_dimtdec, dimtfac: &self.ds_dimtfac,
+                },
+            );
+        }
+        if Some(window_id) == self.shortcuts_window {
+            return crate::ui::shortcuts::view_window(&self.shortcut_overrides);
         }
 
         let i = self.active_tab;
@@ -83,7 +161,23 @@ impl H7CAD {
                 None
             };
 
-            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon)
+            // OST tracking points → screen positions.
+            let ost_points: Vec<overlay::OstTrackPoint> = if self.snapper.otrack_enabled {
+                let vp_mat = tab.scene.camera.borrow().view_proj(vp_bounds);
+                self.snapper.tracking_points.iter().map(|&wp| {
+                    let ndc = vp_mat.project_point3(wp);
+                    overlay::OstTrackPoint {
+                        screen: iced::Point::new(
+                            (ndc.x + 1.0) * 0.5 * vp_bounds.width,
+                            (1.0 - ndc.y) * 0.5 * vp_bounds.height,
+                        ),
+                    }
+                }).collect()
+            } else {
+                vec![]
+            };
+
+            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon, ost_points, tab.last_cursor_screen)
         };
 
         let nav = container(overlay::nav_toolbar())
@@ -135,7 +229,26 @@ impl H7CAD {
                 .unwrap_or(Color { r: 0.11, g: 0.11, b: 0.11, a: 1.0 })
         };
 
-        let viewport_stack = stack![
+        // Dynamic input overlay — shown when a command is active and DYN is on.
+        let dyn_input_overlay: Option<Element<'_, Message>> =
+            if self.dyn_input && tab.active_cmd.is_some() {
+                let w = tab.last_cursor_world;
+                let label = if let Some(base) = self.last_point {
+                    // Show relative distance + angle when we have a base point.
+                    let dx = (w.x - base.x) as f64;
+                    let dy = (w.z - base.z) as f64;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    let ang = dy.atan2(dx).to_degrees();
+                    format!("d={:.3}  <{:.1}°", dist, ang)
+                } else {
+                    format!("X:{:.3}  Y:{:.3}", w.x, w.z)
+                };
+                Some(overlay::dynamic_input_overlay(tab.last_cursor_screen, label))
+            } else {
+                None
+            };
+
+        let mut viewport_stack = stack![
             container(viewport_3d)
                 .style(move |_: &Theme| container::Style {
                     background: Some(Background::Color(bg_color)),
@@ -151,6 +264,9 @@ impl H7CAD {
         ]
         .width(Fill)
         .height(Fill);
+        if let Some(dyn_ol) = dyn_input_overlay {
+            viewport_stack = viewport_stack.push(dyn_ol);
+        }
 
         let center_stack = iced::widget::stack![
             row![tab.properties.view(), viewport_stack]
@@ -177,7 +293,10 @@ impl H7CAD {
                     self.snap_popup_open,
                     self.ortho_mode,
                     self.polar_mode,
+                    self.polar_increment_deg,
                     self.show_grid,
+                    self.dyn_input,
+                    self.snapper.otrack_enabled,
                     tab.scene.layout_names(),
                     tab.scene.current_layout.clone(),
                     self.layout_rename_state.as_ref(),
@@ -216,75 +335,21 @@ impl H7CAD {
                 iced::widget::Space::new().width(0).height(0).into()
             };
 
-        let page_setup_layer: Element<'_, Message> = if self.page_setup_open {
-            page_setup_overlay(
-                &self.page_setup_w,
-                &self.page_setup_h,
-                &self.page_setup_plot_area,
-                self.page_setup_center,
-                &self.page_setup_offset_x,
-                &self.page_setup_offset_y,
-                &self.page_setup_rotation,
-                &self.page_setup_scale,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
+        // ── Viewport right-click context menu ─────────────────────────────
+        let viewport_ctx_layer: Element<'_, Message> = {
+            let ctx_pos = tab.scene.selection.borrow().context_menu;
+            if let Some(p) = ctx_pos {
+                let has_cmd = tab.active_cmd.is_some();
+                let has_selection = !tab.scene.selected.is_empty();
+                let last_cmds: Vec<String> = self.command_line.cmd_recall
+                    .iter().rev().take(3).cloned().collect();
+                viewport_context_menu_overlay(p, has_cmd, has_selection, last_cmds)
+            } else {
+                iced::widget::Space::new().width(0).height(0).into()
+            }
         };
 
-        let textstyle_layer: Element<'_, Message> = if self.textstyle_open {
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.text_styles
-                .iter().map(|s| s.name.clone()).collect();
-            textstyle_overlay(styles, &self.textstyle_selected, &self.textstyle_font, &self.textstyle_width, &self.textstyle_oblique)
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let tablestyle_layer: Element<'_, Message> = if self.tablestyle_open {
-            use acadrust::objects::ObjectType;
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.objects.values()
-                .filter_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
-                .collect();
-            let selected_style = tab.scene.document.objects.values()
-                .find_map(|o| if let ObjectType::TableStyle(s) = o {
-                    if s.name == self.tablestyle_selected { Some(s) } else { None }
-                } else { None });
-            tablestyle_overlay(styles, &self.tablestyle_selected, selected_style)
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let mlstyle_layer: Element<'_, Message> = if self.mlstyle_open {
-            use acadrust::objects::ObjectType;
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.objects.values()
-                .filter_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
-                .collect();
-            let selected_style = tab.scene.document.objects.values()
-                .find_map(|o| if let ObjectType::MLineStyle(s) = o {
-                    if s.name == self.mlstyle_selected { Some(s) } else { None }
-                } else { None });
-            mlstyle_overlay(styles, &self.mlstyle_selected, selected_style, tab.scene.document.header.multiline_style.clone())
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let dimstyle_layer: Element<'_, Message> = if self.dimstyle_open {
-            let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.dim_styles
-                .iter().map(|s| s.name.clone()).collect();
-            dimstyle_overlay(
-                styles,
-                &self.dimstyle_selected,
-                self.dimstyle_tab,
-                self,
-            )
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, page_setup_layer, textstyle_layer, tablestyle_layer, mlstyle_layer, dimstyle_layer].into()
+        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, viewport_ctx_layer].into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -320,6 +385,12 @@ impl H7CAD {
                             {
                                 Some(Message::DeleteSelected)
                             }
+                            keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                                Some(Message::CommandHistoryPrev)
+                            }
+                            keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                                Some(Message::CommandHistoryNext)
+                            }
                             keyboard::Key::Named(keyboard::key::Named::F3) => {
                                 Some(Message::ToggleSnapEnabled)
                             }
@@ -334,6 +405,12 @@ impl H7CAD {
                             }
                             keyboard::Key::Named(keyboard::key::Named::F10) => {
                                 Some(Message::TogglePolar)
+                            }
+                            keyboard::Key::Named(keyboard::key::Named::F11) => {
+                                Some(Message::ToggleOTrack)
+                            }
+                            keyboard::Key::Named(keyboard::key::Named::F12) => {
+                                Some(Message::ToggleDynInput)
                             }
                             keyboard::Key::Character(c) if ctrl => match c.as_str() {
                                 "n" => Some(Message::ClearScene),
@@ -464,6 +541,108 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
 
 // ── Layout context-menu overlay ────────────────────────────────────────────
 
+// ── Viewport right-click context menu ──────────────────────────────────────
+
+fn viewport_context_menu_overlay(
+    pos: iced::Point,
+    has_cmd: bool,
+    has_selection: bool,
+    last_cmds: Vec<String>,
+) -> Element<'static, Message> {
+    const MENU_BG: Color = Color { r: 0.17, g: 0.17, b: 0.17, a: 1.0 };
+    const MENU_BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
+    const ITEM_HOVER: Color = Color { r: 0.25, g: 0.45, b: 0.70, a: 1.0 };
+    const TEXT_COL: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const SEP_COL: Color = Color { r: 0.30, g: 0.30, b: 0.30, a: 1.0 };
+
+    let item = |label: String, msg: Message| -> Element<'static, Message> {
+        button(text(label).size(12).color(TEXT_COL))
+            .on_press(msg)
+            .style(|_: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered | button::Status::Pressed => ITEM_HOVER,
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT_COL,
+                border: Border::default(),
+                shadow: iced::Shadow::default(),
+                snap: false,
+            })
+            .padding([4, 12])
+            .width(Fill)
+            .into()
+    };
+
+    let sep = || -> Element<'static, Message> {
+        container(iced::widget::Space::new().width(Fill).height(1))
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(SEP_COL)),
+                ..Default::default()
+            })
+            .width(Fill)
+            .height(1)
+            .padding([0, 6])
+            .into()
+    };
+
+    let mut items: Vec<Element<'static, Message>> = Vec::new();
+
+    if has_cmd {
+        items.push(item("Cancel".to_string(), Message::CommandEscape));
+        items.push(item("Enter".to_string(), Message::CommandFinalize));
+    } else {
+        if !last_cmds.is_empty() {
+            let last = last_cmds[0].clone();
+            items.push(item(
+                format!("Repeat {last}"),
+                Message::Command(last.to_uppercase()),
+            ));
+            if last_cmds.len() > 1 {
+                for cmd in last_cmds.iter().skip(1) {
+                    let c = cmd.clone();
+                    items.push(item(c.clone(), Message::Command(c.to_uppercase())));
+                }
+            }
+            items.push(sep());
+        }
+        if has_selection {
+            items.push(item("Delete".to_string(), Message::DeleteSelected));
+            items.push(item("Move".to_string(), Message::Command("MOVE".to_string())));
+            items.push(item("Copy".to_string(), Message::Command("COPY".to_string())));
+            items.push(sep());
+        }
+        items.push(item("Select All".to_string(), Message::Command("SELECTALL".to_string())));
+        items.push(item("Zoom Extents".to_string(), Message::Command("ZOOM".to_string())));
+    }
+
+    let menu_col = column(items).spacing(0).width(180);
+
+    let menu = container(menu_col)
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(MENU_BG)),
+            border: Border { color: MENU_BORDER, width: 1.0, radius: 4.0.into() },
+            ..Default::default()
+        })
+        .padding([4, 0]);
+
+    // Click-catcher to close the menu when clicking outside.
+    let catcher = mouse_area(
+        container(Space::new()).width(Fill).height(Fill),
+    )
+    .on_press(Message::ViewportContextMenuClose)
+    .on_right_press(Message::ViewportContextMenuClose);
+
+    // Position using top/left spacing.
+    let positioned = column![
+        Space::new().height(pos.y),
+        row![Space::new().width(pos.x), menu],
+    ]
+    .width(Fill)
+    .height(Fill);
+
+    stack![catcher, positioned].into()
+}
+
 /// A small right-click context menu rendered above the status bar.
 /// The `name` is the layout tab that was right-clicked.
 fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
@@ -529,1058 +708,3 @@ fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
     stack![catcher, positioned].into()
 }
 
-// ── Page Setup overlay ──────────────────────────────────────────────────────
-
-/// Modal panel for editing paper width / height of the current layout.
-// ── Paper size presets ────────────────────────────────────────────────────
-
-#[allow(dead_code)]
-const PAPER_PRESETS: &[(&str, f64, f64)] = &[
-    ("A4 Portrait",   210.0, 297.0),
-    ("A4 Landscape",  297.0, 210.0),
-    ("A3 Portrait",   297.0, 420.0),
-    ("A3 Landscape",  420.0, 297.0),
-    ("A2 Portrait",   420.0, 594.0),
-    ("A2 Landscape",  594.0, 420.0),
-    ("A1 Portrait",   594.0, 841.0),
-    ("A1 Landscape",  841.0, 594.0),
-    ("A0 Portrait",   841.0, 1189.0),
-    ("A0 Landscape",  1189.0, 841.0),
-    ("Letter Portrait",  215.9, 279.4),
-    ("Letter Landscape", 279.4, 215.9),
-    ("Custom",           0.0,   0.0),
-];
-
-fn page_setup_overlay<'a>(
-    w_buf: &'a str,
-    h_buf: &'a str,
-    plot_area: &'a str,
-    center: bool,
-    offset_x: &'a str,
-    offset_y: &'a str,
-    rotation: &'a str,
-    scale: &'a str,
-) -> Element<'a, Message> {
-    const PANEL_BG: Color  = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-    const BORDER_COL: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-    const TEXT_COLOR: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-    const DIM_COLOR: Color  = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-    const ACCENT: Color     = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-    const ACTIVE_BG: Color  = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-
-    let lbl = |s: &'static str| text(s).size(11).color(DIM_COLOR).width(110);
-
-    let field_style = |_: &Theme, _: text_input::Status| text_input::Style {
-        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
-        border: Border { color: BORDER_COL, width: 1.0, radius: 3.0.into() },
-        icon: TEXT_COLOR,
-        placeholder: Color { r: 0.45, g: 0.45, b: 0.45, a: 1.0 },
-        value: TEXT_COLOR,
-        selection: ACCENT,
-    };
-
-    let btn_style = |accent: bool| {
-        move |_: &Theme, status: button::Status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered | button::Status::Pressed if accent => {
-                    Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 }
-                }
-                button::Status::Hovered | button::Status::Pressed => {
-                    Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
-                }
-                _ if accent => ACCENT,
-                _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
-            })),
-            text_color: TEXT_COLOR,
-            border: Border { color: BORDER_COL, width: 1.0, radius: 4.0.into() },
-            shadow: iced::Shadow::default(),
-            snap: false,
-        }
-    };
-
-    let pill_style = |active: bool| {
-        move |_: &Theme, status: button::Status| button::Style {
-            background: Some(Background::Color(match (active, status) {
-                (true,  _) => ACTIVE_BG,
-                (false, button::Status::Hovered | button::Status::Pressed) => {
-                    Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
-                }
-                _ => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
-            })),
-            text_color: TEXT_COLOR,
-            border: Border { color: BORDER_COL, width: 1.0, radius: 3.0.into() },
-            shadow: iced::Shadow::default(),
-            snap: false,
-        }
-    };
-
-    let divider = || container(Space::new().width(Fill).height(1))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(BORDER_COL)),
-            ..Default::default()
-        })
-        .width(Fill)
-        .height(1);
-
-    // ── Paper size presets ────────────────────────────────────────────────
-    let preset_row1 = row![
-        button(text("A4 P").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("A4 Portrait".into()))
-            .style(pill_style(false)).padding([3, 6]),
-        button(text("A4 L").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("A4 Landscape".into()))
-            .style(pill_style(false)).padding([3, 6]),
-        button(text("A3 P").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("A3 Portrait".into()))
-            .style(pill_style(false)).padding([3, 6]),
-        button(text("A3 L").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("A3 Landscape".into()))
-            .style(pill_style(false)).padding([3, 6]),
-    ].spacing(4);
-
-    let preset_row2 = row![
-        button(text("A2 L").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("A2 Landscape".into()))
-            .style(pill_style(false)).padding([3, 6]),
-        button(text("A1 L").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("A1 Landscape".into()))
-            .style(pill_style(false)).padding([3, 6]),
-        button(text("A0 L").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("A0 Landscape".into()))
-            .style(pill_style(false)).padding([3, 6]),
-        button(text("Letter").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPreset("Letter Landscape".into()))
-            .style(pill_style(false)).padding([3, 6]),
-    ].spacing(4);
-
-    // ── Plot area buttons ─────────────────────────────────────────────────
-    let area_row = row![
-        button(text("Layout").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPlotArea("Layout".into()))
-            .style(pill_style(plot_area == "Layout")).padding([3, 8]),
-        button(text("Extents").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupPlotArea("Extents".into()))
-            .style(pill_style(plot_area == "Extents")).padding([3, 8]),
-    ].spacing(6);
-
-    // ── Center toggle ─────────────────────────────────────────────────────
-    let center_btn = button(
-        text(if center { "✓ Center on page" } else { "  Center on page" }).size(11).color(TEXT_COLOR)
-    )
-    .on_press(Message::PageSetupCenterToggle)
-    .style(pill_style(center))
-    .padding([4, 10]);
-
-    // ── Rotation buttons ──────────────────────────────────────────────────
-    let rot_row = row![
-        button(text("0°").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupRotation("0".into()))
-            .style(pill_style(rotation == "0")).padding([3, 8]),
-        button(text("90°").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupRotation("90".into()))
-            .style(pill_style(rotation == "90")).padding([3, 8]),
-        button(text("180°").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupRotation("180".into()))
-            .style(pill_style(rotation == "180")).padding([3, 8]),
-        button(text("270°").size(10).color(TEXT_COLOR))
-            .on_press(Message::PageSetupRotation("270".into()))
-            .style(pill_style(rotation == "270")).padding([3, 8]),
-    ].spacing(4);
-
-    let panel = container(
-        column![
-            text("Page Setup").size(14).color(TEXT_COLOR),
-            divider(),
-            // Paper size
-            text("Paper Size").size(11).color(DIM_COLOR),
-            preset_row1,
-            preset_row2,
-            row![
-                lbl("Width (mm)"),
-                text_input("297", w_buf)
-                    .on_input(Message::PageSetupWidthEdit)
-                    .on_submit(Message::PageSetupCommit)
-                    .style(field_style)
-                    .width(80).size(12),
-            ].spacing(6).align_y(iced::Alignment::Center),
-            row![
-                lbl("Height (mm)"),
-                text_input("210", h_buf)
-                    .on_input(Message::PageSetupHeightEdit)
-                    .on_submit(Message::PageSetupCommit)
-                    .style(field_style)
-                    .width(80).size(12),
-            ].spacing(6).align_y(iced::Alignment::Center),
-            divider(),
-            // Plot area
-            text("Plot Area").size(11).color(DIM_COLOR),
-            area_row,
-            divider(),
-            // Position
-            text("Position").size(11).color(DIM_COLOR),
-            center_btn,
-            row![
-                lbl("Offset X (mm)"),
-                text_input("0", offset_x)
-                    .on_input(Message::PageSetupOffsetXEdit)
-                    .style(field_style)
-                    .width(80).size(12),
-            ].spacing(6).align_y(iced::Alignment::Center),
-            row![
-                lbl("Offset Y (mm)"),
-                text_input("0", offset_y)
-                    .on_input(Message::PageSetupOffsetYEdit)
-                    .style(field_style)
-                    .width(80).size(12),
-            ].spacing(6).align_y(iced::Alignment::Center),
-            divider(),
-            // Rotation
-            text("Rotation").size(11).color(DIM_COLOR),
-            rot_row,
-            divider(),
-            // Plot Scale
-            text("Plot Scale").size(11).color(DIM_COLOR),
-            row![
-                button(text("Fit").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("Fit".into()))
-                    .style(pill_style(scale == "Fit")).padding([3, 8]),
-                button(text("1:1").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("1:1".into()))
-                    .style(pill_style(scale == "1:1")).padding([3, 8]),
-                button(text("1:2").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("1:2".into()))
-                    .style(pill_style(scale == "1:2")).padding([3, 8]),
-                button(text("1:5").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("1:5".into()))
-                    .style(pill_style(scale == "1:5")).padding([3, 8]),
-                button(text("1:10").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("1:10".into()))
-                    .style(pill_style(scale == "1:10")).padding([3, 8]),
-            ].spacing(4),
-            row![
-                button(text("1:20").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("1:20".into()))
-                    .style(pill_style(scale == "1:20")).padding([3, 8]),
-                button(text("1:50").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("1:50".into()))
-                    .style(pill_style(scale == "1:50")).padding([3, 8]),
-                button(text("1:100").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("1:100".into()))
-                    .style(pill_style(scale == "1:100")).padding([3, 8]),
-                button(text("2:1").size(10).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupScale("2:1".into()))
-                    .style(pill_style(scale == "2:1")).padding([3, 8]),
-            ].spacing(4),
-            divider(),
-            // Buttons
-            row![
-                button(text("Cancel").size(12).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupClose)
-                    .style(btn_style(false))
-                    .padding([5, 14]),
-                Space::new().width(Fill).height(0),
-                button(text("OK").size(12).color(TEXT_COLOR))
-                    .on_press(Message::PageSetupCommit)
-                    .style(btn_style(true))
-                    .padding([5, 20]),
-            ]
-            .align_y(iced::Alignment::Center),
-        ]
-        .spacing(8)
-        .padding(16)
-        .width(290),
-    )
-    .style(move |_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL_BG)),
-        border: Border { color: BORDER_COL, width: 1.0, radius: 6.0.into() },
-        ..Default::default()
-    });
-
-    // Click-catcher to close on outside click.
-    let catcher = mouse_area(
-        container(Space::new().width(Fill).height(Fill))
-            .width(Fill)
-            .height(Fill),
-    )
-    .on_press(Message::PageSetupClose);
-
-    // Center the panel on screen.
-    let positioned = container(panel)
-        .width(Fill)
-        .height(Fill)
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center);
-
-    stack![catcher, positioned].into()
-}
-
-// ── DimStyle Dialog overlay ─────────────────────────────────────────────────
-
-fn dimstyle_overlay<'a>(
-    styles: Vec<String>,
-    selected: &'a str,
-    tab: u8,
-    app: &'a super::H7CAD,
-) -> Element<'a, Message> {
-    use super::DsField;
-    use iced::widget::checkbox;
-    use iced::Length::Shrink;
-
-    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-
-    let lbl = |s: &'static str| text(s).size(11).color(DIM_COL).width(150);
-
-    let field_style = |_: &Theme, _: text_input::Status| text_input::Style {
-        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
-        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-        icon: TEXT_COL, placeholder: DIM_COL, value: TEXT_COL, selection: ACCENT,
-    };
-
-    let mk_field = |fld: DsField, val: &'a str| -> Element<'a, Message> {
-        text_input("", val)
-            .on_input(move |s| Message::DsEdit(fld.clone(), s))
-            .style(field_style)
-            .size(11)
-            .width(90)
-            .into()
-    };
-
-    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
-        background: Some(Background::Color(match (accent, status) {
-            (true, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
-            (false, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-            (true, _) => ACCENT,
-            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
-        })),
-        text_color: TEXT_COL,
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
-    };
-
-    let tab_btn = |label: &'static str, idx: u8| {
-        let active = tab == idx;
-        button(text(label).size(11).color(TEXT_COL))
-            .on_press(Message::DimStyleDialogTab(idx))
-            .style(move |_: &Theme, st| button::Style {
-                background: Some(Background::Color(match (active, st) {
-                    (true, _) => ACTIVE_BG,
-                    (false, button::Status::Hovered | button::Status::Pressed) =>
-                        Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-                    _ => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
-                })),
-                text_color: TEXT_COL,
-                border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-                ..Default::default()
-            })
-            .padding([4, 10])
-    };
-
-    // ── Style list ────────────────────────────────────────────────────────
-    let style_list: Element<'_, Message> = {
-        let mut col = column![].spacing(2);
-        for name in styles {
-            let active = name == selected;
-            col = col.push(
-                button(text(name.clone()).size(11).color(TEXT_COL))
-                    .on_press(Message::DimStyleDialogSelect(name))
-                    .style(move |_: &Theme, st| button::Style {
-                        background: Some(Background::Color(match (active, st) {
-                            (true, _) => ACTIVE_BG,
-                            (false, button::Status::Hovered | button::Status::Pressed) =>
-                                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-                            _ => Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 },
-                        })),
-                        text_color: TEXT_COL,
-                        border: Border { color: BORDER, width: 0.0, radius: 3.0.into() },
-                        ..Default::default()
-                    })
-                    .padding([3, 8])
-                    .width(Fill)
-            );
-        }
-        iced::widget::scrollable(col).height(160).into()
-    };
-
-    let style_panel = column![
-        text("Styles").size(11).color(DIM_COL),
-        container(style_list)
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
-                border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-                ..Default::default()
-            })
-            .width(150)
-            .padding(2),
-        row![
-            button(text("New").size(10).color(TEXT_COL))
-                .on_press(Message::DimStyleDialogNew)
-                .style(btn_style(false)).padding([3, 8]),
-            button(text("Delete").size(10).color(TEXT_COL))
-                .on_press(Message::DimStyleDialogDelete)
-                .style(btn_style(false)).padding([3, 8]),
-        ].spacing(4),
-        button(text("Set Current").size(10).color(TEXT_COL))
-            .on_press(Message::DimStyleDialogSetCurrent)
-            .style(btn_style(false)).padding([3, 8]).width(Fill),
-    ].spacing(6).width(150);
-
-    // ── Tab bar ───────────────────────────────────────────────────────────
-    let tabs = row![
-        tab_btn("Lines",       0),
-        tab_btn("Arrows",      1),
-        tab_btn("Text",        2),
-        tab_btn("Scale/Units", 3),
-        tab_btn("Tolerances",  4),
-    ].spacing(2);
-
-    // ── Checkbox helper ───────────────────────────────────────────────────
-    let chk = |label: &'static str, val: bool, fld: DsField| -> Element<'a, Message> {
-        checkbox(val)
-            .label(label)
-            .on_toggle(move |_| Message::DsToggle(fld.clone()))
-            .size(14)
-            .text_size(11)
-            .into()
-    };
-
-    // ── Tab content ───────────────────────────────────────────────────────
-    let tab_content: Element<'_, Message> = match tab {
-        0 => column![
-            text("Dimension Line").size(11).color(ACCENT),
-            row![lbl("Extension (DIMDLE)"),   mk_field(DsField::Dimdle, &app.ds_dimdle)].spacing(8).align_y(iced::Center),
-            row![lbl("Spacing (DIMDLI)"),     mk_field(DsField::Dimdli, &app.ds_dimdli)].spacing(8).align_y(iced::Center),
-            row![lbl("Text gap (DIMGAP)"),    mk_field(DsField::Dimgap, &app.ds_dimgap)].spacing(8).align_y(iced::Center),
-            chk("Suppress 1st line (DIMSD1)", app.ds_dimsd1, DsField::Dimsd1),
-            chk("Suppress 2nd line (DIMSD2)", app.ds_dimsd2, DsField::Dimsd2),
-            text("Extension Line").size(11).color(ACCENT),
-            row![lbl("Extension (DIMEXE)"),   mk_field(DsField::Dimexe, &app.ds_dimexe)].spacing(8).align_y(iced::Center),
-            row![lbl("Offset (DIMEXO)"),      mk_field(DsField::Dimexo, &app.ds_dimexo)].spacing(8).align_y(iced::Center),
-            chk("Suppress 1st line (DIMSE1)", app.ds_dimse1, DsField::Dimse1),
-            chk("Suppress 2nd line (DIMSE2)", app.ds_dimse2, DsField::Dimse2),
-        ].spacing(6).into(),
-
-        1 => column![
-            text("Arrows").size(11).color(ACCENT),
-            row![lbl("Arrow size (DIMASZ)"),   mk_field(DsField::Dimasz, &app.ds_dimasz)].spacing(8).align_y(iced::Center),
-            row![lbl("Center mark (DIMCEN)"),  mk_field(DsField::Dimcen, &app.ds_dimcen)].spacing(8).align_y(iced::Center),
-            row![lbl("Tick size (DIMTSZ)"),    mk_field(DsField::Dimtsz, &app.ds_dimtsz)].spacing(8).align_y(iced::Center),
-        ].spacing(6).into(),
-
-        2 => column![
-            text("Text").size(11).color(ACCENT),
-            row![lbl("Height (DIMTXT)"),         mk_field(DsField::Dimtxt,   &app.ds_dimtxt)].spacing(8).align_y(iced::Center),
-            row![lbl("Style (DIMTXSTY)"),        mk_field(DsField::Dimtxsty, &app.ds_dimtxsty)].spacing(8).align_y(iced::Center),
-            row![lbl("Vertical pos (DIMTAD)"),   mk_field(DsField::Dimtad,   &app.ds_dimtad)].spacing(8).align_y(iced::Center),
-            chk("Horizontal inside (DIMTIH)", app.ds_dimtih, DsField::Dimtih),
-            chk("Horizontal outside (DIMTOH)", app.ds_dimtoh, DsField::Dimtoh),
-        ].spacing(6).into(),
-
-        3 => column![
-            text("Scale").size(11).color(ACCENT),
-            row![lbl("Overall scale (DIMSCALE)"), mk_field(DsField::Dimscale, &app.ds_dimscale)].spacing(8).align_y(iced::Center),
-            row![lbl("Linear factor (DIMLFAC)"),  mk_field(DsField::Dimlfac,  &app.ds_dimlfac)].spacing(8).align_y(iced::Center),
-            text("Units").size(11).color(ACCENT),
-            row![lbl("Format (DIMLUNIT)"),         mk_field(DsField::Dimlunit, &app.ds_dimlunit)].spacing(8).align_y(iced::Center),
-            row![lbl("Decimals (DIMDEC)"),         mk_field(DsField::Dimdec,   &app.ds_dimdec)].spacing(8).align_y(iced::Center),
-            row![lbl("Suffix (DIMPOST)"),          mk_field(DsField::Dimpost,  &app.ds_dimpost)].spacing(8).align_y(iced::Center),
-        ].spacing(6).into(),
-
-        _ => column![
-            text("Tolerances").size(11).color(ACCENT),
-            chk("Generate tolerances (DIMTOL)", app.ds_dimtol, DsField::Dimtol),
-            chk("Limits generation (DIMLIM)",   app.ds_dimlim, DsField::Dimlim),
-            row![lbl("Plus tolerance (DIMTP)"),    mk_field(DsField::Dimtp,   &app.ds_dimtp)].spacing(8).align_y(iced::Center),
-            row![lbl("Minus tolerance (DIMTM)"),   mk_field(DsField::Dimtm,   &app.ds_dimtm)].spacing(8).align_y(iced::Center),
-            row![lbl("Tol. decimals (DIMTDEC)"),   mk_field(DsField::Dimtdec, &app.ds_dimtdec)].spacing(8).align_y(iced::Center),
-            row![lbl("Tol. scale (DIMTFAC)"),      mk_field(DsField::Dimtfac, &app.ds_dimtfac)].spacing(8).align_y(iced::Center),
-        ].spacing(6).into(),
-    };
-
-    // ── Right panel ───────────────────────────────────────────────────────
-    let right_panel = column![
-        text(format!("Editing: {selected}")).size(12).color(TEXT_COL),
-        tabs,
-        container(
-            iced::widget::scrollable(
-                container(tab_content).padding(8)
-            ).height(220)
-        )
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
-            border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-            ..Default::default()
-        })
-        .width(Fill),
-        row![
-            button(text("Apply").size(11).color(TEXT_COL))
-                .on_press(Message::DimStyleDialogApply)
-                .style(btn_style(true)).padding([5, 16]),
-            button(text("Close").size(11).color(TEXT_COL))
-                .on_press(Message::DimStyleDialogClose)
-                .style(btn_style(false)).padding([5, 12]),
-        ].spacing(8),
-    ].spacing(8).width(Fill);
-
-    // ── Main panel ────────────────────────────────────────────────────────
-    let panel = container(
-        column![
-            row![
-                text("Dimension Style Manager").size(14).color(TEXT_COL),
-                Space::new().width(Fill),
-                button(text("✕").size(12).color(DIM_COL))
-                    .on_press(Message::DimStyleDialogClose)
-                    .style(|_: &Theme, _| button::Style {
-                        background: Some(Background::Color(Color::TRANSPARENT)),
-                        text_color: DIM_COL,
-                        ..Default::default()
-                    })
-                    .padding([2, 6]),
-            ].align_y(iced::Center),
-            row![style_panel, right_panel].spacing(12).align_y(iced::Top),
-        ].spacing(10).padding(16)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL_BG)),
-        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
-        ..Default::default()
-    })
-    .width(Shrink);
-
-    let catcher = mouse_area(
-        container(iced::widget::Space::new().width(Fill).height(Fill))
-    ).on_press(Message::DimStyleDialogClose);
-
-    let positioned = container(panel)
-        .width(Fill).height(Fill)
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center);
-
-    stack![catcher, positioned].into()
-}
-
-// ── TextStyle Font Browser overlay ─────────────────────────────────────────
-
-/// Built-in CXF font file names (relative to assets/fonts/).
-const BUILTIN_FONTS: &[&str] = &[
-    "CourierCad.cxf", "Cursive.cxf", "GothGBT.cxf", "GothGRT.cxf", "GothITT.cxf",
-    "GreekC.cxf", "GreekS.cxf", "ItalicC.cxf", "ItalicT.cxf",
-    "RomanC.cxf", "RomanD.cxf", "RomanS.cxf", "RomanT.cxf",
-    "SansND.cxf", "SansNS.cxf", "ScriptC.cxf", "ScriptS.cxf",
-    "Standard.cxf", "Unicode.cxf", "SymbolCad.cxf",
-];
-
-fn textstyle_overlay<'a>(
-    styles: Vec<String>,
-    selected: &'a str,
-    font_buf: &'a str,
-    width_buf: &'a str,
-    oblique_buf: &'a str,
-) -> Element<'a, Message> {
-    use iced::Length::Shrink;
-
-    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-
-    let field_style = |_: &Theme, _: iced::widget::text_input::Status| iced::widget::text_input::Style {
-        background: Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 }),
-        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-        icon: TEXT_COL, placeholder: DIM_COL, value: TEXT_COL, selection: ACCENT,
-    };
-
-    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
-        background: Some(Background::Color(match (accent, status) {
-            (true, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
-            (false, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-            (true, _) => ACCENT,
-            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
-        })),
-        text_color: TEXT_COL,
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
-    };
-
-    // Left: style list.
-    let style_items: Vec<Element<'_, Message>> = styles.iter().map(|name| {
-        let is_sel = name.as_str() == selected;
-        button(text(name.clone()).size(11).color(TEXT_COL))
-            .on_press(Message::TextStyleDialogSelect(name.clone()))
-            .style(move |_: &Theme, st| button::Style {
-                background: Some(Background::Color(match (is_sel, st) {
-                    (true, _) => ACTIVE_BG,
-                    (false, button::Status::Hovered | button::Status::Pressed) =>
-                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
-                    _ => Color::TRANSPARENT,
-                })),
-                text_color: TEXT_COL,
-                ..Default::default()
-            })
-            .padding([3, 8])
-            .width(Fill)
-            .into()
-    }).collect();
-
-    let style_panel = container(
-        column(style_items).spacing(2)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
-    })
-    .padding(4)
-    .width(150)
-    .height(280);
-
-    // Middle: font file list (built-in CXF fonts).
-    let font_items: Vec<Element<'_, Message>> = BUILTIN_FONTS.iter().map(|&f| {
-        let is_sel = font_buf == f;
-        button(text(f).size(10).color(TEXT_COL))
-            .on_press(Message::TextStyleFontPick(f.to_string()))
-            .style(move |_: &Theme, st| button::Style {
-                background: Some(Background::Color(match (is_sel, st) {
-                    (true, _) => ACTIVE_BG,
-                    (false, button::Status::Hovered | button::Status::Pressed) =>
-                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
-                    _ => Color::TRANSPARENT,
-                })),
-                text_color: TEXT_COL,
-                ..Default::default()
-            })
-            .padding([3, 8])
-            .width(Fill)
-            .into()
-    }).collect();
-
-    let font_panel = column![
-        text("Font File:").size(11).color(DIM_COL),
-        container(
-            iced::widget::scrollable(column(font_items).spacing(1))
-        )
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
-            border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-            ..Default::default()
-        })
-        .padding(4)
-        .width(180)
-        .height(160),
-        text_input("font file…", font_buf)
-            .on_input(|v| Message::TextStyleEdit { field: "font", value: v })
-            .style(field_style)
-            .size(11)
-            .width(180),
-    ]
-    .spacing(4);
-
-    // Right: properties + preview.
-    let props = column![
-        text("Properties").size(12).color(ACCENT),
-        row![
-            text("Width Factor:").size(11).color(DIM_COL).width(110),
-            text_input("1.0", width_buf)
-                .on_input(|v| Message::TextStyleEdit { field: "width", value: v })
-                .style(field_style)
-                .size(11)
-                .width(80),
-        ].spacing(6).align_y(iced::Center),
-        row![
-            text("Oblique (°):").size(11).color(DIM_COL).width(110),
-            text_input("0.0", oblique_buf)
-                .on_input(|v| Message::TextStyleEdit { field: "oblique", value: v })
-                .style(field_style)
-                .size(11)
-                .width(80),
-        ].spacing(6).align_y(iced::Center),
-        Space::new().height(8),
-        text("Preview:").size(11).color(DIM_COL),
-        container(
-            text("AaBbCc 0123").size(20).color(TEXT_COL)
-        )
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 })),
-            border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-            ..Default::default()
-        })
-        .padding(10)
-        .width(Fill),
-        Space::new().height(Fill),
-        row![
-            button(text("Apply").size(11))
-                .on_press(Message::TextStyleApply)
-                .style(btn_style(true))
-                .padding([5, 10]),
-            button(text("Set Current").size(11))
-                .on_press(Message::TextStyleDialogSetCurrent)
-                .style(btn_style(false))
-                .padding([5, 10]),
-        ].spacing(6),
-    ]
-    .spacing(8)
-    .width(220);
-
-    let panel = container(
-        column![
-            row![
-                text("Text Style Font Browser").size(13).color(TEXT_COL),
-                Space::new().width(Fill),
-                row![
-                    button(text("New").size(11))
-                        .on_press(Message::TextStyleDialogNew)
-                        .style(btn_style(false))
-                        .padding([3, 8]),
-                    button(text("Delete").size(11))
-                        .on_press(Message::TextStyleDialogDelete)
-                        .style(btn_style(false))
-                        .padding([3, 8]),
-                    button(text("✕").size(12).color(DIM_COL))
-                        .on_press(Message::TextStyleDialogClose)
-                        .style(|_: &Theme, _| button::Style {
-                            background: Some(Background::Color(Color::TRANSPARENT)),
-                            text_color: DIM_COL,
-                            ..Default::default()
-                        })
-                        .padding([2, 6]),
-                ].spacing(4),
-            ].align_y(iced::Center),
-            row![style_panel, font_panel, props].spacing(12).align_y(iced::Top),
-        ].spacing(10).padding(16)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL_BG)),
-        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
-        ..Default::default()
-    })
-    .width(Shrink);
-
-    let catcher = mouse_area(
-        container(iced::widget::Space::new().width(Fill).height(Fill))
-    ).on_press(Message::TextStyleDialogClose);
-
-    let positioned = container(panel)
-        .width(Fill).height(Fill)
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center);
-
-    stack![catcher, positioned].into()
-}
-
-// ── TableStyle Dialog overlay ───────────────────────────────────────────────
-
-fn tablestyle_overlay<'a>(
-    styles: Vec<String>,
-    selected: &'a str,
-    selected_style: Option<&'a acadrust::objects::TableStyle>,
-) -> Element<'a, Message> {
-    use iced::Length::Shrink;
-
-    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-
-    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
-        background: Some(Background::Color(match (accent, status) {
-            (true, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
-            (false, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-            (true, _) => ACCENT,
-            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
-        })),
-        text_color: TEXT_COL,
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
-    };
-
-    // Style list.
-    let style_items: Vec<Element<'_, Message>> = styles.iter().map(|name| {
-        let is_sel = name.as_str() == selected;
-        button(text(name.clone()).size(11).color(TEXT_COL))
-            .on_press(Message::TableStyleDialogSelect(name.clone()))
-            .style(move |_: &Theme, st| button::Style {
-                background: Some(Background::Color(match (is_sel, st) {
-                    (true, _) => ACTIVE_BG,
-                    (false, button::Status::Hovered | button::Status::Pressed) =>
-                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
-                    _ => Color::TRANSPARENT,
-                })),
-                text_color: TEXT_COL,
-                ..Default::default()
-            })
-            .padding([3, 8])
-            .width(Fill)
-            .into()
-    }).collect();
-
-    let style_panel = container(
-        column(style_items).spacing(2)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
-    })
-    .padding(4)
-    .width(160)
-    .height(240);
-
-    // Right panel: details.
-    let details: Element<'_, Message> = if let Some(s) = selected_style {
-        let info_row = |label: &'static str, val: String| -> Element<'_, Message> {
-            row![
-                text(label).size(11).color(DIM_COL).width(140),
-                text(val).size(11).color(TEXT_COL),
-            ].spacing(8).align_y(iced::Center).into()
-        };
-        let row_info = |row_label: &'static str, rs: &acadrust::objects::RowCellStyle| -> Element<'_, Message> {
-            column![
-                text(row_label).size(11).color(ACCENT),
-                info_row("  Text Style:", rs.text_style_name.clone()),
-                info_row("  Text Height:", format!("{:.4}", rs.text_height)),
-                info_row("  Alignment:", format!("{:?}", rs.alignment)),
-            ].spacing(3).into()
-        };
-        column![
-            info_row("Name:", s.name.clone()),
-            info_row("H Margin:", format!("{:.4}", s.horizontal_margin)),
-            info_row("V Margin:", format!("{:.4}", s.vertical_margin)),
-            info_row("Title Suppressed:", s.title_suppressed.to_string()),
-            info_row("Header Suppressed:", s.header_suppressed.to_string()),
-            row_info("Data Row:", &s.data_row_style),
-            row_info("Header Row:", &s.header_row_style),
-            row_info("Title Row:", &s.title_row_style),
-        ].spacing(5).into()
-    } else {
-        text("No style selected.").size(11).color(DIM_COL).into()
-    };
-
-    let right_panel = column![
-        details,
-        Space::new().height(Fill),
-        row![
-            button(text("New").size(11))
-                .on_press(Message::TableStyleDialogNew)
-                .style(btn_style(true))
-                .padding([5, 10]),
-            button(text("Delete").size(11))
-                .on_press(Message::TableStyleDialogDelete)
-                .style(btn_style(false))
-                .padding([5, 10]),
-        ].spacing(6),
-    ]
-    .spacing(10)
-    .width(280)
-    .height(240);
-
-    let panel = container(
-        column![
-            row![
-                text("Table Style Manager").size(13).color(TEXT_COL),
-                Space::new().width(Fill),
-                button(text("✕").size(12).color(DIM_COL))
-                    .on_press(Message::TableStyleDialogClose)
-                    .style(|_: &Theme, _| button::Style {
-                        background: Some(Background::Color(Color::TRANSPARENT)),
-                        text_color: DIM_COL,
-                        ..Default::default()
-                    })
-                    .padding([2, 6]),
-            ].align_y(iced::Center),
-            row![style_panel, right_panel].spacing(12).align_y(iced::Top),
-        ].spacing(10).padding(16)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL_BG)),
-        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
-        ..Default::default()
-    })
-    .width(Shrink);
-
-    let catcher = mouse_area(
-        container(iced::widget::Space::new().width(Fill).height(Fill))
-    ).on_press(Message::TableStyleDialogClose);
-
-    let positioned = container(panel)
-        .width(Fill).height(Fill)
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center);
-
-    stack![catcher, positioned].into()
-}
-
-// ── MLineStyle Dialog overlay ───────────────────────────────────────────────
-
-fn mlstyle_overlay<'a>(
-    styles: Vec<String>,
-    selected: &'a str,
-    selected_style: Option<&'a acadrust::objects::MLineStyle>,
-    current_style: String,
-) -> Element<'a, Message> {
-    use iced::Length::Shrink;
-
-    const PANEL_BG:  Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-    const BORDER:    Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-    const TEXT_COL:  Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-    const DIM_COL:   Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-    const ACCENT:    Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-    const ACTIVE_BG: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-
-    let btn_style = |accent: bool| move |_: &Theme, status: button::Status| button::Style {
-        background: Some(Background::Color(match (accent, status) {
-            (true, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
-            (false, button::Status::Hovered | button::Status::Pressed) =>
-                Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-            (true, _) => ACCENT,
-            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
-        })),
-        text_color: TEXT_COL,
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
-    };
-
-    // Style list.
-    let style_items: Vec<Element<'_, Message>> = styles.iter().map(|name| {
-        let is_sel = name.as_str() == selected;
-        let is_cur = *name == current_style;
-        let label = if is_cur {
-            format!("{} ◀", name)
-        } else {
-            name.clone()
-        };
-        button(text(label).size(11).color(TEXT_COL))
-            .on_press(Message::MlStyleDialogSelect(name.clone()))
-            .style(move |_: &Theme, st| button::Style {
-                background: Some(Background::Color(match (is_sel, st) {
-                    (true, _) => ACTIVE_BG,
-                    (false, button::Status::Hovered | button::Status::Pressed) =>
-                        Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
-                    _ => Color::TRANSPARENT,
-                })),
-                text_color: TEXT_COL,
-                ..Default::default()
-            })
-            .padding([3, 8])
-            .width(Fill)
-            .into()
-    }).collect();
-
-    let style_panel = container(
-        column(style_items).spacing(2)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 })),
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
-        ..Default::default()
-    })
-    .padding(4)
-    .width(160)
-    .height(240);
-
-    // Right panel: details for selected style.
-    let details: Element<'_, Message> = if let Some(s) = selected_style {
-        let info_row = |label: &'static str, val: String| -> Element<'_, Message> {
-            row![
-                text(label).size(11).color(DIM_COL).width(110),
-                text(val).size(11).color(TEXT_COL),
-            ].spacing(8).align_y(iced::Center).into()
-        };
-        let elem_rows: Vec<Element<'_, Message>> = s.elements.iter().enumerate().map(|(idx, e)| {
-            let color_str: String = match &e.color {
-                acadrust::types::Color::ByLayer => "ByLayer".into(),
-                acadrust::types::Color::ByBlock => "ByBlock".into(),
-                acadrust::types::Color::Index(i) => format!("ACI {}", i),
-                acadrust::types::Color::Rgb { r, g, b } => format!("#{:02X}{:02X}{:02X}", r, g, b),
-            };
-            let lt = if e.linetype.is_empty() { "ByLayer" } else { e.linetype.as_str() };
-            row![
-                text(format!("  {}:", idx)).size(10).color(DIM_COL).width(20),
-                text(format!("{:+.3}", e.offset)).size(10).color(TEXT_COL).width(60),
-                text(color_str).size(10).color(TEXT_COL).width(80),
-                text(lt).size(10).color(TEXT_COL),
-            ].spacing(4).align_y(iced::Center).into()
-        }).collect();
-
-        let mut col_items: Vec<Element<'_, Message>> = vec![
-            info_row("Name:", s.name.clone()),
-            info_row("Elements:", s.elements.len().to_string()),
-            text("  Off   Color        Ltype").size(10).color(DIM_COL).into(),
-        ];
-        col_items.extend(elem_rows);
-        column(col_items).spacing(6).into()
-    } else {
-        text("No style selected.").size(11).color(DIM_COL).into()
-    };
-
-    let right_panel = column![
-        details,
-        Space::new().height(Fill),
-        row![
-            button(text("Set Current").size(11))
-                .on_press(Message::MlStyleDialogSetCurrent)
-                .style(btn_style(true))
-                .padding([5, 10]),
-            button(text("New").size(11))
-                .on_press(Message::MlStyleDialogNew)
-                .style(btn_style(false))
-                .padding([5, 10]),
-            button(text("Delete").size(11))
-                .on_press(Message::MlStyleDialogDelete)
-                .style(btn_style(false))
-                .padding([5, 10]),
-        ].spacing(6),
-    ]
-    .spacing(10)
-    .width(280)
-    .height(240);
-
-    let panel = container(
-        column![
-            row![
-                text("Multiline Style Manager").size(13).color(TEXT_COL),
-                Space::new().width(Fill),
-                button(text("✕").size(12).color(DIM_COL))
-                    .on_press(Message::MlStyleDialogClose)
-                    .style(|_: &Theme, _| button::Style {
-                        background: Some(Background::Color(Color::TRANSPARENT)),
-                        text_color: DIM_COL,
-                        ..Default::default()
-                    })
-                    .padding([2, 6]),
-            ].align_y(iced::Center),
-            row![style_panel, right_panel].spacing(12).align_y(iced::Top),
-        ].spacing(10).padding(16)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(PANEL_BG)),
-        border: Border { color: BORDER, width: 1.0, radius: 6.0.into() },
-        ..Default::default()
-    })
-    .width(Shrink);
-
-    let catcher = mouse_area(
-        container(iced::widget::Space::new().width(Fill).height(Fill))
-    ).on_press(Message::MlStyleDialogClose);
-
-    let positioned = container(panel)
-        .width(Fill).height(Fill)
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center);
-
-    stack![catcher, positioned].into()
-}

@@ -1,4 +1,5 @@
 pub mod align;
+pub mod attedit;
 pub mod array;
 pub mod break_cmd;
 pub mod copy;
@@ -15,4 +16,7 @@ pub mod rotate;
 pub mod scale;
 pub mod stretch;
 pub mod translate;
+pub mod spline_ops;
+pub mod splinedit;
+pub mod refedit;
 pub mod trim;

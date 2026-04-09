@@ -4,10 +4,12 @@ use crate::command::CadCommand;
 use crate::snap::SnapResult;
 use crate::scene::grip::GripEdit;
 use crate::scene::GripDef;
+use crate::modules::home::modify::refedit::RefEditSession;
 use acadrust::{CadDocument, Handle};
 use acadrust::tables::Ucs;
 use crate::linetypes;
 use std::path::PathBuf;
+use iced;
 
 // ── Per-document tab state ─────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ pub(super) struct DocumentTab {
     pub(super) wireframe: bool,
     pub(super) visual_style: String,
     pub(super) last_cursor_world: glam::Vec3,
+    pub(super) last_cursor_screen: iced::Point,
     pub(super) history: HistoryState,
     pub(super) active_layer: String,
     /// Currently active UCS. `None` means WCS (identity transform).
@@ -35,6 +38,10 @@ pub(super) struct DocumentTab {
     pub(super) bg_color: Option<[f32; 4]>,
     /// Custom paper-space background color.  `None` = default off-white grey.
     pub(super) paper_bg_color: Option<[f32; 4]>,
+    /// Active REFEDIT session, if any.
+    pub(super) refedit_session: Option<RefEditSession>,
+    /// Currently active MLeader style name.
+    pub(super) active_mleader_style: String,
 }
 
 impl DocumentTab {
@@ -57,11 +64,14 @@ impl DocumentTab {
             wireframe: false,
             visual_style: "Shaded".into(),
             last_cursor_world: glam::Vec3::ZERO,
+            last_cursor_screen: iced::Point::ORIGIN,
             history: HistoryState::default(),
             active_layer: "0".to_string(),
             active_ucs: None,
             bg_color: None,
             paper_bg_color: None,
+            refedit_session: None,
+            active_mleader_style: "Standard".to_string(),
         }
     }
 

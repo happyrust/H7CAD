@@ -7,7 +7,9 @@
 //
 //   BREAK @ (at-sign as second point) → Break at a single point (splits without gap).
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
+use truck_modeling::base::{BoundedCurve, Cut};
+use crate::modules::home::modify::spline_ops::{bspline_to_spline, spline_nearest_t, spline_to_bspline};
 use acadrust::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
@@ -38,6 +40,8 @@ pub fn break_entity(entity: &EntityType, p1: Vec3, p2: Vec3) -> Option<Vec<Entit
         EntityType::Arc(arc)   => Some(break_arc(arc, p1, p2)),
         EntityType::Circle(c)  => Some(break_circle(c, p1, p2)),
         EntityType::LwPolyline(p) => Some(break_lwpolyline(p, p1, p2)),
+        EntityType::Ellipse(e)    => Some(break_ellipse(e, p1, p2)),
+        EntityType::Spline(s)     => Some(break_spline(s, p1, p2)),
         _ => None,
     }
 }
@@ -179,6 +183,56 @@ fn break_lwpolyline(p: &LwPolyline, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     }
 }
 
+fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
+    // Compute the eccentric-anomaly parameter of a world point relative to ellipse.
+    // World coords use XZ plane (Y-up), so DXF X→world X, DXF Y→world Z.
+    let cx = ell.center.x;
+    let cy = ell.center.y;
+    let a = (ell.major_axis.x.powi(2) + ell.major_axis.y.powi(2)).sqrt();
+    if a < 1e-9 { return vec![EntityType::Ellipse(ell.clone())]; }
+    let _b = a * ell.minor_axis_ratio;
+    let nx = ell.major_axis.x / a;
+    let ny = ell.major_axis.y / a;
+
+    // Project a point onto the ellipse parameter (eccentric anomaly)
+    let param_of = |pt: Vec3| -> f64 {
+        let rx = pt.x as f64 - cx;
+        let ry = pt.z as f64 - cy; // Y-up: DXF Y → world Z
+        let xl =  rx * nx + ry * ny;
+        let yl = -rx * ny + ry * nx;
+        yl.atan2(xl) // atan2(yl/b*b, xl/a*a) simplifies to atan2(yl,xl) for ordering
+    };
+
+    let t0 = ell.start_parameter;
+    let t1 = ell.end_parameter;
+
+    let pa1 = param_of(p1);
+    let pa2 = param_of(p2);
+
+    // Clamp both params to arc range (same logic as clamp_to_arc for arcs)
+    let span_deg = {
+        let s = t1 - t0;
+        if s <= 0.0 { s + std::f64::consts::TAU } else { s }
+    };
+    let clamp = |a: f64| -> f64 {
+        let rel = ((a - t0) % std::f64::consts::TAU + std::f64::consts::TAU) % std::f64::consts::TAU;
+        if rel <= span_deg { a } else if rel < span_deg + (std::f64::consts::TAU - span_deg) / 2.0 { t1 } else { t0 }
+    };
+    let a1_on = clamp(pa1);
+    let a2_on = clamp(pa2);
+
+    if (a1_on - a2_on).abs() < 1e-4 {
+        return vec![EntityType::Ellipse(ell.clone())];
+    }
+
+    // Remove CCW from a1_on to a2_on → result goes from a2_on to a1_on
+    let mut result = ell.clone();
+    result.common.handle = Handle::NULL;
+    result.start_parameter = a2_on;
+    result.end_parameter   = a1_on;
+    vec![EntityType::Ellipse(result)]
+}
+
 // ── Small utilities ────────────────────────────────────────────────────────
 
 /// Returns the angle (degrees, 0-360) of `pt` viewed from (cx, cy) in the XZ plane.
@@ -218,6 +272,52 @@ fn world_to_dxf(v: Vec3) -> Vec3 {
 
 fn vec3_to_v3(v: Vec3) -> Vector3 {
     Vector3::new(v.x as f64, v.y as f64, v.z as f64)
+}
+
+fn break_spline(spl: &SplineEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
+    // Find the two nearest parameters to p1 and p2 (DXF XY: world x, z).
+    let t1 = match spline_nearest_t(spl, p1.x as f64, p1.z as f64) {
+        Some(t) => t,
+        None => return vec![EntityType::Spline(spl.clone())],
+    };
+    let t2 = match spline_nearest_t(spl, p2.x as f64, p2.z as f64) {
+        Some(t) => t,
+        None => return vec![EntityType::Spline(spl.clone())],
+    };
+
+    let bs = match spline_to_bspline(spl) {
+        Some(b) => b,
+        None => return vec![EntityType::Spline(spl.clone())],
+    };
+    let (t0, t_end) = bs.range_tuple();
+
+    let (ta, tb) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
+
+    // Single-point break (ta ≈ tb): split into two segments at that point.
+    if (tb - ta).abs() < 1e-9 {
+        let mut piece = bs.clone();
+        let right = piece.cut(ta);
+        return vec![
+            EntityType::Spline(bspline_to_spline(&piece, spl)),
+            EntityType::Spline(bspline_to_spline(&right, spl)),
+        ];
+    }
+
+    // Two-point break: keep [t0..ta] and [tb..t_end], discard middle.
+    let mut result = vec![];
+    // Left piece [t0, ta]
+    if ta - t0 > 1e-9 {
+        let mut left = bs.clone();
+        let _right = left.cut(ta);   // left = [t0, ta]
+        result.push(EntityType::Spline(bspline_to_spline(&left, spl)));
+    }
+    // Right piece [tb, t_end]
+    if t_end - tb > 1e-9 {
+        let mut full = bs.clone();
+        let right = full.cut(tb);    // right = [tb, t_end]
+        result.push(EntityType::Spline(bspline_to_spline(&right, spl)));
+    }
+    result
 }
 
 // ── CadCommand (simplified — break logic via CmdResult::BreakEntity) ───────

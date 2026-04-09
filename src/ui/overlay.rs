@@ -146,6 +146,40 @@ pub struct GridParams {
     pub plane: GridPlane,
 }
 
+/// Compute the adaptive grid step size (world units) that the grid renderer
+/// would use for a given view-projection matrix and viewport bounds.
+///
+/// Returns the smallest power-of-5 multiple of 1.0 that places grid lines at
+/// least `MIN_GRID_PX` pixels apart.  This matches exactly what `draw_grid`
+/// renders, so callers can sync snap spacing to the visible grid.
+pub fn compute_grid_step(vp: Mat4, bounds: iced::Rectangle) -> f32 {
+    use glam::Vec3;
+    let w2s = |world: Vec3| {
+        let ndc = vp.project_point3(world);
+        glam::Vec2::new(
+            (ndc.x + 1.0) * 0.5 * bounds.width,
+            (1.0 - ndc.y) * 0.5 * bounds.height,
+        )
+    };
+    let o = w2s(Vec3::ZERO);
+    let a1 = w2s(Vec3::X);
+    let a2 = w2s(Vec3::Y);
+    let d1 = (a1 - o).length();
+    let d2 = (a2 - o).length();
+    let px_per_unit = d1.max(d2);
+    if px_per_unit < 1e-6 {
+        return 1.0;
+    }
+    let mut s = 1.0_f32;
+    while s * px_per_unit < MIN_GRID_PX {
+        s *= 5.0;
+        if s > 1e9 {
+            return 1.0;
+        }
+    }
+    s
+}
+
 /// Parameters for the screen-space UCS icon drawn in the viewport corner.
 pub struct UcsIconParams {
     /// View-projection matrix used to project world axis directions to screen.
@@ -156,12 +190,20 @@ pub struct UcsIconParams {
 
 // ── Selection overlay ───────────────────────────────────────────────────
 
+/// An acquired OST tracking point with its screen position.
+#[derive(Clone, Debug)]
+pub struct OstTrackPoint {
+    pub screen: Point,
+}
+
 pub fn selection_overlay<'a>(
     selection: SelectionState,
     snap: Option<(Point, SnapType)>,
     grips: Vec<GripMarker>,
     grid: Option<GridParams>,
     ucs_icon: Option<UcsIconParams>,
+    ost_points: Vec<OstTrackPoint>,
+    cursor_screen: Point,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
@@ -169,6 +211,8 @@ pub fn selection_overlay<'a>(
         grips,
         grid,
         ucs_icon,
+        ost_points,
+        cursor_screen,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -181,6 +225,8 @@ struct SelectionCanvas {
     grips: Vec<GripMarker>,
     grid: Option<GridParams>,
     ucs_icon: Option<UcsIconParams>,
+    ost_points: Vec<OstTrackPoint>,
+    cursor_screen: Point,
 }
 
 impl canvas::Program<Message> for SelectionCanvas {
@@ -336,49 +382,6 @@ impl canvas::Program<Message> for SelectionCanvas {
                         ..Default::default()
                     },
                 );
-            }
-        }
-
-        if let Some(p) = self.selection.context_menu {
-            let w = 140.0;
-            let h = 72.0;
-            let rect = canvas::Path::rectangle(Point::new(p.x, p.y), Size::new(w, h));
-            frame.fill(
-                &rect,
-                Color {
-                    r: 0.12,
-                    g: 0.12,
-                    b: 0.12,
-                    a: 0.95,
-                },
-            );
-            frame.stroke(
-                &rect,
-                canvas::Stroke {
-                    width: 1.0,
-                    style: canvas::Style::Solid(Color {
-                        r: 0.30,
-                        g: 0.30,
-                        b: 0.30,
-                        a: 1.0,
-                    }),
-                    ..Default::default()
-                },
-            );
-            let items = ["Open", "Properties", "Hide"];
-            for (i, item) in items.iter().enumerate() {
-                frame.fill_text(canvas::Text {
-                    content: item.to_string(),
-                    position: Point::new(p.x + 10.0, p.y + 10.0 + i as f32 * 20.0),
-                    color: Color::WHITE,
-                    size: iced::Pixels(11.0),
-                    font: iced::Font::DEFAULT,
-                    align_x: iced::alignment::Horizontal::Left.into(),
-                    align_y: iced::alignment::Vertical::Top.into(),
-                    max_width: f32::INFINITY,
-                    line_height: iced::widget::text::LineHeight::default(),
-                    shaping: iced::widget::text::Shaping::default(),
-                });
             }
         }
 
@@ -552,6 +555,40 @@ impl canvas::Program<Message> for SelectionCanvas {
         // ── UCS icon ──────────────────────────────────────────────────────
         if let Some(ref ucs) = self.ucs_icon {
             draw_ucs_icon(&mut frame, ucs.view_proj, ucs.bounds);
+        }
+
+        // ── Object Snap Tracking lines ────────────────────────────────────
+        for ost in &self.ost_points {
+            let tp = ost.screen;
+            let cx = self.cursor_screen.x;
+            let cy = self.cursor_screen.y;
+            let track_color = Color { r: 0.15, g: 0.85, b: 0.95, a: 0.7 };
+            let dash_stroke = canvas::Stroke::default()
+                .with_color(track_color)
+                .with_width(1.0);
+
+            // Draw horizontal line from tracking point to cursor.
+            if (cy - tp.y).abs() < 8.0 {
+                let path = canvas::Path::line(tp, Point { x: cx, y: tp.y });
+                frame.stroke(&path, dash_stroke.clone());
+            }
+            // Draw vertical line.
+            if (cx - tp.x).abs() < 8.0 {
+                let path = canvas::Path::line(tp, Point { x: tp.x, y: cy });
+                frame.stroke(&path, dash_stroke.clone());
+            }
+            // Small cross at the tracking point.
+            let sz = 5.0_f32;
+            let h = canvas::Path::line(
+                Point { x: tp.x - sz, y: tp.y },
+                Point { x: tp.x + sz, y: tp.y },
+            );
+            let v = canvas::Path::line(
+                Point { x: tp.x, y: tp.y - sz },
+                Point { x: tp.x, y: tp.y + sz },
+            );
+            frame.stroke(&h, dash_stroke.clone());
+            frame.stroke(&v, dash_stroke);
         }
 
         vec![frame.into_geometry()]
@@ -814,4 +851,88 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
     // Small circle at origin.
     let circle = canvas::Path::circle(icon_origin, 3.0);
     frame.fill(&circle, Color { r: 0.9, g: 0.9, b: 0.9, a: 0.9 });
+}
+
+// ── Dynamic Input overlay ─────────────────────────────────────────────────
+
+/// Draw a small coordinate / distance-angle tooltip near the cursor.
+///
+/// `cursor_screen` — cursor position in viewport pixels.
+/// `label` — text to display (e.g. "X: 12.34  Y: 56.78").
+pub fn dynamic_input_overlay<'a>(
+    cursor_screen: Point,
+    label: String,
+) -> Element<'a, Message> {
+    canvas(DynInputCanvas { cursor_screen, label })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+struct DynInputCanvas {
+    cursor_screen: Point,
+    label: String,
+}
+
+impl canvas::Program<Message> for DynInputCanvas {
+    type State = ();
+
+    fn mouse_interaction(
+        &self,
+        _state: &(),
+        _bounds: iced::Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        mouse::Interaction::None
+    }
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        // Offset the box 14 px right and 20 px below the cursor.
+        const OFFSET_X: f32 = 14.0;
+        const OFFSET_Y: f32 = 20.0;
+        const PAD: f32 = 4.0;
+        const FONT_SIZE: f32 = 11.0;
+        const BOX_W: f32 = 160.0;
+        const BOX_H: f32 = FONT_SIZE + PAD * 2.0;
+
+        let mut bx = self.cursor_screen.x + OFFSET_X;
+        let mut by = self.cursor_screen.y + OFFSET_Y;
+
+        // Keep box inside viewport.
+        if bx + BOX_W > bounds.width { bx = self.cursor_screen.x - BOX_W - 4.0; }
+        if by + BOX_H > bounds.height { by = self.cursor_screen.y - BOX_H - 4.0; }
+
+        let bg = canvas::Path::rectangle(
+            Point { x: bx, y: by },
+            Size { width: BOX_W, height: BOX_H },
+        );
+        frame.fill(
+            &bg,
+            Color { r: 0.05, g: 0.05, b: 0.12, a: 0.85 },
+        );
+        frame.stroke(
+            &bg,
+            canvas::Stroke::default()
+                .with_color(Color { r: 0.35, g: 0.55, b: 0.90, a: 0.9 })
+                .with_width(1.0),
+        );
+        frame.fill_text(canvas::Text {
+            content: self.label.clone(),
+            position: Point { x: bx + PAD, y: by + PAD },
+            color: Color { r: 0.90, g: 0.90, b: 0.90, a: 1.0 },
+            size: iced::Pixels(FONT_SIZE),
+            ..Default::default()
+        });
+
+        vec![frame.into_geometry()]
+    }
 }

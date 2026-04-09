@@ -14,6 +14,7 @@ pub mod pipeline;
 pub mod properties;
 mod render;
 mod selection;
+pub mod solid3d_tess;
 pub mod tessellate;
 pub mod transform;
 pub mod truck_tess;
@@ -1056,6 +1057,26 @@ impl Scene {
         true
     }
 
+    /// Swap the `tab_order` of two paper layouts so they appear in swapped order.
+    pub fn swap_layout_order(&mut self, name_a: &str, name_b: &str) {
+        let mut order_a: Option<i16> = None;
+        let mut order_b: Option<i16> = None;
+        for obj in self.document.objects.values() {
+            if let ObjectType::Layout(l) = obj {
+                if l.name == name_a { order_a = Some(l.tab_order); }
+                if l.name == name_b { order_b = Some(l.tab_order); }
+            }
+        }
+        if let (Some(oa), Some(ob)) = (order_a, order_b) {
+            for obj in self.document.objects.values_mut() {
+                if let ObjectType::Layout(l) = obj {
+                    if l.name == name_a { l.tab_order = ob; }
+                    else if l.name == name_b { l.tab_order = oa; }
+                }
+            }
+        }
+    }
+
     // ── Entity management ─────────────────────────────────────────────────
 
     pub fn add_entity(&mut self, mut entity: EntityType) -> Handle {
@@ -1072,6 +1093,21 @@ impl Scene {
             ImageModel::from_raster_image(img)
         } else {
             None
+        };
+        let mesh_seed = match &entity {
+            EntityType::Solid3D(s3d) => {
+                let color = self.render_style(&entity).0;
+                solid3d_tess::tessellate_solid3d(s3d, color)
+            }
+            EntityType::Region(r) => {
+                let color = self.render_style(&entity).0;
+                solid3d_tess::tessellate_region(r, color)
+            }
+            EntityType::Body(b) => {
+                let color = self.render_style(&entity).0;
+                solid3d_tess::tessellate_body(b, color)
+            }
+            _ => None,
         };
 
         // Auto-create an ImageDefinition object for new RasterImage entities
@@ -1113,8 +1149,19 @@ impl Scene {
             if let Some(model) = image_seed {
                 self.images.insert(handle, model);
             }
+            if let Some(model) = mesh_seed {
+                self.meshes.insert(handle, model);
+            }
         }
         handle
+    }
+
+    /// Returns the RGBA color for the given layer name.
+    pub fn layer_color(&self, layer: &str) -> [f32; 4] {
+        let layer_entry = self.document.layers.get(layer);
+        let color = layer_entry.map(|l| &l.color).unwrap_or(&acadrust::types::Color::WHITE);
+        let [r, g, b, _] = crate::scene::tessellate::aci_to_rgba(color);
+        [r, g, b, 1.0]
     }
 
     pub fn custom_block_names(&self) -> Vec<String> {
@@ -1560,6 +1607,49 @@ impl Scene {
         }
     }
 
+    /// Tessellate all `Solid3D` entities in the current document into
+    /// GPU-ready `MeshModel`s and store them in `self.meshes`.
+    ///
+    /// Called after loading a document or after undo/redo so that every
+    /// `Solid3D` entity is represented in the mesh cache.
+    pub fn populate_meshes_from_document(&mut self) {
+        self.meshes.clear();
+        // Collect all ACIS-bearing entities: Solid3D, Region, Body.
+        let entries: Vec<(Handle, EntityType)> = self
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) =>
+                    Some((e.common().handle, e.clone())),
+                _ => None,
+            })
+            .collect();
+        for (handle, entity) in entries {
+            let color = if let Some(e) = self.document.get_entity(handle) {
+                tessellate::aci_to_rgba(&e.common().color)
+            } else {
+                [0.7, 0.7, 0.7, 1.0]
+            };
+            let model = match &entity {
+                EntityType::Solid3D(s) => solid3d_tess::tessellate_solid3d(s, color),
+                EntityType::Region(r)  => solid3d_tess::tessellate_region(r, color),
+                EntityType::Body(b)    => solid3d_tess::tessellate_body(b, color),
+                _ => None,
+            };
+            if let Some(m) = model {
+                self.meshes.insert(handle, m);
+            }
+        }
+    }
+
+    /// Rebuild hatch / image / mesh caches after the document is modified
+    /// outside the normal `add_entity` path (e.g. REFCLOSE SAVE).
+    pub fn rebuild_derived_caches(&mut self) {
+        self.populate_hatches_from_document();
+        self.populate_images_from_document();
+        self.populate_meshes_from_document();
+    }
+
     /// Build a solid-fill HatchModel for a DXF Solid entity.
     /// DXF SOLID corners are in "Z-order": p0-p1 top, p2-p3 bottom.
     /// Visual quad is p0→p1→p3→p2 (closed).
@@ -1687,6 +1777,7 @@ impl Scene {
             self.document.remove_entity(h);
             self.selected.remove(&h);
             self.hatches.remove(&h);
+            self.meshes.remove(&h);
         }
         // Remove erased handles from all groups; delete groups that become empty.
         let group_dict_handle = self.document.header.acad_group_dict_handle;

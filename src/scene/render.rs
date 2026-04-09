@@ -36,6 +36,8 @@ pub struct Primitive {
     /// Used by the ViewCube pipeline — no gimbal lock.
     pub(super) cam_rotation: Mat4,
     pub(super) hover_region: Option<usize>,
+    /// Background color used to clear the MSAA buffer at the start of each frame.
+    pub(super) bg_color: [f32; 4],
 }
 
 // ── shader::Program impl ──────────────────────────────────────────────────
@@ -59,6 +61,12 @@ impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
         }
         all_wires.extend(self.preview_wires.iter().cloned());
 
+        let bg_color = if self.current_layout == "Model" {
+            self.bg_color
+        } else {
+            self.paper_bg_color
+        };
+
         Primitive {
             wires: all_wires,
             hatches: self.synced_hatch_models(),
@@ -68,6 +76,7 @@ impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
             uniforms: Uniforms::new(&cam, bounds),
             cam_rotation: cam.view_rotation_mat(),
             hover_region: state.hover_region,
+            bg_color,
         }
     }
 
@@ -123,9 +132,16 @@ impl shader::Primitive for Primitive {
         viewport: &Viewport,
     ) {
         let phys = viewport.physical_size();
-        let size = Size::new(phys.width, phys.height);
-        pipeline.ensure_depth_texture(device, size);
-        pipeline.viewcube.ensure_depth_texture(device, size);
+        let full_size = Size::new(phys.width, phys.height);
+        // MSAA and depth textures are sized to the shader widget's clip bounds,
+        // not the full surface — so the MSAA resolve can't overwrite other widgets.
+        let scale = viewport.scale_factor() as f32;
+        let clip_size = Size::new(
+            (_bounds.width * scale).ceil() as u32,
+            (_bounds.height * scale).ceil() as u32,
+        );
+        pipeline.ensure_depth_texture(device, clip_size);
+        pipeline.viewcube.ensure_depth_texture(device, full_size);
         pipeline.upload_uniforms(queue, &self.uniforms);
         pipeline.upload_hatches(device, &self.hatches);
         pipeline.upload_wipeouts(device, &self.wipeout_hatches);
@@ -149,7 +165,7 @@ impl shader::Primitive for Primitive {
         target: &iced::wgpu::TextureView,
         clip: &Rectangle<u32>,
     ) {
-        pipeline.render(encoder, target, *clip);
+        pipeline.render(encoder, target, *clip, self.bg_color);
         pipeline.viewcube.render(encoder, target, *clip);
     }
 }

@@ -124,6 +124,50 @@ pub enum CmdResult {
     },
     /// Set the plot window on the active layout's PlotSettings.
     SetPlotWindow { p1: Vec3, p2: Vec3 },
+    /// Replace the text content of a Text/MText entity in-place.
+    DdeditEntity { handle: Handle, new_text: String },
+    /// Apply new pattern/scale/angle to an existing hatch entity.
+    HatcheditApply { handle: Handle, name: String, scale: f32, angle: f32 },
+    /// Stretch entities: move only vertices/endpoints inside the crossing window.
+    StretchEntities {
+        handles: Vec<Handle>,
+        /// Min corner of the crossing window in world XZ (= DXF XY).
+        win_min: Vec3,
+        /// Max corner of the crossing window in world XZ (= DXF XY).
+        win_max: Vec3,
+        /// Translation vector to apply to vertices inside the window.
+        delta: Vec3,
+    },
+    /// Create a Solid3D placeholder entity + associated MeshModel.
+    /// `mesh_fn` is called with the entity's handle string to build the mesh.
+    CommitSolid3D {
+        mesh_fn: Box<dyn FnOnce(String) -> Option<crate::scene::mesh_model::MeshModel> + Send>,
+    },
+    /// Extrude the profile entity `handle` by `height` along Z.
+    ExtrudeEntity { handle: Handle, height: f32, color: [f32; 4] },
+    /// Revolve the profile entity `handle` around the given axis by `angle_deg`.
+    RevolveEntity {
+        handle: Handle,
+        axis_start: glam::Vec3,
+        axis_end: glam::Vec3,
+        angle_deg: f32,
+        color: [f32; 4],
+    },
+    /// Sweep the profile entity `profile_handle` along `path_handle`.
+    SweepEntity {
+        profile_handle: Handle,
+        path_handle: Handle,
+        color: [f32; 4],
+    },
+    /// Loft through a series of profile entities.
+    LoftEntities {
+        handles: Vec<Handle>,
+        color: [f32; 4],
+    },
+    /// INSERT landed on a block that has AttributeDefinitions.
+    /// The host should look up the attdefs for `block_name` from the document
+    /// and call `attreq_set_attdefs()` on the command, then loop on text input.
+    AttreqNeeded { block_name: String },
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────
@@ -213,10 +257,42 @@ pub trait CadCommand: Send {
         false
     }
 
+    /// If this command is XATTACH, returns the file path to attach.
+    /// Default: None.
+    fn xattach_path(&self) -> Option<String> {
+        None
+    }
+
+    /// If this command needs attribute data injected (ATTEDIT), returns the
+    /// INSERT handle awaiting attr initialization; else None.
+    fn attedit_pending_handle(&self) -> Option<acadrust::Handle> {
+        None
+    }
+
+    /// Inject attribute (tag, value) pairs into the command after entity pick.
+    fn attedit_set_attrs(&mut self, _attrs: Vec<(String, String)>) {}
+
+    /// Inject attribute definitions (tag, prompt, default_value) for ATTREQ
+    /// attr-filling after INSERT point is picked.
+    fn attreq_set_attdefs(&mut self, _attdefs: Vec<(String, String, String)>) {}
+
+    /// Returns the INSERT entity built so far (pending attr fill) if this is an
+    /// ATTREQ-aware INSERT command waiting for attdef injection.
+    /// Called by the host after `AttreqNeeded` to commit the completed Insert.
+    fn attreq_take_insert(&mut self) -> Option<acadrust::EntityType> {
+        None
+    }
+
+
     /// Called instead of `on_point` when the command needs a tangent pick
     /// and the snap system found a tangent object.
     fn on_tangent_point(&mut self, obj: TangentObject, hit: Vec3) -> CmdResult {
         let _ = obj;
         self.on_point(hit)
     }
+
+    /// Called by update.rs after `on_entity_pick` to inject the cloned entity into commands
+    /// that need to read/modify it (e.g. DIMTEDIT, MLEADERADD, MLEADERREMOVE).
+    /// Default: no-op.
+    fn inject_picked_entity(&mut self, _entity: acadrust::EntityType) {}
 }

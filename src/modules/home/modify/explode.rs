@@ -4,14 +4,22 @@
 //   EXPLODE: Breaks compound objects into their constituent simple entities.
 //
 //   Supported:
-//     LwPolyline → Lines (straight segments) + Arcs (bulge segments)
+//     LwPolyline  → Lines (straight segments) + Arcs (bulge segments)
+//     Polyline2D  → Lines + Arcs
+//     Polyline3D  → Lines
+//     Polyline    → Lines
+//     Insert      → constituent entities (via acadrust explode_from_document)
+//     MLine       → Lines (spine + offset lines per miter direction)
+//     Dimension   → Lines (extension + dimension + arrows) + Text
 //
 //   Unsupported entity types are skipped silently.
 
 use std::f64::consts::TAU;
 
 use acadrust::entities::EntityCommon;
-use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Line as LineEnt, LwPolyline};
+use acadrust::entities::{
+    Arc as ArcEnt, Circle as CircleEnt, Dimension, Line as LineEnt, LwPolyline, MLine,
+};
 use acadrust::entities::{Polyline, Polyline2D};
 use acadrust::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
@@ -46,6 +54,8 @@ pub fn explode_entity(entity: &EntityType, document: &CadDocument) -> Vec<Entity
             .into_iter()
             .map(normalize_insert_entity)
             .collect(),
+        EntityType::MLine(ml) => explode_mline(ml),
+        EntityType::Dimension(dim) => explode_dimension(dim),
         _ => vec![],
     }
 }
@@ -275,6 +285,148 @@ fn bulge_to_arc(
 fn norm_deg(a: f64) -> f64 {
     let t = TAU.to_degrees();
     ((a % t) + t) % t
+}
+
+fn explode_mline(ml: &MLine) -> Vec<EntityType> {
+    let n = ml.vertices.len();
+    if n < 2 {
+        return vec![];
+    }
+    let closed = ml.flags.contains(acadrust::entities::MLineFlags::CLOSED);
+    let scale = ml.scale_factor;
+    let n_segs = if closed { n } else { n - 1 };
+    let mut result = Vec::new();
+
+    // Helper: build a Line from two Vector3 positions.
+    let make_line = |common: &acadrust::entities::EntityCommon,
+                     s: &acadrust::types::Vector3,
+                     e: &acadrust::types::Vector3| -> EntityType {
+        let mut c = common.clone();
+        c.handle = Handle::NULL;
+        EntityType::Line(LineEnt { common: c, start: s.clone(), end: e.clone(), ..LineEnt::new() })
+    };
+
+    // For each segment, emit the center-spine line and the two ±scale/2 offset lines.
+    for i in 0..n_segs {
+        let v0 = &ml.vertices[i];
+        let v1 = &ml.vertices[(i + 1) % n];
+
+        // Spine line
+        result.push(make_line(&ml.common, &v0.position, &v1.position));
+
+        if scale.abs() > 1e-9 {
+            let half = scale * 0.5;
+            for &sign in &[-1.0_f64, 1.0_f64] {
+                let off = half * sign;
+                // Use miter direction at each vertex to offset the endpoints.
+                let s = Vector3::new(
+                    v0.position.x + v0.miter.x * off,
+                    v0.position.y + v0.miter.y * off,
+                    v0.position.z + v0.miter.z * off,
+                );
+                let e = Vector3::new(
+                    v1.position.x + v1.miter.x * off,
+                    v1.position.y + v1.miter.y * off,
+                    v1.position.z + v1.miter.z * off,
+                );
+                result.push(make_line(&ml.common, &s, &e));
+            }
+        }
+    }
+
+    result
+}
+
+// ── Dimension explode ──────────────────────────────────────────────────────
+
+/// Convert a Dimension entity into Lines (geometry) + Text (label).
+fn explode_dimension(dim: &Dimension) -> Vec<EntityType> {
+    use acadrust::entities::Text;
+
+    let base = dim.base();
+    let common = base.common.clone();
+    let mut result: Vec<EntityType> = Vec::new();
+
+    // Helper: make a line segment
+    let make_seg = |a: &Vector3, b: &Vector3, common: &EntityCommon| -> EntityType {
+        let mut c = common.clone();
+        c.handle = Handle::NULL;
+        EntityType::Line(LineEnt { common: c, start: a.clone(), end: b.clone(), ..LineEnt::new() })
+    };
+
+    let v3 = |x: f64, y: f64, z: f64| Vector3::new(x, y, z);
+
+    match dim {
+        Dimension::Aligned(d) => {
+            let fx = d.first_point.x;  let fy = d.first_point.y;
+            let sx = d.second_point.x; let sy = d.second_point.y;
+            let dx_s = sx - fx; let dy_s = sy - fy;
+            let len = (dx_s*dx_s + dy_s*dy_s).sqrt().max(1e-12);
+            let axis_angle = dy_s.atan2(dx_s);
+            let perp_x = -(axis_angle.sin()); let perp_y = axis_angle.cos();
+            let offset = (d.definition_point.x - fx) * perp_x + (d.definition_point.y - fy) * perp_y;
+            let d1 = v3(fx + perp_x * offset, fy + perp_y * offset, d.first_point.z);
+            let d2 = v3(sx + perp_x * offset, sy + perp_y * offset, d.second_point.z);
+            result.push(make_seg(&d.first_point, &d1, &common));
+            result.push(make_seg(&d.second_point, &d2, &common));
+            result.push(make_seg(&d1, &d2, &common));
+            let _ = len;
+        }
+        Dimension::Linear(d) => {
+            let angle = d.rotation.to_radians();
+            let perp_x = -(angle.sin()); let perp_y = angle.cos();
+            let fx = d.first_point.x; let fy = d.first_point.y;
+            let sx = d.second_point.x; let sy = d.second_point.y;
+            let offset = (d.definition_point.x - fx) * perp_x + (d.definition_point.y - fy) * perp_y;
+            let d1 = v3(fx + perp_x * offset, fy + perp_y * offset, d.first_point.z);
+            let d2 = v3(sx + perp_x * offset, sy + perp_y * offset, d.second_point.z);
+            result.push(make_seg(&d.first_point, &d1, &common));
+            result.push(make_seg(&d.second_point, &d2, &common));
+            result.push(make_seg(&d1, &d2, &common));
+        }
+        Dimension::Radius(d) => {
+            result.push(make_seg(&d.angle_vertex, &d.definition_point, &common));
+        }
+        Dimension::Diameter(d) => {
+            result.push(make_seg(&d.angle_vertex, &d.definition_point, &common));
+        }
+        Dimension::Angular2Ln(d) => {
+            result.push(make_seg(&d.first_point, &d.angle_vertex, &common));
+            result.push(make_seg(&d.second_point, &d.angle_vertex, &common));
+        }
+        Dimension::Angular3Pt(d) => {
+            result.push(make_seg(&d.first_point, &d.angle_vertex, &common));
+            result.push(make_seg(&d.second_point, &d.angle_vertex, &common));
+        }
+        Dimension::Ordinate(d) => {
+            result.push(make_seg(&d.feature_location, &d.definition_point, &common));
+            result.push(make_seg(&d.definition_point, &d.leader_endpoint, &common));
+        }
+    }
+
+    // Text entity for the dimension label
+    let text_val = if let Some(u) = &base.user_text {
+        if !u.trim().is_empty() { u.clone() } else { format!("{:.4}", dim.measurement()) }
+    } else if !base.text.trim().is_empty() {
+        base.text.clone()
+    } else {
+        match dim {
+            Dimension::Radius(_)   => format!("R{:.4}", dim.measurement()),
+            Dimension::Diameter(_) => format!("Ø{:.4}", dim.measurement()),
+            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) =>
+                format!("{:.2}°", dim.measurement()),
+            _ => format!("{:.4}", dim.measurement()),
+        }
+    };
+
+    let mut text = Text::with_value(text_val, base.text_middle_point.clone())
+        .with_height(base.line_spacing_factor.abs().max(0.1))
+        .with_rotation(base.text_rotation);
+    text.common = common.clone();
+    text.common.handle = Handle::NULL;
+    result.push(EntityType::Text(text));
+
+    result
 }
 
 // ── Command stub (kept for future interactive selection mode) ───────────────

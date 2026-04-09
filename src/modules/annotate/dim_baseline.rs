@@ -12,7 +12,19 @@ use acadrust::EntityType;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
+
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_baseline.svg"));
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "DIMBASELINE",
+        label: "Baseline",
+        icon: ICON,
+        event: ModuleEvent::Command("DIMBASELINE".to_string()),
+    }
+}
 
 /// Default stacking increment (world units) between successive baseline dimensions.
 const DIMDLI: f32 = 1.5;

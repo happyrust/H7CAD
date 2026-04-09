@@ -7,7 +7,7 @@ use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
 use glam::Vec3;
 
-pub const ICON: IconKind = IconKind::Glyph("⟷");
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/dim_linear.svg"));
 
 pub fn tool() -> ToolDef {
     ToolDef {

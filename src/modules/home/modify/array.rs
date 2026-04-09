@@ -697,3 +697,113 @@ impl CadCommand for ArrayPathCommand {
         CmdResult::Cancel
     }
 }
+
+// ── 3D Rectangular Array ──────────────────────────────────────────────────
+
+/// ARRAY3D — rectangular array in X (columns), Z (rows in drawing plane), Y (levels up).
+/// Prompts: rows → cols → levels → row spacing → col spacing → level spacing
+#[derive(Debug, Clone, Copy)]
+enum Array3DStep {
+    Rows,
+    Cols { rows: u32 },
+    Levels { rows: u32, cols: u32 },
+    RowSp { rows: u32, cols: u32, levels: u32 },
+    ColSp { rows: u32, cols: u32, levels: u32, row_sp: f32 },
+    LvlSp { rows: u32, cols: u32, levels: u32, row_sp: f32, col_sp: f32 },
+}
+
+pub struct Array3DCommand {
+    handles: Vec<Handle>,
+    step: Array3DStep,
+}
+
+impl Array3DCommand {
+    pub fn new(handles: Vec<Handle>) -> Self {
+        Self { handles, step: Array3DStep::Rows }
+    }
+
+    fn build_transforms(
+        rows: u32, cols: u32, levels: u32,
+        row_sp: f32, col_sp: f32, lvl_sp: f32,
+    ) -> Vec<EntityTransform> {
+        let mut t = Vec::new();
+        for l in 0..levels {
+            for r in 0..rows {
+                for c in 0..cols {
+                    if l == 0 && r == 0 && c == 0 { continue; }
+                    // World: X=col dir, Z=row dir (DXF Y), Y=level (up)
+                    t.push(EntityTransform::Translate(Vec3::new(
+                        col_sp * c as f32,
+                        lvl_sp * l as f32,
+                        row_sp * r as f32,
+                    )));
+                }
+            }
+        }
+        t
+    }
+}
+
+impl CadCommand for Array3DCommand {
+    fn name(&self) -> &'static str { "ARRAY3D" }
+
+    fn prompt(&self) -> String {
+        match self.step {
+            Array3DStep::Rows => "ARRAY3D  Enter row count:".into(),
+            Array3DStep::Cols { rows } => format!("ARRAY3D  Enter column count  [{rows} rows]:"),
+            Array3DStep::Levels { rows, cols } => format!("ARRAY3D  Enter level count  [{rows}×{cols}]:"),
+            Array3DStep::RowSp { rows, cols, levels } => format!("ARRAY3D  Row spacing  [{rows}×{cols}×{levels}]:"),
+            Array3DStep::ColSp { rows, cols, levels, row_sp } => format!("ARRAY3D  Column spacing  [{rows}×{cols}×{levels}, row={row_sp:.0}]:"),
+            Array3DStep::LvlSp { rows, cols, levels, row_sp, col_sp } => format!("ARRAY3D  Level spacing  [{rows}×{cols}×{levels}, r={row_sp:.0} c={col_sp:.0}]:"),
+        }
+    }
+
+    fn wants_text_input(&self) -> bool { true }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let t = text.trim().replace(',', ".");
+        let t = t.as_str();
+        match self.step {
+            Array3DStep::Rows => {
+                let v = if t.is_empty() { 2 } else { t.parse::<u32>().unwrap_or(2).max(1) };
+                self.step = Array3DStep::Cols { rows: v };
+                Some(CmdResult::NeedPoint)
+            }
+            Array3DStep::Cols { rows } => {
+                let v = if t.is_empty() { 2 } else { t.parse::<u32>().unwrap_or(2).max(1) };
+                self.step = Array3DStep::Levels { rows, cols: v };
+                Some(CmdResult::NeedPoint)
+            }
+            Array3DStep::Levels { rows, cols } => {
+                let v = if t.is_empty() { 2 } else { t.parse::<u32>().unwrap_or(2).max(1) };
+                self.step = Array3DStep::RowSp { rows, cols, levels: v };
+                Some(CmdResult::NeedPoint)
+            }
+            Array3DStep::RowSp { rows, cols, levels } => {
+                let v: f32 = if t.is_empty() { 1.0 } else { t.parse().unwrap_or(1.0) };
+                self.step = Array3DStep::ColSp { rows, cols, levels, row_sp: v };
+                Some(CmdResult::NeedPoint)
+            }
+            Array3DStep::ColSp { rows, cols, levels, row_sp } => {
+                let v: f32 = if t.is_empty() { 1.0 } else { t.parse().unwrap_or(1.0) };
+                self.step = Array3DStep::LvlSp { rows, cols, levels, row_sp, col_sp: v };
+                Some(CmdResult::NeedPoint)
+            }
+            Array3DStep::LvlSp { rows, cols, levels, row_sp, col_sp } => {
+                let v: f32 = if t.is_empty() { 1.0 } else { t.parse().unwrap_or(1.0) };
+                let transforms = Self::build_transforms(rows, cols, levels, row_sp, col_sp, v);
+                Some(CmdResult::BatchCopy(self.handles.clone(), transforms))
+            }
+        }
+    }
+
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
+
+    fn on_enter(&mut self) -> CmdResult {
+        self.on_text_input("").map_or(CmdResult::NeedPoint, |r| r)
+    }
+
+    fn on_escape(&mut self) -> CmdResult { CmdResult::Cancel }
+
+    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> { vec![] }
+}

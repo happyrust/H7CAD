@@ -20,6 +20,9 @@ use crate::scene::image_model::ImageModel;
 use crate::scene::mesh_model::MeshModel;
 use crate::scene::wire_model::WireModel;
 
+/// MSAA sample count for the main drawing pipelines.
+const MSAA_SAMPLES: u32 = 4;
+
 pub struct Pipeline {
     wire_pipeline: wgpu::RenderPipeline,
     hatch_pipeline: wgpu::RenderPipeline,
@@ -31,6 +34,17 @@ pub struct Pipeline {
     image_bgl1: wgpu::BindGroupLayout,
     depth_texture_size: Size<u32>,
     depth_view: wgpu::TextureView,
+    /// 4× MSAA color buffer for the main drawing passes.
+    msaa_view: wgpu::TextureView,
+    /// Single-sample texture that receives the MSAA resolve result.
+    resolve_view: wgpu::TextureView,
+    /// Pipeline + resources for blitting the resolve texture to the surface target.
+    blit_pipeline: wgpu::RenderPipeline,
+    blit_bind_group_layout: wgpu::BindGroupLayout,
+    blit_sampler: wgpu::Sampler,
+    blit_bind_group: wgpu::BindGroup,
+    /// Cached texture format (needed to recreate MSAA / depth textures on resize).
+    surface_format: wgpu::TextureFormat,
     gpu_wires: Vec<WireGpu>,
     gpu_hatches: Vec<HatchGpu>,
     /// Wipeout fills — rendered after wires in a separate pass.
@@ -113,7 +127,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -182,7 +196,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -236,7 +250,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -325,7 +339,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -345,6 +359,99 @@ impl Pipeline {
 
         let viewcube = ViewCubePipeline::new(device, queue, format);
 
+        let init_size = Size::new(1, 1);
+        let msaa_view = create_msaa_texture(device, init_size, format)
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let resolve_tex = create_resolve_texture(device, init_size, format);
+        let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // ── Blit pipeline (resolve texture → surface target) ──────────────
+        let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("blit.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/blit.wgsl"
+            ))),
+        });
+
+        let blit_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("blit.bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let blit_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("blit.pipeline_layout"),
+            bind_group_layouts: &[&blit_bgl],
+            push_constant_ranges: &[],
+        });
+
+        let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("blit.pipeline"),
+            layout: Some(&blit_layout),
+            vertex: wgpu::VertexState {
+                module: &blit_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &blit_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let blit_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("blit.sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit.bind_group"),
+            layout: &blit_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&resolve_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&blit_sampler),
+                },
+            ],
+        });
+
         Self {
             wire_pipeline,
             hatch_pipeline,
@@ -356,6 +463,13 @@ impl Pipeline {
             image_bgl1,
             depth_texture_size: Size::new(1, 1),
             depth_view,
+            msaa_view,
+            resolve_view,
+            blit_pipeline,
+            blit_bind_group_layout: blit_bgl,
+            blit_sampler,
+            blit_bind_group,
+            surface_format: format,
             gpu_wires: vec![],
             gpu_hatches: vec![],
             gpu_wipeouts: vec![],
@@ -414,19 +528,24 @@ impl Pipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         clip_bounds: Rectangle<u32>,
+        bg_color: [f32; 4],
     ) {
         let vp = clip_bounds;
+        let msaa = &self.msaa_view;
+        let [r, g, b, a] = bg_color;
+        let clear_color = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: a as f64 };
 
         // ── Pass 1: hatch fills ────────────────────────────────────────────
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("hatch.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        // Clear MSAA to background color on the first pass.
+                        load: wgpu::LoadOp::Clear(clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -441,14 +560,8 @@ impl Pipeline {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_viewport(
-                vp.x as f32,
-                vp.y as f32,
-                vp.width as f32,
-                vp.height as f32,
-                0.0,
-                1.0,
-            );
+            // MSAA texture is clip-bounds-sized, so viewport starts at (0, 0).
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             if !self.gpu_hatches.is_empty() {
                 pass.set_pipeline(&self.hatch_pipeline);
                 pass.set_bind_group(0, &self.uniform_bind_group, &[]);
@@ -465,7 +578,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("image.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -484,14 +597,7 @@ impl Pipeline {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_viewport(
-                vp.x as f32,
-                vp.y as f32,
-                vp.width as f32,
-                vp.height as f32,
-                0.0,
-                1.0,
-            );
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.image_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             for img in &self.gpu_images {
@@ -506,7 +612,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mesh.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -525,14 +631,7 @@ impl Pipeline {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_viewport(
-                vp.x as f32,
-                vp.y as f32,
-                vp.width as f32,
-                vp.height as f32,
-                0.0,
-                1.0,
-            );
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.mesh_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             for mesh in &self.gpu_meshes {
@@ -549,7 +648,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wire.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -568,14 +667,7 @@ impl Pipeline {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_viewport(
-                vp.x as f32,
-                vp.y as f32,
-                vp.width as f32,
-                vp.height as f32,
-                0.0,
-                1.0,
-            );
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.wire_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             for wire in &self.gpu_wires {
@@ -591,7 +683,7 @@ impl Pipeline {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wipeout.render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: msaa,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -610,14 +702,7 @@ impl Pipeline {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_viewport(
-                vp.x as f32,
-                vp.y as f32,
-                vp.width as f32,
-                vp.height as f32,
-                0.0,
-                1.0,
-            );
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.hatch_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             for wipeout in &self.gpu_wipeouts {
@@ -626,12 +711,85 @@ impl Pipeline {
                 pass.draw(0..6, 0..1);
             }
         }
+
+        // ── Resolve MSAA → clip-sized resolve texture ─────────────────────
+        // Both msaa_view and resolve_view are sized to clip_bounds, so the
+        // resolve does NOT touch any pixels outside the shader widget's area.
+        {
+            let _resolve = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("msaa.resolve_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: Some(&self.resolve_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            // No draw calls — the pass itself triggers the MSAA resolve.
+        }
+
+        // ── Blit resolve texture → surface target at clip_bounds position ──
+        // The viewport maps the full-screen NDC quad to exactly clip_bounds
+        // in the surface, leaving all other widgets untouched.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("blit.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(
+                vp.x as f32,
+                vp.y as f32,
+                vp.width as f32,
+                vp.height as f32,
+                0.0,
+                1.0,
+            );
+            pass.set_pipeline(&self.blit_pipeline);
+            pass.set_bind_group(0, &self.blit_bind_group, &[]);
+            pass.draw(0..6, 0..1);
+        }
     }
 
     pub fn ensure_depth_texture(&mut self, device: &wgpu::Device, size: Size<u32>) {
         if self.depth_texture_size != size {
-            let tex = create_depth_texture(device, size);
-            self.depth_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+            let depth_tex = create_depth_texture(device, size);
+            self.depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            let msaa_tex = create_msaa_texture(device, size, self.surface_format);
+            self.msaa_view = msaa_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            let resolve_tex = create_resolve_texture(device, size, self.surface_format);
+            let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            self.blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("blit.bind_group"),
+                layout: &self.blit_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&resolve_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.blit_sampler),
+                    },
+                ],
+            });
+            self.resolve_view = resolve_view;
             self.depth_texture_size = size;
         }
     }
@@ -646,9 +804,51 @@ fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
+        sample_count: MSAA_SAMPLES,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
+}
+
+fn create_resolve_texture(
+    device: &wgpu::Device,
+    size: Size<u32>,
+    format: wgpu::TextureFormat,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("viewer.resolve_texture"),
+        size: wgpu::Extent3d {
+            width: size.width.max(1),
+            height: size.height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+fn create_msaa_texture(
+    device: &wgpu::Device,
+    size: Size<u32>,
+    format: wgpu::TextureFormat,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("viewer.msaa_texture"),
+        size: wgpu::Extent3d {
+            width: size.width.max(1),
+            height: size.height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: MSAA_SAMPLES,
+        dimension: wgpu::TextureDimension::D2,
+        format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     })

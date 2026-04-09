@@ -16,6 +16,12 @@ const MAX_HISTORY: usize = 64;
 pub struct CommandLine {
     pub input: String,
     pub history: Vec<HistoryEntry>,
+    /// Commands the user has typed (for ↑/↓ recall).
+    pub cmd_recall: Vec<String>,
+    /// Current position in `cmd_recall` while navigating (None = not navigating).
+    recall_cursor: Option<usize>,
+    /// Saved draft input before the user started navigating history.
+    recall_draft: String,
 }
 
 #[derive(Clone, Debug)]
@@ -39,15 +45,60 @@ impl CommandLine {
         cl.push_info("Type a command or use the ribbon. Open OBJ: INSERT tab.");
         cl
     }
+
     pub fn submit(&mut self) -> Option<String> {
         let cmd = self.input.trim().to_uppercase();
         if cmd.is_empty() {
             return None;
         }
+        // Record in recall list (avoid duplicates at the top).
+        let raw = self.input.trim().to_string();
+        if self.cmd_recall.last().map(|s| s.as_str()) != Some(&raw) {
+            self.cmd_recall.push(raw);
+            if self.cmd_recall.len() > 50 {
+                self.cmd_recall.remove(0);
+            }
+        }
+        self.recall_cursor = None;
+        self.recall_draft.clear();
         self.push_command(&self.input.clone());
         self.input.clear();
         Some(cmd)
     }
+
+    /// Navigate to the previous command in recall history (↑).
+    pub fn history_prev(&mut self) {
+        if self.cmd_recall.is_empty() {
+            return;
+        }
+        let cursor = match self.recall_cursor {
+            None => {
+                self.recall_draft = self.input.clone();
+                self.cmd_recall.len() - 1
+            }
+            Some(c) if c > 0 => c - 1,
+            Some(c) => c,
+        };
+        self.recall_cursor = Some(cursor);
+        self.input = self.cmd_recall[cursor].clone();
+    }
+
+    /// Navigate to the next command in recall history (↓).
+    pub fn history_next(&mut self) {
+        match self.recall_cursor {
+            None => {}
+            Some(c) if c + 1 < self.cmd_recall.len() => {
+                let next = c + 1;
+                self.recall_cursor = Some(next);
+                self.input = self.cmd_recall[next].clone();
+            }
+            Some(_) => {
+                self.recall_cursor = None;
+                self.input = self.recall_draft.clone();
+            }
+        }
+    }
+
     pub fn push_command(&mut self, cmd: &str) {
         self.push(EntryKind::Command, format!("Command: {cmd}"));
     }

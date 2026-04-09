@@ -39,5 +39,53 @@ impl H7CAD {
             .collect();
         self.tabs[i].layers.sync_linetypes(lt_items.clone());
         self.ribbon.set_available_linetypes(lt_items);
+        self.sync_ribbon_styles();
+    }
+
+    pub(super) fn sync_ribbon_styles(&mut self) {
+        let i = self.active_tab;
+        let doc = &self.tabs[i].scene.document;
+
+        let text_names: Vec<String> = doc.text_styles.iter().map(|s| s.name.clone()).collect();
+        let active_text = doc.header.current_text_style_name.clone();
+        let active_text = if text_names.contains(&active_text) { active_text } else {
+            text_names.first().cloned().unwrap_or_else(|| "Standard".to_string())
+        };
+
+        let dim_names: Vec<String> = doc.dim_styles.iter().map(|s| s.name.clone()).collect();
+        let active_dim = doc.header.current_dimstyle_name.clone();
+        let active_dim = if dim_names.contains(&active_dim) { active_dim } else {
+            dim_names.first().cloned().unwrap_or_else(|| "Standard".to_string())
+        };
+
+        let mleader_names: Vec<String> = doc.objects.values().filter_map(|o| {
+            if let acadrust::objects::ObjectType::MultiLeaderStyle(mls) = o {
+                Some(mls.name.clone())
+            } else {
+                None
+            }
+        }).collect();
+        let active_mleader = self.tabs[i].active_mleader_style.clone();
+        let active_mleader = if mleader_names.contains(&active_mleader) { active_mleader } else {
+            mleader_names.first().cloned().unwrap_or_else(|| "Standard".to_string())
+        };
+
+        let table_names: Vec<String> = doc.objects.values().filter_map(|o| {
+            if let acadrust::objects::ObjectType::TableStyle(ts) = o {
+                Some(ts.name.clone())
+            } else {
+                None
+            }
+        }).collect();
+        let active_table = table_names.first().cloned().unwrap_or_else(|| "Standard".to_string());
+
+        let active_mleader2 = active_mleader.clone();
+        let active_table2 = active_table.clone();
+        self.ribbon.set_styles(
+            text_names, &active_text,
+            dim_names, &active_dim,
+            mleader_names, &active_mleader2,
+            table_names, &active_table2,
+        );
     }
 }

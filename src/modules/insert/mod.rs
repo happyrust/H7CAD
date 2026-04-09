@@ -6,7 +6,10 @@ pub(crate) mod create_block;
 mod cylinder;
 pub(crate) mod insert_block;
 mod open_obj;
+pub(crate) mod solid3d_cmds;
 mod sphere;
+pub(crate) mod wblock;
+pub(crate) mod xattach;
 
 use crate::modules::{CadModule, RibbonGroup};
 
@@ -36,7 +39,12 @@ impl CadModule for InsertModule {
             },
             RibbonGroup {
                 title: "Block",
-                tools: vec![create_block::tool().into(), insert_block::tool().into()],
+                tools: vec![
+                    create_block::tool().into(),
+                    insert_block::tool().into(),
+                    wblock::tool().into(),
+                    xattach::tool().into(),
+                ],
             },
         ]
     }

@@ -43,10 +43,14 @@ pub(super) struct H7CAD {
     pre_cmd_tangent: Option<bool>,
     /// Orthogonal drawing constraint (F8): constrains picks to 0°/90°/180°/270°.
     ortho_mode: bool,
-    /// Polar tracking (F10): constrains picks to 45° angle increments.
+    /// Polar tracking (F10): constrains picks to configurable angle increments.
     polar_mode: bool,
+    /// Polar tracking angle increment in degrees (15 / 30 / 45 / 90).
+    polar_increment_deg: f32,
     /// Show grid lines in the viewport (F7).
     show_grid: bool,
+    /// Dynamic input overlay (F12): show coordinate tooltip near cursor.
+    dyn_input: bool,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
     /// Last point committed by a drawing command — used as ortho/polar base.
@@ -55,6 +59,15 @@ pub(super) struct H7CAD {
     layer_window: Option<window::Id>,
     /// OS window Id of the primary application window.
     main_window: Option<window::Id>,
+    // ── Floating panel windows ────────────────────────────────────────────
+    page_setup_window:      Option<window::Id>,
+    textstyle_window:       Option<window::Id>,
+    tablestyle_window:      Option<window::Id>,
+    mlstyle_window:         Option<window::Id>,
+    layout_manager_window:  Option<window::Id>,
+    plotstyle_window:       Option<window::Id>,
+    dimstyle_window:        Option<window::Id>,
+    shortcuts_window:       Option<window::Id>,
     /// In-memory clipboard: cloned entities waiting to be pasted.
     clipboard: Vec<acadrust::EntityType>,
     /// Centroid of the clipboard entities (XZ plane, Y-up).
@@ -67,8 +80,7 @@ pub(super) struct H7CAD {
     last_vp_click_time: Option<Instant>,
     /// Screen position of the previous viewport left-click release.
     last_vp_click_pos: Option<Point>,
-    /// Page Setup overlay open/closed.
-    page_setup_open: bool,
+    // page_setup_open: moved to page_setup_window: Option<window::Id>
     /// Editable paper width buffer for the Page Setup panel (string while typing).
     page_setup_w: String,
     /// Editable paper height buffer for the Page Setup panel (string while typing).
@@ -91,15 +103,12 @@ pub(super) struct H7CAD {
     active_plot_style: Option<crate::io::plot_style::PlotStyleTable>,
 
     // ── MLineStyle Dialog ─────────────────────────────────────────────────
-    mlstyle_open: bool,
     mlstyle_selected: String,
 
     // ── TableStyle Dialog ─────────────────────────────────────────────────
-    tablestyle_open: bool,
     tablestyle_selected: String,
 
     // ── TextStyle Font Browser ────────────────────────────────────────────
-    textstyle_open: bool,
     textstyle_selected: String,
     /// Edit buffer for font file name.
     textstyle_font: String,
@@ -108,8 +117,26 @@ pub(super) struct H7CAD {
     /// Edit buffer for oblique angle (degrees).
     textstyle_oblique: String,
 
+    // ── Color Scheme ──────────────────────────────────────────────────────
+    active_theme: Theme,
+
+    // ── Keyboard Shortcut Editor ──────────────────────────────────────────
+    /// User-defined function-key overrides: "F3" → command string.
+    shortcut_overrides: std::collections::HashMap<String, String>,
+
+    // ── Layout Manager Panel ──────────────────────────────────────────────
+    layout_manager_selected: String,
+    layout_manager_rename_buf: String,
+
+    // ── Plot Style Panel ──────────────────────────────────────────────────
+    /// Selected ACI index in the panel (1-255).
+    plotstyle_panel_aci: u8,
+    /// Edit buffers for the selected entry.
+    ps_color_buf: String,
+    ps_lineweight_buf: String,
+    ps_screening_buf: String,
+
     // ── DimStyle Dialog ───────────────────────────────────────────────────
-    dimstyle_open: bool,
     /// Name of the style currently shown in the dialog.
     dimstyle_selected: String,
     /// Active tab: 0=Lines, 1=Arrows, 2=Text, 3=Scale/Units, 4=Tolerances.
@@ -176,6 +203,10 @@ pub enum Message {
     CommandInput(String),
     CommandSubmit,
     Command(String),
+    /// Recall previous command in history (↑ arrow key).
+    CommandHistoryPrev,
+    /// Recall next command in history (↓ arrow key).
+    CommandHistoryNext,
     ToggleLayers,
     LayerToggleVisible(usize),
     LayerToggleLock(usize),
@@ -220,8 +251,14 @@ pub enum Message {
     ToggleGrid,
     /// Toggle orthogonal drawing constraint — F8 / ORTHO status-bar button.
     ToggleOrtho,
-    /// Toggle polar-angle constraint (45° increments) — F10 / POLAR status-bar button.
+    /// Toggle polar-angle constraint — F10 / POLAR status-bar button.
     TogglePolar,
+    /// Set polar tracking angle increment (right-click POLAR button).
+    SetPolarAngle(f32),
+    /// Toggle dynamic input overlay (F12).
+    ToggleDynInput,
+    /// Toggle object snap tracking (F11).
+    ToggleOTrack,
     /// Toggle an individual snap mode (from popup row click).
     ToggleSnap(crate::snap::SnapType),
     /// Open / close the OSNAP popup (▾ arrow click).
@@ -258,6 +295,8 @@ pub enum Message {
     RibbonLinetypeChanged(String),
     /// User changed the active lineweight in the Properties toolbar.
     RibbonLineweightChanged(LineWeight),
+    /// User selected a style from a style combobox in the ribbon.
+    RibbonStyleChanged { key: crate::modules::StyleKey, name: String },
 
     // ── Properties panel ──────────────────────────────────────────────────
     /// User selected a layer from the layer pick_list in the Properties panel.
@@ -315,6 +354,24 @@ pub enum Message {
     LayoutContextMenu(String),
     /// Close the layout context menu.
     LayoutContextMenuClose,
+    // ── Layout Manager Panel ────────────────────────────────────────────
+    LayoutManagerOpen,
+    LayoutManagerClose,
+    LayoutManagerSelect(String),
+    LayoutManagerRenameBuf(String),
+    LayoutManagerRenameCommit,
+    LayoutManagerNew,
+    LayoutManagerDelete,
+    LayoutManagerMoveLeft,
+    LayoutManagerMoveRight,
+    LayoutManagerSetCurrent,
+    /// Switch the UI color scheme.
+    SetTheme(Theme),
+    // ── Keyboard Shortcut Editor ────────────────────────────────────────
+    ShortcutsPanelOpen,
+    ShortcutsPanelClose,
+    /// Close the viewport right-click context menu without performing any action.
+    ViewportContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.
@@ -348,6 +405,10 @@ pub enum Message {
     PlotExport,
     /// Callback after the user picks (or cancels) the export path.
     PlotExportPath(Option<std::path::PathBuf>),
+    /// Send current layout to the system printer (via lp / lpr).
+    PrintToPrinter,
+    /// Callback from the async printer job.
+    PrintResult(Result<String, String>),
     // ── Plot Style Table ─────────────────────────────────────────────────
     /// Open file dialog to load a CTB/STB plot style table.
     PlotStyleLoad,
@@ -355,6 +416,21 @@ pub enum Message {
     PlotStyleLoaded(Option<crate::io::plot_style::PlotStyleTable>),
     /// Clear the active plot style table.
     PlotStyleClear,
+    /// Open/close the Plot Style panel.
+    PlotStylePanelOpen,
+    PlotStylePanelClose,
+    /// Select an ACI entry in the panel.
+    PlotStylePanelSelectAci(u8),
+    /// Edit buffers changed.
+    PlotStylePanelColorBuf(String),
+    PlotStylePanelLwBuf(String),
+    PlotStylePanelScreenBuf(String),
+    /// Apply current edit buffers to the selected ACI entry.
+    PlotStylePanelApply,
+    /// Save the modified table back to disk.
+    PlotStylePanelSave,
+    /// Save callback.
+    PlotStylePanelSavePath(Option<std::path::PathBuf>),
     // ── TextStyle Font Browser ────────────────────────────────────────────
     TextStyleDialogOpen,
     TextStyleDialogClose,
@@ -404,6 +480,36 @@ pub enum Message {
     ImagePick,
     /// Result of the image file picker + pixel dimension decode.
     ImagePickResult(Result<(std::path::PathBuf, u32, u32), String>),
+    // ── XREF ──────────────────────────────────────────────────────────────
+    /// Open file-picker dialog for XATTACH command (async).
+    XAttachPick,
+    /// Result of the XATTACH file picker.
+    XAttachPickResult(Result<std::path::PathBuf, String>),
+    // ── WBLOCK ────────────────────────────────────────────────────────────
+    /// Trigger the WBLOCK save dialog for `block_name` (or `*` = selection).
+    WblockSave(String),
+    /// Result of the WBLOCK save path dialog.
+    WblockSaveResult(String, Option<std::path::PathBuf>),
+    // ── DATAEXTRACTION ────────────────────────────────────────────────────
+    /// Save the pre-built CSV string to a file chosen by the user.
+    DataExtractionSave(String),
+    /// Path chosen (or None = cancelled).
+    DataExtractionSaveResult(String, Option<std::path::PathBuf>),
+    // ── STL export ────────────────────────────────────────────────────────
+    /// Trigger STL export: collect meshes and show save dialog.
+    StlExport,
+    /// Callback after the user picks (or cancels) the STL save path.
+    StlExportPath(Option<std::path::PathBuf>),
+    // ── STEP export ───────────────────────────────────────────────────────
+    /// Trigger STEP AP203 export: show save dialog.
+    StepExport,
+    /// Callback after the user picks (or cancels) the STEP save path.
+    StepExportPath(Option<std::path::PathBuf>),
+    // ── OBJ import ────────────────────────────────────────────────────────
+    /// Trigger OBJ import: show open-file dialog.
+    ObjImport,
+    /// Callback after the user picks (or cancels) the OBJ file path.
+    ObjImportPath(Option<std::path::PathBuf>),
 }
 
 impl H7CAD {
@@ -425,18 +531,27 @@ impl H7CAD {
             pre_cmd_tangent: None,
             ortho_mode: false,
             polar_mode: false,
+            polar_increment_deg: 45.0,
             show_grid: false,
+            dyn_input: true,
             show_ucs_icon: true,
             last_point: None,
             layer_window: None,
             main_window: None,
+            page_setup_window:     None,
+            textstyle_window:      None,
+            tablestyle_window:     None,
+            mlstyle_window:        None,
+            layout_manager_window: None,
+            plotstyle_window:      None,
+            dimstyle_window:       None,
+            shortcuts_window:      None,
             clipboard: Vec::new(),
             clipboard_centroid: glam::Vec3::ZERO,
             layout_context_menu: None,
             layout_rename_state: None,
             last_vp_click_time: None,
             last_vp_click_pos: None,
-            page_setup_open: false,
             page_setup_w: String::new(),
             page_setup_h: String::new(),
             page_setup_plot_area: "Layout".to_string(),
@@ -447,20 +562,27 @@ impl H7CAD {
             page_setup_scale: "Fit".to_string(),
             // Plot style
             active_plot_style: None,
+            // Color scheme (default: dark CAD-style)
+            active_theme: Theme::Dark,
+            // Keyboard shortcuts
+            shortcut_overrides: std::collections::HashMap::new(),
+            // Layout Manager
+            layout_manager_selected: "Model".to_string(),
+            layout_manager_rename_buf: String::new(),
+            plotstyle_panel_aci: 1,
+            ps_color_buf: String::new(),
+            ps_lineweight_buf: "255".to_string(),
+            ps_screening_buf: "100".to_string(),
             // TextStyle font browser
-            textstyle_open: false,
             textstyle_selected: "Standard".to_string(),
             textstyle_font: String::new(),
             textstyle_width: "1.0".to_string(),
             textstyle_oblique: "0.0".to_string(),
             // TableStyle dialog
-            tablestyle_open: false,
             tablestyle_selected: "Standard".to_string(),
             // MLineStyle dialog
-            mlstyle_open: false,
             mlstyle_selected: "Standard".to_string(),
             // DimStyle dialog
-            dimstyle_open: false,
             dimstyle_selected: "Standard".to_string(),
             dimstyle_tab: 0,
             ds_dimdle: "0".to_string(),       ds_dimdli: "3.75".to_string(),
@@ -507,9 +629,16 @@ pub fn run() -> iced::Result {
     iced::daemon(H7CAD::boot, H7CAD::update, H7CAD::view)
         .subscription(H7CAD::subscription)
         .title(|state: &H7CAD, window_id: window::Id| {
-            if Some(window_id) == state.layer_window {
-                "Layer Properties Manager".to_string()
-            } else if let Some(tab) = state.tabs.get(state.active_tab) {
+            if Some(window_id) == state.layer_window         { return "Layer Properties Manager".into(); }
+            if Some(window_id) == state.page_setup_window    { return "Page Setup".into(); }
+            if Some(window_id) == state.textstyle_window     { return "Text Style".into(); }
+            if Some(window_id) == state.tablestyle_window    { return "Table Style".into(); }
+            if Some(window_id) == state.mlstyle_window       { return "Multiline Style".into(); }
+            if Some(window_id) == state.layout_manager_window { return "Layout Manager".into(); }
+            if Some(window_id) == state.plotstyle_window     { return "Plot Style Table Editor".into(); }
+            if Some(window_id) == state.dimstyle_window      { return "Dimension Style Manager".into(); }
+            if Some(window_id) == state.shortcuts_window     { return "Keyboard Shortcuts".into(); }
+            if let Some(tab) = state.tabs.get(state.active_tab) {
                 let dot = if tab.dirty { "● " } else { "" };
                 let name = tab.tab_display_name();
                 format!("{}H7CAD — {}", dot, name)
@@ -517,6 +646,6 @@ pub fn run() -> iced::Result {
                 "H7CAD".to_string()
             }
         })
-        .theme(Theme::Dark)
+        .theme(|state: &H7CAD, _| state.active_theme.clone())
         .run()
 }

@@ -417,6 +417,91 @@ impl H7CAD {
                 }
             }
 
+            "XATTACH" | "XA" => {
+                // Launch the file picker; XAttachPickResult will start the command.
+                return Task::done(Message::XAttachPick);
+            }
+
+            cmd if cmd == "WBLOCK" || cmd == "WB" || cmd.starts_with("WBLOCK ") => {
+                let arg = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim();
+                if arg.is_empty() {
+                    // No argument: use selected entities (*) if any, else ask.
+                    let sel: Vec<_> = self.tabs[i].scene.selected.iter().copied().collect();
+                    if sel.is_empty() {
+                        self.command_line.push_error(
+                            "WBLOCK  Select entities first, or: WBLOCK <block name>  or  WBLOCK *",
+                        );
+                    } else {
+                        return Task::done(Message::WblockSave("*".to_string()));
+                    }
+                } else {
+                    return Task::done(Message::WblockSave(arg.to_string()));
+                }
+            }
+
+            "XREF" | "XR" => {
+                // List all xref blocks in the current drawing.
+                let xrefs: Vec<String> = self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .iter()
+                    .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+                    .map(|br| {
+                        format!(
+                            "  {} — {}",
+                            br.name,
+                            if br.xref_path.is_empty() {
+                                "(no path)".to_string()
+                            } else {
+                                br.xref_path.clone()
+                            }
+                        )
+                    })
+                    .collect();
+                if xrefs.is_empty() {
+                    self.command_line.push_output("XREF  No external references in this drawing.");
+                } else {
+                    self.command_line.push_output("XREF  External references:");
+                    for line in xrefs {
+                        self.command_line.push_output(&line);
+                    }
+                }
+            }
+
+            "XRELOAD" => {
+                // Reload all xrefs for the current drawing.
+                if let Some(path) = &self.tabs[i].current_path.clone() {
+                    if let Some(base_dir) = path.parent() {
+                        let infos = crate::io::xref::resolve_xrefs(
+                            &mut self.tabs[i].scene.document,
+                            base_dir,
+                        );
+                        for info in &infos {
+                            match info.status {
+                                crate::io::xref::XrefStatus::Loaded => {
+                                    self.command_line.push_output(&format!(
+                                        "XREF  Reloaded \"{}\"",
+                                        info.name
+                                    ));
+                                }
+                                crate::io::xref::XrefStatus::NotFound => {
+                                    self.command_line.push_error(&format!(
+                                        "XREF  Not found: \"{}\" ({})",
+                                        info.name, info.path
+                                    ));
+                                }
+                            }
+                        }
+                        self.tabs[i].scene.populate_hatches_from_document();
+                        self.tabs[i].scene.populate_images_from_document();
+                        self.tabs[i].scene.populate_meshes_from_document();
+                    }
+                } else {
+                    self.command_line.push_error("XREF  Save the drawing first to resolve relative XREF paths.");
+                }
+            }
+
             // ── Draw commands ──────────────────────────────────────────────
             "LINE"|"L" => {
                 use crate::modules::home::draw::line::LineCommand;
@@ -677,7 +762,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "RECT" => {
+            "RECT"|"RECTANG"|"REC" => {
                 use crate::modules::home::draw::shapes::RectCommand;
                 let new_cmd = RectCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -695,7 +780,7 @@ impl H7CAD {
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
-            "POLY" => {
+            "POLY"|"POLYGON"|"POL" => {
                 use crate::modules::home::draw::shapes::PolyCommand;
                 let new_cmd = PolyCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -787,7 +872,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "XLINE"|"XL" => {
+            "XLINE"|"XL"|"CONSTRUCTIONLINE" => {
                 use crate::modules::home::draw::ray::XLineCommand;
                 let new_cmd = XLineCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -800,6 +885,28 @@ impl H7CAD {
                 let new_cmd = HatchCommand::new(outlines);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "HATCHEDIT"|"HE" => {
+                use crate::modules::home::draw::hatchedit::HatcheditCommand;
+                // If a single hatch is already selected, skip the pick step.
+                let sel = self.tabs[i].scene.selected_entities();
+                if sel.len() == 1 {
+                    let (h, _) = sel[0];
+                    if let Some(model) = self.tabs[i].scene.hatches.get(&h).cloned() {
+                        let cmd = HatcheditCommand::with_handle(
+                            h, model.name.clone(), model.scale, model.angle_offset,
+                        );
+                        self.command_line.push_info(&cmd.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    } else {
+                        self.command_line.push_error("HATCHEDIT: selected entity is not a hatch.");
+                    }
+                } else {
+                    let cmd = HatcheditCommand::new();
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
             }
 
             "GRADIENT" => {
@@ -906,6 +1013,28 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
+            "DDEDIT"|"ED" => {
+                use crate::modules::annotate::ddedit::{DdeditCommand, entity_text};
+                // If a single text/mtext entity is already selected, skip the pick step.
+                let sel = self.tabs[i].scene.selected_entities();
+                if sel.len() == 1 {
+                    let (h, _) = sel[0];
+                    if let Some(e) = self.tabs[i].scene.document.get_entity(h) {
+                        if let Some(cur) = entity_text(e) {
+                            let cmd = DdeditCommand::with_handle(h, cur.clone());
+                            self.command_line.push_info(&format!("DDEDIT  Enter new text <{cur}>:"));
+                            self.tabs[i].active_cmd = Some(Box::new(cmd));
+                        } else {
+                            self.command_line.push_error("DDEDIT: selected entity is not text.");
+                        }
+                    }
+                } else {
+                    let cmd = DdeditCommand::new();
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
+            }
+
             "MTEXT"|"MT" => {
                 use crate::modules::annotate::mtext::MTextCommand;
                 let new_cmd = MTextCommand::new();
@@ -944,6 +1073,13 @@ impl H7CAD {
             "DIMANGULAR" => {
                 use crate::modules::annotate::angular_dim::AngularDimensionCommand;
                 let new_cmd = AngularDimensionCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "DIMORDINATE"|"DOR" => {
+                use crate::modules::annotate::ordinate_dim::OrdinateDimCommand;
+                let new_cmd = OrdinateDimCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -994,6 +1130,76 @@ impl H7CAD {
                 } else {
                     DimBaselineCommand::new()
                 };
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "QDIM" => {
+                use crate::modules::annotate::qdim::QdimCommand;
+                let cmd = QdimCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMEDIT"|"DED" => {
+                use crate::modules::annotate::dimedit::DimEditCommand;
+                let cmd = DimEditCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMTEDIT"|"DIMTED" => {
+                use crate::modules::annotate::dimtedit::DimTeditCommand;
+                let cmd = DimTeditCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMBREAK"|"DBR" => {
+                use crate::modules::annotate::dimbreak::DimBreakCommand;
+                let cmd = DimBreakCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMSPACE"|"DSPACE" => {
+                use crate::modules::annotate::dimspace::DimSpaceCommand;
+                let cmd = DimSpaceCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMJOGLINE"|"DJL" => {
+                use crate::modules::annotate::dimjogline::DimJogLineCommand;
+                let cmd = DimJogLineCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERADD"|"MLA" => {
+                use crate::modules::annotate::mleader_edit::MLeaderAddCommand;
+                let cmd = MLeaderAddCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERREMOVE"|"MLR" => {
+                use crate::modules::annotate::mleader_edit::MLeaderRemoveCommand;
+                let cmd = MLeaderRemoveCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERALIGN"|"MLAL" => {
+                use crate::modules::annotate::mleader_edit::MLeaderAlignCommand;
+                let cmd = MLeaderAlignCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERCOLLECT"|"MLC" => {
+                use crate::modules::annotate::mleader_edit::MLeaderCollectCommand;
+                let cmd = MLeaderCollectCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
@@ -1127,6 +1333,22 @@ impl H7CAD {
                             self.tabs[i].scene.document.get_entity(h).cloned()
                         }).collect();
                     let new_cmd = ArrayPathCommand::new(handles, wires, all_entities);
+                    self.command_line.push_info(&new_cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                }
+            }
+
+            "ARRAY3D"|"3DARRAY" => {
+                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
+                    .into_iter().map(|(h, _)| h).collect();
+                if handles.is_empty() {
+                    use crate::modules::home::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("ARRAY3D");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    use crate::modules::home::modify::array::Array3DCommand;
+                    let new_cmd = Array3DCommand::new(handles);
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 }
@@ -1306,6 +1528,237 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
+            "SPLINEDIT"|"SPE" => {
+                use crate::modules::home::modify::splinedit::SplineditCommand;
+                let cmd_obj = SplineditCommand::new();
+                self.command_line.push_info(&cmd_obj.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            }
+
+            "ATTEDIT"|"ATE"|"-ATTEDIT" => {
+                use crate::modules::home::modify::attedit::AtteditCommand;
+                let cmd_obj = AtteditCommand::new();
+                self.command_line.push_info(&cmd_obj.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            }
+
+            // ── REFEDIT — in-place block editing ─────────────────────────────
+            "REFEDIT" => {
+                use crate::modules::home::modify::refedit::RefEditPickCommand;
+                // If a session is already active, tell the user.
+                if self.tabs[i].refedit_session.is_some() {
+                    self.command_line.push_error(
+                        "REFEDIT: a session is already active. Use REFCLOSE first."
+                    );
+                } else {
+                    // Check if a single INSERT is already selected.
+                    let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
+                    if selected.len() == 1 {
+                        if let Some(acadrust::EntityType::Insert(_)) = selected.first().map(|(_, e)| e) {
+                            let handle = selected[0].0;
+                            // Skip pick phase — jump straight to begin.
+                            let _ = self.dispatch_command(&format!("REFEDIT_BEGIN:{}", handle.value()));
+                            return Task::none();
+                        }
+                    }
+                    let cmd_obj = RefEditPickCommand::new();
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                }
+            }
+
+            cmd if cmd.starts_with("REFEDIT_BEGIN:") => {
+                use crate::modules::home::modify::refedit::{RefEditSession, apply_insert_transform};
+                use acadrust::Handle;
+
+                let handle_u64: u64 = cmd["REFEDIT_BEGIN:".len()..]
+                    .parse().unwrap_or(0);
+                let insert_handle = Handle::new(handle_u64);
+
+                // Get INSERT entity.
+                let insert = match self.tabs[i].scene.document.get_entity(insert_handle) {
+                    Some(acadrust::EntityType::Insert(ins)) => ins.clone(),
+                    _ => {
+                        self.command_line.push_error("REFEDIT: selected object is not an INSERT.");
+                        return Task::none();
+                    }
+                };
+
+                // Validate: non-uniform scale is not supported.
+                let sx = insert.x_scale();
+                let sy = insert.y_scale();
+                let sz = insert.z_scale();
+                if (sx - sy).abs() > 1e-6 || (sx - sz).abs() > 1e-6 {
+                    self.command_line.push_error(
+                        "REFEDIT: non-uniform scale inserts are not supported."
+                    );
+                    return Task::none();
+                }
+
+                // Find the block record.
+                let br_handle = match self.tabs[i].scene.document.block_records.get(&insert.block_name) {
+                    Some(br) => br.handle,
+                    None => {
+                        self.command_line.push_error(&format!(
+                            "REFEDIT: block \"{}\" not found.", insert.block_name
+                        ));
+                        return Task::none();
+                    }
+                };
+
+                // Collect block-local entities (skip structural Block/BlockEnd/AttDef).
+                let block_entities: Vec<_> = {
+                    let br = self.tabs[i].scene.document.block_records.get(&insert.block_name).unwrap();
+                    br.entity_handles
+                        .iter()
+                        .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
+                        .filter(|e| !matches!(e,
+                            acadrust::EntityType::Block(_) |
+                            acadrust::EntityType::BlockEnd(_) |
+                            acadrust::EntityType::AttributeDefinition(_)
+                        ))
+                        .collect()
+                };
+
+                if block_entities.is_empty() {
+                    self.command_line.push_error("REFEDIT: block is empty.");
+                    return Task::none();
+                }
+
+                let session = RefEditSession {
+                    insert_handle,
+                    block_name: insert.block_name.clone(),
+                    br_handle,
+                    temp_handles: vec![],
+                    insert_x: insert.insert_point.x,
+                    insert_y: insert.insert_point.y,
+                    insert_z: insert.insert_point.z,
+                    rotation_deg: insert.rotation.to_degrees(),
+                    scale: sx,
+                };
+
+                self.push_undo_snapshot(i, "REFEDIT");
+                self.tabs[i].refedit_session = Some(session.clone());
+
+                // Add block entities to model space with INSERT transform applied.
+                let mut temp_handles = Vec::new();
+                for mut entity in block_entities {
+                    apply_insert_transform(&mut entity, &session);
+                    entity.common_mut().handle = acadrust::Handle::NULL;
+                    entity.common_mut().owner_handle = acadrust::Handle::NULL;
+                    let h = self.tabs[i].scene.add_entity(entity);
+                    temp_handles.push(h);
+                }
+                self.tabs[i].refedit_session.as_mut().unwrap().temp_handles = temp_handles.clone();
+
+                // Select the temp entities so user can see what they're editing.
+                self.tabs[i].scene.deselect_all();
+                for h in &temp_handles {
+                    self.tabs[i].scene.select_entity(*h, false);
+                }
+                self.tabs[i].dirty = true;
+
+                self.command_line.push_info(&format!(
+                    "REFEDIT: Editing block \"{}\". Use REFCLOSE when done.",
+                    insert.block_name
+                ));
+                use crate::modules::home::modify::refedit::RefCloseCommand;
+                let cmd_obj = RefCloseCommand::new();
+                self.command_line.push_info(&cmd_obj.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+            }
+
+            "REFCLOSE" => {
+                if self.tabs[i].refedit_session.is_some() {
+                    use crate::modules::home::modify::refedit::RefCloseCommand;
+                    let cmd_obj = RefCloseCommand::new();
+                    self.command_line.push_info(&cmd_obj.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
+                } else {
+                    self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                }
+            }
+
+            "REFCLOSE_SAVE" => {
+                use crate::modules::home::modify::refedit::apply_insert_inverse_transform;
+                use crate::modules::home::modify::explode::normalize_entity_for_block;
+
+                let session = match self.tabs[i].refedit_session.take() {
+                    Some(s) => s,
+                    None => {
+                        self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                        return Task::none();
+                    }
+                };
+
+                self.push_undo_snapshot(i, "REFCLOSE");
+
+                // Collect the edited temp entities.
+                let new_entities: Vec<acadrust::EntityType> = session.temp_handles
+                    .iter()
+                    .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
+                    .collect();
+
+                // Remove temp entities from model space.
+                self.tabs[i].scene.erase_entities(&session.temp_handles);
+
+                // Apply inverse INSERT transform → block-local coordinates.
+                let new_entities: Vec<_> = new_entities
+                    .into_iter()
+                    .map(|mut entity| {
+                        apply_insert_inverse_transform(&mut entity, &session);
+                        let mut entity = normalize_entity_for_block(entity);
+                        entity.common_mut().handle = acadrust::Handle::NULL;
+                        entity.common_mut().owner_handle = session.br_handle;
+                        entity
+                    })
+                    .collect();
+
+                // Remove old block entities from the document.
+                let old_handles: Vec<_> = match self.tabs[i].scene.document
+                    .block_records.get(&session.block_name)
+                {
+                    Some(br) => br.entity_handles.clone(),
+                    None => vec![],
+                };
+                for h in &old_handles {
+                    self.tabs[i].scene.document.remove_entity(*h);
+                }
+                // Flush the entity_handles list from the block record.
+                if let Some(br) = self.tabs[i].scene.document
+                    .block_records.get_mut(&session.block_name)
+                {
+                    br.entity_handles.clear();
+                }
+
+                // Add the new block entities.
+                for entity in new_entities {
+                    let _ = self.tabs[i].scene.document.add_entity(entity);
+                }
+
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(&format!(
+                    "REFCLOSE: Block \"{}\" saved. All references updated.",
+                    session.block_name
+                ));
+                // Rebuild hatch/image/mesh caches since block content changed.
+                self.tabs[i].scene.rebuild_derived_caches();
+            }
+
+            "REFCLOSE_DISCARD" => {
+                let session = match self.tabs[i].refedit_session.take() {
+                    Some(s) => s,
+                    None => {
+                        self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                        return Task::none();
+                    }
+                };
+                // Remove temp entities without modifying the block.
+                self.tabs[i].scene.erase_entities(&session.temp_handles);
+                self.tabs[i].scene.deselect_all();
+                self.command_line.push_output("REFCLOSE: Changes discarded.");
+            }
+
             "ALIGN"|"AL" => {
                 use crate::modules::home::modify::align::AlignCommand;
                 let cmd = AlignCommand::new();
@@ -1354,6 +1807,31 @@ impl H7CAD {
                 let cmd = AreaCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── MASSPROP — area, perimeter, centroid of selected entities ────
+            "MASSPROP" => {
+                let selected = self.tabs[i].scene.selected_entities();
+                if selected.is_empty() {
+                    self.command_line.push_error(
+                        "MASSPROP: no entities selected. Select entities first."
+                    );
+                } else {
+                    for (handle, _) in &selected {
+                        if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
+                            if let Some(props) = massprop_entity(entity) {
+                                self.command_line.push_output(&format!(
+                                    "{}  Area={:.4}  Perimeter={:.4}  Centroid=({:.4},{:.4})",
+                                    entity_type_name(entity),
+                                    props.area,
+                                    props.perimeter,
+                                    props.cx,
+                                    props.cy,
+                                ));
+                            }
+                        }
+                    }
+                }
             }
 
             // ── FLATTEN — move selected (or all) entities to Z=0 ─────────────
@@ -1458,6 +1936,11 @@ impl H7CAD {
                 self.command_line.push_output(&format!("COUNT: {total} entity(ies) total."));
             }
 
+            "DATAEXTRACTION" | "EATTEXT" | "ATTEXT" => {
+                let csv = build_data_extraction_csv(&self.tabs[i].scene.document);
+                return Task::done(Message::DataExtractionSave(csv));
+            }
+
             // ── Find / Replace ────────────────────────────────────────────────
             // FIND <search>              — list all Text/MText/Dimension containing <search>
             // FIND <search> REPLACE <rep> — replace first occurrence (case-insensitive)
@@ -1537,7 +2020,7 @@ impl H7CAD {
 
             "HELP"|"?" => {
                 self.command_line.push_output(
-                    "Draw: LINE CIRCLE ARC PLINE RECT POLY POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT REVCLOUD WIPEOUT MLINE ATTDEF  |  \
+                    "Draw: LINE CIRCLE ARC PLINE RECTANG(RECT) POLYGON(POLY) POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT REVCLOUD WIPEOUT MLINE ATTDEF  |  \
                      Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN ALIGN PEDIT  |  \
                      Array: ARRAY ARRAYRECT ARRAYPOLAR ARRAYPATH  |  \
                      Text: TEXT MTEXT LEADER MLEADER  |  \
@@ -1557,6 +2040,93 @@ impl H7CAD {
             "DONATE" => {
                 let _ = open::that("https://patreon.com/HakanSeven12");
                 self.command_line.push_info("Opening Patreon page...");
+            }
+
+            // ── Keyboard Shortcuts panel ──────────────────────────────────
+            cmd if cmd == "SHORTCUTS" || cmd.starts_with("SHORTCUTS ") => {
+                let raw_rest = cmd.trim_start_matches("SHORTCUTS").trim();
+                let parts: Vec<&str> = raw_rest.splitn(3, ' ').collect();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        return Task::done(Message::ShortcutsPanelOpen);
+                    }
+                    "SET" | "S" => {
+                        // SHORTCUTS SET <key> <command>
+                        // e.g. SHORTCUTS SET CTRL+D DIST
+                        let key = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                        let cmd_str = parts.get(2).map(|s| s.to_uppercase()).unwrap_or_default();
+                        if key.is_empty() || cmd_str.is_empty() {
+                            self.command_line.push_error("Usage: SHORTCUTS SET <key> <command>  e.g. SHORTCUTS SET CTRL+D DIST");
+                        } else {
+                            self.shortcut_overrides.insert(key.clone(), cmd_str.clone());
+                            self.command_line.push_output(&format!("Shortcut set: {key} → {cmd_str}"));
+                        }
+                    }
+                    "CLEAR" | "DELETE" | "REMOVE" => {
+                        let key = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+                        if key.is_empty() {
+                            self.command_line.push_error("Usage: SHORTCUTS CLEAR <key>");
+                        } else if self.shortcut_overrides.remove(&key).is_some() {
+                            self.command_line.push_output(&format!("Shortcut '{key}' removed."));
+                        } else {
+                            self.command_line.push_error(&format!("Shortcut '{key}' not found."));
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info("Usage: SHORTCUTS LIST | SET <key> <cmd> | CLEAR <key>");
+                    }
+                }
+            }
+
+            // ── Color Scheme / Theme selector ─────────────────────────────
+            cmd if cmd == "COLORSCHEME" || cmd.starts_with("COLORSCHEME ") => {
+                use iced::Theme;
+                let sub = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("").to_uppercase();
+                // Map name to Theme variant.
+                let theme: Option<Theme> = match sub.as_str() {
+                    "DARK"             => Some(Theme::Dark),
+                    "LIGHT"            => Some(Theme::Light),
+                    "DRACULA"          => Some(Theme::Dracula),
+                    "NORD"             => Some(Theme::Nord),
+                    "SOLARIZED_LIGHT" | "SOLARIZEDLIGHT"  => Some(Theme::SolarizedLight),
+                    "SOLARIZED_DARK"  | "SOLARIZEDDARK"   => Some(Theme::SolarizedDark),
+                    "GRUVBOX_LIGHT"   | "GRUVBOXLIGHT"    => Some(Theme::GruvboxLight),
+                    "GRUVBOX_DARK"    | "GRUVBOXDARK"     => Some(Theme::GruvboxDark),
+                    "TOKYONIGHT"      | "TOKYO_NIGHT"     => Some(Theme::TokyoNight),
+                    "TOKYONIGHTSTORM" | "TOKYO_NIGHT_STORM" => Some(Theme::TokyoNightStorm),
+                    "TOKYONIGHTLIGHT" | "TOKYO_NIGHT_LIGHT" => Some(Theme::TokyoNightLight),
+                    "KANAGAWAWAVE"    | "KANAGAWA_WAVE"   => Some(Theme::KanagawaWave),
+                    "KANAGAWADRAGON"  | "KANAGAWA_DRAGON" => Some(Theme::KanagawaDragon),
+                    "KANAGAWALOTUS"   | "KANAGAWA_LOTUS"  => Some(Theme::KanagawaLotus),
+                    "MOONFLY"         => Some(Theme::Moonfly),
+                    "NIGHTFLY"        => Some(Theme::Nightfly),
+                    "OXOCARBON"       => Some(Theme::Oxocarbon),
+                    "FERRA"           => Some(Theme::Ferra),
+                    "" | "LIST" | "?" => {
+                        self.command_line.push_output(
+                            "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
+                             GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
+                             KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA"
+                        );
+                        return Task::none();
+                    }
+                    _ => {
+                        self.command_line.push_error(&format!("COLORSCHEME: unknown theme '{}'. Type COLORSCHEME LIST for options.", sub));
+                        return Task::none();
+                    }
+                };
+                if let Some(t) = theme {
+                    let name = format!("{:?}", t);
+                    self.command_line.push_output(&format!("Color scheme set to '{name}'."));
+                    return Task::done(Message::SetTheme(t));
+                }
+                return Task::none();
+            }
+
+            // ── Layout Manager GUI ─────────────────────────────────────────
+            "LAYOUTMANAGER"|"LAYOUTPANEL" => {
+                return Task::done(Message::LayoutManagerOpen);
             }
 
             // ── Layout / viewport ──────────────────────────────────────────
@@ -1579,12 +2149,14 @@ impl H7CAD {
                 return Task::done(Message::PspaceCommand);
             }
 
-            // ── VPORTS — list viewports in current layout ─────────────────
-            "VPORTS" => {
+            // ── VPORTS — list or create preset viewport configurations ────
+            cmd if cmd == "VPORTS" || cmd.starts_with("VPORTS ") => {
+                let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
                 let scene = &self.tabs[i].scene;
                 if scene.current_layout == "Model" {
                     self.command_line.push_error("VPORTS: switch to a paper space layout first.");
-                } else {
+                } else if sub.is_empty() {
+                    // ── List existing viewports ──────────────────────────
                     let layout_block = scene.current_layout_block_handle_pub();
                     let viewports: Vec<_> = scene.document.entities()
                         .filter_map(|e| {
@@ -1596,7 +2168,7 @@ impl H7CAD {
                         })
                         .collect();
                     if viewports.is_empty() {
-                        self.command_line.push_info("No viewports in current layout. Use MVIEW to create one.");
+                        self.command_line.push_info("No viewports. Use MVIEW to create one, or VPORTS 2H / 2V / 4 / SINGLE.");
                     } else {
                         self.command_line.push_output(&format!("{} viewport(s) in layout \"{}\":", viewports.len(), scene.current_layout));
                         for (id, center, w, h, scale, is_on, locked) in &viewports {
@@ -1610,6 +2182,126 @@ impl H7CAD {
                                 center.x, center.y
                             ));
                         }
+                    }
+                } else {
+                    // ── Preset viewport layout ───────────────────────────
+                    // Determine paper dimensions from PlotSettings (fallback A4 landscape).
+                    let layout_name = scene.current_layout.clone();
+                    let (paper_w, paper_h) = {
+                        use acadrust::objects::ObjectType;
+                        let mut pw = 297.0_f64;
+                        let mut ph = 210.0_f64;
+                        for (_, obj) in &scene.document.objects {
+                            if let ObjectType::PlotSettings(ps) = obj {
+                                if ps.page_name == layout_name && ps.paper_width > 0.0 {
+                                    pw = ps.paper_width;
+                                    ph = ps.paper_height;
+                                    break;
+                                }
+                            }
+                        }
+                        (pw, ph)
+                    };
+                    let margin = 5.0_f64; // mm margin around the usable area
+                    let uw = paper_w - 2.0 * margin; // usable width
+                    let uh = paper_h - 2.0 * margin; // usable height
+                    // Collect rectangle specs: (cx, cz, w, h) in mm
+                    let rects: Vec<(f64, f64, f64, f64)> = match sub.as_str() {
+                        "2H" => {
+                            // Two viewports side by side (horizontal split)
+                            let vw = (uw - 2.0) / 2.0;
+                            vec![
+                                (margin + vw / 2.0,          margin + uh / 2.0, vw, uh),
+                                (margin + vw + 2.0 + vw / 2.0, margin + uh / 2.0, vw, uh),
+                            ]
+                        }
+                        "2V" => {
+                            // Two viewports stacked (vertical split)
+                            let vh = (uh - 2.0) / 2.0;
+                            vec![
+                                (margin + uw / 2.0, margin + vh + 2.0 + vh / 2.0, uw, vh),
+                                (margin + uw / 2.0, margin + vh / 2.0,            uw, vh),
+                            ]
+                        }
+                        "4" => {
+                            // Four equal viewports (2×2 grid)
+                            let vw = (uw - 2.0) / 2.0;
+                            let vh = (uh - 2.0) / 2.0;
+                            vec![
+                                (margin + vw / 2.0,              margin + vh + 2.0 + vh / 2.0, vw, vh),
+                                (margin + vw + 2.0 + vw / 2.0,  margin + vh + 2.0 + vh / 2.0, vw, vh),
+                                (margin + vw / 2.0,              margin + vh / 2.0,             vw, vh),
+                                (margin + vw + 2.0 + vw / 2.0,  margin + vh / 2.0,             vw, vh),
+                            ]
+                        }
+                        "SINGLE" | "1" => {
+                            // Single full-page viewport
+                            vec![(margin + uw / 2.0, margin + uh / 2.0, uw, uh)]
+                        }
+                        _ => {
+                            self.command_line.push_error(
+                                "VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE"
+                            );
+                            vec![]
+                        }
+                    };
+                    if !rects.is_empty() {
+                        // Remove existing user viewports in this layout first.
+                        let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
+                        let to_erase: Vec<acadrust::Handle> = self.tabs[i].scene.document.entities()
+                            .filter_map(|e| {
+                                if let acadrust::EntityType::Viewport(vp) = e {
+                                    if vp.id > 1 && vp.common.owner_handle == layout_block {
+                                        Some(vp.common.handle)
+                                    } else { None }
+                                } else { None }
+                            })
+                            .collect();
+                        self.push_undo_snapshot(i, "VPORTS");
+                        self.tabs[i].scene.erase_entities(&to_erase);
+                        // Create new viewports.
+                        for (cx, cz, w, h) in &rects {
+                            let mut vp = acadrust::entities::Viewport::new();
+                            vp.center = acadrust::types::Vector3::new(*cx, 0.0, *cz);
+                            vp.width  = *w;
+                            vp.height = *h;
+                            vp.id     = 2; // commit_entity will assign unique IDs
+                            match self.tabs[i].scene.document.add_entity_to_layout(
+                                acadrust::EntityType::Viewport(vp),
+                                &layout_name,
+                            ) {
+                                Ok(handle) => {
+                                    self.tabs[i].scene.auto_fit_viewport(handle);
+                                }
+                                Err(e) => {
+                                    self.command_line.push_error(&format!("VPORTS: {e}"));
+                                }
+                            }
+                        }
+                        // Re-assign unique IDs (1 + existing max per viewport).
+                        let layout_block2 = self.tabs[i].scene.current_layout_block_handle_pub();
+                        let mut id_counter = 2_i16;
+                        let handles: Vec<acadrust::Handle> = self.tabs[i].scene.document.entities()
+                            .filter_map(|e| {
+                                if let acadrust::EntityType::Viewport(vp) = e {
+                                    if vp.id >= 2 && vp.common.owner_handle == layout_block2 {
+                                        Some(vp.common.handle)
+                                    } else { None }
+                                } else { None }
+                            })
+                            .collect();
+                        for h in handles {
+                            if let Some(acadrust::EntityType::Viewport(vp)) =
+                                self.tabs[i].scene.document.get_entity_mut(h)
+                            {
+                                vp.id = id_counter;
+                                id_counter += 1;
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!(
+                            "VPORTS: created {} viewport(s) [{}].", rects.len(), sub
+                        ));
                     }
                 }
             }
@@ -2368,6 +3060,100 @@ impl H7CAD {
                 }
             }
 
+            // ── MLeader Style management ──────────────────────────────────
+            cmd if cmd == "MLEADERSTYLE" || cmd.starts_with("MLEADERSTYLE ") => {
+                use acadrust::objects::{ObjectType, MultiLeaderStyle};
+                let raw_rest = cmd.trim_start_matches("MLEADERSTYLE").trim();
+                let parts: Vec<&str> = raw_rest.split_whitespace().collect();
+                let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
+                match sub.as_str() {
+                    "" | "LIST" | "?" => {
+                        let styles: Vec<String> = self.tabs[i].scene.document
+                            .objects.values()
+                            .filter_map(|o| if let ObjectType::MultiLeaderStyle(s) = o { Some(format!("{}(txt:{:.2} asz:{:.2})", s.name, s.text_height, s.arrowhead_size)) } else { None })
+                            .collect();
+                        let current = &self.tabs[i].active_mleader_style;
+                        if styles.is_empty() {
+                            self.command_line.push_output(&format!("MLeader styles: (none)  active: {current}"));
+                        } else {
+                            self.command_line.push_output(&format!("MLeader styles: {}  active: {current}", styles.join(", ")));
+                        }
+                    }
+                    "NEW" | "N" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_error("Usage: MLEADERSTYLE NEW <name>");
+                        } else {
+                            let already_exists = self.tabs[i].scene.document.objects.values()
+                                .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
+                            if already_exists {
+                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' already exists.", name));
+                            } else {
+                                let handle = self.tabs[i].scene.document.allocate_handle();
+                                let mut style = MultiLeaderStyle::new(&name);
+                                style.handle = handle;
+                                self.tabs[i].scene.document.objects.insert(handle, ObjectType::MultiLeaderStyle(style));
+                                self.push_undo_snapshot(i, "MLEADERSTYLE NEW");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("MLEADERSTYLE: '{}' created.", name));
+                            }
+                        }
+                    }
+                    "SET" | "S" => {
+                        // MLEADERSTYLE SET <name> <property> <value>
+                        // Properties: text_height arrowhead_size landing_distance landing_gap
+                        let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        let prop = parts.get(2).map(|s| s.to_lowercase()).unwrap_or_default();
+                        let val_str = parts.get(3).map(|s| s.trim()).unwrap_or("");
+                        if let Ok(val) = val_str.parse::<f64>() {
+                            let style_entry = self.tabs[i].scene.document.objects.values_mut()
+                                .find_map(|o| if let ObjectType::MultiLeaderStyle(s) = o { if s.name == style_name { Some(s) } else { None } } else { None });
+                            if let Some(s) = style_entry {
+                                match prop.as_str() {
+                                    "text_height" | "textheight" | "txth" => { s.text_height = val; }
+                                    "arrowhead_size" | "arrowsize" | "asz" => { s.arrowhead_size = val; }
+                                    "landing_distance" | "landing" | "dogleg" => { s.landing_distance = val; }
+                                    "landing_gap" | "gap" => { s.landing_gap = val; }
+                                    _ => {
+                                        self.command_line.push_error(&format!(
+                                            "MLEADERSTYLE: unknown property '{}'. Try: text_height arrowhead_size landing_distance landing_gap", prop
+                                        ));
+                                        return Task::none();
+                                    }
+                                }
+                                self.push_undo_snapshot(i, "MLEADERSTYLE SET");
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!("MLEADERSTYLE: '{style_name}'.{prop} = {val:.3}"));
+                            } else {
+                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' not found.", style_name));
+                            }
+                        } else {
+                            self.command_line.push_error("Usage: MLEADERSTYLE SET <name> <property> <value>");
+                        }
+                    }
+                    "CURRENT" | "C" | "ACTIVE" => {
+                        let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line.push_output(&format!("Current MLeader style: {}", self.tabs[i].active_mleader_style));
+                        } else {
+                            let exists = name == "Standard" || self.tabs[i].scene.document.objects.values()
+                                .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
+                            if exists {
+                                self.tabs[i].active_mleader_style = name.clone();
+                                self.command_line.push_output(&format!("MLEADERSTYLE: current style set to '{name}'."));
+                            } else {
+                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' not found.", name));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_info(
+                            "Usage: MLEADERSTYLE LIST | NEW <name> | SET <name> <prop> <val> | CURRENT [<name>]"
+                        );
+                    }
+                }
+            }
+
             // ── TextStyle / Style management ──────────────────────────────
             cmd if cmd == "STYLE" || cmd == "TEXTSTYLE" || cmd.starts_with("STYLE ") || cmd.starts_with("TEXTSTYLE ") => {
                 let (prefix, rest) = if cmd.starts_with("TEXTSTYLE") {
@@ -2989,9 +3775,106 @@ impl H7CAD {
                 }
             }
 
+            // ── 3D Primitive — BOX ────────────────────────────────────────
+            "BOX" => {
+                use crate::modules::insert::solid3d_cmds::BoxCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = BoxCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── 3D Primitive — SPHERE ─────────────────────────────────────
+            "SPHERE" => {
+                use crate::modules::insert::solid3d_cmds::SphereCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = SphereCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── 3D Primitive — CYLINDER ───────────────────────────────────
+            "CYLINDER" => {
+                use crate::modules::insert::solid3d_cmds::CylinderCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = CylinderCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── EXTRUDE ────────────────────────────────────────────────────
+            "EXTRUDE"|"EXT" => {
+                use crate::modules::insert::solid3d_cmds::ExtrudeCommand;
+                // If a single entity is already selected, skip the pick step.
+                let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                if selected.len() == 1 {
+                    let handle = selected[0].0;
+                    let mut cmd = ExtrudeCommand::new(color);
+                    cmd.on_entity_pick(handle, glam::Vec3::ZERO);
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                } else {
+                    let cmd = ExtrudeCommand::new(color);
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                }
+            }
+
+            // ── REVOLVE ────────────────────────────────────────────────────
+            "REVOLVE"|"REV" => {
+                use crate::modules::insert::solid3d_cmds::RevolveCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = RevolveCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── SWEEP ──────────────────────────────────────────────────────
+            "SWEEP" => {
+                use crate::modules::insert::solid3d_cmds::SweepCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = SweepCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── LOFT ───────────────────────────────────────────────────────
+            "LOFT" => {
+                use crate::modules::insert::solid3d_cmds::LoftCommand;
+                let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
+                let cmd = LoftCommand::new(color);
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            // ── OBJ import ───────────────────────────────────────────────
+            "IMPORTOBJ"|"OBJIMPORT" => {
+                return Task::done(Message::ObjImport);
+            }
+
+            // ── STL export ────────────────────────────────────────────────
+            "STLOUT"|"EXPORTSTL" => {
+                return Task::done(Message::StlExport);
+            }
+
+            // STEPOUT — export 3D meshes to STEP AP203 format
+            "STEPOUT"|"EXPORTSTEP"|"STPOUT" => {
+                return Task::done(Message::StepExport);
+            }
+
+            // ── Plot Style Editor GUI ─────────────────────────────────────
+            "PLOTSTYLEPANEL"|"PLOTSTYLEEDITOR"|"STYLESMANAGER" => {
+                return Task::done(Message::PlotStylePanelOpen);
+            }
+
             // ── Plot / Page Setup ──────────────────────────────────────────
-            "PRINT"|"PLOT"|"EXPORT" => {
+            "PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
+            }
+            // PRINT — send current layout to the system default printer.
+            "PRINT" => {
+                return Task::done(Message::PrintToPrinter);
             }
             // PLOTSTYLE — load or clear CTB/STB plot style table
             cmd if cmd == "PLOTSTYLE" || cmd.starts_with("PLOTSTYLE ") => {
@@ -3295,6 +4178,142 @@ fn entity_text_content(entity: &acadrust::EntityType) -> Option<String> {
     }
 }
 
+// ── MASSPROP helpers ───────────────────────────────────────────────────────
+
+struct MassProps {
+    area: f64,
+    perimeter: f64,
+    cx: f64,
+    cy: f64,
+}
+
+fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
+    use std::f64::consts::{PI, TAU};
+
+    match entity {
+        acadrust::EntityType::Circle(c) => {
+            let r = c.radius;
+            Some(MassProps {
+                area: PI * r * r,
+                perimeter: TAU * r,
+                cx: c.center.x,
+                cy: c.center.y,
+            })
+        }
+        acadrust::EntityType::Arc(a) => {
+            let r = a.radius;
+            let span = {
+                let s = ((a.end_angle - a.start_angle) + 360.0) % 360.0;
+                if s < 1e-6 { 360.0 } else { s }
+            };
+            let span_rad = span.to_radians();
+            // Sector area (pie slice)
+            let area = 0.5 * r * r * span_rad;
+            let arc_len = r * span_rad;
+            // Centroid of arc (chord midpoint direction)
+            let mid_rad = (a.start_angle + span / 2.0).to_radians();
+            Some(MassProps {
+                area,
+                perimeter: arc_len,
+                cx: a.center.x + r * mid_rad.cos(),
+                cy: a.center.y + r * mid_rad.sin(),
+            })
+        }
+        acadrust::EntityType::Line(l) => {
+            let dx = l.end.x - l.start.x;
+            let dy = l.end.y - l.start.y;
+            let len = (dx * dx + dy * dy).sqrt();
+            Some(MassProps {
+                area: 0.0,
+                perimeter: len,
+                cx: (l.start.x + l.end.x) / 2.0,
+                cy: (l.start.y + l.end.y) / 2.0,
+            })
+        }
+        acadrust::EntityType::LwPolyline(p) => {
+            let n = p.vertices.len();
+            if n < 2 { return None; }
+            // Shoelace area + perimeter
+            let mut area_sum = 0.0f64;
+            let mut perimeter = 0.0f64;
+            let mut cx_sum = 0.0f64;
+            let mut cy_sum = 0.0f64;
+            let n_segs = if p.is_closed { n } else { n - 1 };
+            for idx in 0..n_segs {
+                let v0 = &p.vertices[idx];
+                let v1 = &p.vertices[(idx + 1) % n];
+                let x0 = v0.location.x;
+                let y0 = v0.location.y;
+                let x1 = v1.location.x;
+                let y1 = v1.location.y;
+                area_sum += x0 * y1 - x1 * y0;
+                perimeter += ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+                cx_sum += (x0 + x1) * (x0 * y1 - x1 * y0);
+                cy_sum += (y0 + y1) * (x0 * y1 - x1 * y0);
+            }
+            let area = (area_sum / 2.0).abs();
+            let (cx, cy) = if area > 1e-12 {
+                (cx_sum / (6.0 * area), cy_sum / (6.0 * area))
+            } else {
+                let sx: f64 = p.vertices.iter().map(|v| v.location.x).sum::<f64>() / n as f64;
+                let sy: f64 = p.vertices.iter().map(|v| v.location.y).sum::<f64>() / n as f64;
+                (sx, sy)
+            };
+            Some(MassProps { area, perimeter, cx, cy })
+        }
+        acadrust::EntityType::Ellipse(e) => {
+            let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
+            let b = a * e.minor_axis_ratio;
+            let t0 = e.start_parameter;
+            let t1 = {
+                let mut t = e.end_parameter;
+                if t <= t0 { t += TAU; }
+                t
+            };
+            let span = t1 - t0;
+            let is_full = (span - TAU).abs() < 1e-6;
+            let area = if is_full {
+                PI * a * b
+            } else {
+                // Sector area of ellipse approximated via 256-pt integration
+                let n = 256usize;
+                let mut s = 0.0f64;
+                for k in 0..n {
+                    let t = t0 + span * (k as f64 / n as f64);
+                    let tp = t0 + span * ((k + 1) as f64 / n as f64);
+                    let nx = e.major_axis.x / a;
+                    let ny = e.major_axis.y / a;
+                    let x0 = a * t.cos() * nx - b * t.sin() * ny;
+                    let y0 = a * t.cos() * ny + b * t.sin() * nx;
+                    let x1 = a * tp.cos() * nx - b * tp.sin() * ny;
+                    let y1 = a * tp.cos() * ny + b * tp.sin() * nx;
+                    s += x0 * y1 - x1 * y0;
+                }
+                (s / 2.0).abs()
+            };
+            // Arc length via 256-pt numerical integration
+            let nx = e.major_axis.x / a.max(1e-12);
+            let ny = e.major_axis.y / a.max(1e-12);
+            let perimeter = {
+                let n = 256usize;
+                let mut len = 0.0f64;
+                for k in 0..n {
+                    let t = t0 + span * (k as f64 / n as f64);
+                    let tp = t0 + span * ((k + 1) as f64 / n as f64);
+                    let x0 = e.center.x + a * t.cos() * nx - b * t.sin() * ny;
+                    let y0 = e.center.y + a * t.cos() * ny + b * t.sin() * nx;
+                    let x1 = e.center.x + a * tp.cos() * nx - b * tp.sin() * ny;
+                    let y1 = e.center.y + a * tp.cos() * ny + b * tp.sin() * nx;
+                    len += (x1 - x0).hypot(y1 - y0);
+                }
+                len
+            };
+            Some(MassProps { area, perimeter, cx: e.center.x, cy: e.center.y })
+        }
+        _ => None,
+    }
+}
+
 fn replace_entity_text(entity: &mut acadrust::EntityType, search: &str, rep: &str) {
     let search_lc = search.to_lowercase();
     match entity {
@@ -3323,3 +4342,71 @@ fn replace_entity_text(entity: &mut acadrust::EntityType, search: &str, rep: &st
     }
 }
 
+
+// ── DATAEXTRACTION ─────────────────────────────────────────────────────────
+
+/// Build a CSV string with one row per entity in model space.
+/// Columns: Type, Handle, Layer, Color, Linetype, ExtraInfo
+fn build_data_extraction_csv(doc: &acadrust::CadDocument) -> String {
+    use acadrust::EntityType;
+
+    let mut out = String::from("Type,Handle,Layer,Color,Linetype,ExtraInfo\n");
+
+    let ms_handle = doc.header.model_space_block_handle;
+    for e in doc.entities() {
+        // Skip Block/EndBlock sentinels and paper-space entities.
+        if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+            continue;
+        }
+        if !ms_handle.is_null() && e.common().owner_handle != ms_handle {
+            continue;
+        }
+        let type_name = entity_type_name(e);
+        let handle = format!("{:X}", e.common().handle.value());
+        let layer = csv_escape(&e.common().layer);
+        let color = format!("{}", e.common().color);
+        let lt = csv_escape(&e.common().linetype);
+        let extra = csv_escape(&entity_extra_info(e));
+        out.push_str(&format!("{type_name},{handle},{layer},{color},{lt},{extra}\n"));
+    }
+    out
+}
+
+/// Return a short geometry summary for CSV ExtraInfo column.
+fn entity_extra_info(entity: &acadrust::EntityType) -> String {
+    use acadrust::EntityType;
+    match entity {
+        EntityType::Line(e) => format!(
+            "({:.3},{:.3})-({:.3},{:.3})",
+            e.start.x, e.start.y, e.end.x, e.end.y
+        ),
+        EntityType::Circle(e) => format!(
+            "C({:.3},{:.3}) R={:.3}",
+            e.center.x, e.center.y, e.radius
+        ),
+        EntityType::Arc(e) => format!(
+            "C({:.3},{:.3}) R={:.3} {:.1}°-{:.1}°",
+            e.center.x, e.center.y, e.radius, e.start_angle, e.end_angle
+        ),
+        EntityType::Text(e) => e.value.clone(),
+        EntityType::MText(e) => e.value.chars().take(60).collect(),
+        EntityType::Insert(e) => format!("BLK={} @({:.3},{:.3})", e.block_name, e.insert_point.x, e.insert_point.y),
+        EntityType::LwPolyline(e) => format!("{} vertices", e.vertices.len()),
+        EntityType::Polyline(e) => format!("{} vertices", e.vertices.len()),
+        EntityType::Polyline2D(e) => format!("{} vertices", e.vertices.len()),
+        EntityType::Polyline3D(e) => format!("{} vertices", e.vertices.len()),
+        EntityType::Hatch(e) => format!("PAT={}", e.pattern.name),
+        EntityType::Dimension(e) => format!("{:.3}", e.base().actual_measurement),
+        EntityType::Spline(e) => format!("{} ctrl pts", e.control_points.len()),
+        _ => String::new(),
+    }
+}
+
+/// Escape a string for a CSV field (wrap in quotes if it contains comma/quote/newline).
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}

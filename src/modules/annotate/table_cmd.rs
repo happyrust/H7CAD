@@ -13,7 +13,19 @@ use acadrust::EntityType;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
+
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/table.svg"));
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "TABLE",
+        label: "Table",
+        icon: ICON,
+        event: ModuleEvent::Command("TABLE".to_string()),
+    }
+}
 
 const DEFAULT_COLS: usize = 3;
 const DEFAULT_ROWS: usize = 4;

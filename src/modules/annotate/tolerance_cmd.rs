@@ -10,7 +10,19 @@ use acadrust::EntityType;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::wire_model::WireModel;
+
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/tolerance.svg"));
+
+pub fn tool() -> ToolDef {
+    ToolDef {
+        id: "TOLERANCE",
+        label: "Tolerance",
+        icon: ICON,
+        event: ModuleEvent::Command("TOLERANCE".to_string()),
+    }
+}
 
 enum Step {
     Text,
