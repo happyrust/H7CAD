@@ -1430,6 +1430,21 @@ impl H7CAD {
                                     self.tabs[i].active_cmd = None;
                                 }
                             }
+                            // DIMTEDIT / MLEADERADD / MLEADERREMOVE: inject cloned entity via trait.
+                            {
+                                let needs_inject = self.tabs[i].active_cmd.as_ref()
+                                    .map(|c| matches!(c.name(), "DIMTEDIT" | "MLEADERADD" | "MLEADERREMOVE"))
+                                    .unwrap_or(false);
+                                if needs_inject {
+                                    if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                                        if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
+                                            cmd.inject_picked_entity(entity);
+                                            let prompt = cmd.prompt();
+                                            self.command_line.push_info(&prompt);
+                                        }
+                                    }
+                                }
+                            }
                             result
                         } else {
                             self.command_line.push_info("Nothing found at that point.");

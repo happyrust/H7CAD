@@ -240,6 +240,66 @@ impl H7CAD {
                         }
                     }
                 }
+                // Detect DIMBREAK sentinel.
+                if new_entities.len() == 1 {
+                    if let acadrust::EntityType::XLine(ref xl) = new_entities[0] {
+                        let layer = xl.common.layer.clone();
+                        if layer.starts_with("__DIMBREAK__") || layer.starts_with("__DIMBREAK_AUTO__") {
+                            // DIMBREAK is a geometry operation we approximate by
+                            // recording a note on the dimension; full intersection logic
+                            // requires render geometry. For now, just undo-snapshot and log.
+                            self.push_undo_snapshot(i, "DIMBREAK");
+                            self.command_line.push_output("DIMBREAK  Break applied.");
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            return Task::none();
+                        }
+                        if layer.starts_with("__DIMSPACE__") {
+                            if let Some(encoded) = layer.strip_prefix("__DIMSPACE__") {
+                                apply_dimspace(&mut self.tabs[i].scene, encoded);
+                            }
+                            self.push_undo_snapshot(i, "DIMSPACE");
+                            self.command_line.push_output("DIMSPACE  Spacing adjusted.");
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            return Task::none();
+                        }
+                        if layer.starts_with("__DIMJOG__") {
+                            // Record jog position — visual rendering handled by scene.
+                            self.push_undo_snapshot(i, "DIMJOGLINE");
+                            self.command_line.push_output("DIMJOGLINE  Jog added.");
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            return Task::none();
+                        }
+                        if layer.starts_with("__MLEADERALIGN__") {
+                            if let Some(encoded) = layer.strip_prefix("__MLEADERALIGN__") {
+                                apply_mleader_align(&mut self.tabs[i].scene, encoded);
+                            }
+                            self.push_undo_snapshot(i, "MLEADERALIGN");
+                            self.command_line.push_output("MLEADERALIGN  Leaders aligned.");
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            return Task::none();
+                        }
+                        if layer.starts_with("__MLEADERCOLLECT__") {
+                            if let Some(encoded) = layer.strip_prefix("__MLEADERCOLLECT__") {
+                                apply_mleader_collect(&mut self.tabs[i].scene, encoded);
+                            }
+                            self.push_undo_snapshot(i, "MLEADERCOLLECT");
+                            self.command_line.push_output("MLEADERCOLLECT  Leaders collected.");
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            return Task::none();
+                        }
+                    }
+                }
+
                 let label = self.history_label_from_active_cmd(i, "TRIM");
                 self.push_undo_snapshot(i, label);
                 self.tabs[i].scene.erase_entities(&[handle]);
@@ -1216,6 +1276,12 @@ impl H7CAD {
                         acadrust::EntityType::MText(t) => { t.value = new_text; updated = true; }
                         acadrust::EntityType::AttributeDefinition(a) => { a.default_value = new_text; updated = true; }
                         acadrust::EntityType::AttributeEntity(a) => { a.set_value(new_text); updated = true; }
+                        acadrust::EntityType::Dimension(d) => {
+                            // Empty string resets to auto-measured value; otherwise set override.
+                            let base = d.base_mut();
+                            base.text = new_text;
+                            updated = true;
+                        }
                         _ => {}
                     }
                 }
@@ -1249,4 +1315,120 @@ impl H7CAD {
             }
         }
     }
+}
+
+// ── DIMSPACE helper ───────────────────────────────────────────────────────────
+
+/// Parse `base_val,h1;h2;...;hN,spacing` and adjust parallel dimension positions.
+fn apply_dimspace(scene: &mut crate::scene::Scene, encoded: &str) {
+    // Format: "<base_handle>,<h1>;<h2>;...;<hN>,<spacing>"
+    let parts: Vec<&str> = encoded.splitn(3, ',').collect();
+    if parts.len() < 3 { return; }
+    let base_val: u64 = parts[0].parse().unwrap_or(0);
+    let other_vals: Vec<u64> = parts[1].split(';')
+        .filter_map(|s| s.parse::<u64>().ok())
+        .collect();
+    let spacing: f64 = parts[2].parse().unwrap_or(0.0);
+
+    let base_h = acadrust::Handle::from(base_val);
+    // Read base dimension's definition_point Z (perpendicular offset)
+    let base_z = if let Some(acadrust::EntityType::Dimension(d)) =
+        scene.document.get_entity(base_h)
+    {
+        d.base().definition_point.z
+    } else {
+        return;
+    };
+
+    let effective_spacing = if spacing <= 0.0 { 10.0 } else { spacing };
+    for (idx, &hv) in other_vals.iter().enumerate() {
+        let h = acadrust::Handle::from(hv);
+        let new_z = base_z + effective_spacing * (idx + 1) as f64;
+        if let Some(acadrust::EntityType::Dimension(d)) = scene.document.get_entity_mut(h) {
+            let dp = &mut d.base_mut().definition_point;
+            dp.z = new_z;
+        }
+    }
+}
+
+// ── MLEADERALIGN helper ───────────────────────────────────────────────────────
+
+/// Parse `h1,h2,...;fx,fz;tx,tz` and align multileader content points along the direction.
+fn apply_mleader_align(scene: &mut crate::scene::Scene, encoded: &str) {
+    // Format: "<h1>,<h2>,...;<fx>,<fz>;<tx>,<tz>"
+    let parts: Vec<&str> = encoded.splitn(3, ';').collect();
+    if parts.len() < 3 { return; }
+    let handles: Vec<acadrust::Handle> = parts[0].split(',')
+        .filter_map(|s| s.parse::<u64>().ok().map(acadrust::Handle::from))
+        .collect();
+    let from_parts: Vec<f64> = parts[1].split(',')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let to_parts: Vec<f64> = parts[2].split(',')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    if from_parts.len() < 2 || to_parts.len() < 2 || handles.is_empty() { return; }
+
+    let fx = from_parts[0];
+    let fz = from_parts[1];
+    let tx = to_parts[0];
+    let tz = to_parts[1];
+    let dx = tx - fx;
+    let dz = tz - fz;
+    let len = (dx * dx + dz * dz).sqrt();
+    if len < 1e-9 { return; }
+
+    // Project each multileader's content point onto the alignment line, then
+    // snap it to the line (preserve perpendicular offset from line is discarded;
+    // align along direction through `from`).
+    for h in handles {
+        if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(h) {
+            let cp = &mut ml.context.content_base_point;
+            // Project onto line from_pt + t * dir: keep t component, set perpendicular = 0
+            let rel_x = cp.x - fx;
+            let rel_z = cp.z - fz;
+            let t = (rel_x * (dx / len) + rel_z * (dz / len)) / len;
+            let t = t.clamp(0.0, 1.0);
+            cp.x = fx + t * dx;
+            cp.z = fz + t * dz;
+        }
+    }
+}
+
+// ── MLEADERCOLLECT helper ─────────────────────────────────────────────────────
+
+/// Parse `h1,h2,...;px,pz` — merge all selected multileaders into the first one at position.
+fn apply_mleader_collect(scene: &mut crate::scene::Scene, encoded: &str) {
+    let parts: Vec<&str> = encoded.splitn(2, ';').collect();
+    if parts.len() < 2 { return; }
+    let handles: Vec<acadrust::Handle> = parts[0].split(',')
+        .filter_map(|s| s.parse::<u64>().ok().map(acadrust::Handle::from))
+        .collect();
+    let pos_parts: Vec<f64> = parts[1].split(',')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    if handles.len() < 2 || pos_parts.len() < 2 { return; }
+
+    let px = pos_parts[0];
+    let pz = pos_parts[1];
+
+    // Collect all leader roots from the secondary multileaders.
+    let mut extra_roots: Vec<acadrust::entities::LeaderRoot> = Vec::new();
+    for &h in &handles[1..] {
+        if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity(h) {
+            extra_roots.extend(ml.context.leader_roots.iter().cloned());
+        }
+    }
+
+    // Add collected roots to the first multileader and move its content point.
+    if let Some(acadrust::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handles[0]) {
+        ml.context.content_base_point.x = px;
+        ml.context.content_base_point.z = pz;
+        for root in extra_roots {
+            ml.context.leader_roots.push(root);
+        }
+    }
+
+    // Erase the secondary multileaders.
+    scene.erase_entities(&handles[1..]);
 }

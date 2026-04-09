@@ -1134,6 +1134,76 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
+            "QDIM" => {
+                use crate::modules::annotate::qdim::QdimCommand;
+                let cmd = QdimCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMEDIT"|"DED" => {
+                use crate::modules::annotate::dimedit::DimEditCommand;
+                let cmd = DimEditCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMTEDIT"|"DIMTED" => {
+                use crate::modules::annotate::dimtedit::DimTeditCommand;
+                let cmd = DimTeditCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMBREAK"|"DBR" => {
+                use crate::modules::annotate::dimbreak::DimBreakCommand;
+                let cmd = DimBreakCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMSPACE"|"DSPACE" => {
+                use crate::modules::annotate::dimspace::DimSpaceCommand;
+                let cmd = DimSpaceCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "DIMJOGLINE"|"DJL" => {
+                use crate::modules::annotate::dimjogline::DimJogLineCommand;
+                let cmd = DimJogLineCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERADD"|"MLA" => {
+                use crate::modules::annotate::mleader_edit::MLeaderAddCommand;
+                let cmd = MLeaderAddCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERREMOVE"|"MLR" => {
+                use crate::modules::annotate::mleader_edit::MLeaderRemoveCommand;
+                let cmd = MLeaderRemoveCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERALIGN"|"MLAL" => {
+                use crate::modules::annotate::mleader_edit::MLeaderAlignCommand;
+                let cmd = MLeaderAlignCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
+            "MLEADERCOLLECT"|"MLC" => {
+                use crate::modules::annotate::mleader_edit::MLeaderCollectCommand;
+                let cmd = MLeaderCollectCommand::new();
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
+            }
+
             "ZOOM EXTENTS"|"ZOOMEXTENTS"|"ZE" => {
                 self.tabs[i].scene.fit_all();
                 self.command_line.push_output("Zoom Extents");

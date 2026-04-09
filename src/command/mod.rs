@@ -290,4 +290,9 @@ pub trait CadCommand: Send {
         let _ = obj;
         self.on_point(hit)
     }
+
+    /// Called by update.rs after `on_entity_pick` to inject the cloned entity into commands
+    /// that need to read/modify it (e.g. DIMTEDIT, MLEADERADD, MLEADERREMOVE).
+    /// Default: no-op.
+    fn inject_picked_entity(&mut self, _entity: acadrust::EntityType) {}
 }

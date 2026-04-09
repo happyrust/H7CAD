@@ -6,14 +6,21 @@ pub mod ddedit;
 pub mod diameter_dim;
 pub mod dim_baseline;
 pub mod dim_continue;
+pub mod dimbreak;
+pub mod dimedit;
+pub mod dimjogline;
+pub mod dimspace;
+pub mod dimtedit;
 pub mod leader_cmd;
 pub mod linear_dim;
 pub mod mleader_cmd;
+pub mod mleader_edit;
 pub mod mtext;
+pub mod ordinate_dim;
+pub mod qdim;
 pub mod radius_dim;
 pub mod table_cmd;
 pub mod text;
-pub mod ordinate_dim;
 pub mod tolerance_cmd;
 
 use crate::modules::{CadModule, RibbonGroup, RibbonItem};
@@ -47,6 +54,18 @@ impl CadModule for AnnotateModule {
                         ],
                         default: "MTEXT",
                     },
+                    RibbonItem::Tool(crate::modules::ToolDef {
+                        id: "STYLE",
+                        label: "Text Style",
+                        icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/text_style.svg")),
+                        event: crate::modules::ModuleEvent::Command("STYLE".to_string()),
+                    }),
+                    RibbonItem::Tool(crate::modules::ToolDef {
+                        id: "FIND",
+                        label: "Find",
+                        icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/find.svg")),
+                        event: crate::modules::ModuleEvent::Command("FIND".to_string()),
+                    }),
                 ],
             },
             // ── Dimensions ───────────────────────────────────────────────
@@ -64,12 +83,24 @@ impl CadModule for AnnotateModule {
                             (radius_dim::tool().id,  radius_dim::tool().label,  radius_dim::tool().icon),
                             (diameter_dim::tool().id, diameter_dim::tool().label, diameter_dim::tool().icon),
                             (ordinate_dim::tool().id, ordinate_dim::tool().label, ordinate_dim::tool().icon),
+                            (qdim::tool().id, qdim::tool().label, qdim::tool().icon),
                         ],
                         default: "DIMLINEAR",
                     },
                     RibbonItem::Tool(dim_continue::tool()),
                     RibbonItem::Tool(dim_baseline::tool()),
                     RibbonItem::Tool(tolerance_cmd::tool()),
+                    RibbonItem::Tool(dimedit::tool()),
+                    RibbonItem::Tool(dimtedit::tool()),
+                    RibbonItem::Tool(dimbreak::tool()),
+                    RibbonItem::Tool(dimspace::tool()),
+                    RibbonItem::Tool(dimjogline::tool()),
+                    RibbonItem::Tool(crate::modules::ToolDef {
+                        id: "DIMSTYLE",
+                        label: "Dim Style",
+                        icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/dim_style.svg")),
+                        event: crate::modules::ModuleEvent::Command("DIMSTYLE".to_string()),
+                    }),
                 ],
             },
             // ── Leaders ──────────────────────────────────────────────────
@@ -86,6 +117,10 @@ impl CadModule for AnnotateModule {
                         ],
                         default: "MLEADER",
                     },
+                    RibbonItem::Tool(mleader_edit::tool_add()),
+                    RibbonItem::Tool(mleader_edit::tool_remove()),
+                    RibbonItem::Tool(mleader_edit::tool_align()),
+                    RibbonItem::Tool(mleader_edit::tool_collect()),
                 ],
             },
             // ── Tables ───────────────────────────────────────────────────
