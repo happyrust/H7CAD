@@ -52,6 +52,46 @@
 
 12-15 个工作日
 
+## acadrust API 结构（已分析）
+
+### EntityType enum — 41+ variants
+位于 `acadrust-0.3.3/src/entities/mod.rs`
+
+常用 variant（在 H7CAD 中匹配的）：
+- `Line(Line)`, `Circle(Circle)`, `Arc(Arc)`
+- `Ellipse(Ellipse)`, `Spline(Spline)`
+- `LwPolyline(LwPolyline)`, `Polyline(Polyline)`, `Polyline3D(Polyline3D)`
+- `Text(Text)`, `MText(MText)`
+- `Insert(Insert)`, `Block(Block)`, `BlockEnd(BlockEnd)`
+- `Dimension*`(7 种子类型)
+- `Hatch(Hatch)`, `Solid(Solid)`, `Face3D(Face3D)`
+- `Ray(Ray)`, `XLine(XLine)`
+- `Viewport(Viewport)`
+- `AttributeDefinition(AttributeDefinition)`, `AttributeEntity(AttributeEntity)`
+- `Leader(Leader)`, `MultiLeader(MultiLeader)`
+- `MLine(MLine)`, `Mesh(Mesh)`
+- `RasterImage(RasterImage)`, `Wipeout(Wipeout)`
+- `Solid3D(Solid3D)`, `Region(Region)`, `Body(Body)`
+- `Table(Table)`, `Tolerance(Tolerance)`
+- `Shape(Shape)`, `Underlay(Underlay)`
+- `Seqend(Seqend)`, `Ole2Frame(Ole2Frame)`, `UnknownEntity(UnknownEntity)`
+
+### Entity trait
+```rust
+pub trait Entity {
+    fn handle(&self) -> Handle;
+    fn set_handle(&mut self, handle: Handle);
+    fn layer(&self) -> &str;
+    fn set_layer(&mut self, layer: String);
+    fn color(&self) -> Color;
+    fn bounding_box(&self) -> BoundingBox3D;
+    // ... ~20 methods
+}
+```
+
+### CadDocument 关键字段
+位于 `acadrust-0.3.3/src/document.rs`
+
 ## 风险
 
 1. DWG 支持需要转换层
