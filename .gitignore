@@ -28,3 +28,4 @@ ROADMAP.md
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 ROADMAP.md
+.ace-tool/

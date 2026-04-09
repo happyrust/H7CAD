@@ -1,9 +1,1609 @@
+pub mod tokenizer;
+mod entity_parsers;
+
+use std::fmt;
+
+pub use tokenizer::*;
 use h7cad_native_model::CadDocument;
 
-pub fn read_dxf(_input: &str) -> Result<CadDocument, String> {
-    Err("native DXF reader not implemented yet".to_string())
+// ---------------------------------------------------------------------------
+// DXF Read Error
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DxfReadError {
+    Parse(DxfParseError),
+    UnexpectedToken {
+        expected: String,
+        got_code: i16,
+        got_value: String,
+    },
+    UnexpectedEof {
+        context: &'static str,
+    },
+    UnknownSection(String),
+}
+
+impl From<DxfParseError> for DxfReadError {
+    fn from(e: DxfParseError) -> Self {
+        Self::Parse(e)
+    }
+}
+
+impl fmt::Display for DxfReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(e) => write!(f, "{e}"),
+            Self::UnexpectedToken {
+                expected,
+                got_code,
+                got_value,
+            } => write!(
+                f,
+                "expected {expected}, got ({got_code}, `{got_value}`)"
+            ),
+            Self::UnexpectedEof { context } => write!(f, "unexpected EOF: {context}"),
+            Self::UnknownSection(name) => write!(f, "unknown section `{name}` (skipped)"),
+        }
+    }
+}
+
+impl std::error::Error for DxfReadError {}
+
+// ---------------------------------------------------------------------------
+// Section Names
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DxfSectionName {
+    Header,
+    Classes,
+    Tables,
+    Blocks,
+    Entities,
+    Objects,
+}
+
+impl DxfSectionName {
+    pub fn from_dxf(s: &str) -> Option<Self> {
+        match s.trim() {
+            "HEADER" => Some(Self::Header),
+            "CLASSES" => Some(Self::Classes),
+            "TABLES" => Some(Self::Tables),
+            "BLOCKS" => Some(Self::Blocks),
+            "ENTITIES" => Some(Self::Entities),
+            "OBJECTS" => Some(Self::Objects),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stream Reader — wraps DxfTokenizer with peek / current semantics
+// ---------------------------------------------------------------------------
+
+pub struct DxfStreamReader<'a> {
+    tokenizer: DxfTokenizer<'a>,
+    current: Option<DxfToken>,
+}
+
+impl<'a> DxfStreamReader<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Self {
+            tokenizer: DxfTokenizer::new(input),
+            current: None,
+        }
+    }
+
+    pub fn read_next(&mut self) -> Result<bool, DxfReadError> {
+        match self.tokenizer.next() {
+            Some(Ok(token)) => {
+                self.current = Some(token);
+                Ok(true)
+            }
+            Some(Err(e)) => Err(DxfReadError::Parse(e)),
+            None => {
+                self.current = None;
+                Ok(false)
+            }
+        }
+    }
+
+    pub fn current(&self) -> Option<&DxfToken> {
+        self.current.as_ref()
+    }
+
+    pub fn current_code(&self) -> i16 {
+        self.current.as_ref().map_or(-1, |t| t.code.value())
+    }
+
+    pub fn current_value_trimmed(&self) -> &str {
+        self.current
+            .as_ref()
+            .map(|t| t.raw_value.trim())
+            .unwrap_or("")
+    }
+
+    pub fn find(&mut self, code: i16, value: &str) -> Result<bool, DxfReadError> {
+        loop {
+            if !self.read_next()? {
+                return Ok(false);
+            }
+            if self.current_code() == code && self.current_value_trimmed() == value {
+                return Ok(true);
+            }
+        }
+    }
+
+    pub fn skip_section(&mut self) -> Result<(), DxfReadError> {
+        loop {
+            if !self.read_next()? {
+                return Err(DxfReadError::UnexpectedEof {
+                    context: "expected ENDSEC",
+                });
+            }
+            if self.current_code() == 0 && self.current_value_trimmed() == "ENDSEC" {
+                return Ok(());
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Section readers
+// ---------------------------------------------------------------------------
+
+fn read_header_section(
+    stream: &mut DxfStreamReader<'_>,
+    doc: &mut CadDocument,
+) -> Result<(), DxfReadError> {
+    use h7cad_native_model::DxfVersion;
+
+    while stream.read_next()? {
+        if stream.current_code() == 0 && stream.current_value_trimmed() == "ENDSEC" {
+            return Ok(());
+        }
+
+        if stream.current_code() == 9 {
+            let var_name = stream.current_value_trimmed().to_string();
+
+            if !stream.read_next()? {
+                return Err(DxfReadError::UnexpectedEof {
+                    context: "expected value after header variable",
+                });
+            }
+
+            if var_name == "$ACADVER" {
+                doc.header.version = DxfVersion::from_acadver(stream.current_value_trimmed());
+            }
+        }
+    }
+
+    Err(DxfReadError::UnexpectedEof {
+        context: "expected ENDSEC for HEADER section",
+    })
+}
+
+fn read_classes_section(
+    stream: &mut DxfStreamReader<'_>,
+    doc: &mut CadDocument,
+) -> Result<(), DxfReadError> {
+    use h7cad_native_model::DxfClass;
+
+    while stream.read_next()? {
+        if stream.current_code() == 0 {
+            match stream.current_value_trimmed() {
+                "ENDSEC" => return Ok(()),
+                "CLASS" => {
+                    let mut cls = DxfClass::new();
+                    let mut class_number: i16 = 0;
+                    while stream.read_next()? {
+                        if stream.current_code() == 0 {
+                            if class_number < 500 {
+                                class_number = 500 + doc.classes.len() as i16;
+                            }
+                            let _ = class_number;
+                            doc.classes.push(cls);
+                            match stream.current_value_trimmed() {
+                                "ENDSEC" => return Ok(()),
+                                "CLASS" => {
+                                    cls = DxfClass::new();
+                                    class_number = 0;
+                                    continue;
+                                }
+                                _ => break,
+                            }
+                        }
+                        match stream.current_code() {
+                            1 => cls.dxf_name = stream.current_value_trimmed().to_string(),
+                            2 => cls.cpp_class_name = stream.current_value_trimmed().to_string(),
+                            3 => cls.application_name = stream.current_value_trimmed().to_string(),
+                            90 => {
+                                cls.proxy_flags = stream
+                                    .current_value_trimmed()
+                                    .parse()
+                                    .unwrap_or(0);
+                            }
+                            91 => {
+                                cls.instance_count = stream
+                                    .current_value_trimmed()
+                                    .parse()
+                                    .unwrap_or(0);
+                            }
+                            280 => cls.was_a_proxy = stream.current_value_trimmed() == "1",
+                            281 => cls.is_an_entity = stream.current_value_trimmed() == "1",
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Err(DxfReadError::UnexpectedEof {
+        context: "expected ENDSEC for CLASSES section",
+    })
+}
+
+fn read_tables_section(
+    stream: &mut DxfStreamReader<'_>,
+    doc: &mut CadDocument,
+) -> Result<(), DxfReadError> {
+    while stream.read_next()? {
+        if stream.current_code() == 0 {
+            match stream.current_value_trimmed() {
+                "ENDSEC" => return Ok(()),
+                "TABLE" => read_single_table(stream, doc)?,
+                _ => {}
+            }
+        }
+    }
+    Err(DxfReadError::UnexpectedEof {
+        context: "expected ENDSEC for TABLES section",
+    })
+}
+
+fn read_single_table(
+    stream: &mut DxfStreamReader<'_>,
+    doc: &mut CadDocument,
+) -> Result<(), DxfReadError> {
+    use h7cad_native_model::Handle;
+
+    if !stream.read_next()? {
+        return Err(DxfReadError::UnexpectedEof {
+            context: "expected table name after TABLE",
+        });
+    }
+    let table_name = stream.current_value_trimmed().to_string();
+
+    while stream.read_next()? {
+        if stream.current_code() == 0 {
+            break;
+        }
+    }
+
+    loop {
+        let entry_type = stream.current_value_trimmed().to_string();
+        if entry_type == "ENDTAB" {
+            return Ok(());
+        }
+
+        let mut entry_handle = Handle::NULL;
+        let mut entry_name = String::new();
+
+        while stream.read_next()? {
+            if stream.current_code() == 0 {
+                break;
+            }
+            match stream.current_code() {
+                5 => {
+                    entry_handle = Handle::new(
+                        u64::from_str_radix(stream.current_value_trimmed(), 16).unwrap_or(0),
+                    );
+                }
+                2 => {
+                    entry_name = stream.current_value_trimmed().to_string();
+                }
+                _ => {}
+            }
+        }
+
+        if !entry_name.is_empty() {
+            let table = match table_name.as_str() {
+                "LAYER" => Some(&mut doc.tables.layer),
+                "LTYPE" => Some(&mut doc.tables.linetype),
+                "STYLE" => Some(&mut doc.tables.style),
+                "VIEW" => Some(&mut doc.tables.view),
+                "UCS" => Some(&mut doc.tables.ucs),
+                "APPID" => Some(&mut doc.tables.appid),
+                "DIMSTYLE" => Some(&mut doc.tables.dimstyle),
+                "BLOCK_RECORD" => Some(&mut doc.tables.block_record),
+                "VPORT" => None,
+                _ => None,
+            };
+            if let Some(tbl) = table {
+                tbl.insert(entry_name, entry_handle);
+            }
+        }
+
+        if stream.current().is_none() {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDTAB",
+            });
+        }
+    }
+}
+
+fn read_blocks_section(
+    stream: &mut DxfStreamReader<'_>,
+    doc: &mut CadDocument,
+) -> Result<(), DxfReadError> {
+    use h7cad_native_model::{BlockRecord, Handle};
+
+    loop {
+        if !stream.read_next()? {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDSEC for BLOCKS section",
+            });
+        }
+        if stream.current_code() == 0 {
+            break;
+        }
+    }
+
+    loop {
+        match stream.current_value_trimmed() {
+            "ENDSEC" => return Ok(()),
+            "BLOCK" => {
+                let mut handle = Handle::NULL;
+                let mut name = String::new();
+
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                    match stream.current_code() {
+                        5 => {
+                            handle = Handle::new(
+                                u64::from_str_radix(stream.current_value_trimmed(), 16)
+                                    .unwrap_or(0),
+                            );
+                        }
+                        2 | 3 => {
+                            if name.is_empty() {
+                                name = stream.current_value_trimmed().to_string();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !name.is_empty() && !doc.block_records.contains_key(&handle) {
+                    let record = BlockRecord::new(handle, &name);
+                    doc.insert_block_record(record);
+                }
+
+                loop {
+                    if stream.current().is_none() {
+                        return Err(DxfReadError::UnexpectedEof {
+                            context: "expected ENDBLK",
+                        });
+                    }
+                    let is_endblk = stream.current_value_trimmed() == "ENDBLK";
+                    while stream.read_next()? {
+                        if stream.current_code() == 0 {
+                            break;
+                        }
+                    }
+                    if is_endblk {
+                        break;
+                    }
+                }
+            }
+            _ => {
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if stream.current().is_none() {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDSEC for BLOCKS section",
+            });
+        }
+    }
+}
+
+fn read_entities_section(
+    stream: &mut DxfStreamReader<'_>,
+    doc: &mut CadDocument,
+) -> Result<(), DxfReadError> {
+    loop {
+        if !stream.read_next()? {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDSEC for ENTITIES section",
+            });
+        }
+        if stream.current_code() == 0 {
+            break;
+        }
+    }
+
+    loop {
+        let type_name = stream.current_value_trimmed().to_string();
+        if type_name == "ENDSEC" {
+            return Ok(());
+        }
+
+        if let Some(entity) = read_entity(stream, &type_name)? {
+            doc.entities.push(entity);
+        }
+
+        if stream.current().is_none() {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDSEC for ENTITIES section",
+            });
+        }
+    }
+}
+
+fn read_entity(
+    stream: &mut DxfStreamReader<'_>,
+    type_name: &str,
+) -> Result<Option<h7cad_native_model::Entity>, DxfReadError> {
+    use h7cad_native_model::{Entity, EntityData, Handle};
+    use entity_parsers::*;
+
+    let mut entity = Entity::new(EntityData::Unknown {
+        entity_type: type_name.to_string(),
+    });
+
+    let mut codes: Vec<(i16, String)> = Vec::new();
+    while stream.read_next()? {
+        if stream.current_code() == 0 {
+            break;
+        }
+        codes.push((
+            stream.current_code(),
+            stream.current_value_trimmed().to_string(),
+        ));
+    }
+
+    for &(code, ref val) in &codes {
+        match code {
+            5 => {
+                entity.handle =
+                    Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
+            }
+            8 => entity.layer_name = val.clone(),
+            6 => entity.linetype_name = val.clone(),
+            62 => entity.color_index = val.parse().unwrap_or(256),
+            _ => {}
+        }
+    }
+
+    entity.data = match type_name {
+        "LINE" => parse_line(&codes),
+        "CIRCLE" => parse_circle(&codes),
+        "ARC" => parse_arc(&codes),
+        "POINT" => parse_point(&codes),
+        "LWPOLYLINE" => parse_lwpolyline(&codes),
+        "TEXT" => parse_text(&codes),
+        "ELLIPSE" => parse_ellipse(&codes),
+        "SPLINE" => parse_spline(&codes),
+        "3DFACE" => parse_3dface(&codes),
+        "SOLID" | "TRACE" => parse_solid(&codes),
+        "RAY" => parse_ray_xline(&codes, true),
+        "XLINE" => parse_ray_xline(&codes, false),
+        "MTEXT" => parse_mtext(&codes),
+        "INSERT" => {
+            let (data, has_attribs) = parse_insert(&codes);
+            if has_attribs {
+                entity.data = data;
+                return read_insert_attrib_sequence(stream, entity);
+            }
+            data
+        }
+        "DIMENSION" => parse_dimension(&codes),
+        "HATCH" => parse_hatch(&codes),
+        "VIEWPORT" => parse_viewport(&codes),
+        "ATTRIB" => parse_attrib(&codes),
+        "ATTDEF" => parse_attdef(&codes),
+        "LEADER" => parse_leader(&codes),
+        "MLINE" => parse_mline(&codes),
+        "IMAGE" => parse_image(&codes),
+        "WIPEOUT" => parse_wipeout(&codes),
+        "TOLERANCE" => parse_tolerance(&codes),
+        "SHAPE" => parse_shape(&codes),
+        "3DSOLID" | "BODY" => parse_solid3d(&codes),
+        "REGION" => parse_region(&codes),
+        "MULTILEADER" => EntityData::MultiLeader {},
+        "ACAD_TABLE" => EntityData::Table {},
+        "MESH" => parse_mesh(&codes),
+        "PDFUNDERLAY" | "DWFUNDERLAY" | "DGNUNDERLAY" => parse_underlay(&codes),
+        "SEQEND" => {
+            return Ok(None);
+        }
+        "POLYLINE" => {
+            return read_polyline_sequence(stream, entity, &codes);
+        }
+        _ => EntityData::Unknown {
+            entity_type: type_name.to_string(),
+        },
+    };
+
+    Ok(Some(entity))
+}
+
+fn read_polyline_sequence(
+    stream: &mut DxfStreamReader<'_>,
+    mut entity: h7cad_native_model::Entity,
+    header_codes: &[(i16, String)],
+) -> Result<Option<h7cad_native_model::Entity>, DxfReadError> {
+    use h7cad_native_model::{PolylineType, PolylineVertex};
+
+    let mut flags: i16 = 0;
+    for &(code, ref val) in header_codes {
+        if code == 70 {
+            flags = val.parse().unwrap_or(0);
+        }
+    }
+
+    let polyline_type = if flags & 16 != 0 {
+        PolylineType::PolygonMesh
+    } else if flags & 64 != 0 {
+        PolylineType::PolyfaceMesh
+    } else if flags & 8 != 0 {
+        PolylineType::Polyline3D
+    } else {
+        PolylineType::Polyline2D
+    };
+    let closed = flags & 1 != 0;
+
+    let mut vertices = Vec::new();
+
+    loop {
+        if stream.current().is_none() {
+            break;
+        }
+        let entry_type = stream.current_value_trimmed().to_string();
+        match entry_type.as_str() {
+            "VERTEX" => {
+                let mut pos = [0.0f64; 3];
+                let mut bulge = 0.0;
+                let mut sw = 0.0;
+                let mut ew = 0.0;
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                    match stream.current_code() {
+                        10 => pos[0] = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        20 => pos[1] = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        30 => pos[2] = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        42 => bulge = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        40 => sw = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        41 => ew = stream.current_value_trimmed().parse().unwrap_or(0.0),
+                        _ => {}
+                    }
+                }
+                vertices.push(PolylineVertex {
+                    position: pos,
+                    bulge,
+                    start_width: sw,
+                    end_width: ew,
+                });
+            }
+            "SEQEND" => {
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                }
+                break;
+            }
+            _ => {
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    entity.data = h7cad_native_model::EntityData::Polyline {
+        polyline_type,
+        vertices,
+        closed,
+    };
+    Ok(Some(entity))
+}
+
+fn read_insert_attrib_sequence(
+    stream: &mut DxfStreamReader<'_>,
+    mut entity: h7cad_native_model::Entity,
+) -> Result<Option<h7cad_native_model::Entity>, DxfReadError> {
+    use h7cad_native_model::{Entity, EntityData, Handle};
+    use entity_parsers::*;
+
+    let mut attribs = Vec::new();
+
+    loop {
+        if stream.current().is_none() {
+            break;
+        }
+        let entry_type = stream.current_value_trimmed().to_string();
+        match entry_type.as_str() {
+            "ATTRIB" => {
+                let mut attr = Entity::new(EntityData::Unknown {
+                    entity_type: "ATTRIB".to_string(),
+                });
+                let mut codes: Vec<(i16, String)> = Vec::new();
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                    codes.push((
+                        stream.current_code(),
+                        stream.current_value_trimmed().to_string(),
+                    ));
+                }
+                for &(code, ref val) in &codes {
+                    match code {
+                        5 => attr.handle = Handle::new(u64::from_str_radix(val, 16).unwrap_or(0)),
+                        8 => attr.layer_name = val.clone(),
+                        6 => attr.linetype_name = val.clone(),
+                        62 => attr.color_index = val.parse().unwrap_or(256),
+                        _ => {}
+                    }
+                }
+                attr.data = parse_attrib(&codes);
+                attribs.push(attr);
+            }
+            "SEQEND" => {
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                }
+                break;
+            }
+            _ => {
+                while stream.read_next()? {
+                    if stream.current_code() == 0 {
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    if let EntityData::Insert { attribs: ref mut existing, .. } = entity.data {
+        *existing = attribs;
+    }
+    Ok(Some(entity))
+}
+
+fn read_objects_section(
+    stream: &mut DxfStreamReader<'_>,
+    doc: &mut CadDocument,
+) -> Result<(), DxfReadError> {
+    use h7cad_native_model::{CadObject, Handle, ObjectData};
+
+    loop {
+        if !stream.read_next()? {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDSEC for OBJECTS section",
+            });
+        }
+        if stream.current_code() == 0 {
+            break;
+        }
+    }
+
+    loop {
+        let type_name = stream.current_value_trimmed().to_string();
+        if type_name == "ENDSEC" {
+            return Ok(());
+        }
+
+        let mut handle = Handle::NULL;
+        let mut owner_handle = Handle::NULL;
+        let mut codes: Vec<(i16, String)> = Vec::new();
+
+        while stream.read_next()? {
+            if stream.current_code() == 0 {
+                break;
+            }
+            let code = stream.current_code();
+            let val = stream.current_value_trimmed().to_string();
+            match code {
+                5 => {
+                    handle =
+                        Handle::new(u64::from_str_radix(&val, 16).unwrap_or(0));
+                }
+                330 => {
+                    owner_handle =
+                        Handle::new(u64::from_str_radix(&val, 16).unwrap_or(0));
+                }
+                _ => {}
+            }
+            codes.push((code, val));
+        }
+
+        let data = match type_name.as_str() {
+            "DICTIONARY" | "ACDBDICTIONARYWDFLT" => {
+                let mut entries = Vec::new();
+                let mut current_key = String::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        3 => current_key = val.clone(),
+                        350 | 360 => {
+                            let h = Handle::new(
+                                u64::from_str_radix(val, 16).unwrap_or(0),
+                            );
+                            entries.push((std::mem::take(&mut current_key), h));
+                        }
+                        _ => {}
+                    }
+                }
+                ObjectData::Dictionary { entries }
+            }
+            "XRECORD" => {
+                let data_pairs = codes
+                    .iter()
+                    .filter(|&&(c, _)| c != 5 && c != 330 && c != 100 && c != 102)
+                    .cloned()
+                    .collect();
+                ObjectData::XRecord { data_pairs }
+            }
+            "GROUP" => {
+                let mut description = String::new();
+                let mut entity_handles = Vec::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        300 => description = val.clone(),
+                        340 => {
+                            entity_handles.push(Handle::new(
+                                u64::from_str_radix(val, 16).unwrap_or(0),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                ObjectData::Group {
+                    description,
+                    entity_handles,
+                }
+            }
+            _ => ObjectData::Unknown {
+                object_type: type_name.clone(),
+            },
+        };
+
+        doc.objects.push(CadObject {
+            handle,
+            owner_handle,
+            data,
+        });
+
+        if stream.current().is_none() {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDSEC for OBJECTS section",
+            });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Read a text-format DXF string into a `CadDocument`.
+pub fn read_dxf(input: &str) -> Result<CadDocument, DxfReadError> {
+    let mut stream = DxfStreamReader::new(input);
+    let mut doc = CadDocument::new();
+
+    while stream.find(0, "SECTION")? {
+        if !stream.read_next()? {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected section name after SECTION",
+            });
+        }
+        if stream.current_code() != 2 {
+            return Err(DxfReadError::UnexpectedToken {
+                expected: "group code 2 (section name)".into(),
+                got_code: stream.current_code(),
+                got_value: stream.current_value_trimmed().into(),
+            });
+        }
+
+        let name = stream.current_value_trimmed().to_string();
+
+        match DxfSectionName::from_dxf(&name) {
+            Some(DxfSectionName::Header) => read_header_section(&mut stream, &mut doc)?,
+            Some(DxfSectionName::Classes) => read_classes_section(&mut stream, &mut doc)?,
+            Some(DxfSectionName::Tables) => read_tables_section(&mut stream, &mut doc)?,
+            Some(DxfSectionName::Blocks) => read_blocks_section(&mut stream, &mut doc)?,
+            Some(DxfSectionName::Entities) => read_entities_section(&mut stream, &mut doc)?,
+            Some(DxfSectionName::Objects) => read_objects_section(&mut stream, &mut doc)?,
+            None => stream.skip_section()?,
+        }
+    }
+
+    Ok(doc)
 }
 
 pub fn write_dxf(_doc: &CadDocument) -> Result<String, String> {
     Err("native DXF writer not implemented yet".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_dxf() -> &'static str {
+        concat!(
+            "  0\nSECTION\n  2\nHEADER\n",
+            "  9\n$ACADVER\n  1\nAC1015\n",
+            "  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        )
+    }
+
+    #[test]
+    fn read_dxf_parses_minimal_file() {
+        let doc = read_dxf(minimal_dxf()).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2000);
+    }
+
+    #[test]
+    fn read_dxf_reads_acadver_r2018() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nHEADER\n",
+            "  9\n$ACADVER\n  1\nAC1032\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2018);
+    }
+
+    #[test]
+    fn read_dxf_reads_acadver_r12() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nHEADER\n",
+            "  9\n$ACADVER\n  1\nAC1009\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R12);
+    }
+
+    #[test]
+    fn read_dxf_header_skips_unknown_variables() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nHEADER\n",
+            "  9\n$EXTMIN\n 10\n0.0\n 20\n0.0\n 30\n0.0\n",
+            "  9\n$ACADVER\n  1\nAC1021\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2007);
+    }
+
+    #[test]
+    fn read_dxf_parses_classes_section() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1015\n  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nCLASSES\n",
+            "  0\nCLASS\n  1\nACDB_MLEADERSTYLE\n  2\nAcDbMLeaderStyle\n  3\nACAD\n 90\n4095\n 91\n0\n280\n0\n281\n0\n",
+            "  0\nCLASS\n  1\nACDBDICTIONARYWDFLT\n  2\nAcDbDictionaryWithDefault\n  3\n\n 90\n0\n280\n0\n281\n0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.classes.len(), 2);
+        assert_eq!(doc.classes[0].dxf_name, "ACDB_MLEADERSTYLE");
+        assert_eq!(doc.classes[0].cpp_class_name, "AcDbMLeaderStyle");
+        assert_eq!(doc.classes[0].application_name, "ACAD");
+        assert_eq!(doc.classes[0].proxy_flags, 4095);
+        assert!(!doc.classes[0].is_an_entity);
+        assert_eq!(doc.classes[1].dxf_name, "ACDBDICTIONARYWDFLT");
+    }
+
+    #[test]
+    fn read_dxf_parses_tables_section() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nTABLES\n",
+            "  0\nTABLE\n  2\nLAYER\n  5\n2\n 70\n2\n",
+            "  0\nLAYER\n  5\n10\n100\nAcDbSymbolTableRecord\n100\nAcDbLayerTableRecord\n  2\n0\n 70\n0\n 62\n7\n  6\nContinuous\n",
+            "  0\nLAYER\n  5\n11\n100\nAcDbSymbolTableRecord\n100\nAcDbLayerTableRecord\n  2\nDimensions\n 70\n0\n 62\n1\n  6\nContinuous\n",
+            "  0\nENDTAB\n",
+            "  0\nTABLE\n  2\nLTYPE\n  5\n5\n 70\n1\n",
+            "  0\nLTYPE\n  5\n14\n100\nAcDbSymbolTableRecord\n100\nAcDbLinetypeTableRecord\n  2\nByBlock\n 70\n0\n",
+            "  0\nENDTAB\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.tables.layer.entries.len(), 2);
+        assert!(doc.tables.layer.entries.contains_key("0"));
+        assert!(doc.tables.layer.entries.contains_key("Dimensions"));
+        assert_eq!(
+            doc.tables.layer.entries.get("0"),
+            Some(&h7cad_native_model::Handle::new(0x10))
+        );
+        assert_eq!(doc.tables.linetype.entries.len(), 1);
+        assert!(doc.tables.linetype.entries.contains_key("ByBlock"));
+    }
+
+    #[test]
+    fn read_dxf_parses_blocks_section() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nBLOCKS\n",
+            "  0\nBLOCK\n  5\n20\n  8\n0\n  2\n*Model_Space\n 70\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n  3\n*Model_Space\n  1\n\n",
+            "  0\nENDBLK\n  5\n21\n  8\n0\n",
+            "  0\nBLOCK\n  5\n1C\n  8\n0\n  2\n*Paper_Space\n 70\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n  3\n*Paper_Space\n  1\n\n",
+            "  0\nENDBLK\n  5\n1D\n  8\n0\n",
+            "  0\nBLOCK\n  5\n30\n  8\n0\n  2\nMyBlock\n 70\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n  3\nMyBlock\n  1\n\n",
+            "  0\nLINE\n  5\n31\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n 11\n1.0\n 21\n1.0\n 31\n0.0\n",
+            "  0\nENDBLK\n  5\n32\n  8\n0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert!(doc.tables.block_record.entries.contains_key("MyBlock"));
+        assert_eq!(
+            doc.tables.block_record.entries.get("MyBlock"),
+            Some(&h7cad_native_model::Handle::new(0x30))
+        );
+    }
+
+    #[test]
+    fn read_dxf_parses_entities_line() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nLINE\n  5\nA0\n  8\nLayer1\n 10\n1.0\n 20\n2.0\n 30\n0.0\n 11\n10.0\n 21\n20.0\n 31\n0.0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 1);
+        let e = &doc.entities[0];
+        assert_eq!(e.handle, h7cad_native_model::Handle::new(0xA0));
+        assert_eq!(e.layer_name, "Layer1");
+        match &e.data {
+            h7cad_native_model::EntityData::Line { start, end } => {
+                assert_eq!(*start, [1.0, 2.0, 0.0]);
+                assert_eq!(*end, [10.0, 20.0, 0.0]);
+            }
+            _ => panic!("expected Line"),
+        }
+    }
+
+    #[test]
+    fn read_dxf_parses_entities_circle_arc() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nCIRCLE\n  5\nB0\n  8\n0\n 10\n5.0\n 20\n5.0\n 30\n0.0\n 40\n3.0\n",
+            "  0\nARC\n  5\nB1\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n 40\n10.0\n 50\n45.0\n 51\n135.0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 2);
+
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Circle { center, radius } => {
+                assert_eq!(*center, [5.0, 5.0, 0.0]);
+                assert_eq!(*radius, 3.0);
+            }
+            _ => panic!("expected Circle"),
+        }
+        match &doc.entities[1].data {
+            h7cad_native_model::EntityData::Arc {
+                radius,
+                start_angle,
+                end_angle,
+                ..
+            } => {
+                assert_eq!(*radius, 10.0);
+                assert_eq!(*start_angle, 45.0);
+                assert_eq!(*end_angle, 135.0);
+            }
+            _ => panic!("expected Arc"),
+        }
+    }
+
+    #[test]
+    fn read_dxf_parses_lwpolyline() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nLWPOLYLINE\n  5\nC0\n  8\n0\n 90\n3\n 70\n1\n",
+            " 10\n0.0\n 20\n0.0\n",
+            " 10\n10.0\n 20\n0.0\n",
+            " 10\n10.0\n 20\n10.0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 1);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::LwPolyline { vertices, closed } => {
+                assert!(closed);
+                assert_eq!(vertices.len(), 3);
+                assert_eq!(vertices[0].x, 0.0);
+                assert_eq!(vertices[1].x, 10.0);
+                assert_eq!(vertices[2].y, 10.0);
+            }
+            _ => panic!("expected LwPolyline"),
+        }
+    }
+
+    #[test]
+    fn read_dxf_parses_text() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nTEXT\n  5\nD0\n  8\n0\n 10\n1.0\n 20\n2.0\n 30\n0.0\n 40\n2.5\n  1\nHello World\n 50\n0.0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 1);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Text { height, value, .. } => {
+                assert_eq!(*height, 2.5);
+                assert_eq!(value, "Hello World");
+            }
+            _ => panic!("expected Text"),
+        }
+    }
+
+    #[test]
+    fn read_dxf_parses_polyline_2d() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nPOLYLINE\n  5\nF0\n  8\n0\n 66\n1\n 70\n1\n",
+            "  0\nVERTEX\n  5\nF1\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n",
+            "  0\nVERTEX\n  5\nF2\n  8\n0\n 10\n5.0\n 20\n0.0\n 30\n0.0\n",
+            "  0\nVERTEX\n  5\nF3\n  8\n0\n 10\n5.0\n 20\n5.0\n 30\n0.0\n",
+            "  0\nSEQEND\n  5\nF4\n  8\n0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 1);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Polyline {
+                polyline_type,
+                vertices,
+                closed,
+            } => {
+                assert_eq!(*polyline_type, h7cad_native_model::PolylineType::Polyline2D);
+                assert!(closed);
+                assert_eq!(vertices.len(), 3);
+                assert_eq!(vertices[0].position, [0.0, 0.0, 0.0]);
+                assert_eq!(vertices[1].position, [5.0, 0.0, 0.0]);
+                assert_eq!(vertices[2].position, [5.0, 5.0, 0.0]);
+            }
+            _ => panic!("expected Polyline"),
+        }
+    }
+
+    #[test]
+    fn read_dxf_parses_polyline_3d() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nPOLYLINE\n  5\nG0\n  8\n0\n 66\n1\n 70\n8\n",
+            "  0\nVERTEX\n 10\n0.0\n 20\n0.0\n 30\n0.0\n",
+            "  0\nVERTEX\n 10\n1.0\n 20\n2.0\n 30\n3.0\n",
+            "  0\nSEQEND\n",
+            "  0\nLINE\n  5\nG1\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n 11\n1.0\n 21\n1.0\n 31\n0.0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 2);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Polyline {
+                polyline_type,
+                vertices,
+                ..
+            } => {
+                assert_eq!(*polyline_type, h7cad_native_model::PolylineType::Polyline3D);
+                assert_eq!(vertices.len(), 2);
+                assert_eq!(vertices[1].position, [1.0, 2.0, 3.0]);
+            }
+            _ => panic!("expected Polyline"),
+        }
+        assert!(matches!(
+            doc.entities[1].data,
+            h7cad_native_model::EntityData::Line { .. }
+        ));
+    }
+
+    #[test]
+    fn read_dxf_unknown_entity_preserved() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nHELIX\n  5\nE0\n  8\n0\n 70\n0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 1);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Unknown { entity_type } => {
+                assert_eq!(entity_type, "HELIX");
+            }
+            _ => panic!("expected Unknown"),
+        }
+    }
+
+    #[test]
+    fn read_dxf_skips_unknown_sections() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nTHUMBNAILIMAGE\n",
+            " 90\n12345\n",
+            "  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nHEADER\n",
+            "  9\n$ACADVER\n  1\nAC1015\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2000);
+    }
+
+    #[test]
+    fn read_dxf_handles_all_six_sections() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nHEADER\n  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nCLASSES\n  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nTABLES\n  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nBLOCKS\n  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nOBJECTS\n  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2000);
+    }
+
+    #[test]
+    fn read_dxf_errors_on_missing_section_name() {
+        let input = "  0\nSECTION\n";
+        let err = read_dxf(input).unwrap_err();
+        assert!(matches!(err, DxfReadError::UnexpectedEof { .. }));
+    }
+
+    #[test]
+    fn read_dxf_errors_on_wrong_code_after_section() {
+        let input = "  0\nSECTION\n  0\nHEADER\n  0\nENDSEC\n  0\nEOF\n";
+        let err = read_dxf(input).unwrap_err();
+        assert!(matches!(err, DxfReadError::UnexpectedToken { .. }));
+    }
+
+    #[test]
+    fn read_dxf_errors_on_missing_endsec() {
+        let input = "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1015\n";
+        let err = read_dxf(input).unwrap_err();
+        assert!(matches!(err, DxfReadError::UnexpectedEof { .. }));
+    }
+
+    #[test]
+    fn section_name_from_dxf_roundtrip() {
+        assert_eq!(DxfSectionName::from_dxf("HEADER"), Some(DxfSectionName::Header));
+        assert_eq!(DxfSectionName::from_dxf("CLASSES"), Some(DxfSectionName::Classes));
+        assert_eq!(DxfSectionName::from_dxf("TABLES"), Some(DxfSectionName::Tables));
+        assert_eq!(DxfSectionName::from_dxf("BLOCKS"), Some(DxfSectionName::Blocks));
+        assert_eq!(DxfSectionName::from_dxf("ENTITIES"), Some(DxfSectionName::Entities));
+        assert_eq!(DxfSectionName::from_dxf("OBJECTS"), Some(DxfSectionName::Objects));
+        assert_eq!(DxfSectionName::from_dxf("THUMBNAILIMAGE"), None);
+        assert_eq!(DxfSectionName::from_dxf(""), None);
+    }
+
+    #[test]
+    fn stream_reader_find_and_skip() {
+        let input = "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  0\nENDSEC\n  0\nEOF\n";
+        let mut stream = DxfStreamReader::new(input);
+
+        assert!(stream.find(0, "SECTION").unwrap());
+        assert!(stream.read_next().unwrap());
+        assert_eq!(stream.current_code(), 2);
+        assert_eq!(stream.current_value_trimmed(), "HEADER");
+
+        stream.skip_section().unwrap();
+        assert_eq!(stream.current_code(), 0);
+        assert_eq!(stream.current_value_trimmed(), "ENDSEC");
+
+        assert!(!stream.find(0, "SECTION").unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration: ACadSharp DXF samples
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_acad_sample_ac1015() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found at {path}");
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2000);
+        assert!(!doc.entities.is_empty(), "should have entities");
+        assert!(
+            !doc.tables.layer.entries.is_empty(),
+            "should have layers"
+        );
+        eprintln!(
+            "AC1015: {} entities, {} layers, {} classes, {} block_records",
+            doc.entities.len(),
+            doc.tables.layer.entries.len(),
+            doc.classes.len(),
+            doc.tables.block_record.entries.len(),
+        );
+    }
+
+    #[test]
+    fn read_acad_sample_ac1009() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1009_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found");
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R12);
+        eprintln!(
+            "AC1009: {} entities, {} layers",
+            doc.entities.len(),
+            doc.tables.layer.entries.len(),
+        );
+    }
+
+    #[test]
+    fn read_acad_sample_ac1018() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1018_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found");
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2004);
+        assert!(!doc.entities.is_empty());
+        eprintln!(
+            "AC1018: {} entities, {} layers, {} objects",
+            doc.entities.len(),
+            doc.tables.layer.entries.len(),
+            doc.objects.len(),
+        );
+    }
+
+    #[test]
+    fn read_acad_sample_ac1021() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1021_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found");
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2007);
+        assert!(!doc.entities.is_empty());
+        eprintln!(
+            "AC1021: {} entities, {} layers, {} objects",
+            doc.entities.len(),
+            doc.tables.layer.entries.len(),
+            doc.objects.len(),
+        );
+    }
+
+    #[test]
+    fn read_acad_sample_ac1024() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1024_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found");
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2010);
+        assert!(!doc.entities.is_empty());
+        eprintln!(
+            "AC1024: {} entities, {} layers, {} objects",
+            doc.entities.len(),
+            doc.tables.layer.entries.len(),
+            doc.objects.len(),
+        );
+    }
+
+    #[test]
+    fn read_acad_sample_ac1027() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1027_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found");
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2013);
+        assert!(!doc.entities.is_empty());
+        eprintln!(
+            "AC1027: {} entities, {} layers, {} objects",
+            doc.entities.len(),
+            doc.tables.layer.entries.len(),
+            doc.objects.len(),
+        );
+    }
+
+    #[test]
+    fn entity_type_distribution_ac1015() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for e in &doc.entities {
+            let name = match &e.data {
+                h7cad_native_model::EntityData::Line { .. } => "LINE",
+                h7cad_native_model::EntityData::Circle { .. } => "CIRCLE",
+                h7cad_native_model::EntityData::Arc { .. } => "ARC",
+                h7cad_native_model::EntityData::Point { .. } => "POINT",
+                h7cad_native_model::EntityData::Ellipse { .. } => "ELLIPSE",
+                h7cad_native_model::EntityData::Spline { .. } => "SPLINE",
+                h7cad_native_model::EntityData::LwPolyline { .. } => "LWPOLYLINE",
+                h7cad_native_model::EntityData::Polyline { .. } => "POLYLINE",
+                h7cad_native_model::EntityData::Text { .. } => "TEXT",
+                h7cad_native_model::EntityData::MText { .. } => "MTEXT",
+                h7cad_native_model::EntityData::Insert { .. } => "INSERT",
+                h7cad_native_model::EntityData::Dimension { .. } => "DIMENSION",
+                h7cad_native_model::EntityData::Hatch { .. } => "HATCH",
+                h7cad_native_model::EntityData::Leader { .. } => "LEADER",
+                h7cad_native_model::EntityData::Attrib { .. } => "ATTRIB",
+                h7cad_native_model::EntityData::AttDef { .. } => "ATTDEF",
+                h7cad_native_model::EntityData::Viewport { .. } => "VIEWPORT",
+                h7cad_native_model::EntityData::Face3D { .. } => "3DFACE",
+                h7cad_native_model::EntityData::Solid { .. } => "SOLID",
+                h7cad_native_model::EntityData::Ray { .. } => "RAY",
+                h7cad_native_model::EntityData::XLine { .. } => "XLINE",
+                h7cad_native_model::EntityData::MLine { .. } => "MLINE",
+                h7cad_native_model::EntityData::Image { .. } => "IMAGE",
+                h7cad_native_model::EntityData::Wipeout { .. } => "WIPEOUT",
+                h7cad_native_model::EntityData::Tolerance { .. } => "TOLERANCE",
+                h7cad_native_model::EntityData::Shape { .. } => "SHAPE",
+                h7cad_native_model::EntityData::Solid3D { .. } => "3DSOLID",
+                h7cad_native_model::EntityData::Region { .. } => "REGION",
+                h7cad_native_model::EntityData::MultiLeader { .. } => "MULTILEADER",
+                h7cad_native_model::EntityData::Table { .. } => "ACAD_TABLE",
+                h7cad_native_model::EntityData::Mesh { .. } => "MESH",
+                h7cad_native_model::EntityData::PdfUnderlay { .. } => "PDFUNDERLAY",
+                h7cad_native_model::EntityData::Unknown { entity_type } => entity_type.as_str(),
+            };
+            *counts.entry(name.to_string()).or_default() += 1;
+        }
+        eprintln!("Entity type distribution (AC1015):");
+        for (name, count) in &counts {
+            eprintln!("  {name}: {count}");
+        }
+    }
+
+    #[test]
+    fn hatch_boundary_paths_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        let hatches: Vec<_> = doc
+            .entities
+            .iter()
+            .filter(|e| matches!(&e.data, h7cad_native_model::EntityData::Hatch { .. }))
+            .collect();
+        assert!(!hatches.is_empty(), "should have HATCH entities");
+        let mut total_paths = 0;
+        let mut total_edges = 0;
+        for h in &hatches {
+            if let h7cad_native_model::EntityData::Hatch {
+                boundary_paths, ..
+            } = &h.data
+            {
+                total_paths += boundary_paths.len();
+                for bp in boundary_paths {
+                    total_edges += bp.edges.len();
+                }
+            }
+        }
+        eprintln!(
+            "HATCH: {} entities, {} boundary paths, {} edges",
+            hatches.len(),
+            total_paths,
+            total_edges,
+        );
+        assert!(total_paths > 0, "should parse boundary paths");
+        assert!(total_edges > 0, "should parse boundary edges");
+    }
+
+    #[test]
+    fn read_dxf_parses_insert_with_attribs() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nINSERT\n  5\nA0\n  8\n0\n  2\nMyBlock\n 10\n1.0\n 20\n2.0\n 30\n0.0\n 66\n1\n",
+            "  0\nATTRIB\n  5\nA1\n  8\n0\n  2\nTAG1\n  1\nValue1\n 10\n0.0\n 20\n0.0\n 30\n0.0\n 40\n2.5\n",
+            "  0\nATTRIB\n  5\nA2\n  8\n0\n  2\nTAG2\n  1\nValue2\n 10\n0.0\n 20\n0.0\n 30\n0.0\n 40\n2.5\n",
+            "  0\nSEQEND\n  5\nA3\n  8\n0\n",
+            "  0\nLINE\n  5\nB0\n  8\n0\n 10\n0.0\n 20\n0.0\n 30\n0.0\n 11\n1.0\n 21\n1.0\n 31\n0.0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 2);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Insert {
+                block_name,
+                has_attribs,
+                attribs,
+                ..
+            } => {
+                assert_eq!(block_name, "MyBlock");
+                assert!(has_attribs);
+                assert_eq!(attribs.len(), 2);
+                match &attribs[0].data {
+                    h7cad_native_model::EntityData::Attrib { tag, value, .. } => {
+                        assert_eq!(tag, "TAG1");
+                        assert_eq!(value, "Value1");
+                    }
+                    _ => panic!("expected Attrib"),
+                }
+            }
+            _ => panic!("expected Insert"),
+        }
+        assert!(matches!(
+            doc.entities[1].data,
+            h7cad_native_model::EntityData::Line { .. }
+        ));
+    }
+
+    #[test]
+    fn read_acad_sample_ac1032() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1032_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            eprintln!("skipping: sample file not found at {path}");
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2018);
+        assert!(!doc.entities.is_empty(), "should have entities");
+        eprintln!(
+            "AC1032: {} entities, {} layers, {} classes",
+            doc.entities.len(),
+            doc.tables.layer.entries.len(),
+            doc.classes.len(),
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Tokenizer tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tokenizer_reads_group_code_pairs() {
+        let input = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n";
+        let tokens = tokenize_dxf(input).unwrap();
+
+        assert_eq!(
+            tokens,
+            vec![
+                DxfToken::new(GroupCode::new(0).unwrap(), "SECTION"),
+                DxfToken::new(GroupCode::new(2).unwrap(), "HEADER"),
+                DxfToken::new(GroupCode::new(0).unwrap(), "ENDSEC"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenizer_reports_missing_value_line() {
+        let err = tokenize_dxf("0\nSECTION\n2\n").unwrap_err();
+
+        assert_eq!(
+            err,
+            DxfParseError::UnexpectedEndOfInput {
+                expected: "value line",
+                line: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn tokenizer_rejects_negative_group_codes() {
+        let err = tokenize_dxf("-1\noops\n").unwrap_err();
+
+        assert_eq!(err, DxfParseError::InvalidGroupCode("-1".to_string()));
+    }
+
+    #[test]
+    fn decode_supports_common_scalar_types() {
+        let string_token = DxfToken::new(GroupCode::new(8).unwrap(), "Layer0");
+        let double_token = DxfToken::new(GroupCode::new(10).unwrap(), "12.5");
+        let short_token = DxfToken::new(GroupCode::new(70).unwrap(), "7");
+        let bool_token = DxfToken::new(GroupCode::new(290).unwrap(), "1");
+        let long_token = DxfToken::new(GroupCode::new(420).unwrap(), "16711680");
+        let binary_token = DxfToken::new(GroupCode::new(1004).unwrap(), "0A0B");
+
+        assert_eq!(string_token.decode().unwrap(), DxfValue::Str("Layer0".into()));
+        assert_eq!(double_token.decode().unwrap(), DxfValue::Double(12.5));
+        assert_eq!(short_token.decode().unwrap(), DxfValue::Short(7));
+        assert_eq!(bool_token.decode().unwrap(), DxfValue::Bool(true));
+        assert_eq!(long_token.decode().unwrap(), DxfValue::Long(16_711_680));
+        assert_eq!(binary_token.decode().unwrap(), DxfValue::Binary(vec![0x0A, 0x0B]));
+    }
+
+    #[test]
+    fn decode_reports_invalid_scalars() {
+        let err = DxfToken::new(GroupCode::new(10).unwrap(), "abc")
+            .decode()
+            .unwrap_err();
+        assert_eq!(
+            err,
+            DxfDecodeError::new(
+                GroupCode::new(10).unwrap(),
+                "abc",
+                "invalid numeric value"
+            )
+        );
+
+        let err = DxfToken::new(GroupCode::new(290).unwrap(), "2")
+            .decode()
+            .unwrap_err();
+        assert_eq!(
+            err,
+            DxfDecodeError::new(GroupCode::new(290).unwrap(), "2", "expected boolean 0 or 1")
+        );
+    }
 }

@@ -6,10 +6,17 @@ pub enum NativeFormat {
     Dwg,
 }
 
-pub fn load(_format: NativeFormat, _bytes: &[u8]) -> Result<CadDocument, String> {
-    Err("native facade not implemented yet".to_string())
+pub fn load(format: NativeFormat, bytes: &[u8]) -> Result<CadDocument, String> {
+    match format {
+        NativeFormat::Dxf => {
+            let text = std::str::from_utf8(bytes)
+                .map_err(|e| format!("invalid UTF-8 in DXF: {e}"))?;
+            h7cad_native_dxf::read_dxf(text).map_err(|e| e.to_string())
+        }
+        NativeFormat::Dwg => Err("native DWG reader not implemented yet".to_string()),
+    }
 }
 
 pub fn save(_format: NativeFormat, _doc: &CadDocument) -> Result<Vec<u8>, String> {
-    Err("native facade not implemented yet".to_string())
+    Err("native save not implemented yet".to_string())
 }

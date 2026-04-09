@@ -1,0 +1,4 @@
+commands:
+  test: cargo test --workspace
+  build: cargo build --workspace
+  run: cargo run
