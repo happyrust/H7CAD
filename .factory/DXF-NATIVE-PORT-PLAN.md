@@ -138,15 +138,20 @@
 |---------|------|----------------|
 | m1-dxf-objects-section-reader | ✅ | 对象分发框架 + handle/owner 提取 |
 | m1-dxf-object-dictionary | ✅ | DICTIONARY / ACDBDICTIONARYWDFLT（key→handle 条目） |
-| m1-dxf-object-imagedef | ⬜ | IMAGEDEF / IMAGEDEF_REACTOR（Unknown 兜底） |
+| m1-dxf-object-imagedef | ✅ | IMAGEDEF（file_name/size）+ IMAGEDEF_REACTOR（image_handle） |
 | m1-dxf-object-xrecord | ✅ | XRECORD（data_pairs 保留） |
 | m1-dxf-object-group | ✅ | GROUP（description + entity_handles） |
-| m1-dxf-object-mlinestyle | ⬜ | MLINESTYLE（Unknown 兜底） |
-| m1-dxf-object-layout | ⬜ | LAYOUT（Unknown 兜底） |
-| m1-dxf-object-plotsettings | ⬜ | PLOTSETTINGS（Unknown 兜底） |
-| m1-dxf-object-tablestyle | ⬜ | TABLESTYLE（Unknown 兜底） |
-| m1-dxf-object-mleaderstyle | ⬜ | MLEADERSTYLE（Unknown 兜底） |
-| m1-dxf-object-sortentstable | ⬜ | SORTENTSTABLE（Unknown 兜底） |
+| m1-dxf-object-mlinestyle | ✅ | MLINESTYLE（name/description/element_count） |
+| m1-dxf-object-layout | ✅ | LAYOUT（name/tab_order/block_record_handle/plot_paper_size/plot_origin） |
+| m1-dxf-object-plotsettings | ✅ | PLOTSETTINGS（page_name/printer_name/paper_size） |
+| m1-dxf-object-tablestyle | ✅ | TABLESTYLE（name/description） |
+| m1-dxf-object-mleaderstyle | ✅ | MLEADERSTYLE（name/content_type/text_style_handle） |
+| m1-dxf-object-sortentstable | ✅ | SORTENTSTABLE（entity_handles/sort_handles） |
+| m1-dxf-object-dictionaryvar | ✅ | DICTIONARYVAR（schema/value） |
+| m1-dxf-object-scale | ✅ | SCALE（name/paper_units/drawing_units/is_unit_scale） |
+| m1-dxf-object-visualstyle | ✅ | VISUALSTYLE（description/style_type） |
+| m1-dxf-object-material | ✅ | MATERIAL（name） |
+| m1-dxf-object-dimassoc | ✅ | DIMASSOC（associativity/dimension_handle） |
 
 ### Phase 11：组码映射框架
 
