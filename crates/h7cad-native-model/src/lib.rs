@@ -366,6 +366,14 @@ pub struct Entity {
     pub layer_name: String,
     pub linetype_name: String,
     pub color_index: i16,
+    /// True color (code 420) as packed RGB, 0 = not set
+    pub true_color: i32,
+    /// Line weight in 1/100 mm (code 370), -1=ByLayer, -2=ByBlock, -3=Default
+    pub lineweight: i16,
+    /// 0=visible, 1=invisible (code 60)
+    pub invisible: bool,
+    /// Transparency (code 440), 0=fully opaque
+    pub transparency: i32,
     pub data: EntityData,
 }
 
@@ -376,6 +384,10 @@ impl Entity {
             layer_name: "0".into(),
             linetype_name: String::new(),
             color_index: 256, // BYLAYER
+            true_color: 0,
+            lineweight: -1, // ByLayer
+            invisible: false,
+            transparency: 0,
             data,
         }
     }

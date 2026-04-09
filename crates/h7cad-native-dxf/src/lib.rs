@@ -482,6 +482,10 @@ fn read_entity(
             8 => entity.layer_name = val.clone(),
             6 => entity.linetype_name = val.clone(),
             62 => entity.color_index = val.parse().unwrap_or(256),
+            420 => entity.true_color = val.parse().unwrap_or(0),
+            370 => entity.lineweight = val.parse().unwrap_or(-1),
+            60 => entity.invisible = val.parse::<i16>().unwrap_or(0) != 0,
+            440 => entity.transparency = val.parse().unwrap_or(0),
             _ => {}
         }
     }
