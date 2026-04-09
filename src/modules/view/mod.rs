@@ -1,15 +1,30 @@
-// View module — navigation, visual styles, and viewport presets.
+// View module — viewport tools, navigation, visual styles, palettes, interface.
 
+mod cascade;
+mod file_tabs;
 mod hidden;
+mod layout_tabs;
+mod navbar;
 mod orbit;
 mod ortho;
 mod pan;
 mod persp;
+mod properties_palette;
+mod sheetset;
 mod solid;
+mod tile_horiz;
+mod tile_vert;
+mod tool_palettes;
+mod ucs_icon;
+mod viewcube;
 mod view_front;
 mod view_iso;
 mod view_right;
 mod view_top;
+mod vports_config;
+mod vports_join;
+mod vports_named;
+mod vports_restore;
 mod wireframe;
 mod xray;
 mod zoom_ext;
@@ -18,7 +33,7 @@ mod zoom_out;
 pub mod plot_window;
 pub mod zoom_window;
 
-use crate::modules::{CadModule, RibbonGroup};
+use crate::modules::{CadModule, RibbonGroup, RibbonItem};
 
 pub struct ViewModule;
 
@@ -32,40 +47,94 @@ impl CadModule for ViewModule {
 
     fn ribbon_groups(&self) -> Vec<RibbonGroup> {
         vec![
+            // ── Viewport Tools ───────────────────────────────────────────────
+            RibbonGroup {
+                title: "Viewport Tools",
+                tools: vec![
+                    RibbonItem::LargeTool(ucs_icon::tool()),
+                    RibbonItem::LargeTool(viewcube::tool()),
+                    RibbonItem::LargeTool(navbar::tool()),
+                ],
+            },
+            // ── Navigate ─────────────────────────────────────────────────────
             RibbonGroup {
                 title: "Navigate",
                 tools: vec![
-                    zoom_ext::tool().into(),
-                    zoom_in::tool().into(),
-                    zoom_out::tool().into(),
-                    pan::tool().into(),
-                    orbit::tool().into(),
+                    RibbonItem::LargeTool(zoom_ext::tool()),
+                    RibbonItem::Tool(zoom_in::tool()),
+                    RibbonItem::Tool(zoom_out::tool()),
+                    RibbonItem::Tool(pan::tool()),
+                    RibbonItem::Tool(orbit::tool()),
                 ],
             },
+            // ── Model Viewports ───────────────────────────────────────────────
+            RibbonGroup {
+                title: "Model Viewports",
+                tools: vec![
+                    RibbonItem::LargeTool(vports_config::tool()),
+                    RibbonItem::Tool(vports_named::tool()),
+                    RibbonItem::Tool(vports_join::tool()),
+                    RibbonItem::Tool(vports_restore::tool()),
+                ],
+            },
+            // ── Visual Style ──────────────────────────────────────────────────
             RibbonGroup {
                 // WIREFRAME and SOLID ids are special-cased in ribbon.rs
                 // for toggle-state highlighting based on Ribbon::wireframe.
                 title: "Visual Style",
                 tools: vec![
-                    wireframe::tool().into(),
-                    solid::tool().into(),
-                    hidden::tool().into(),
-                    xray::tool().into(),
+                    RibbonItem::LargeDropdown {
+                        id: "VISUAL_STYLE",
+                        label: "Visual\nStyle",
+                        icon: wireframe::tool().icon,
+                        items: vec![
+                            ("WIREFRAME", "Wireframe", wireframe::tool().icon),
+                            ("SOLID",     "Shaded",   solid::tool().icon),
+                            ("HIDDEN",    "Hidden",   hidden::tool().icon),
+                            ("XRAY",      "X-Ray",    xray::tool().icon),
+                        ],
+                        default: "WIREFRAME",
+                    },
                 ],
             },
+            // ── Projection ────────────────────────────────────────────────────
             RibbonGroup {
                 // ORTHO and PERSP ids are special-cased in ribbon.rs
                 // for toggle-state highlighting based on Camera::projection.
                 title: "Projection",
-                tools: vec![ortho::tool().into(), persp::tool().into()],
+                tools: vec![
+                    RibbonItem::LargeTool(ortho::tool()),
+                    RibbonItem::LargeTool(persp::tool()),
+                ],
             },
+            // ── Preset Views ──────────────────────────────────────────────────
             RibbonGroup {
                 title: "Preset",
                 tools: vec![
-                    view_top::tool().into(),
-                    view_front::tool().into(),
-                    view_right::tool().into(),
-                    view_iso::tool().into(),
+                    RibbonItem::Tool(view_top::tool()),
+                    RibbonItem::Tool(view_front::tool()),
+                    RibbonItem::Tool(view_right::tool()),
+                    RibbonItem::Tool(view_iso::tool()),
+                ],
+            },
+            // ── Palettes ──────────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Palettes",
+                tools: vec![
+                    RibbonItem::LargeTool(tool_palettes::tool()),
+                    RibbonItem::LargeTool(properties_palette::tool()),
+                    RibbonItem::LargeTool(sheetset::tool()),
+                ],
+            },
+            // ── Interface ─────────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Interface",
+                tools: vec![
+                    RibbonItem::LargeTool(file_tabs::tool()),
+                    RibbonItem::LargeTool(layout_tabs::tool()),
+                    RibbonItem::Tool(tile_horiz::tool()),
+                    RibbonItem::Tool(tile_vert::tool()),
+                    RibbonItem::Tool(cascade::tool()),
                 ],
             },
         ]
