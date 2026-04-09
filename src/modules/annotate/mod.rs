@@ -23,7 +23,7 @@ pub mod table_cmd;
 pub mod text;
 pub mod tolerance_cmd;
 
-use crate::modules::{CadModule, RibbonGroup, RibbonItem};
+use crate::modules::{CadModule, RibbonGroup, RibbonItem, StyleKey};
 
 pub struct AnnotateModule;
 
@@ -45,7 +45,7 @@ impl CadModule for AnnotateModule {
                 tools: vec![
                     RibbonItem::LargeDropdown {
                         id: "ANNOTATE_TEXT",
-                        label: "Text",
+                        label: "Multiline\nText",
                         icon: mtext::ICON,
                         items: vec![
                             (mtext::tool().id, mtext::tool().label, mtext::tool().icon),
@@ -54,18 +54,21 @@ impl CadModule for AnnotateModule {
                         ],
                         default: "MTEXT",
                     },
-                    RibbonItem::Tool(crate::modules::ToolDef {
-                        id: "STYLE",
-                        label: "Text Style",
-                        icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/text_style.svg")),
-                        event: crate::modules::ModuleEvent::Command("STYLE".to_string()),
-                    }),
-                    RibbonItem::Tool(crate::modules::ToolDef {
-                        id: "FIND",
-                        label: "Find",
-                        icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/find.svg")),
-                        event: crate::modules::ModuleEvent::Command("FIND".to_string()),
-                    }),
+                    RibbonItem::StyleComboGroup {
+                        style_key: StyleKey::TextStyle,
+                        combo_id: "TEXT_STYLE_COMBO",
+                        manager_cmd: Some("STYLE"),
+                        rows: vec![
+                            vec![
+                                crate::modules::ToolDef {
+                                    id: "FIND",
+                                    label: "Find",
+                                    icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/find.svg")),
+                                    event: crate::modules::ModuleEvent::Command("FIND".to_string()),
+                                },
+                            ],
+                        ],
+                    },
                 ],
             },
             // ── Dimensions ───────────────────────────────────────────────
@@ -87,20 +90,26 @@ impl CadModule for AnnotateModule {
                         ],
                         default: "DIMLINEAR",
                     },
-                    RibbonItem::Tool(dim_continue::tool()),
-                    RibbonItem::Tool(dim_baseline::tool()),
-                    RibbonItem::Tool(tolerance_cmd::tool()),
-                    RibbonItem::Tool(dimedit::tool()),
-                    RibbonItem::Tool(dimtedit::tool()),
-                    RibbonItem::Tool(dimbreak::tool()),
-                    RibbonItem::Tool(dimspace::tool()),
-                    RibbonItem::Tool(dimjogline::tool()),
-                    RibbonItem::Tool(crate::modules::ToolDef {
-                        id: "DIMSTYLE",
-                        label: "Dim Style",
-                        icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/dim_style.svg")),
-                        event: crate::modules::ModuleEvent::Command("DIMSTYLE".to_string()),
-                    }),
+                    RibbonItem::StyleComboGroup {
+                        style_key: StyleKey::DimStyle,
+                        combo_id: "DIM_STYLE_COMBO",
+                        manager_cmd: Some("DIMSTYLE"),
+                        rows: vec![
+                            vec![
+                                qdim::tool(),
+                                dim_continue::tool(),
+                                dim_baseline::tool(),
+                            ],
+                            vec![
+                                tolerance_cmd::tool(),
+                                dimedit::tool(),
+                                dimtedit::tool(),
+                                dimbreak::tool(),
+                                dimspace::tool(),
+                                dimjogline::tool(),
+                            ],
+                        ],
+                    },
                 ],
             },
             // ── Leaders ──────────────────────────────────────────────────
@@ -117,10 +126,21 @@ impl CadModule for AnnotateModule {
                         ],
                         default: "MLEADER",
                     },
-                    RibbonItem::Tool(mleader_edit::tool_add()),
-                    RibbonItem::Tool(mleader_edit::tool_remove()),
-                    RibbonItem::Tool(mleader_edit::tool_align()),
-                    RibbonItem::Tool(mleader_edit::tool_collect()),
+                    RibbonItem::StyleComboGroup {
+                        style_key: StyleKey::MLeaderStyle,
+                        combo_id: "MLEADER_STYLE_COMBO",
+                        manager_cmd: Some("MLEADERSTYLE"),
+                        rows: vec![
+                            vec![
+                                mleader_edit::tool_add(),
+                                mleader_edit::tool_remove(),
+                            ],
+                            vec![
+                                mleader_edit::tool_align(),
+                                mleader_edit::tool_collect(),
+                            ],
+                        ],
+                    },
                 ],
             },
             // ── Tables ───────────────────────────────────────────────────
@@ -128,6 +148,12 @@ impl CadModule for AnnotateModule {
                 title: "Tables",
                 tools: vec![
                     RibbonItem::LargeTool(table_cmd::tool()),
+                    RibbonItem::StyleComboGroup {
+                        style_key: StyleKey::TableStyle,
+                        combo_id: "TABLE_STYLE_COMBO",
+                        manager_cmd: Some("TABLESTYLE"),
+                        rows: vec![],
+                    },
                 ],
             },
             // ── Markup ───────────────────────────────────────────────────

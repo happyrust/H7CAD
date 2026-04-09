@@ -79,6 +79,27 @@ pub enum RibbonItem {
     LayerComboGroup { row2: Vec<ToolDef>, row3: Vec<ToolDef> },
     /// Match Properties (large button) + Color / Linetype / Lineweight combos on the right.
     PropertiesGroup { match_prop: ToolDef },
+    /// A style selector combobox (text / dim / mleader / table style) with
+    /// optional small tool rows below it.
+    StyleComboGroup {
+        /// Which style domain this combo controls.
+        style_key: StyleKey,
+        /// Unique dropdown id (must be unique across the ribbon).
+        combo_id: &'static str,
+        /// Optional command to run when the user opens the style manager.
+        manager_cmd: Option<&'static str>,
+        /// Small tool rows rendered below the combo (0–2 rows).
+        rows: Vec<Vec<ToolDef>>,
+    },
+}
+
+/// Identifies which style list a `StyleComboGroup` refers to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StyleKey {
+    TextStyle,
+    DimStyle,
+    MLeaderStyle,
+    TableStyle,
 }
 
 impl From<ToolDef> for RibbonItem {

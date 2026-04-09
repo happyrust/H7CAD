@@ -295,6 +295,8 @@ pub enum Message {
     RibbonLinetypeChanged(String),
     /// User changed the active lineweight in the Properties toolbar.
     RibbonLineweightChanged(LineWeight),
+    /// User selected a style from a style combobox in the ribbon.
+    RibbonStyleChanged { key: crate::modules::StyleKey, name: String },
 
     // ── Properties panel ──────────────────────────────────────────────────
     /// User selected a layer from the layer pick_list in the Properties panel.

@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use acadrust::types::{Color as AcadColor, LineWeight};
 use iced::widget::tooltip::Position as TipPos;
-use iced::widget::{button, column, container, row, svg, text, tooltip};
+use iced::widget::{button, column, container, row, scrollable, svg, text, tooltip};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
-use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
+use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
 use crate::ui::properties::{LwItem, acad_color_display};
 
 use super::LayerInfo;
@@ -69,6 +69,38 @@ pub(super) const CHECK_COLOR: Color = Color { r: 0.20, g: 0.75, b: 0.35, a: 1.0 
 pub(super) const ICON_COLOR: Color = Color { r: 0.25, g: 0.75, b: 0.45, a: 1.0 };
 pub(super) const LABEL_ON: Color = Color { r: 0.92, g: 0.92, b: 0.92, a: 1.0 };
 pub(super) const LABEL_OFF: Color = Color { r: 0.72, g: 0.72, b: 0.72, a: 1.0 };
+
+// ── Style context (passed from Ribbon to render_large) ────────────────────
+
+pub(super) struct StyleContext {
+    pub text_style_names: Vec<String>,
+    pub active_text_style: String,
+    pub dim_style_names: Vec<String>,
+    pub active_dim_style: String,
+    pub mleader_style_names: Vec<String>,
+    pub active_mleader_style: String,
+    pub table_style_names: Vec<String>,
+    pub active_table_style: String,
+}
+
+impl StyleContext {
+    fn names_for(&self, key: StyleKey) -> &[String] {
+        match key {
+            StyleKey::TextStyle    => &self.text_style_names,
+            StyleKey::DimStyle     => &self.dim_style_names,
+            StyleKey::MLeaderStyle => &self.mleader_style_names,
+            StyleKey::TableStyle   => &self.table_style_names,
+        }
+    }
+    fn active_for(&self, key: StyleKey) -> &str {
+        match key {
+            StyleKey::TextStyle    => &self.active_text_style,
+            StyleKey::DimStyle     => &self.active_dim_style,
+            StyleKey::MLeaderStyle => &self.active_mleader_style,
+            StyleKey::TableStyle   => &self.active_table_style,
+        }
+    }
+}
 
 // ── Layout helpers ─────────────────────────────────────────────────────────
 
@@ -260,7 +292,7 @@ pub(super) fn render_small<'a>(
 
 // ── Large item renderer ────────────────────────────────────────────────────
 
-/// Render a full-height large button (LargeTool, LargeDropdown, or LayerCombo).
+/// Render a full-height large button (LargeTool, LargeDropdown, LayerCombo, StyleCombo).
 pub(super) fn render_large<'a>(
     item: RibbonItem,
     active_tool: &Option<String>,
@@ -273,6 +305,7 @@ pub(super) fn render_large<'a>(
     active_color: AcadColor,
     active_linetype: &'a str,
     active_lineweight: LineWeight,
+    style_ctx: &StyleContext,
 ) -> Element<'a, Message> {
     match item {
         RibbonItem::LargeTool(t) => {
@@ -595,6 +628,185 @@ pub(super) fn render_large<'a>(
                 .into()
         }
 
+        RibbonItem::StyleComboGroup { style_key, combo_id, manager_cmd, rows } => {
+            const STYLE_COMBO_W: f32 = LARGE_W * 2.3;
+            let names: Vec<String> = style_ctx.names_for(style_key).to_vec();
+            let active: String = style_ctx.active_for(style_key).to_string();
+            let is_open = open_dd.as_deref() == Some(combo_id);
+
+            // ── combo button ──
+            let combo_btn = button(
+                row![
+                    container(text(active.clone()).size(11).color(Color::WHITE))
+                        .width(Fill)
+                        .clip(true),
+                    text(if is_open { "▲" } else { "▾" })
+                        .size(9)
+                        .color(Color { r: 0.7, g: 0.7, b: 0.7, a: 1.0 }),
+                ]
+                .spacing(4)
+                .align_y(iced::Center),
+            )
+            .on_press(Message::ToggleRibbonDropdown(combo_id.to_string()))
+            .style(move |_: &Theme, status| button::Style {
+                background: Some(Background::Color(match (is_open, status) {
+                    (true, _) => Color { r: 0.14, g: 0.14, b: 0.14, a: 1.0 },
+                    (_, button::Status::Hovered) => Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
+                    _ => Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 },
+                })),
+                border: Border {
+                    radius: 3.0.into(),
+                    width: 1.0,
+                    color: if is_open {
+                        Color { r: 0.45, g: 0.65, b: 0.90, a: 1.0 }
+                    } else {
+                        Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 }
+                    },
+                },
+                ..Default::default()
+            })
+            .padding([3, 8])
+            .width(Fill);
+
+            // ── style items panel (when open) ──
+            let items_panel: Element<Message> = if is_open {
+                let items_col: Vec<Element<Message>> = names
+                    .into_iter()
+                    .map(|name| {
+                        let is_sel = name.as_str() == active.as_str();
+                        let n = name.clone();
+                        let key = style_key;
+                        button(
+                            row![
+                                text(if is_sel { "✓" } else { " " })
+                                    .size(10)
+                                    .color(if is_sel {
+                                        Color { r: 0.2, g: 0.8, b: 0.4, a: 1.0 }
+                                    } else {
+                                        Color::TRANSPARENT
+                                    }),
+                                text(name).size(11).color(Color::WHITE),
+                            ]
+                            .spacing(6)
+                            .align_y(iced::Center),
+                        )
+                        .on_press(Message::RibbonStyleChanged { key, name: n })
+                        .style(move |_: &Theme, status| button::Style {
+                            background: Some(Background::Color(match status {
+                                button::Status::Hovered | button::Status::Pressed => {
+                                    Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
+                                }
+                                _ if is_sel => Color { r: 0.20, g: 0.35, b: 0.55, a: 1.0 },
+                                _ => Color { r: 0.16, g: 0.16, b: 0.16, a: 1.0 },
+                            })),
+                            ..Default::default()
+                        })
+                        .padding([4, 10])
+                        .width(Fill)
+                        .into()
+                    })
+                    .collect();
+
+                // Optional "Open Manager…" row
+                let mut full_col = items_col;
+                if let Some(mgr_cmd) = manager_cmd {
+                    full_col.push(
+                        button(
+                            text(format!("Manage…")).size(10)
+                                .color(Color { r: 0.5, g: 0.8, b: 1.0, a: 1.0 }),
+                        )
+                        .on_press(Message::Command(mgr_cmd.to_string()))
+                        .style(|_: &Theme, status| button::Style {
+                            background: Some(Background::Color(match status {
+                                button::Status::Hovered => Color { r: 0.24, g: 0.24, b: 0.24, a: 1.0 },
+                                _ => Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 },
+                            })),
+                            ..Default::default()
+                        })
+                        .padding([4, 10])
+                        .width(Fill)
+                        .into(),
+                    );
+                }
+
+                container(
+                    scrollable(
+                        container(column(full_col).spacing(1))
+                            .width(Fill)
+                            .padding(4),
+                    )
+                    .height(Length::Shrink),
+                )
+                .max_height(180.0)
+                .width(Length::Fixed(STYLE_COMBO_W))
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(
+                        Color { r: 0.14, g: 0.14, b: 0.14, a: 0.98 },
+                    )),
+                    border: Border {
+                        color: Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into()
+            } else {
+                iced::widget::Space::new().width(0).height(0).into()
+            };
+
+            // ── tool rows below combo ──
+            let make_tool_row = |tools: Vec<ToolDef>| -> Element<Message> {
+                let btns: Vec<Element<Message>> = tools
+                    .into_iter()
+                    .map(|t| {
+                        let is_active = active_tool.as_deref() == Some(t.id);
+                        let tip = t.label;
+                        let event = t.event.clone();
+                        let icon_el: Element<Message> = match t.icon {
+                            IconKind::Glyph(g) => text(g).size(13).color(Color::WHITE).into(),
+                            IconKind::Svg(bytes) => iced::widget::svg(
+                                iced::widget::svg::Handle::from_memory(bytes),
+                            )
+                            .width(16)
+                            .height(16)
+                            .into(),
+                        };
+                        let msg = module_event_to_message(event);
+                        tooltip(
+                            button(icon_el)
+                                .on_press(msg)
+                                .style(move |_: &Theme, status| tool_btn_style(is_active, status))
+                                .padding([2, 5]),
+                            make_tip(tip.to_string()),
+                            TipPos::Bottom,
+                        )
+                        .gap(4.0)
+                        .delay(Duration::from_millis(400))
+                        .style(tip_style)
+                        .into()
+                    })
+                    .collect();
+                row(btns).spacing(2).align_y(iced::Center).into()
+            };
+
+            let mut col_items: Vec<Element<Message>> = vec![
+                container(row![combo_btn, items_panel].spacing(0))
+                    .width(Fill)
+                    .into(),
+            ];
+            for row_tools in rows {
+                col_items.push(make_tool_row(row_tools));
+            }
+
+            container(column(col_items).spacing(3).align_x(iced::Left))
+                .width(Length::Fixed(STYLE_COMBO_W))
+                .height(Fill)
+                .align_y(iced::Center)
+                .padding(Padding { top: 4.0, bottom: 4.0, left: 4.0, right: 4.0 })
+                .into()
+        }
+
         _ => text("").into(),
     }
 }
@@ -636,6 +848,7 @@ pub(super) fn compute_dropdown_left(
                     | RibbonItem::LargeDropdown { .. }
                     | RibbonItem::LayerComboGroup { .. }
                     | RibbonItem::PropertiesGroup { .. }
+                    | RibbonItem::StyleComboGroup { .. }
             );
             let id: &str = match item {
                 RibbonItem::LargeTool(t) => t.id,
@@ -644,11 +857,13 @@ pub(super) fn compute_dropdown_left(
                 RibbonItem::Dropdown { id, .. } => *id,
                 RibbonItem::LayerComboGroup { .. } => LAYER_COMBO_ID,
                 RibbonItem::PropertiesGroup { match_prop } => match_prop.id,
+                RibbonItem::StyleComboGroup { combo_id, .. } => combo_id,
             };
             let item_w = match item {
                 RibbonItem::LargeTool(_) | RibbonItem::LargeDropdown { .. } => LARGE_W,
                 RibbonItem::LayerComboGroup { .. } => LARGE_W * 2.5,
                 RibbonItem::PropertiesGroup { .. } => LARGE_W + 4.0 + 130.0,
+                RibbonItem::StyleComboGroup { .. } => LARGE_W * 2.3,
                 RibbonItem::Dropdown { .. } => SMALL_W + ARROW_W,
                 _ => SMALL_W,
             };

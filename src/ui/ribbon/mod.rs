@@ -18,7 +18,7 @@ use crate::ui::properties::{LinetypeItem, color_picker_dropdown, lw_options};
 use crate::app::Message;
 
 mod widgets;
-use widgets::*;
+use widgets::{StyleContext, *};
 
 // ── Ribbon state ───────────────────────────────────────────────────────────
 
@@ -43,6 +43,15 @@ pub struct Ribbon {
     pub available_linetypes: Vec<LinetypeItem>,
     /// Whether the full ACI palette is expanded inside the color picker overlay.
     pub prop_color_palette_open: bool,
+    // ── Style selector state ──────────────────────────────────────────────
+    pub text_style_names: Vec<String>,
+    pub active_text_style: String,
+    pub dim_style_names: Vec<String>,
+    pub active_dim_style: String,
+    pub mleader_style_names: Vec<String>,
+    pub active_mleader_style: String,
+    pub table_style_names: Vec<String>,
+    pub active_table_style: String,
 }
 
 /// Per-layer display data shown in the ribbon layer dropdown.
@@ -82,7 +91,32 @@ impl Ribbon {
                 art: String::new(),
             }],
             prop_color_palette_open: false,
+            text_style_names: vec!["Standard".to_string()],
+            active_text_style: "Standard".to_string(),
+            dim_style_names: vec!["Standard".to_string()],
+            active_dim_style: "Standard".to_string(),
+            mleader_style_names: vec!["Standard".to_string()],
+            active_mleader_style: "Standard".to_string(),
+            table_style_names: vec!["Standard".to_string()],
+            active_table_style: "Standard".to_string(),
         }
+    }
+
+    pub fn set_styles(
+        &mut self,
+        text: Vec<String>, active_text: &str,
+        dim: Vec<String>, active_dim: &str,
+        mleader: Vec<String>, active_mleader: &str,
+        table: Vec<String>, active_table: &str,
+    ) {
+        self.text_style_names = text;
+        self.active_text_style = active_text.to_string();
+        self.dim_style_names = dim;
+        self.active_dim_style = active_dim.to_string();
+        self.mleader_style_names = mleader;
+        self.active_mleader_style = active_mleader.to_string();
+        self.table_style_names = table;
+        self.active_table_style = active_table.to_string();
     }
 
     pub fn set_layers(&mut self, infos: Vec<LayerInfo>, active: &str) {
@@ -274,6 +308,16 @@ impl Ribbon {
                 let active_color = self.active_color;
                 let active_linetype = &self.active_linetype;
                 let active_lineweight = self.active_lineweight;
+                let style_ctx = StyleContext {
+                    text_style_names: self.text_style_names.clone(),
+                    active_text_style: self.active_text_style.clone(),
+                    dim_style_names: self.dim_style_names.clone(),
+                    active_dim_style: self.active_dim_style.clone(),
+                    mleader_style_names: self.mleader_style_names.clone(),
+                    active_mleader_style: self.active_mleader_style.clone(),
+                    table_style_names: self.table_style_names.clone(),
+                    active_table_style: self.active_table_style.clone(),
+                };
 
                 let mut widgets: Vec<Element<Message>> = Vec::new();
                 let mut first_group = true;
@@ -303,6 +347,7 @@ impl Ribbon {
                             | RibbonItem::LargeDropdown { .. }
                             | RibbonItem::LayerComboGroup { .. }
                             | RibbonItem::PropertiesGroup { .. }
+                            | RibbonItem::StyleComboGroup { .. }
                         );
 
                         if is_large {
@@ -319,6 +364,7 @@ impl Ribbon {
                                 active_color,
                                 active_linetype,
                                 active_lineweight,
+                                &style_ctx,
                             ));
                         } else {
                             small_buf.push(render_small(

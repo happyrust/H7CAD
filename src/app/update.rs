@@ -1929,6 +1929,43 @@ impl H7CAD {
                 Task::none()
             }
 
+            Message::RibbonStyleChanged { key, name } => {
+                use crate::modules::StyleKey;
+                self.ribbon.close_dropdown();
+                match key {
+                    StyleKey::TextStyle => {
+                        self.ribbon.active_text_style = name.clone();
+                        let i = self.active_tab;
+                        let found = self.tabs[i].scene.document.text_styles.iter()
+                            .find(|s| s.name == name)
+                            .map(|ts| ts.handle);
+                        if let Some(h) = found {
+                            self.tabs[i].scene.document.header.current_text_style_handle = h;
+                            self.tabs[i].scene.document.header.current_text_style_name = name;
+                        }
+                    }
+                    StyleKey::DimStyle => {
+                        self.ribbon.active_dim_style = name.clone();
+                        let i = self.active_tab;
+                        let found = self.tabs[i].scene.document.dim_styles.get(&name)
+                            .map(|ds| ds.handle);
+                        if let Some(h) = found {
+                            self.tabs[i].scene.document.header.current_dimstyle_handle = h;
+                            self.tabs[i].scene.document.header.current_dimstyle_name = name;
+                        }
+                    }
+                    StyleKey::MLeaderStyle => {
+                        self.ribbon.active_mleader_style = name.clone();
+                        let i = self.active_tab;
+                        self.tabs[i].active_mleader_style = name;
+                    }
+                    StyleKey::TableStyle => {
+                        self.ribbon.active_table_style = name;
+                    }
+                }
+                Task::none()
+            }
+
             Message::PropLayerChanged(layer) => {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
