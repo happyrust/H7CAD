@@ -15,6 +15,8 @@ use acadrust::io::dwg::DwgReader;
 use acadrust::{CadDocument, DwgWriter, DxfReader, DxfWriter};
 use std::path::{Path, PathBuf};
 
+pub mod native_bridge;
+
 // ── Open ──────────────────────────────────────────────────────────────────
 
 /// Show a file-open dialog and load the selected DWG or DXF file.
