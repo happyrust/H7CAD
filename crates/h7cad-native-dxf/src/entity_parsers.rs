@@ -358,16 +358,42 @@ pub(crate) fn parse_region(codes: &[(i16, String)]) -> EntityData {
 pub(crate) fn parse_mesh(codes: &[(i16, String)]) -> EntityData {
     let mut vertex_count: i32 = 0;
     let mut face_count: i32 = 0;
+    let mut vertices: Vec<[f64; 3]> = Vec::new();
+    let mut face_indices: Vec<i32> = Vec::new();
+    let (mut vx, mut vy) = (0.0_f64, 0.0_f64);
+
+    let mut in_faces = false;
+
     for &(code, ref val) in codes {
         match code {
-            92 => vertex_count = val.parse().unwrap_or(0),
-            93 => face_count = val.parse().unwrap_or(0),
+            91 => { /* subdivision level */ }
+            92 => {
+                vertex_count = val.parse().unwrap_or(0);
+                in_faces = false;
+            }
+            10 => vx = val.parse().unwrap_or(0.0),
+            20 => vy = val.parse().unwrap_or(0.0),
+            30 => {
+                let vz: f64 = val.parse().unwrap_or(0.0);
+                vertices.push([vx, vy, vz]);
+            }
+            93 => {
+                face_count = val.parse().unwrap_or(0);
+                in_faces = true;
+            }
+            90 => {
+                if in_faces {
+                    face_indices.push(val.parse().unwrap_or(0));
+                }
+            }
             _ => {}
         }
     }
     EntityData::Mesh {
         vertex_count,
         face_count,
+        vertices,
+        face_indices,
     }
 }
 

@@ -180,7 +180,7 @@ fn write_tables(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(0, "SECTION");
     w.pair_str(2, "TABLES");
 
-    write_vport_table(w);
+    write_vport_table(w, doc);
     write_ltype_table(w, doc);
     write_layer_table(w, doc);
     write_style_table(w, doc);
@@ -190,10 +190,31 @@ fn write_tables(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(0, "ENDSEC");
 }
 
-fn write_vport_table(w: &mut DxfWriter) {
+fn write_vport_table(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(0, "TABLE");
     w.pair_str(2, "VPORT");
-    w.pair_i16(70, 0);
+    w.pair_i16(70, doc.vports.len() as i16);
+
+    for vp in doc.vports.values() {
+        w.pair_str(0, "VPORT");
+        if vp.handle != Handle::NULL {
+            w.pair_handle(5, vp.handle);
+        }
+        w.pair_str(2, &vp.name);
+        w.pair_i16(70, 0);
+        w.point2d(10, vp.lower_left);
+        w.point2d(11, vp.upper_right);
+        w.point2d(12, vp.view_center);
+        w.pair_f64(40, vp.view_height);
+        w.pair_f64(41, vp.aspect_ratio);
+        w.pair_f64(16, vp.view_direction[0]);
+        w.pair_f64(26, vp.view_direction[1]);
+        w.pair_f64(36, vp.view_direction[2]);
+        w.pair_f64(17, vp.view_target[0]);
+        w.pair_f64(27, vp.view_target[1]);
+        w.pair_f64(37, vp.view_target[2]);
+    }
+
     w.pair_str(0, "ENDTAB");
 }
 
@@ -808,9 +829,18 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
         EntityData::Mesh {
             vertex_count,
             face_count,
+            vertices,
+            face_indices,
         } => {
-            w.pair_i32(91, *vertex_count);
-            w.pair_i32(92, *face_count);
+            w.pair_i32(91, 0);
+            w.pair_i32(92, *vertex_count);
+            for v in vertices {
+                w.point3d(10, *v);
+            }
+            w.pair_i32(93, *face_count);
+            for idx in face_indices {
+                w.pair_i32(90, *idx);
+            }
         }
         EntityData::PdfUnderlay {
             insertion, scale, ..

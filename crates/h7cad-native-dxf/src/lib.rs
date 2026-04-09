@@ -332,7 +332,7 @@ fn read_single_table(
 ) -> Result<(), DxfReadError> {
     use h7cad_native_model::{
         DimStyleProperties, Handle, LayerProperties, LinetypeProperties, LinetypeSegment,
-        TextStyleProperties,
+        TextStyleProperties, VPortProperties,
     };
 
     if !stream.read_next()? {
@@ -350,7 +350,7 @@ fn read_single_table(
 
     let needs_detail = matches!(
         table_name.as_str(),
-        "LAYER" | "LTYPE" | "STYLE" | "DIMSTYLE"
+        "LAYER" | "LTYPE" | "STYLE" | "DIMSTYLE" | "VPORT"
     );
 
     loop {
@@ -455,6 +455,30 @@ fn read_single_table(
                         }
                     }
                     doc.dim_styles.insert(entry_name.clone(), ds);
+                }
+                "VPORT" => {
+                    let mut vp = VPortProperties::new(&entry_name);
+                    vp.handle = entry_handle;
+                    for &(code, ref val) in &codes {
+                        match code {
+                            10 => vp.lower_left[0] = val.parse().unwrap_or(0.0),
+                            20 => vp.lower_left[1] = val.parse().unwrap_or(0.0),
+                            11 => vp.upper_right[0] = val.parse().unwrap_or(1.0),
+                            21 => vp.upper_right[1] = val.parse().unwrap_or(1.0),
+                            12 => vp.view_center[0] = val.parse().unwrap_or(0.0),
+                            22 => vp.view_center[1] = val.parse().unwrap_or(0.0),
+                            40 => vp.view_height = val.parse().unwrap_or(1.0),
+                            41 => vp.aspect_ratio = val.parse().unwrap_or(1.0),
+                            16 => vp.view_direction[0] = val.parse().unwrap_or(0.0),
+                            26 => vp.view_direction[1] = val.parse().unwrap_or(0.0),
+                            36 => vp.view_direction[2] = val.parse().unwrap_or(1.0),
+                            17 => vp.view_target[0] = val.parse().unwrap_or(0.0),
+                            27 => vp.view_target[1] = val.parse().unwrap_or(0.0),
+                            37 => vp.view_target[2] = val.parse().unwrap_or(0.0),
+                            _ => {}
+                        }
+                    }
+                    doc.vports.insert(entry_name.clone(), vp);
                 }
                 _ => {}
             }

@@ -187,6 +187,43 @@ impl DimStyleProperties {
     }
 }
 
+/// Viewport configuration from the VPORT table
+#[derive(Debug, Clone, PartialEq)]
+pub struct VPortProperties {
+    pub handle: Handle,
+    pub name: String,
+    /// Lower-left corner of viewport (code 10/20)
+    pub lower_left: [f64; 2],
+    /// Upper-right corner of viewport (code 11/21)
+    pub upper_right: [f64; 2],
+    /// View center point (code 12/22)
+    pub view_center: [f64; 2],
+    /// View height (code 40)
+    pub view_height: f64,
+    /// View width (code 41 — aspect ratio)
+    pub aspect_ratio: f64,
+    /// View direction (code 16/26/36)
+    pub view_direction: [f64; 3],
+    /// View target point (code 17/27/37)
+    pub view_target: [f64; 3],
+}
+
+impl VPortProperties {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            handle: Handle::NULL,
+            name: name.into(),
+            lower_left: [0.0, 0.0],
+            upper_right: [1.0, 1.0],
+            view_center: [0.0, 0.0],
+            view_height: 1.0,
+            aspect_ratio: 1.0,
+            view_direction: [0.0, 0.0, 1.0],
+            view_target: [0.0, 0.0, 0.0],
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CadDocument {
     pub header: DocumentHeader,
@@ -196,6 +233,7 @@ pub struct CadDocument {
     pub linetypes: BTreeMap<String, LinetypeProperties>,
     pub text_styles: BTreeMap<String, TextStyleProperties>,
     pub dim_styles: BTreeMap<String, DimStyleProperties>,
+    pub vports: BTreeMap<String, VPortProperties>,
     pub block_records: BTreeMap<Handle, BlockRecord>,
     pub layouts: BTreeMap<Handle, Layout>,
     pub root_dictionary: RootDictionary,
@@ -262,6 +300,9 @@ impl CadDocument {
         let mut dim_styles = BTreeMap::new();
         dim_styles.insert("Standard".into(), DimStyleProperties::new("Standard"));
 
+        let mut vports = BTreeMap::new();
+        vports.insert("*Active".into(), VPortProperties::new("*Active"));
+
         Self {
             header: DocumentHeader::default(),
             classes: Vec::new(),
@@ -270,6 +311,7 @@ impl CadDocument {
             linetypes,
             text_styles,
             dim_styles,
+            vports,
             block_records,
             layouts,
             root_dictionary,
@@ -974,6 +1016,8 @@ pub enum EntityData {
     Mesh {
         vertex_count: i32,
         face_count: i32,
+        vertices: Vec<[f64; 3]>,
+        face_indices: Vec<i32>,
     },
     PdfUnderlay {
         insertion: [f64; 3],
