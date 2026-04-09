@@ -24,15 +24,18 @@
 
 | 维度 | 数据 |
 |------|------|
-| Rust 代码量 | ~3200 行 (dxf, 含 writer) + ~1050 行 (model) = ~4250 行 |
-| 测试数 | 55 (51 DXF + 4 Model) |
+| Rust 代码量 | ~3400 行 (dxf, 含 writer) + ~1150 行 (model) = ~4550 行 |
+| 测试数 | 56 (52 DXF + 4 Model) |
 | 实体类型 | 33+ 种，0 Unknown (AC1015) |
 | 对象类型 | 17 种，92% 覆盖 (AC1018) |
 | 表属性 | LAYER/LTYPE/STYLE/DIMSTYLE 详细解析 |
 | Header 变量 | 16 个 ($ACADVER...$HANDSEED) |
 | 交叉引用 | owner_handle + resolve API |
+| XData | 原始 XData 捕获（22 应用名） |
+| Entity 属性 | thickness/extrusion/style_name |
 | DXF Writer | ✅ 完整写入 + roundtrip 验证 |
-| M1 完成度 | **~85%** |
+| VPORT 表 | ✅ view_center/height/direction |
+| M1 完成度 | **~90%** |
 | M2 完成度 | **~90%** (基础 roundtrip 已通过) |
 
 ---
@@ -65,7 +68,7 @@ DxfStreamReader + SECTION/ENDSEC 状态机 + 6 段分发。
 | LTYPE 详细属性 | ✅ | description/pattern_length/segments → LinetypeProperties |
 | STYLE 详细属性 | ✅ | height/width_factor/oblique_angle/font_name → TextStyleProperties |
 | DIMSTYLE 详细属性 | ✅ | dimscale/dimasz/dimexo/dimgap/dimtxt/dimdec/dimlunit/dimaunit → DimStyleProperties |
-| VPORT | ⬜ | 视口配置 |
+| VPORT | ✅ | lower_left/upper_right/view_center/view_height/view_direction/view_target |
 
 ### Phase 5：Blocks Section ✅
 
@@ -111,6 +114,7 @@ DICTIONARY, XRECORD, GROUP, LAYOUT, PLOTSETTINGS, DICTIONARYVAR, SCALE, VISUALST
 | 后处理 | ✅ | handle seed 同步 + pre-seeded 清理 |
 | 交叉引用 API | ✅ | resolve_color/linetype/lineweight, model/paper space, resolve_insert_block |
 | 便捷 API | ✅ | entity_type_counts, compute_extents, model_space_entities |
+| Entity 属性增强 | ✅ | thickness, extrusion, TEXT/MTEXT style_name, XData |
 | Binary DXF | ⬜ | sentinel + Int16 组码 |
 | Legacy 编码 | ⬜ | AC1009 + 非 UTF-8 |
 
@@ -138,11 +142,11 @@ DICTIONARY, XRECORD, GROUP, LAYOUT, PLOTSETTINGS, DICTIONARYVAR, SCALE, VISUALST
 h7cad-native-dxf/src/
 ├── lib.rs              (~1500 行) Section readers, API, tests
 ├── tokenizer.rs        (~233 行)  DxfToken, GroupCode, DxfValue, DxfTokenizer
-├── entity_parsers.rs   (~800 行)  30+ parse_* 纯函数
-└── writer.rs           (~600 行)  DXF 文本写入器
+├── entity_parsers.rs   (~850 行)  30+ parse_* 纯函数
+└── writer.rs           (~650 行)  DXF 文本写入器
 
 h7cad-native-model/src/
-└── lib.rs              (~1050 行) CadDocument, Entity, EntityData, tables, objects
+└── lib.rs              (~1150 行) CadDocument, Entity, EntityData, tables, objects, VPort
 
 h7cad-native-facade/src/
 └── lib.rs              (~25 行)   load/save 统一接口
@@ -155,11 +159,11 @@ h7cad-native-facade/src/
 | 项目 | 优先级 | 复杂度 | 说明 |
 |------|--------|--------|------|
 | MULTILEADER 详细解析 | 中 | ★★★★ | 当前简化处理 |
-| VPORT 表 | 低 | ★★ | 视口配置 |
-| XData 读取 | 中 | ★★★ | 应用扩展数据 |
+| ~~VPORT 表~~ | ~~低~~ | ~~★★~~ | ✅ 已完成 |
+| ~~XData 读取~~ | ~~中~~ | ~~★★★~~ | ✅ 已完成（原始捕获） |
 | Binary DXF | 中 | ★★★ | sentinel + Int16 组码 |
 | ACAD_TABLE | 低 | ★★★ | 表格实体 |
-| MESH 详细 | 低 | ★★ | 顶点/面片数据 |
+| ~~MESH 详细~~ | ~~低~~ | ~~★★~~ | ✅ 已完成（vertices + face_indices） |
 | 编码支持 | 低 | ★★ | UTF-8 / legacy codepage |
 
 ---
