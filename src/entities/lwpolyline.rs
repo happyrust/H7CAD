@@ -1,19 +1,23 @@
-use acadrust::entities::{LwPolyline, LwVertex};
 use glam::Vec3;
 use truck_modeling::{builder, Edge, Point3, Wire};
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
+use crate::entities::common::{
+    edit_prop as edit, parse_f64, ro_prop as ro, square_grip, transform_pt,
+};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::TangentGeom;
 
 const TAU: f64 = std::f64::consts::TAU;
 
-fn to_truck(pline: &LwPolyline) -> TruckEntity {
-    let verts = &pline.vertices;
-    if verts.is_empty() {
+/// Lightweight vertex: (x, y, bulge)
+pub type NmLwVertex = h7cad_native_model::LwVertex;
+
+// ── Free functions ──────────────────────────────────────────────────────
+
+pub fn to_truck(vertices: &[NmLwVertex], closed: bool, elevation: f64) -> TruckEntity {
+    if vertices.is_empty() {
         let v = builder::vertex(Point3::new(0.0, 0.0, 0.0));
         let edge = builder::line(&v, &v);
         return TruckEntity {
@@ -24,18 +28,17 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         };
     }
 
-    let elev = pline.elevation;
-    let count = verts.len();
-    let seg_count = if pline.is_closed { count } else { count - 1 };
+    let count = vertices.len();
+    let seg_count = if closed { count } else { count - 1 };
     let mut edges: Vec<Edge> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
     let mut key_verts: Vec<[f32; 3]> = Vec::new();
 
-    let to_pt = |v: &LwVertex| -> Point3 { Point3::new(v.location.x, v.location.y, elev) };
+    let to_pt = |v: &NmLwVertex| -> Point3 { Point3::new(v.x, v.y, elevation) };
 
     for i in 0..seg_count {
-        let v0 = &verts[i];
-        let v1 = &verts[(i + 1) % count];
+        let v0 = &vertices[i];
+        let v1 = &vertices[(i + 1) % count];
         let p0 = to_pt(v0);
         let p1 = to_pt(v1);
         let bulge = v0.bulge;
@@ -49,7 +52,7 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
                 p2: [p1.x as f32, p1.y as f32, p1.z as f32],
             });
         } else {
-            let angle = 4.0 * (bulge as f64).atan();
+            let angle = 4.0 * bulge.atan();
             let dx = p1.x - p0.x;
             let dy = p1.y - p0.y;
             let d = (dx * dx + dy * dy).sqrt();
@@ -96,91 +99,114 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
     }
 }
 
-fn grips(pline: &LwPolyline) -> Vec<GripDef> {
-    let elev = pline.elevation as f32;
-    pline
-        .vertices
+pub fn grips(vertices: &[NmLwVertex], elevation: f64) -> Vec<GripDef> {
+    let elev = elevation as f32;
+    vertices
         .iter()
         .enumerate()
-        .map(|(i, v)| square_grip(i, Vec3::new(v.location.x as f32, v.location.y as f32, elev)))
+        .map(|(i, v)| square_grip(i, Vec3::new(v.x as f32, v.y as f32, elev)))
         .collect()
 }
 
-fn properties(pline: &LwPolyline) -> PropSection {
+pub fn properties(vertices: &[NmLwVertex], closed: bool, elevation: f64) -> PropSection {
     PropSection {
         title: "Geometry".into(),
         props: vec![
-            ro("Vertices", "vertices", pline.vertices.len().to_string()),
-            ro(
-                "Closed",
-                "closed",
-                if pline.is_closed { "Yes" } else { "No" },
-            ),
-            edit("Elevation", "elevation", pline.elevation),
+            ro("Vertices", "vertices", vertices.len().to_string()),
+            ro("Closed", "closed", if closed { "Yes" } else { "No" }),
+            edit("Elevation", "elevation", elevation),
         ],
     }
 }
 
-fn apply_geom_prop(pline: &mut LwPolyline, field: &str, value: &str) {
-    let Some(v) = parse_f64(value) else {
-        return;
-    };
+pub fn apply_geom_prop(elevation: &mut f64, field: &str, value: &str) {
     if field == "elevation" {
-        pline.elevation = v;
+        if let Some(v) = parse_f64(value) {
+            *elevation = v;
+        }
     }
 }
 
-fn apply_grip(pline: &mut LwPolyline, grip_id: usize, apply: GripApply) {
-    if let Some(v) = pline.vertices.get_mut(grip_id) {
+pub fn apply_grip(vertices: &mut [NmLwVertex], grip_id: usize, apply: GripApply) {
+    if let Some(v) = vertices.get_mut(grip_id) {
         match apply {
             GripApply::Absolute(p) => {
-                v.location.x = p.x as f64;
-                v.location.y = p.y as f64;
+                v.x = p.x as f64;
+                v.y = p.y as f64;
             }
             GripApply::Translate(d) => {
-                v.location.x += d.x as f64;
-                v.location.y += d.y as f64;
+                v.x += d.x as f64;
+                v.y += d.y as f64;
             }
         }
     }
 }
 
-fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
-    crate::scene::transform::apply_standard_entity_transform(pline, t, |entity, p1, p2| {
-        for v in &mut entity.vertices {
-            crate::scene::transform::reflect_xy_point(&mut v.location.x, &mut v.location.y, p1, p2);
-        }
-    });
-}
-
-impl TruckConvertible for LwPolyline {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+pub fn apply_transform(vertices: &mut [NmLwVertex], t: &EntityTransform) {
+    for v in vertices.iter_mut() {
+        let mut pt = [v.x, v.y, 0.0];
+        transform_pt(&mut pt, t);
+        v.x = pt[0];
+        v.y = pt[1];
     }
 }
 
-impl Grippable for LwPolyline {
+// ── Trait impls (temporary adapters) ────────────────────────────────────
+
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
+
+fn ar_to_nm(verts: &[acadrust::entities::LwVertex]) -> Vec<NmLwVertex> {
+    verts
+        .iter()
+        .map(|v| NmLwVertex {
+            x: v.location.x,
+            y: v.location.y,
+            bulge: v.bulge,
+        })
+        .collect()
+}
+
+fn write_back_verts(dst: &mut Vec<acadrust::entities::LwVertex>, src: &[NmLwVertex]) {
+    for (d, s) in dst.iter_mut().zip(src.iter()) {
+        d.location.x = s.x;
+        d.location.y = s.y;
+        d.bulge = s.bulge;
+    }
+}
+
+impl TruckConvertible for acadrust::entities::LwPolyline {
+    fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
+        let verts = ar_to_nm(&self.vertices);
+        Some(self::to_truck(&verts, self.is_closed, self.elevation))
+    }
+}
+
+impl Grippable for acadrust::entities::LwPolyline {
     fn grips(&self) -> Vec<GripDef> {
-        grips(self)
+        let verts = ar_to_nm(&self.vertices);
+        self::grips(&verts, self.elevation)
     }
-
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        apply_grip(self, grip_id, apply);
+        let mut verts = ar_to_nm(&self.vertices);
+        self::apply_grip(&mut verts, grip_id, apply);
+        write_back_verts(&mut self.vertices, &verts);
     }
 }
 
-impl PropertyEditable for LwPolyline {
-    fn geometry_properties(&self, _text_style_names: &[String]) -> PropSection {
-        properties(self)
+impl PropertyEditable for acadrust::entities::LwPolyline {
+    fn geometry_properties(&self, _: &[String]) -> PropSection {
+        let verts = ar_to_nm(&self.vertices);
+        properties(&verts, self.is_closed, self.elevation)
     }
-
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        apply_geom_prop(self, field, value);
+        self::apply_geom_prop(&mut self.elevation, field, value);
     }
 }
 
-impl Transformable for LwPolyline {
+impl Transformable for acadrust::entities::LwPolyline {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        apply_transform(self, t);
+        let mut verts = ar_to_nm(&self.vertices);
+        self::apply_transform(&mut verts, t);
+        write_back_verts(&mut self.vertices, &verts);
     }
 }

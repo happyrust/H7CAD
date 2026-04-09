@@ -1,148 +1,160 @@
-// SOLID entity — 2D filled quadrilateral (or triangle when p3 == p4).
-//
-// Wireframe: the 4 perimeter edges as TruckObject::Lines.
-// Filled:    the scene injects a solid-fill HatchModel (like hatch.rs).
-// Grips:     4 corner grip points.
-
-use acadrust::entities::Solid;
-use glam::Vec3;
-
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_prop as edit, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
+use crate::entities::common::{edit_prop as edit, parse_f64, pt_to_vec3, square_grip, transform_pt};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 
-fn v3(v: &acadrust::types::Vector3) -> [f32; 3] {
-    [v.x as f32, v.y as f32, v.z as f32]
+// ── Free functions (corners: [[f64;3]; 4]) ──────────────────────────────
+
+pub fn to_truck(corners: &[[f64; 3]; 4]) -> TruckEntity {
+    let p: Vec<[f32; 3]> = corners
+        .iter()
+        .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32])
+        .collect();
+    let pts = vec![
+        p[0], p[1], [f32::NAN; 3],
+        p[1], p[3], [f32::NAN; 3],
+        p[3], p[2], [f32::NAN; 3],
+        p[2], p[0],
+    ];
+    let snap = corners
+        .iter()
+        .map(|c| (pt_to_vec3(c), SnapHint::Node))
+        .collect();
+    Some(TruckEntity {
+        object: TruckObject::Lines(pts),
+        snap_pts: snap,
+        tangent_geoms: vec![],
+        key_vertices: p,
+    })
+    .unwrap()
 }
 
-impl TruckConvertible for Solid {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let p0 = v3(&self.first_corner);
-        let p1 = v3(&self.second_corner);
-        let p2 = v3(&self.third_corner);
-        let p3 = v3(&self.fourth_corner);
+pub fn grips(corners: &[[f64; 3]; 4]) -> Vec<GripDef> {
+    corners
+        .iter()
+        .enumerate()
+        .map(|(i, c)| square_grip(i, pt_to_vec3(c)))
+        .collect()
+}
 
-        // DXF SOLID vertex order: 1-2-4-3 (Z-shaped), render as closed quad outline.
-        // AutoCAD stores corners in "Z" order: p0-p1 are top edge, p2-p3 are bottom edge,
-        // so the visual quad is p0→p1→p3→p2→p0.
-        let pts = vec![
-            p0, p1, [f32::NAN; 3],
-            p1, p3, [f32::NAN; 3],
-            p3, p2, [f32::NAN; 3],
-            p2, p0,
-        ];
-
-        let snap = vec![
-            (Vec3::from(p0), SnapHint::Node),
-            (Vec3::from(p1), SnapHint::Node),
-            (Vec3::from(p2), SnapHint::Node),
-            (Vec3::from(p3), SnapHint::Node),
-        ];
-
-        Some(TruckEntity {
-            object: TruckObject::Lines(pts),
-            snap_pts: snap,
-            tangent_geoms: vec![],
-            key_vertices: vec![p0, p1, p2, p3],
-        })
+pub fn properties(corners: &[[f64; 3]; 4], thickness: f64) -> PropSection {
+    PropSection {
+        title: "Geometry".into(),
+        props: vec![
+            edit("P1 X", "sl_p1x", corners[0][0]),
+            edit("P1 Y", "sl_p1y", corners[0][1]),
+            edit("P1 Z", "sl_p1z", corners[0][2]),
+            edit("P2 X", "sl_p2x", corners[1][0]),
+            edit("P2 Y", "sl_p2y", corners[1][1]),
+            edit("P2 Z", "sl_p2z", corners[1][2]),
+            edit("P3 X", "sl_p3x", corners[2][0]),
+            edit("P3 Y", "sl_p3y", corners[2][1]),
+            edit("P3 Z", "sl_p3z", corners[2][2]),
+            edit("P4 X", "sl_p4x", corners[3][0]),
+            edit("P4 Y", "sl_p4y", corners[3][1]),
+            edit("P4 Z", "sl_p4z", corners[3][2]),
+            edit("Thickness", "sl_thick", thickness),
+        ],
     }
 }
 
-impl Grippable for Solid {
+pub fn apply_geom_prop(corners: &mut [[f64; 3]; 4], thickness: &mut f64, field: &str, value: &str) {
+    let Some(v) = parse_f64(value) else { return };
+    match field {
+        "sl_p1x" => corners[0][0] = v,
+        "sl_p1y" => corners[0][1] = v,
+        "sl_p1z" => corners[0][2] = v,
+        "sl_p2x" => corners[1][0] = v,
+        "sl_p2y" => corners[1][1] = v,
+        "sl_p2z" => corners[1][2] = v,
+        "sl_p3x" => corners[2][0] = v,
+        "sl_p3y" => corners[2][1] = v,
+        "sl_p3z" => corners[2][2] = v,
+        "sl_p4x" => corners[3][0] = v,
+        "sl_p4y" => corners[3][1] = v,
+        "sl_p4z" => corners[3][2] = v,
+        "sl_thick" => *thickness = v,
+        _ => {}
+    }
+}
+
+pub fn apply_grip(corners: &mut [[f64; 3]; 4], grip_id: usize, apply: GripApply) {
+    let Some(corner) = corners.get_mut(grip_id) else { return };
+    match apply {
+        GripApply::Translate(d) => {
+            corner[0] += d.x as f64;
+            corner[1] += d.y as f64;
+            corner[2] += d.z as f64;
+        }
+        GripApply::Absolute(p) => {
+            corner[0] = p.x as f64;
+            corner[1] = p.y as f64;
+            corner[2] = p.z as f64;
+        }
+    }
+}
+
+pub fn apply_transform(corners: &mut [[f64; 3]; 4], t: &EntityTransform) {
+    for c in corners.iter_mut() {
+        transform_pt(c, t);
+    }
+}
+
+// ── Trait impls ─────────────────────────────────────────────────────────
+
+use crate::entities::common::{arr_to_v3, v3_to_arr};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
+
+fn ar_corners(s: &acadrust::entities::Solid) -> [[f64; 3]; 4] {
+    [
+        v3_to_arr(&s.first_corner),
+        v3_to_arr(&s.second_corner),
+        v3_to_arr(&s.third_corner),
+        v3_to_arr(&s.fourth_corner),
+    ]
+}
+fn write_back(s: &mut acadrust::entities::Solid, c: &[[f64; 3]; 4]) {
+    s.first_corner = arr_to_v3(&c[0]);
+    s.second_corner = arr_to_v3(&c[1]);
+    s.third_corner = arr_to_v3(&c[2]);
+    s.fourth_corner = arr_to_v3(&c[3]);
+}
+
+impl TruckConvertible for acadrust::entities::Solid {
+    fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
+        Some(self::to_truck(&ar_corners(self)))
+    }
+}
+
+impl Grippable for acadrust::entities::Solid {
     fn grips(&self) -> Vec<GripDef> {
-        vec![
-            square_grip(0, Vec3::from(v3(&self.first_corner))),
-            square_grip(1, Vec3::from(v3(&self.second_corner))),
-            square_grip(2, Vec3::from(v3(&self.third_corner))),
-            square_grip(3, Vec3::from(v3(&self.fourth_corner))),
-        ]
+        self::grips(&ar_corners(self))
     }
-
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        let corner = match grip_id {
-            0 => &mut self.first_corner,
-            1 => &mut self.second_corner,
-            2 => &mut self.third_corner,
-            3 => &mut self.fourth_corner,
-            _ => return,
-        };
-        match apply {
-            GripApply::Translate(d) => {
-                corner.x += d.x as f64;
-                corner.y += d.y as f64;
-                corner.z += d.z as f64;
-            }
-            GripApply::Absolute(p) => {
-                corner.x = p.x as f64;
-                corner.y = p.y as f64;
-                corner.z = p.z as f64;
-            }
-        }
+        let mut c = ar_corners(self);
+        self::apply_grip(&mut c, grip_id, apply);
+        write_back(self, &c);
     }
 }
 
-impl PropertyEditable for Solid {
-    fn geometry_properties(&self, _text_style_names: &[String]) -> PropSection {
-        PropSection {
-            title: "Geometry".into(),
-            props: vec![
-                edit("P1 X", "sl_p1x", self.first_corner.x),
-                edit("P1 Y", "sl_p1y", self.first_corner.y),
-                edit("P1 Z", "sl_p1z", self.first_corner.z),
-                edit("P2 X", "sl_p2x", self.second_corner.x),
-                edit("P2 Y", "sl_p2y", self.second_corner.y),
-                edit("P2 Z", "sl_p2z", self.second_corner.z),
-                edit("P3 X", "sl_p3x", self.third_corner.x),
-                edit("P3 Y", "sl_p3y", self.third_corner.y),
-                edit("P3 Z", "sl_p3z", self.third_corner.z),
-                edit("P4 X", "sl_p4x", self.fourth_corner.x),
-                edit("P4 Y", "sl_p4y", self.fourth_corner.y),
-                edit("P4 Z", "sl_p4z", self.fourth_corner.z),
-                edit("Thickness", "sl_thick", self.thickness),
-            ],
-        }
+impl PropertyEditable for acadrust::entities::Solid {
+    fn geometry_properties(&self, _: &[String]) -> PropSection {
+        properties(&ar_corners(self), self.thickness)
     }
-
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else { return };
-        match field {
-            "sl_p1x" => self.first_corner.x = v,
-            "sl_p1y" => self.first_corner.y = v,
-            "sl_p1z" => self.first_corner.z = v,
-            "sl_p2x" => self.second_corner.x = v,
-            "sl_p2y" => self.second_corner.y = v,
-            "sl_p2z" => self.second_corner.z = v,
-            "sl_p3x" => self.third_corner.x = v,
-            "sl_p3y" => self.third_corner.y = v,
-            "sl_p3z" => self.third_corner.z = v,
-            "sl_p4x" => self.fourth_corner.x = v,
-            "sl_p4y" => self.fourth_corner.y = v,
-            "sl_p4z" => self.fourth_corner.z = v,
-            "sl_thick" => self.thickness = v,
-            _ => {}
-        }
+        let mut c = ar_corners(self);
+        let mut th = self.thickness;
+        self::apply_geom_prop(&mut c, &mut th, field, value);
+        write_back(self, &c);
+        self.thickness = th;
     }
 }
 
-impl Transformable for Solid {
+impl Transformable for acadrust::entities::Solid {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            for corner in [
-                &mut entity.first_corner,
-                &mut entity.second_corner,
-                &mut entity.third_corner,
-                &mut entity.fourth_corner,
-            ] {
-                crate::scene::transform::reflect_xy_point(
-                    &mut corner.x,
-                    &mut corner.y,
-                    p1,
-                    p2,
-                );
-            }
-        });
+        let mut c = ar_corners(self);
+        self::apply_transform(&mut c, t);
+        write_back(self, &c);
     }
 }

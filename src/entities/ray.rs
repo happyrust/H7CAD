@@ -1,255 +1,259 @@
-use acadrust::entities::{Ray, XLine};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{diamond_grip, edit_prop as edit, square_grip};
-use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
+use crate::entities::common::{
+    diamond_grip, edit_prop as edit, parse_f64, pt_to_vec3, square_grip, transform_pt,
+};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 
-/// Display length used when rendering semi-infinite / infinite lines.
 const DISPLAY_EXTENT: f64 = 1_000_000.0;
 
-// ── Ray (semi-infinite line) ──────────────────────────────────────────────────
+// ── Ray free functions (origin + direction as [f64;3]) ──────────────────
 
-impl TruckConvertible for Ray {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let bp = self.base_point;
-        let dir = self.direction;
-        let far = [
-            (bp.x + dir.x * DISPLAY_EXTENT) as f32,
-            (bp.y + dir.y * DISPLAY_EXTENT) as f32,
-            (bp.z + dir.z * DISPLAY_EXTENT) as f32,
-        ];
-        let start = [bp.x as f32, bp.y as f32, bp.z as f32];
-        Some(TruckEntity {
-            object: TruckObject::Lines(vec![start, far]),
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            key_vertices: vec![start],
-        })
+pub fn ray_to_truck(origin: &[f64; 3], direction: &[f64; 3]) -> TruckEntity {
+    let far = [
+        (origin[0] + direction[0] * DISPLAY_EXTENT) as f32,
+        (origin[1] + direction[1] * DISPLAY_EXTENT) as f32,
+        (origin[2] + direction[2] * DISPLAY_EXTENT) as f32,
+    ];
+    let start = [origin[0] as f32, origin[1] as f32, origin[2] as f32];
+    TruckEntity {
+        object: TruckObject::Lines(vec![start, far]),
+        snap_pts: vec![],
+        tangent_geoms: vec![],
+        key_vertices: vec![start],
     }
 }
 
-impl Grippable for Ray {
-    fn grips(&self) -> Vec<GripDef> {
-        let bp = &self.base_point;
-        let dir = &self.direction;
-        // Grip 0: base point (movable)
-        // Grip 1: a point along the direction (changes direction)
-        let guide_dist = 10.0_f64;
-        vec![
-            square_grip(0, Vec3::new(bp.x as f32, bp.y as f32, bp.z as f32)),
-            diamond_grip(
-                1,
-                Vec3::new(
-                    (bp.x + dir.x * guide_dist) as f32,
-                    (bp.y + dir.y * guide_dist) as f32,
-                    (bp.z + dir.z * guide_dist) as f32,
-                ),
+pub fn ray_grips(origin: &[f64; 3], direction: &[f64; 3]) -> Vec<GripDef> {
+    let guide_dist = 10.0_f64;
+    vec![
+        square_grip(0, pt_to_vec3(origin)),
+        diamond_grip(
+            1,
+            Vec3::new(
+                (origin[0] + direction[0] * guide_dist) as f32,
+                (origin[1] + direction[1] * guide_dist) as f32,
+                (origin[2] + direction[2] * guide_dist) as f32,
             ),
-        ]
-    }
+        ),
+    ]
+}
 
-    fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        match (grip_id, apply) {
-            (0, GripApply::Translate(d)) => {
-                self.base_point.x += d.x as f64;
-                self.base_point.y += d.y as f64;
-                self.base_point.z += d.z as f64;
-            }
-            (0, GripApply::Absolute(p)) => {
-                self.base_point.x = p.x as f64;
-                self.base_point.y = p.y as f64;
-                self.base_point.z = p.z as f64;
-            }
-            (1, GripApply::Absolute(p)) => {
-                // New direction = grip point - base point, normalized.
-                let dx = p.x as f64 - self.base_point.x;
-                let dy = p.y as f64 - self.base_point.y;
-                let dz = p.z as f64 - self.base_point.z;
-                let len = (dx * dx + dy * dy + dz * dz).sqrt();
-                if len > 1e-9 {
-                    self.direction.x = dx / len;
-                    self.direction.y = dy / len;
-                    self.direction.z = dz / len;
-                }
-            }
-            _ => {}
+pub fn ray_properties(origin: &[f64; 3], direction: &[f64; 3], prefix: &str) -> PropSection {
+    let (bp, dp) = (
+        [
+            &format!("{prefix}_bx"),
+            &format!("{prefix}_by"),
+            &format!("{prefix}_bz"),
+        ],
+        [
+            &format!("{prefix}_dx"),
+            &format!("{prefix}_dy"),
+            &format!("{prefix}_dz"),
+        ],
+    );
+    PropSection {
+        title: "Geometry".into(),
+        props: vec![
+            edit("Base X", string_to_static(bp[0]), origin[0]),
+            edit("Base Y", string_to_static(bp[1]), origin[1]),
+            edit("Base Z", string_to_static(bp[2]), origin[2]),
+            edit("Dir X", string_to_static(dp[0]), direction[0]),
+            edit("Dir Y", string_to_static(dp[1]), direction[1]),
+            edit("Dir Z", string_to_static(dp[2]), direction[2]),
+        ],
+    }
+}
+
+fn string_to_static(s: &str) -> &'static str {
+    match s {
+        "ray_bx" => "ray_bx",
+        "ray_by" => "ray_by",
+        "ray_bz" => "ray_bz",
+        "ray_dx" => "ray_dx",
+        "ray_dy" => "ray_dy",
+        "ray_dz" => "ray_dz",
+        "xl_bx" => "xl_bx",
+        "xl_by" => "xl_by",
+        "xl_bz" => "xl_bz",
+        "xl_dx" => "xl_dx",
+        "xl_dy" => "xl_dy",
+        "xl_dz" => "xl_dz",
+        _ => "",
+    }
+}
+
+pub fn ray_apply_geom_prop(
+    origin: &mut [f64; 3],
+    direction: &mut [f64; 3],
+    field: &str,
+    value: &str,
+) {
+    let Some(v) = parse_f64(value) else { return };
+    let idx = match field.chars().last() {
+        Some('x') => 0,
+        Some('y') => 1,
+        Some('z') => 2,
+        _ => return,
+    };
+    if field.contains("_b") {
+        origin[idx] = v;
+    } else if field.contains("_d") {
+        direction[idx] = v;
+    }
+}
+
+pub fn ray_apply_grip(
+    origin: &mut [f64; 3],
+    direction: &mut [f64; 3],
+    grip_id: usize,
+    apply: GripApply,
+) {
+    match (grip_id, apply) {
+        (0, GripApply::Translate(d)) => {
+            origin[0] += d.x as f64;
+            origin[1] += d.y as f64;
+            origin[2] += d.z as f64;
         }
-    }
-}
-
-impl PropertyEditable for Ray {
-    fn geometry_properties(&self, _text_style_names: &[String]) -> PropSection {
-        PropSection {
-            title: "Geometry".into(),
-            props: vec![
-                edit("Base X", "ray_bx", self.base_point.x),
-                edit("Base Y", "ray_by", self.base_point.y),
-                edit("Base Z", "ray_bz", self.base_point.z),
-                edit("Dir X", "ray_dx", self.direction.x),
-                edit("Dir Y", "ray_dy", self.direction.y),
-                edit("Dir Z", "ray_dz", self.direction.z),
-            ],
+        (0, GripApply::Absolute(p)) => {
+            origin[0] = p.x as f64;
+            origin[1] = p.y as f64;
+            origin[2] = p.z as f64;
         }
-    }
-
-    fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else { return };
-        match field {
-            "ray_bx" => self.base_point.x = v,
-            "ray_by" => self.base_point.y = v,
-            "ray_bz" => self.base_point.z = v,
-            "ray_dx" => { self.direction.x = v; }
-            "ray_dy" => { self.direction.y = v; }
-            "ray_dz" => { self.direction.z = v; }
-            _ => {}
-        }
-    }
-}
-
-impl Transformable for Ray {
-    fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            crate::scene::transform::reflect_xy_point(
-                &mut entity.base_point.x,
-                &mut entity.base_point.y,
-                p1,
-                p2,
-            );
-            // Mirror the direction: negate the component perpendicular to mirror axis.
-            let ax = (p2.x - p1.x) as f64;
-            let ay = (p2.y - p1.y) as f64;
-            let len2 = ax * ax + ay * ay;
-            if len2 > 1e-12 {
-                let d = &mut entity.direction;
-                let dot = d.x * ax + d.y * ay;
-                d.x = 2.0 * dot * ax / len2 - d.x;
-                d.y = 2.0 * dot * ay / len2 - d.y;
+        (1, GripApply::Absolute(p)) => {
+            let dx = p.x as f64 - origin[0];
+            let dy = p.y as f64 - origin[1];
+            let dz = p.z as f64 - origin[2];
+            let len = (dx * dx + dy * dy + dz * dz).sqrt();
+            if len > 1e-9 {
+                direction[0] = dx / len;
+                direction[1] = dy / len;
+                direction[2] = dz / len;
             }
-        });
+        }
+        _ => {}
     }
 }
 
-// ── XLine (construction line, infinite) ──────────────────────────────────────
+pub fn ray_apply_transform(
+    origin: &mut [f64; 3],
+    direction: &mut [f64; 3],
+    t: &EntityTransform,
+) {
+    transform_pt(origin, t);
+    crate::entities::common::transform_dir(direction, t);
+}
 
-impl TruckConvertible for XLine {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let bp = self.base_point;
-        let dir = self.direction;
-        let far_pos = [
-            (bp.x + dir.x * DISPLAY_EXTENT) as f32,
-            (bp.y + dir.y * DISPLAY_EXTENT) as f32,
-            (bp.z + dir.z * DISPLAY_EXTENT) as f32,
-        ];
-        let far_neg = [
-            (bp.x - dir.x * DISPLAY_EXTENT) as f32,
-            (bp.y - dir.y * DISPLAY_EXTENT) as f32,
-            (bp.z - dir.z * DISPLAY_EXTENT) as f32,
-        ];
-        Some(TruckEntity {
-            object: TruckObject::Lines(vec![far_neg, far_pos]),
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            key_vertices: vec![[bp.x as f32, bp.y as f32, bp.z as f32]],
-        })
+// ── XLine free functions ────────────────────────────────────────────────
+
+pub fn xline_to_truck(origin: &[f64; 3], direction: &[f64; 3]) -> TruckEntity {
+    let far_pos = [
+        (origin[0] + direction[0] * DISPLAY_EXTENT) as f32,
+        (origin[1] + direction[1] * DISPLAY_EXTENT) as f32,
+        (origin[2] + direction[2] * DISPLAY_EXTENT) as f32,
+    ];
+    let far_neg = [
+        (origin[0] - direction[0] * DISPLAY_EXTENT) as f32,
+        (origin[1] - direction[1] * DISPLAY_EXTENT) as f32,
+        (origin[2] - direction[2] * DISPLAY_EXTENT) as f32,
+    ];
+    TruckEntity {
+        object: TruckObject::Lines(vec![far_neg, far_pos]),
+        snap_pts: vec![],
+        tangent_geoms: vec![],
+        key_vertices: vec![[origin[0] as f32, origin[1] as f32, origin[2] as f32]],
     }
 }
 
-impl Grippable for XLine {
+// ── Trait impls (temporary adapters) ────────────────────────────────────
+
+use crate::entities::common::{arr_to_v3, v3_to_arr};
+use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
+
+impl TruckConvertible for acadrust::entities::Ray {
+    fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
+        Some(ray_to_truck(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction)))
+    }
+}
+
+impl Grippable for acadrust::entities::Ray {
     fn grips(&self) -> Vec<GripDef> {
-        let bp = &self.base_point;
-        let dir = &self.direction;
-        let guide_dist = 10.0_f64;
-        vec![
-            square_grip(0, Vec3::new(bp.x as f32, bp.y as f32, bp.z as f32)),
-            diamond_grip(
-                1,
-                Vec3::new(
-                    (bp.x + dir.x * guide_dist) as f32,
-                    (bp.y + dir.y * guide_dist) as f32,
-                    (bp.z + dir.z * guide_dist) as f32,
-                ),
-            ),
-        ]
+        ray_grips(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction))
     }
-
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
-        match (grip_id, apply) {
-            (0, GripApply::Translate(d)) => {
-                self.base_point.x += d.x as f64;
-                self.base_point.y += d.y as f64;
-                self.base_point.z += d.z as f64;
-            }
-            (0, GripApply::Absolute(p)) => {
-                self.base_point.x = p.x as f64;
-                self.base_point.y = p.y as f64;
-                self.base_point.z = p.z as f64;
-            }
-            (1, GripApply::Absolute(p)) => {
-                let dx = p.x as f64 - self.base_point.x;
-                let dy = p.y as f64 - self.base_point.y;
-                let dz = p.z as f64 - self.base_point.z;
-                let len = (dx * dx + dy * dy + dz * dz).sqrt();
-                if len > 1e-9 {
-                    self.direction.x = dx / len;
-                    self.direction.y = dy / len;
-                    self.direction.z = dz / len;
-                }
-            }
-            _ => {}
-        }
+        let mut o = v3_to_arr(&self.base_point);
+        let mut d = v3_to_arr(&self.direction);
+        ray_apply_grip(&mut o, &mut d, grip_id, apply);
+        self.base_point = arr_to_v3(&o);
+        self.direction = arr_to_v3(&d);
     }
 }
 
-impl PropertyEditable for XLine {
-    fn geometry_properties(&self, _text_style_names: &[String]) -> PropSection {
-        PropSection {
-            title: "Geometry".into(),
-            props: vec![
-                edit("Base X", "xl_bx", self.base_point.x),
-                edit("Base Y", "xl_by", self.base_point.y),
-                edit("Base Z", "xl_bz", self.base_point.z),
-                edit("Dir X", "xl_dx", self.direction.x),
-                edit("Dir Y", "xl_dy", self.direction.y),
-                edit("Dir Z", "xl_dz", self.direction.z),
-            ],
-        }
+impl PropertyEditable for acadrust::entities::Ray {
+    fn geometry_properties(&self, _: &[String]) -> PropSection {
+        ray_properties(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction), "ray")
     }
-
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else { return };
-        match field {
-            "xl_bx" => self.base_point.x = v,
-            "xl_by" => self.base_point.y = v,
-            "xl_bz" => self.base_point.z = v,
-            "xl_dx" => { self.direction.x = v; }
-            "xl_dy" => { self.direction.y = v; }
-            "xl_dz" => { self.direction.z = v; }
-            _ => {}
-        }
+        let mut o = v3_to_arr(&self.base_point);
+        let mut d = v3_to_arr(&self.direction);
+        ray_apply_geom_prop(&mut o, &mut d, field, value);
+        self.base_point = arr_to_v3(&o);
+        self.direction = arr_to_v3(&d);
     }
 }
 
-impl Transformable for XLine {
+impl Transformable for acadrust::entities::Ray {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
-            crate::scene::transform::reflect_xy_point(
-                &mut entity.base_point.x,
-                &mut entity.base_point.y,
-                p1,
-                p2,
-            );
-            let ax = (p2.x - p1.x) as f64;
-            let ay = (p2.y - p1.y) as f64;
-            let len2 = ax * ax + ay * ay;
-            if len2 > 1e-12 {
-                let d = &mut entity.direction;
-                let dot = d.x * ax + d.y * ay;
-                d.x = 2.0 * dot * ax / len2 - d.x;
-                d.y = 2.0 * dot * ay / len2 - d.y;
-            }
-        });
+        let mut o = v3_to_arr(&self.base_point);
+        let mut d = v3_to_arr(&self.direction);
+        ray_apply_transform(&mut o, &mut d, t);
+        self.base_point = arr_to_v3(&o);
+        self.direction = arr_to_v3(&d);
+    }
+}
+
+// ── XLine trait impls ───────────────────────────────────────────────────
+
+impl TruckConvertible for acadrust::entities::XLine {
+    fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
+        Some(xline_to_truck(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction)))
+    }
+}
+
+impl Grippable for acadrust::entities::XLine {
+    fn grips(&self) -> Vec<GripDef> {
+        ray_grips(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction))
+    }
+    fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        let mut o = v3_to_arr(&self.base_point);
+        let mut d = v3_to_arr(&self.direction);
+        ray_apply_grip(&mut o, &mut d, grip_id, apply);
+        self.base_point = arr_to_v3(&o);
+        self.direction = arr_to_v3(&d);
+    }
+}
+
+impl PropertyEditable for acadrust::entities::XLine {
+    fn geometry_properties(&self, _: &[String]) -> PropSection {
+        ray_properties(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction), "xl")
+    }
+    fn apply_geom_prop(&mut self, field: &str, value: &str) {
+        let mut o = v3_to_arr(&self.base_point);
+        let mut d = v3_to_arr(&self.direction);
+        ray_apply_geom_prop(&mut o, &mut d, field, value);
+        self.base_point = arr_to_v3(&o);
+        self.direction = arr_to_v3(&d);
+    }
+}
+
+impl Transformable for acadrust::entities::XLine {
+    fn apply_transform(&mut self, t: &EntityTransform) {
+        let mut o = v3_to_arr(&self.base_point);
+        let mut d = v3_to_arr(&self.direction);
+        ray_apply_transform(&mut o, &mut d, t);
+        self.base_point = arr_to_v3(&o);
+        self.direction = arr_to_v3(&d);
     }
 }
