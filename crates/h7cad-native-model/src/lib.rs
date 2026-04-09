@@ -46,11 +46,156 @@ impl Default for DxfClass {
     }
 }
 
+/// Layer properties parsed from the LAYER table
 #[derive(Debug, Clone, PartialEq)]
+pub struct LayerProperties {
+    pub handle: Handle,
+    pub name: String,
+    /// ACI color; negative = layer off
+    pub color: i16,
+    pub linetype_name: String,
+    /// 1/100 mm; -1=Default
+    pub lineweight: i16,
+    pub is_frozen: bool,
+    pub is_locked: bool,
+    /// True color (code 420), 0 = not set
+    pub true_color: i32,
+    pub plot: bool,
+}
+
+impl LayerProperties {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            handle: Handle::NULL,
+            name: name.into(),
+            color: 7,
+            linetype_name: "Continuous".into(),
+            lineweight: -1,
+            is_frozen: false,
+            is_locked: false,
+            true_color: 0,
+            plot: true,
+        }
+    }
+
+    pub fn is_on(&self) -> bool {
+        self.color >= 0
+    }
+}
+
+/// Linetype dash-pattern segment: positive = dash, negative = space, zero = dot
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinetypeSegment {
+    pub length: f64,
+}
+
+/// Linetype properties parsed from the LTYPE table
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinetypeProperties {
+    pub handle: Handle,
+    pub name: String,
+    pub description: String,
+    pub pattern_length: f64,
+    pub segments: Vec<LinetypeSegment>,
+}
+
+impl LinetypeProperties {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            handle: Handle::NULL,
+            name: name.into(),
+            description: String::new(),
+            pattern_length: 0.0,
+            segments: Vec::new(),
+        }
+    }
+
+    pub fn is_continuous(&self) -> bool {
+        self.segments.is_empty()
+    }
+}
+
+/// Text style properties parsed from the STYLE table
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextStyleProperties {
+    pub handle: Handle,
+    pub name: String,
+    pub height: f64,
+    pub width_factor: f64,
+    pub oblique_angle: f64,
+    pub font_name: String,
+    pub bigfont_name: String,
+    /// Bit flags: 2=backward, 4=upside-down
+    pub flags: i16,
+}
+
+impl TextStyleProperties {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            handle: Handle::NULL,
+            name: name.into(),
+            height: 0.0,
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            font_name: "txt".into(),
+            bigfont_name: String::new(),
+            flags: 0,
+        }
+    }
+}
+
+/// Dimension style properties parsed from the DIMSTYLE table
+#[derive(Debug, Clone, PartialEq)]
+pub struct DimStyleProperties {
+    pub handle: Handle,
+    pub name: String,
+    /// Overall scale factor (DIMSCALE)
+    pub dimscale: f64,
+    /// Arrow size (DIMASZ)
+    pub dimasz: f64,
+    /// Extension line offset (DIMEXO)
+    pub dimexo: f64,
+    /// Dimension line gap (DIMGAP)
+    pub dimgap: f64,
+    /// Text height (DIMTXT)
+    pub dimtxt: f64,
+    /// Decimal places (DIMDEC)
+    pub dimdec: i16,
+    /// Text style name
+    pub dimtxsty_name: String,
+    /// Linear unit format (DIMLUNIT)
+    pub dimlunit: i16,
+    /// Angular unit format (DIMAUNIT)
+    pub dimaunit: i16,
+}
+
+impl DimStyleProperties {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            handle: Handle::NULL,
+            name: name.into(),
+            dimscale: 1.0,
+            dimasz: 2.5,
+            dimexo: 0.625,
+            dimgap: 0.625,
+            dimtxt: 2.5,
+            dimdec: 4,
+            dimtxsty_name: "Standard".into(),
+            dimlunit: 2,
+            dimaunit: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct CadDocument {
     pub header: DocumentHeader,
     pub classes: Vec<DxfClass>,
     pub tables: Tables,
+    pub layers: BTreeMap<String, LayerProperties>,
+    pub linetypes: BTreeMap<String, LinetypeProperties>,
+    pub text_styles: BTreeMap<String, TextStyleProperties>,
+    pub dim_styles: BTreeMap<String, DimStyleProperties>,
     pub block_records: BTreeMap<Handle, BlockRecord>,
     pub layouts: BTreeMap<Handle, Layout>,
     pub root_dictionary: RootDictionary,
@@ -103,10 +248,28 @@ impl CadDocument {
         root_dictionary.insert("ACAD_PLOTSETTINGS", Handle::NULL);
         root_dictionary.insert("ACAD_PLOTSTYLENAME", Handle::NULL);
 
+        let mut layers = BTreeMap::new();
+        layers.insert("0".to_string(), LayerProperties::new("0"));
+
+        let mut linetypes = BTreeMap::new();
+        linetypes.insert("Continuous".into(), LinetypeProperties::new("Continuous"));
+        linetypes.insert("ByLayer".into(), LinetypeProperties::new("ByLayer"));
+        linetypes.insert("ByBlock".into(), LinetypeProperties::new("ByBlock"));
+
+        let mut text_styles = BTreeMap::new();
+        text_styles.insert("Standard".into(), TextStyleProperties::new("Standard"));
+
+        let mut dim_styles = BTreeMap::new();
+        dim_styles.insert("Standard".into(), DimStyleProperties::new("Standard"));
+
         Self {
             header: DocumentHeader::default(),
             classes: Vec::new(),
             tables: Tables::new(model_space_handle, paper_space_handle),
+            layers,
+            linetypes,
+            text_styles,
+            dim_styles,
             block_records,
             layouts,
             root_dictionary,
@@ -118,6 +281,10 @@ impl CadDocument {
 
     pub fn next_handle(&self) -> u64 {
         self.next_handle
+    }
+
+    pub fn set_next_handle(&mut self, value: u64) {
+        self.next_handle = self.next_handle.max(value);
     }
 
     pub fn allocate_handle(&mut self) -> Handle {
@@ -187,6 +354,95 @@ impl CadDocument {
             self.root_dictionary.insert(layout_entry_name(layout_handle), layout_handle);
         }
     }
+
+    /// Resolve the effective ACI color for an entity (handles ByLayer=256)
+    pub fn resolve_color(&self, entity: &Entity) -> i16 {
+        if entity.color_index == 256 {
+            self.layers
+                .get(&entity.layer_name)
+                .map(|l| l.color.abs())
+                .unwrap_or(7)
+        } else {
+            entity.color_index
+        }
+    }
+
+    /// Resolve the effective linetype name (handles empty or "ByLayer")
+    pub fn resolve_linetype<'a>(&'a self, entity: &'a Entity) -> &'a str {
+        let lt = &entity.linetype_name;
+        if lt.is_empty() || lt.eq_ignore_ascii_case("BYLAYER") {
+            self.layers
+                .get(&entity.layer_name)
+                .map(|l| l.linetype_name.as_str())
+                .unwrap_or("Continuous")
+        } else {
+            lt.as_str()
+        }
+    }
+
+    /// Resolve lineweight in 1/100mm (handles -1=ByLayer, -2=ByBlock, -3=Default)
+    pub fn resolve_lineweight(&self, entity: &Entity) -> i16 {
+        match entity.lineweight {
+            -1 => {
+                self.layers
+                    .get(&entity.layer_name)
+                    .map(|l| if l.lineweight < 0 { 25 } else { l.lineweight })
+                    .unwrap_or(25)
+            }
+            -3 => 25,
+            w => w,
+        }
+    }
+
+    /// Find block record by BLOCK_RECORD handle (primary key)
+    pub fn block_record_by_handle(&self, handle: Handle) -> Option<&BlockRecord> {
+        self.block_records.get(&handle)
+    }
+
+    /// Find block record by any associated handle (BLOCK_RECORD or BLOCK entity)
+    pub fn block_record_by_any_handle(&self, handle: Handle) -> Option<&BlockRecord> {
+        if let Some(br) = self.block_records.get(&handle) {
+            return Some(br);
+        }
+        self.block_records
+            .values()
+            .find(|br| br.block_entity_handle == handle)
+    }
+
+    /// Find block record by name
+    pub fn block_record_by_name(&self, name: &str) -> Option<&BlockRecord> {
+        let handle = self.tables.block_record.entries.get(name).copied()?;
+        self.block_records.get(&handle)
+    }
+
+    /// Resolve INSERT entity's target block record
+    pub fn resolve_insert_block(&self, entity: &Entity) -> Option<&BlockRecord> {
+        if let EntityData::Insert { block_name, .. } = &entity.data {
+            self.block_record_by_name(block_name)
+        } else {
+            None
+        }
+    }
+
+    /// Find the entity's owner block record (via owner_handle, checks both BLOCK_RECORD and BLOCK entity handles)
+    pub fn entity_owner_block(&self, entity: &Entity) -> Option<&BlockRecord> {
+        if entity.owner_handle == Handle::NULL {
+            return None;
+        }
+        self.block_record_by_any_handle(entity.owner_handle)
+    }
+
+    /// Check if entity is in model space
+    pub fn is_model_space_entity(&self, entity: &Entity) -> bool {
+        if entity.owner_handle == Handle::NULL {
+            return false;
+        }
+        if let Some(br) = self.block_record_by_any_handle(entity.owner_handle) {
+            br.name == "*Model_Space"
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for CadDocument {
@@ -195,9 +451,47 @@ impl Default for CadDocument {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DocumentHeader {
     pub version: DxfVersion,
+    pub insbase: [f64; 3],
+    pub extmin: [f64; 3],
+    pub extmax: [f64; 3],
+    pub limmin: [f64; 2],
+    pub limmax: [f64; 2],
+    pub ltscale: f64,
+    pub pdmode: i32,
+    pub pdsize: f64,
+    pub textsize: f64,
+    pub dimscale: f64,
+    pub lunits: i16,
+    pub luprec: i16,
+    pub aunits: i16,
+    pub auprec: i16,
+    pub handseed: u64,
+}
+
+impl Default for DocumentHeader {
+    fn default() -> Self {
+        Self {
+            version: DxfVersion::default(),
+            insbase: [0.0; 3],
+            extmin: [1e20, 1e20, 1e20],
+            extmax: [-1e20, -1e20, -1e20],
+            limmin: [0.0, 0.0],
+            limmax: [12.0, 9.0],
+            ltscale: 1.0,
+            pdmode: 0,
+            pdsize: 0.0,
+            textsize: 2.5,
+            dimscale: 1.0,
+            lunits: 2,
+            luprec: 4,
+            aunits: 0,
+            auprec: 0,
+            handseed: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -289,6 +583,8 @@ impl SymbolTable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockRecord {
     pub handle: Handle,
+    /// Handle of the BLOCK entity in the BLOCKS section
+    pub block_entity_handle: Handle,
     pub name: String,
     pub layout_handle: Option<Handle>,
     pub entities: Vec<Entity>,
@@ -300,6 +596,7 @@ impl BlockRecord {
     pub fn new(handle: Handle, name: impl Into<String>) -> Self {
         Self {
             handle,
+            block_entity_handle: Handle::NULL,
             name: name.into(),
             layout_handle: None,
             entities: Vec::new(),
@@ -368,6 +665,8 @@ impl RootDictionary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entity {
     pub handle: Handle,
+    /// Owner block record handle (code 330)
+    pub owner_handle: Handle,
     pub layer_name: String,
     pub linetype_name: String,
     pub color_index: i16,
@@ -386,6 +685,7 @@ impl Entity {
     pub fn new(data: EntityData) -> Self {
         Self {
             handle: Handle::NULL,
+            owner_handle: Handle::NULL,
             layer_name: "0".into(),
             linetype_name: String::new(),
             color_index: 256, // BYLAYER

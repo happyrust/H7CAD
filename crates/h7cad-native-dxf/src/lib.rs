@@ -159,29 +159,89 @@ fn read_header_section(
 ) -> Result<(), DxfReadError> {
     use h7cad_native_model::DxfVersion;
 
-    while stream.read_next()? {
+    if !stream.read_next()? {
+        return Err(DxfReadError::UnexpectedEof {
+            context: "expected ENDSEC for HEADER section",
+        });
+    }
+
+    loop {
+        if stream.current().is_none() {
+            return Err(DxfReadError::UnexpectedEof {
+                context: "expected ENDSEC for HEADER section",
+            });
+        }
+
         if stream.current_code() == 0 && stream.current_value_trimmed() == "ENDSEC" {
             return Ok(());
         }
 
-        if stream.current_code() == 9 {
-            let var_name = stream.current_value_trimmed().to_string();
-
+        if stream.current_code() != 9 {
             if !stream.read_next()? {
                 return Err(DxfReadError::UnexpectedEof {
-                    context: "expected value after header variable",
+                    context: "expected ENDSEC for HEADER section",
                 });
             }
+            continue;
+        }
 
-            if var_name == "$ACADVER" {
-                doc.header.version = DxfVersion::from_acadver(stream.current_value_trimmed());
+        let var_name = stream.current_value_trimmed().to_string();
+
+        let mut codes: Vec<(i16, String)> = Vec::new();
+        while stream.read_next()? {
+            if stream.current_code() == 0 || stream.current_code() == 9 {
+                break;
             }
+            codes.push((
+                stream.current_code(),
+                stream.current_value_trimmed().to_string(),
+            ));
+        }
+
+        let f = |c: i16| -> f64 {
+            codes
+                .iter()
+                .find(|(code, _)| *code == c)
+                .and_then(|(_, v)| v.parse().ok())
+                .unwrap_or(0.0)
+        };
+        let i16v = |c: i16| -> i16 {
+            codes
+                .iter()
+                .find(|(code, _)| *code == c)
+                .and_then(|(_, v)| v.parse().ok())
+                .unwrap_or(0)
+        };
+        let sv = |c: i16| -> &str {
+            codes
+                .iter()
+                .find(|(code, _)| *code == c)
+                .map(|(_, v)| v.as_str())
+                .unwrap_or("")
+        };
+
+        match var_name.as_str() {
+            "$ACADVER" => doc.header.version = DxfVersion::from_acadver(sv(1)),
+            "$INSBASE" => doc.header.insbase = [f(10), f(20), f(30)],
+            "$EXTMIN" => doc.header.extmin = [f(10), f(20), f(30)],
+            "$EXTMAX" => doc.header.extmax = [f(10), f(20), f(30)],
+            "$LIMMIN" => doc.header.limmin = [f(10), f(20)],
+            "$LIMMAX" => doc.header.limmax = [f(10), f(20)],
+            "$LTSCALE" => doc.header.ltscale = f(40),
+            "$PDMODE" => doc.header.pdmode = i16v(70) as i32,
+            "$PDSIZE" => doc.header.pdsize = f(40),
+            "$TEXTSIZE" => doc.header.textsize = f(40),
+            "$DIMSCALE" => doc.header.dimscale = f(40),
+            "$LUNITS" => doc.header.lunits = i16v(70),
+            "$LUPREC" => doc.header.luprec = i16v(70),
+            "$AUNITS" => doc.header.aunits = i16v(70),
+            "$AUPREC" => doc.header.auprec = i16v(70),
+            "$HANDSEED" => {
+                doc.header.handseed = u64::from_str_radix(sv(5), 16).unwrap_or(0);
+            }
+            _ => {}
         }
     }
-
-    Err(DxfReadError::UnexpectedEof {
-        context: "expected ENDSEC for HEADER section",
-    })
 }
 
 fn read_classes_section(
@@ -268,7 +328,10 @@ fn read_single_table(
     stream: &mut DxfStreamReader<'_>,
     doc: &mut CadDocument,
 ) -> Result<(), DxfReadError> {
-    use h7cad_native_model::Handle;
+    use h7cad_native_model::{
+        DimStyleProperties, Handle, LayerProperties, LinetypeProperties, LinetypeSegment,
+        TextStyleProperties,
+    };
 
     if !stream.read_next()? {
         return Err(DxfReadError::UnexpectedEof {
@@ -283,6 +346,11 @@ fn read_single_table(
         }
     }
 
+    let needs_detail = matches!(
+        table_name.as_str(),
+        "LAYER" | "LTYPE" | "STYLE" | "DIMSTYLE"
+    );
+
     loop {
         let entry_type = stream.current_value_trimmed().to_string();
         if entry_type == "ENDTAB" {
@@ -291,25 +359,104 @@ fn read_single_table(
 
         let mut entry_handle = Handle::NULL;
         let mut entry_name = String::new();
+        let mut codes: Vec<(i16, String)> = Vec::new();
 
         while stream.read_next()? {
             if stream.current_code() == 0 {
                 break;
             }
-            match stream.current_code() {
-                5 => {
+            let code = stream.current_code();
+            let val = stream.current_value_trimmed().to_string();
+            match code {
+                5 | 105 => {
                     entry_handle = Handle::new(
-                        u64::from_str_radix(stream.current_value_trimmed(), 16).unwrap_or(0),
+                        u64::from_str_radix(&val, 16).unwrap_or(0),
                     );
                 }
-                2 => {
-                    entry_name = stream.current_value_trimmed().to_string();
-                }
+                2 => entry_name = val.clone(),
                 _ => {}
+            }
+            if needs_detail {
+                codes.push((code, val));
             }
         }
 
         if !entry_name.is_empty() {
+            match table_name.as_str() {
+                "LAYER" => {
+                    let mut layer = LayerProperties::new(&entry_name);
+                    layer.handle = entry_handle;
+                    for &(code, ref val) in &codes {
+                        match code {
+                            62 => layer.color = val.parse().unwrap_or(7),
+                            6 => layer.linetype_name = val.clone(),
+                            70 => {
+                                let flags: i16 = val.parse().unwrap_or(0);
+                                layer.is_frozen = flags & 1 != 0;
+                                layer.is_locked = flags & 4 != 0;
+                            }
+                            290 => layer.plot = val.parse::<i16>().unwrap_or(1) != 0,
+                            370 => layer.lineweight = val.parse().unwrap_or(-1),
+                            420 => layer.true_color = val.parse().unwrap_or(0),
+                            _ => {}
+                        }
+                    }
+                    doc.layers.insert(entry_name.clone(), layer);
+                }
+                "LTYPE" => {
+                    let mut lt = LinetypeProperties::new(&entry_name);
+                    lt.handle = entry_handle;
+                    for &(code, ref val) in &codes {
+                        match code {
+                            3 => lt.description = val.clone(),
+                            40 => lt.pattern_length = val.parse().unwrap_or(0.0),
+                            49 => {
+                                lt.segments.push(LinetypeSegment {
+                                    length: val.parse().unwrap_or(0.0),
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                    doc.linetypes.insert(entry_name.clone(), lt);
+                }
+                "STYLE" => {
+                    let mut ts = TextStyleProperties::new(&entry_name);
+                    ts.handle = entry_handle;
+                    for &(code, ref val) in &codes {
+                        match code {
+                            40 => ts.height = val.parse().unwrap_or(0.0),
+                            41 => ts.width_factor = val.parse().unwrap_or(1.0),
+                            50 => ts.oblique_angle = val.parse().unwrap_or(0.0),
+                            70 => ts.flags = val.parse().unwrap_or(0),
+                            3 => ts.font_name = val.clone(),
+                            4 => ts.bigfont_name = val.clone(),
+                            _ => {}
+                        }
+                    }
+                    doc.text_styles.insert(entry_name.clone(), ts);
+                }
+                "DIMSTYLE" => {
+                    let mut ds = DimStyleProperties::new(&entry_name);
+                    ds.handle = entry_handle;
+                    for &(code, ref val) in &codes {
+                        match code {
+                            40 => ds.dimscale = val.parse().unwrap_or(1.0),
+                            41 => ds.dimasz = val.parse().unwrap_or(2.5),
+                            42 => ds.dimexo = val.parse().unwrap_or(0.625),
+                            44 => ds.dimgap = val.parse().unwrap_or(0.625),
+                            140 => ds.dimtxt = val.parse().unwrap_or(2.5),
+                            271 => ds.dimdec = val.parse().unwrap_or(4),
+                            277 => ds.dimlunit = val.parse().unwrap_or(2),
+                            275 => ds.dimaunit = val.parse().unwrap_or(0),
+                            _ => {}
+                        }
+                    }
+                    doc.dim_styles.insert(entry_name.clone(), ds);
+                }
+                _ => {}
+            }
+
             let table = match table_name.as_str() {
                 "LAYER" => Some(&mut doc.tables.layer),
                 "LTYPE" => Some(&mut doc.tables.linetype),
@@ -356,7 +503,8 @@ fn read_blocks_section(
         match stream.current_value_trimmed() {
             "ENDSEC" => return Ok(()),
             "BLOCK" => {
-                let mut handle = Handle::NULL;
+                let mut block_entity_handle = Handle::NULL;
+                let mut owner_handle = Handle::NULL;
                 let mut name = String::new();
                 let mut base_point = [0.0f64; 3];
 
@@ -366,7 +514,13 @@ fn read_blocks_section(
                     }
                     match stream.current_code() {
                         5 => {
-                            handle = Handle::new(
+                            block_entity_handle = Handle::new(
+                                u64::from_str_radix(stream.current_value_trimmed(), 16)
+                                    .unwrap_or(0),
+                            );
+                        }
+                        330 => {
+                            owner_handle = Handle::new(
                                 u64::from_str_radix(stream.current_value_trimmed(), 16)
                                     .unwrap_or(0),
                             );
@@ -406,16 +560,23 @@ fn read_blocks_section(
                 }
 
                 if !name.is_empty() {
-                    let mut record = if let Some(existing) = doc.block_records.get_mut(&handle) {
+                    let record_handle = if owner_handle != Handle::NULL {
+                        owner_handle
+                    } else {
+                        block_entity_handle
+                    };
+
+                    if let Some(existing) = doc.block_records.get_mut(&record_handle) {
+                        existing.block_entity_handle = block_entity_handle;
                         existing.base_point = base_point;
                         existing.entities = block_entities;
-                        continue;
                     } else {
-                        BlockRecord::new(handle, &name)
-                    };
-                    record.base_point = base_point;
-                    record.entities = block_entities;
-                    doc.insert_block_record(record);
+                        let mut record = BlockRecord::new(record_handle, &name);
+                        record.block_entity_handle = block_entity_handle;
+                        record.base_point = base_point;
+                        record.entities = block_entities;
+                        doc.insert_block_record(record);
+                    }
                 }
             }
             _ => {
@@ -494,6 +655,10 @@ fn read_entity(
         match code {
             5 => {
                 entity.handle =
+                    Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
+            }
+            330 => {
+                entity.owner_handle =
                     Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
             }
             8 => entity.layer_name = val.clone(),
@@ -1086,7 +1251,60 @@ pub fn read_dxf(input: &str) -> Result<CadDocument, DxfReadError> {
         }
     }
 
+    post_process(&mut doc);
     Ok(doc)
+}
+
+fn post_process(doc: &mut CadDocument) {
+    use h7cad_native_model::Handle;
+
+    let mut max_handle: u64 = 0;
+
+    for entity in &doc.entities {
+        max_handle = max_handle.max(entity.handle.value());
+    }
+    for obj in &doc.objects {
+        max_handle = max_handle.max(obj.handle.value());
+    }
+    for (_, br) in &doc.block_records {
+        max_handle = max_handle.max(br.handle.value());
+        max_handle = max_handle.max(br.block_entity_handle.value());
+        for ent in &br.entities {
+            max_handle = max_handle.max(ent.handle.value());
+        }
+    }
+    for (_, layer) in &doc.layers {
+        max_handle = max_handle.max(layer.handle.value());
+    }
+    for (_, lt) in &doc.linetypes {
+        max_handle = max_handle.max(lt.handle.value());
+    }
+    for (_, ts) in &doc.text_styles {
+        max_handle = max_handle.max(ts.handle.value());
+    }
+    for (_, ds) in &doc.dim_styles {
+        max_handle = max_handle.max(ds.handle.value());
+    }
+    max_handle = max_handle.max(doc.header.handseed);
+    doc.set_next_handle(max_handle + 1);
+
+    let pre_seeded: Vec<Handle> = doc
+        .block_records
+        .keys()
+        .copied()
+        .filter(|h| {
+            let br = &doc.block_records[h];
+            br.block_entity_handle == Handle::NULL
+                && (br.name == "*Model_Space" || br.name == "*Paper_Space")
+                && doc
+                    .block_records
+                    .values()
+                    .any(|other| other.name == br.name && other.block_entity_handle != Handle::NULL)
+        })
+        .collect();
+    for h in pre_seeded {
+        doc.block_records.remove(&h);
+    }
 }
 
 pub fn write_dxf(_doc: &CadDocument) -> Result<String, String> {
@@ -2001,6 +2219,245 @@ mod tests {
             doc.block_records.len(),
         );
         assert!(blocks_with_entities > 0, "some blocks should have entities");
+    }
+
+    #[test]
+    fn layer_properties_parsed_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+
+        assert!(
+            doc.layers.len() >= 2,
+            "should have at least default '0' + other layers, got {}",
+            doc.layers.len(),
+        );
+
+        let layer0 = doc.layers.get("0").expect("layer '0' must exist");
+        assert!(layer0.color >= 0, "default layer should be on");
+        assert!(!layer0.is_frozen, "default layer should not be frozen");
+
+        let mut layers_with_color = 0;
+        let mut layers_with_linetype = 0;
+        for (name, layer) in &doc.layers {
+            if layer.color != 7 {
+                layers_with_color += 1;
+            }
+            if layer.linetype_name != "Continuous" {
+                layers_with_linetype += 1;
+            }
+            eprintln!(
+                "  Layer '{}': color={}, ltype={}, lw={}, frozen={}, locked={}, plot={}",
+                name,
+                layer.color,
+                layer.linetype_name,
+                layer.lineweight,
+                layer.is_frozen,
+                layer.is_locked,
+                layer.plot,
+            );
+        }
+        eprintln!(
+            "LAYERS: {} total, {} non-default color, {} non-Continuous ltype",
+            doc.layers.len(),
+            layers_with_color,
+            layers_with_linetype,
+        );
+
+        assert_eq!(
+            doc.layers.len(),
+            doc.tables.layer.entries.len(),
+            "layer count should match SymbolTable count",
+        );
+    }
+
+    #[test]
+    fn table_properties_parsed_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+
+        // --- LTYPE ---
+        assert!(
+            doc.linetypes.len() >= 3,
+            "should have at least Continuous/ByLayer/ByBlock, got {}",
+            doc.linetypes.len(),
+        );
+        let cont = doc.linetypes.get("Continuous").expect("Continuous must exist");
+        assert!(cont.is_continuous(), "Continuous should have no segments");
+
+        let mut complex_ltypes = 0;
+        for (name, lt) in &doc.linetypes {
+            if !lt.segments.is_empty() {
+                complex_ltypes += 1;
+            }
+            eprintln!(
+                "  LTYPE '{}': desc='{}', len={}, segs={}",
+                name,
+                lt.description,
+                lt.pattern_length,
+                lt.segments.len(),
+            );
+        }
+        eprintln!(
+            "LINETYPES: {} total, {} complex (with segments)",
+            doc.linetypes.len(),
+            complex_ltypes,
+        );
+        assert_eq!(
+            doc.linetypes.len(),
+            doc.tables.linetype.entries.len(),
+            "linetype count should match SymbolTable",
+        );
+
+        // --- STYLE ---
+        assert!(
+            !doc.text_styles.is_empty(),
+            "should have text styles",
+        );
+        for (name, ts) in &doc.text_styles {
+            eprintln!(
+                "  STYLE '{}': h={}, wf={}, font='{}'",
+                name,
+                ts.height,
+                ts.width_factor,
+                ts.font_name,
+            );
+        }
+        assert_eq!(
+            doc.text_styles.len(),
+            doc.tables.style.entries.len(),
+            "style count should match SymbolTable",
+        );
+
+        // --- DIMSTYLE ---
+        assert!(
+            !doc.dim_styles.is_empty(),
+            "should have dim styles",
+        );
+        let std_ds = doc.dim_styles.get("Standard").or_else(|| doc.dim_styles.values().next());
+        if let Some(ds) = std_ds {
+            eprintln!(
+                "  DIMSTYLE '{}': scale={}, asz={}, txt={}, dec={}",
+                ds.name,
+                ds.dimscale,
+                ds.dimasz,
+                ds.dimtxt,
+                ds.dimdec,
+            );
+            assert!(ds.dimscale > 0.0, "dimscale should be positive");
+        }
+        assert_eq!(
+            doc.dim_styles.len(),
+            doc.tables.dimstyle.entries.len(),
+            "dimstyle count should match SymbolTable",
+        );
+    }
+
+    #[test]
+    fn header_variables_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        let h = &doc.header;
+
+        eprintln!(
+            "HEADER: ver={:?}, extmin=[{:.2},{:.2},{:.2}], extmax=[{:.2},{:.2},{:.2}]",
+            h.version, h.extmin[0], h.extmin[1], h.extmin[2], h.extmax[0], h.extmax[1], h.extmax[2],
+        );
+        eprintln!(
+            "  ltscale={}, textsize={}, dimscale={}, lunits={}, luprec={}",
+            h.ltscale, h.textsize, h.dimscale, h.lunits, h.luprec,
+        );
+        eprintln!("  handseed={:X}, next_handle={:X}", h.handseed, doc.next_handle());
+
+        assert!(h.extmax[0] > h.extmin[0], "extmax.x should > extmin.x");
+        assert!(h.extmax[1] > h.extmin[1], "extmax.y should > extmin.y");
+        assert!(h.ltscale > 0.0, "ltscale should be positive");
+        assert!(h.handseed > 0, "handseed should be set");
+        assert!(
+            doc.next_handle() >= h.handseed,
+            "next_handle should be >= handseed",
+        );
+    }
+
+    #[test]
+    fn cross_references_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+
+        let ms_handle = doc.model_space_handle();
+        assert_ne!(ms_handle, h7cad_native_model::Handle::NULL, "model space handle should exist");
+
+        let mut ms_entities = 0;
+        let mut ps_entities = 0;
+        let mut with_owner = 0;
+        for entity in &doc.entities {
+            if entity.owner_handle != h7cad_native_model::Handle::NULL {
+                with_owner += 1;
+            }
+            if doc.is_model_space_entity(entity) {
+                ms_entities += 1;
+            } else {
+                ps_entities += 1;
+            }
+        }
+        eprintln!(
+            "CROSS-REF: {} entities with owner, {} model space, {} paper space",
+            with_owner, ms_entities, ps_entities,
+        );
+        assert!(with_owner > 0, "some entities should have owner_handle");
+        assert!(ms_entities > 0, "should have model space entities");
+
+        let mut resolved_colors = 0;
+        let mut bylayer = 0;
+        for entity in &doc.entities {
+            let color = doc.resolve_color(entity);
+            if entity.color_index == 256 {
+                bylayer += 1;
+            }
+            if color > 0 && color < 256 {
+                resolved_colors += 1;
+            }
+        }
+        eprintln!(
+            "COLOR: {} ByLayer resolved, {} total with valid ACI",
+            bylayer, resolved_colors,
+        );
+
+        let mut insert_resolved = 0;
+        for entity in &doc.entities {
+            if doc.resolve_insert_block(entity).is_some() {
+                insert_resolved += 1;
+            }
+        }
+        eprintln!("INSERT: {} resolved to block records", insert_resolved);
+        assert!(insert_resolved > 0, "some INSERTs should resolve to blocks");
     }
 
     #[test]
