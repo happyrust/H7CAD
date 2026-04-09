@@ -454,11 +454,36 @@ pub enum EntityData {
         attribs: Vec<Entity>,
     },
     Dimension {
+        /// Low 4 bits of code 70: 0=Linear, 1=Aligned, 2=Angular2Line,
+        /// 3=Diameter, 4=Radius, 5=Angular3Pt, 6=Ordinate
         dim_type: i16,
         block_name: String,
+        style_name: String,
+        /// code 10/20/30
         definition_point: [f64; 3],
+        /// code 11/21/31
         text_midpoint: [f64; 3],
         text_override: String,
+        attachment_point: i16,
+        measurement: f64,
+        text_rotation: f64,
+        horizontal_direction: f64,
+        flip_arrow1: bool,
+        flip_arrow2: bool,
+        /// code 13/23/33 — Aligned/Linear: FirstPoint; Angular: FirstPoint; Ordinate: FeatureLocation
+        first_point: [f64; 3],
+        /// code 14/24/34 — Aligned/Linear: SecondPoint; Angular: SecondPoint; Ordinate: LeaderEndpoint
+        second_point: [f64; 3],
+        /// code 15/25/35 — Radius/Diameter/Angular: AngleVertex
+        angle_vertex: [f64; 3],
+        /// code 16/26/36 — Angular2Line: DimensionArc
+        dimension_arc: [f64; 3],
+        /// code 40 — Radius/Diameter: LeaderLength
+        leader_length: f64,
+        /// code 50 — Linear: Rotation
+        rotation: f64,
+        /// code 52 — Aligned/Linear: ExtLineRotation (oblique angle)
+        ext_line_rotation: f64,
     },
     Hatch {
         pattern_name: String,

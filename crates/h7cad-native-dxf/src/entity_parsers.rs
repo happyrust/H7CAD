@@ -637,29 +637,80 @@ pub(crate) fn parse_insert(codes: &[(i16, String)]) -> (EntityData, bool) {
 pub(crate) fn parse_dimension(codes: &[(i16, String)]) -> EntityData {
     let mut dim_type: i16 = 0;
     let mut block_name = String::new();
+    let mut style_name = String::new();
     let (mut dx, mut dy, mut dz) = (0.0, 0.0, 0.0);
     let (mut mx, mut my, mut mz) = (0.0, 0.0, 0.0);
     let mut text_override = String::new();
+    let mut attachment_point: i16 = 0;
+    let mut measurement: f64 = 0.0;
+    let mut text_rotation: f64 = 0.0;
+    let mut horizontal_direction: f64 = 0.0;
+    let mut flip_arrow1 = false;
+    let mut flip_arrow2 = false;
+    let (mut f1x, mut f1y, mut f1z) = (0.0, 0.0, 0.0);
+    let (mut f2x, mut f2y, mut f2z) = (0.0, 0.0, 0.0);
+    let (mut ax, mut ay, mut az) = (0.0, 0.0, 0.0);
+    let (mut dax, mut day, mut daz) = (0.0, 0.0, 0.0);
+    let mut leader_length: f64 = 0.0;
+    let mut rotation: f64 = 0.0;
+    let mut ext_line_rotation: f64 = 0.0;
+
     for &(code, ref val) in codes {
         match code {
             70 => dim_type = val.parse().unwrap_or(0),
             2 => block_name = val.clone(),
+            3 => style_name = val.clone(),
+            1 => text_override = val.clone(),
             10 => dx = val.parse().unwrap_or(0.0),
             20 => dy = val.parse().unwrap_or(0.0),
             30 => dz = val.parse().unwrap_or(0.0),
             11 => mx = val.parse().unwrap_or(0.0),
             21 => my = val.parse().unwrap_or(0.0),
             31 => mz = val.parse().unwrap_or(0.0),
-            1 => text_override = val.clone(),
+            13 => f1x = val.parse().unwrap_or(0.0),
+            23 => f1y = val.parse().unwrap_or(0.0),
+            33 => f1z = val.parse().unwrap_or(0.0),
+            14 => f2x = val.parse().unwrap_or(0.0),
+            24 => f2y = val.parse().unwrap_or(0.0),
+            34 => f2z = val.parse().unwrap_or(0.0),
+            15 => ax = val.parse().unwrap_or(0.0),
+            25 => ay = val.parse().unwrap_or(0.0),
+            35 => az = val.parse().unwrap_or(0.0),
+            16 => dax = val.parse().unwrap_or(0.0),
+            26 => day = val.parse().unwrap_or(0.0),
+            36 => daz = val.parse().unwrap_or(0.0),
+            40 => leader_length = val.parse().unwrap_or(0.0),
+            42 => measurement = val.parse().unwrap_or(0.0),
+            50 => rotation = val.parse().unwrap_or(0.0),
+            51 => horizontal_direction = val.parse().unwrap_or(0.0),
+            52 => ext_line_rotation = val.parse().unwrap_or(0.0),
+            53 => text_rotation = val.parse().unwrap_or(0.0),
+            71 => attachment_point = val.parse().unwrap_or(0),
+            74 => flip_arrow1 = val.parse::<i16>().unwrap_or(0) != 0,
+            75 => flip_arrow2 = val.parse::<i16>().unwrap_or(0) != 0,
             _ => {}
         }
     }
     EntityData::Dimension {
         dim_type,
         block_name,
+        style_name,
         definition_point: [dx, dy, dz],
         text_midpoint: [mx, my, mz],
         text_override,
+        attachment_point,
+        measurement,
+        text_rotation,
+        horizontal_direction,
+        flip_arrow1,
+        flip_arrow2,
+        first_point: [f1x, f1y, f1z],
+        second_point: [f2x, f2y, f2z],
+        angle_vertex: [ax, ay, az],
+        dimension_arc: [dax, day, daz],
+        leader_length,
+        rotation,
+        ext_line_rotation,
     }
 }
 

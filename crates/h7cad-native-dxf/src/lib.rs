@@ -1467,6 +1467,142 @@ mod tests {
     }
 
     #[test]
+    fn dimension_subtypes_in_real_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../",
+            "../ACadSharp/samples/sample_AC1015_ascii.dxf"
+        );
+        let Ok(input) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let doc = read_dxf(&input).unwrap();
+        let dims: Vec<_> = doc
+            .entities
+            .iter()
+            .filter_map(|e| {
+                if let h7cad_native_model::EntityData::Dimension {
+                    dim_type,
+                    block_name,
+                    style_name,
+                    measurement,
+                    first_point,
+                    second_point,
+                    angle_vertex,
+                    ..
+                } = &e.data
+                {
+                    Some((*dim_type, block_name.clone(), style_name.clone(), *measurement, *first_point, *second_point, *angle_vertex))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(!dims.is_empty(), "should have DIMENSION entities");
+
+        let mut type_counts = std::collections::HashMap::new();
+        for (dt, _, _, _, _, _, _) in &dims {
+            let base_type = dt & 0x0F;
+            *type_counts.entry(base_type).or_insert(0) += 1;
+        }
+        eprintln!("DIMENSION sub-types: {:?}", type_counts);
+
+        for (dt, block_name, style_name, measurement, _, _, _) in &dims {
+            assert!(!block_name.is_empty(), "dim type {} should have block_name", dt);
+            eprintln!(
+                "  dim_type={} (base={}), block={}, style={}, measurement={}",
+                dt,
+                dt & 0x0F,
+                block_name,
+                style_name,
+                measurement,
+            );
+        }
+    }
+
+    #[test]
+    fn dimension_linear_parses_subtype_fields() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nDIMENSION\n  5\nD0\n  8\n0\n",
+            " 70\n     0\n",
+            "  2\n*D1\n  3\nISO-25\n",
+            "  1\n<>mm\n",
+            " 10\n5.0\n 20\n10.0\n 30\n0.0\n",
+            " 11\n2.5\n 21\n5.0\n 31\n0.0\n",
+            " 13\n0.0\n 23\n0.0\n 33\n0.0\n",
+            " 14\n5.0\n 24\n0.0\n 34\n0.0\n",
+            " 42\n5.0\n 50\n0.0\n 52\n0.0\n",
+            " 71\n     5\n",
+            "  0\nENDSEC\n  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 1);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Dimension {
+                dim_type,
+                block_name,
+                style_name,
+                definition_point,
+                text_midpoint,
+                text_override,
+                measurement,
+                first_point,
+                second_point,
+                rotation,
+                ext_line_rotation,
+                attachment_point,
+                ..
+            } => {
+                assert_eq!(*dim_type & 0x0F, 0, "should be Linear");
+                assert_eq!(block_name, "*D1");
+                assert_eq!(style_name, "ISO-25");
+                assert_eq!(text_override, "<>mm");
+                assert_eq!(definition_point, &[5.0, 10.0, 0.0]);
+                assert_eq!(text_midpoint, &[2.5, 5.0, 0.0]);
+                assert_eq!(first_point, &[0.0, 0.0, 0.0]);
+                assert_eq!(second_point, &[5.0, 0.0, 0.0]);
+                assert_eq!(*measurement, 5.0);
+                assert_eq!(*rotation, 0.0);
+                assert_eq!(*ext_line_rotation, 0.0);
+                assert_eq!(*attachment_point, 5);
+            }
+            _ => panic!("expected Dimension"),
+        }
+    }
+
+    #[test]
+    fn dimension_radius_parses_subtype_fields() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nDIMENSION\n  5\nD1\n  8\n0\n",
+            " 70\n     4\n",
+            "  2\n*D2\n  3\nStandard\n",
+            " 10\n10.0\n 20\n10.0\n 30\n0.0\n",
+            " 15\n15.0\n 25\n10.0\n 35\n0.0\n",
+            " 40\n3.5\n 42\n5.0\n",
+            "  0\nENDSEC\n  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        assert_eq!(doc.entities.len(), 1);
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Dimension {
+                dim_type,
+                angle_vertex,
+                leader_length,
+                measurement,
+                ..
+            } => {
+                assert_eq!(*dim_type & 0x0F, 4, "should be Radius");
+                assert_eq!(angle_vertex, &[15.0, 10.0, 0.0]);
+                assert_eq!(*leader_length, 3.5);
+                assert_eq!(*measurement, 5.0);
+            }
+            _ => panic!("expected Dimension"),
+        }
+    }
+
+    #[test]
     fn read_dxf_parses_insert_with_attribs() {
         let input = concat!(
             "  0\nSECTION\n  2\nENTITIES\n",

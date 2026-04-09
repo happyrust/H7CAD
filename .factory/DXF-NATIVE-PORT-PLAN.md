@@ -105,7 +105,7 @@
 | m1-dxf-entity-text | ✅ | TEXT（在 Phase 6 完成） |
 | m1-dxf-entity-mtext | ✅ | MTEXT（insertion/height/width/value/rotation，code 1+3 拼接） |
 | m1-dxf-entity-attrib-attdef | ✅ | ATTRIB（tag/value/insertion/height）+ ATTDEF（tag/prompt/default） |
-| m1-dxf-entity-dimension | ✅ | DIMENSION（dim_type/block/def_point/text_midpoint/text_override） |
+| m1-dxf-entity-dimension | ✅ | DIMENSION 全 7 种子类型（Linear/Aligned/Angular2Line/Angular3Pt/Radius/Diameter/Ordinate），含 style_name/measurement/attachment_point/first_point/second_point/angle_vertex/dimension_arc/leader_length/rotation/ext_line_rotation 等完整字段 |
 | m1-dxf-entity-leader | ✅ | LEADER（vertices + arrowhead） |
 | m1-dxf-entity-multileader | ⬜ | MULTILEADER（嵌套 `{`/`}` 上下文解析，**高复杂度**） |
 | m1-dxf-entity-tolerance | ⬜ | TOLERANCE |
