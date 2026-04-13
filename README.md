@@ -8,9 +8,21 @@ A CAD application for 2D/3D drawing and design, built with Rust.
 
 - 2D drafting and 3D modeling
 - DXF file import/export
+- Native DWG parser work is in progress under `crates/h7cad-native-dwg`
 - GPU-accelerated rendering via WebGPU
 - Snap and annotation tools
 - Modular ribbon interface (Home, Annotate, Insert, View, Manage)
+
+## Native DWG Parser Status
+
+- Parser-side semantic extraction and resolver-hardening regression coverage now live in `crates/h7cad-native-dwg`.
+- Public runtime DWG loading is still intentionally unavailable; the facade keeps returning `native DWG reader not implemented yet` for DWG loads until a later integration mission enables rollout.
+- Useful validation commands for the native DWG parser surface:
+
+```bash
+cargo test -p h7cad-native-dwg -- --test-threads=1
+cargo check -p h7cad-native-facade
+```
 
 ## Installation
 
