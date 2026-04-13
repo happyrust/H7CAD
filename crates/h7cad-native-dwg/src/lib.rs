@@ -8,6 +8,7 @@ mod section_map;
 mod version;
 
 use h7cad_native_model::CadDocument;
+use h7cad_native_model::Handle;
 
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
@@ -47,44 +48,57 @@ pub fn build_pending_document(
     payloads: Vec<Vec<u8>>,
 ) -> Result<PendingDocument, DwgReadError> {
     let mut pending = PendingDocument::new(header.version, header.section_count);
-    pending.sections = sections
+    let section_records = sections
         .descriptors
         .iter()
         .zip(payloads)
         .map(|descriptor| {
-            let record_count = classify_section_records(&descriptor.1)?.len() as u32;
-            Ok(PendingSection {
-                index: descriptor.0.index,
-                offset: descriptor.0.offset,
-                size: descriptor.0.size,
-                record_count,
-                payload: descriptor.1,
-            })
+            let records = classify_section_records(&descriptor.1)?;
+            let record_count = records.len() as u32;
+            Ok((
+                PendingSection {
+                    index: descriptor.0.index,
+                    offset: descriptor.0.offset,
+                    size: descriptor.0.size,
+                    record_count,
+                    payload: descriptor.1,
+                },
+                records,
+            ))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    pending.objects = pending
-        .sections
+    pending.sections = section_records
+        .iter()
+        .map(|(section, _)| section.clone())
+        .collect();
+    pending.objects = section_records
         .iter()
         .enumerate()
-        .map(|(index, section)| {
-            classify_section_records(&section.payload).map(|records| {
-                records
-                    .into_iter()
-                    .enumerate()
-                    .map(|(record_index, record)| PendingObject {
-                        handle: h7cad_native_model::Handle::new(
-                            0x100 + index as u64 * 0x10 + record_index as u64,
-                        ),
-                        owner_handle: h7cad_native_model::Handle::NULL,
-                        section_index: section.index,
-                        kind: classify_record_kind(section.index, record_index as u32, &record),
-                    })
-                    .collect::<Vec<_>>()
-            })
+        .map(|(index, (section, records))| {
+            records
+                .iter()
+                .enumerate()
+                .map(|(record_index, record)| PendingObject {
+                    handle: semantic_handle(record).unwrap_or_else(|| {
+                        Handle::new(0x100 + index as u64 * 0x10 + record_index as u64)
+                    }),
+                    owner_handle: semantic_owner_handle(record).unwrap_or(Handle::NULL),
+                    section_index: section.index,
+                    kind: classify_record_kind(section.index, record_index as u32, record),
+                })
+                .collect::<Vec<_>>()
         })
-        .collect::<Result<Vec<_>, _>>()?
+        .collect::<Vec<_>>()
         .into_iter()
         .flatten()
+        .collect();
+    pending.layers = section_records
+        .iter()
+        .flat_map(|(_, records)| records.iter().filter_map(|record| semantic_layer(record)))
+        .collect();
+    pending.entities = section_records
+        .iter()
+        .flat_map(|(_, records)| records.iter().filter_map(|record| semantic_entity(record)))
         .collect();
     Ok(pending)
 }
@@ -279,6 +293,66 @@ fn semantic_record_category(record: &[u8]) -> Option<SemanticRecordCategory> {
     } else {
         None
     }
+}
+
+fn semantic_fields(record: &[u8]) -> Option<Vec<&str>> {
+    semantic_record_category(record)?;
+    std::str::from_utf8(record)
+        .ok()
+        .map(|text| text.split(':').collect::<Vec<_>>())
+}
+
+fn parse_handle_fragment(fragment: &str, prefix: char) -> Option<Handle> {
+    let rest = fragment.strip_prefix(prefix)?;
+    u64::from_str_radix(rest, 16).ok().map(Handle::new)
+}
+
+fn semantic_handle(record: &[u8]) -> Option<Handle> {
+    let fields = semantic_fields(record)?;
+    fields
+        .iter()
+        .rev()
+        .find_map(|field| parse_handle_fragment(field, 'H').or_else(|| parse_handle_fragment(field, 'E')))
+}
+
+fn semantic_owner_handle(record: &[u8]) -> Option<Handle> {
+    let fields = semantic_fields(record)?;
+    fields.iter().find_map(|field| {
+        if field.starts_with('O') && !field.starts_with("OBJ") {
+            parse_handle_fragment(field, 'O')
+        } else {
+            None
+        }
+    })
+}
+
+fn semantic_layer(record: &[u8]) -> Option<PendingLayer> {
+    let fields = semantic_fields(record)?;
+    if fields.first().copied()? != "TBL" || fields.get(1).copied()? != "LAYER" {
+        return None;
+    }
+    Some(PendingLayer {
+        handle: semantic_handle(record)?,
+        name: fields.get(2)?.to_string(),
+    })
+}
+
+fn semantic_entity(record: &[u8]) -> Option<PendingEntity> {
+    let fields = semantic_fields(record)?;
+    if fields.first().copied()? != "ENT" {
+        return None;
+    }
+    let layer_name = fields
+        .iter()
+        .skip(2)
+        .find_map(|field| field.strip_prefix('L'))
+        .unwrap_or_default()
+        .to_string();
+    Some(PendingEntity {
+        handle: semantic_handle(record)?,
+        owner_handle: semantic_owner_handle(record).unwrap_or(Handle::NULL),
+        layer_name,
+    })
 }
 
 #[cfg(test)]

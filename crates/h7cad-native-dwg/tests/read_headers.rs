@@ -1,7 +1,8 @@
 use h7cad_native_dwg::{
     build_pending_document, classify_record_kind, classify_section_records, dispatch_object,
-    read_dwg, record_payload_size, sniff_version, summarize_object, DispatchTarget, DwgFileHeader, DwgReadError, DwgVersion,
-    ParsedRecordSummary, PendingObject, PendingObjectKind, SectionDescriptor, SectionMap,
+    read_dwg, record_payload_size, sniff_version, summarize_object, DispatchTarget, DwgFileHeader,
+    DwgReadError, DwgVersion, ParsedRecordSummary, PendingObject, PendingObjectKind,
+    SectionDescriptor, SectionMap,
 };
 
 #[test]
@@ -664,8 +665,8 @@ fn semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit() 
             "record=DWG_TABLE_SECTION_0_RECORD_0_SIZE_24 owner=0".to_string(),
             "record=DWG_OBJECT_SECTION_1_RECORD_0_SIZE_39 owner=0".to_string(),
             "record=DWG_OBJECT_SECTION_1_RECORD_1_SIZE_24 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_2_RECORD_0_SIZE_28 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_2_RECORD_1_SIZE_30 owner=0".to_string(),
+            "record=DWG_ENTITY_SECTION_2_RECORD_0_SIZE_28 owner=129".to_string(),
+            "record=DWG_ENTITY_SECTION_2_RECORD_1_SIZE_30 owner=144".to_string(),
             "record=DWG_OBJECT_SECTION_3_RECORD_0_SIZE_23 owner=0".to_string(),
         ]
     );
@@ -673,7 +674,7 @@ fn semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit() 
         semantic_fixture_graph_projection(&invalid),
         vec![
             "record=DWG_OBJECT_SECTION_0_RECORD_0_SIZE_25 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_29 owner=0".to_string(),
+            "record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_29 owner=255".to_string(),
         ]
     );
 }
@@ -738,6 +739,50 @@ fn semantic_decode_embedded_zero_and_same_size_records_keep_distinct_identities(
 }
 
 #[test]
+fn pending_layer_semantics_come_from_decoded_records() {
+    let pending = parse_pending_fixture(&semantic_record_fixture("ownership-graph"));
+
+    assert_eq!(
+        pending.layers,
+        vec![h7cad_native_dwg::PendingLayer {
+            handle: h7cad_native_model::Handle::new(0x80),
+            name: "LayerModel".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn pending_entity_semantics_preserve_handle_owner_and_layer_relationships() {
+    let pending = parse_pending_fixture(&semantic_record_fixture("ownership-graph"));
+
+    assert_eq!(
+        pending.entities,
+        vec![
+            h7cad_native_dwg::PendingEntity {
+                handle: h7cad_native_model::Handle::new(0x83),
+                owner_handle: h7cad_native_model::Handle::new(0x81),
+                layer_name: "LayerModel".to_string(),
+            },
+            h7cad_native_dwg::PendingEntity {
+                handle: h7cad_native_model::Handle::new(0x84),
+                owner_handle: h7cad_native_model::Handle::new(0x90),
+                layer_name: "LayerModel".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn semantic_provenance_projection_is_stable_across_repeated_parses() {
+    let bytes = semantic_record_fixture("ownership-graph");
+
+    let first = parse_pending_fixture(&bytes);
+    let second = parse_pending_fixture(&bytes);
+
+    assert_eq!(pending_semantic_projection(&first), pending_semantic_projection(&second));
+}
+
+#[test]
 fn typed_record_classifier_maps_section_buckets() {
     assert_eq!(
         classify_record_kind(0, 0, b"A"),
@@ -792,6 +837,42 @@ fn parse_pending_fixture(bytes: &[u8]) -> h7cad_native_dwg::PendingDocument {
     let sections = SectionMap::parse(bytes, &header).unwrap();
     let payloads = sections.read_section_payloads(bytes).unwrap();
     build_pending_document(&header, &sections, payloads).unwrap()
+}
+
+fn pending_semantic_projection(
+    pending: &h7cad_native_dwg::PendingDocument,
+) -> Vec<(u64, u64, &'static str, String)> {
+    let mut projection = pending
+        .objects
+        .iter()
+        .map(|object| {
+            let semantic_kind = match object.kind {
+                PendingObjectKind::TableRecord { .. } => "table",
+                PendingObjectKind::EntityRecord { .. } => "entity",
+                PendingObjectKind::ObjectRecord { .. } => "object",
+            };
+            (
+                object.handle.value(),
+                object.owner_handle.value(),
+                semantic_kind,
+                pending
+                    .entities
+                    .iter()
+                    .find(|entity| entity.handle == object.handle)
+                    .map(|entity| entity.layer_name.clone())
+                    .or_else(|| {
+                        pending
+                            .layers
+                            .iter()
+                            .find(|layer| layer.handle == object.handle)
+                            .map(|layer| layer.name.clone())
+                    })
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    projection.sort();
+    projection
 }
 
 fn resolved_object_projection(
