@@ -1,4 +1,9 @@
 commands:
-  test: cargo test --workspace
-  build: cargo build --workspace
-  run: cargo run
+  install: cargo fetch --locked
+  check: cargo check -p h7cad-native-dwg
+  test: cargo test -p h7cad-native-dwg -- --test-threads=1
+  test_integration: cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1
+  compile_surface: cargo check -p h7cad-native-facade
+  build: cargo build -p h7cad-native-dwg
+
+services: {}
