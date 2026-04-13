@@ -48,6 +48,7 @@ Typical work:
 
 Before trusting a narrow manifest command, verify it actually matches the current workspace layout. If a manifest command is stale, use the working equivalent and note the deviation in the handoff.
 If the assigned target files were already dirty before you started, you should still create a feature commit by staging the assigned file set only. Note any mixed file ancestry in the handoff rather than returning solely because the files were pre-modified.
+If an attribution-repair follow-up finds that the assigned file set already matches `HEAD` with no remaining diff, do not invent a no-op code change. Record the existing attributable commit if it already contains the scoped implementation; otherwise return to the orchestrator immediately and explain that no file-level diff remains to recommit safely.
 
 ## Example Handoff
 
