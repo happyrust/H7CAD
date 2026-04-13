@@ -268,6 +268,87 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Shape(e))
         }
+        nm::EntityData::Polyline {
+            polyline_type,
+            vertices,
+            closed,
+        } => Some(match polyline_type {
+            nm::PolylineType::Polyline2D => {
+                let mut e = ar::Polyline2D::new();
+                e.vertices = vertices
+                    .iter()
+                    .map(|vertex| {
+                        let mut out = ar::Vertex2D::new(v3(&vertex.position));
+                        out.bulge = vertex.bulge;
+                        out.start_width = vertex.start_width;
+                        out.end_width = vertex.end_width;
+                        out
+                    })
+                    .collect();
+                e.flags.set_closed(*closed);
+                apply_common(&mut e.common, entity);
+                ar::EntityType::Polyline2D(e)
+            }
+            nm::PolylineType::Polyline3D => {
+                let mut e = ar::Polyline3D::new();
+                e.vertices = vertices
+                    .iter()
+                    .map(|vertex| ar::Vertex3DPolyline::new(v3(&vertex.position)))
+                    .collect();
+                e.flags.closed = *closed;
+                apply_common(&mut e.common, entity);
+                ar::EntityType::Polyline3D(e)
+            }
+            nm::PolylineType::PolygonMesh => {
+                let mut e = ar::PolygonMeshEntity::new();
+                e.vertices = vertices
+                    .iter()
+                    .map(|vertex| {
+                        let mut out = ar::PolygonMeshVertex::at(v3(&vertex.position));
+                        out.common.layer = entity.layer_name.clone();
+                        out
+                    })
+                    .collect();
+                if *closed {
+                    e.flags.insert(ar::PolygonMeshFlags::CLOSED_M);
+                }
+                apply_common(&mut e.common, entity);
+                ar::EntityType::PolygonMesh(e)
+            }
+            nm::PolylineType::PolyfaceMesh => {
+                let mut e = ar::PolyfaceMesh::new();
+                e.vertices = vertices
+                    .iter()
+                    .map(|vertex| {
+                        let mut out = ar::PolyfaceVertex::new(v3(&vertex.position));
+                        out.start_width = vertex.start_width;
+                        out.end_width = vertex.end_width;
+                        out.bulge = vertex.bulge;
+                        out
+                    })
+                    .collect();
+                if *closed {
+                    e.flags.insert(ar::PolyfaceMeshFlags::CLOSED);
+                }
+                apply_common(&mut e.common, entity);
+                ar::EntityType::PolyfaceMesh(e)
+            }
+        }),
+        nm::EntityData::Hatch {
+            pattern_name,
+            solid_fill,
+            boundary_paths,
+        } => {
+            let mut e = ar::Hatch::new();
+            e.pattern.name = pattern_name.clone();
+            e.is_solid = *solid_fill;
+            e.paths = boundary_paths
+                .iter()
+                .map(native_hatch_path_to_acadrust)
+                .collect();
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Hatch(e))
+        }
         nm::EntityData::Dimension { .. } => native_dimension_to_acadrust(entity),
         nm::EntityData::MultiLeader { .. } => native_multileader_to_acadrust(entity),
         nm::EntityData::Insert {
@@ -485,6 +566,82 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 ],
                 size: shape.size,
                 shape_number: shape.shape_number as i16,
+            },
+        )),
+        ar::EntityType::Polyline2D(pline) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::Polyline2D,
+                vertices: pline
+                    .vertices
+                    .iter()
+                    .map(|vertex| nm::PolylineVertex {
+                        position: [vertex.location.x, vertex.location.y, vertex.location.z],
+                        bulge: vertex.bulge,
+                        start_width: vertex.start_width,
+                        end_width: vertex.end_width,
+                    })
+                    .collect(),
+                closed: pline.is_closed(),
+            },
+        )),
+        ar::EntityType::Polyline3D(pline) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::Polyline3D,
+                vertices: pline
+                    .vertices
+                    .iter()
+                    .map(|vertex| nm::PolylineVertex {
+                        position: [vertex.position.x, vertex.position.y, vertex.position.z],
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    })
+                    .collect(),
+                closed: pline.is_closed(),
+            },
+        )),
+        ar::EntityType::PolygonMesh(mesh) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::PolygonMesh,
+                vertices: mesh
+                    .vertices
+                    .iter()
+                    .map(|vertex| nm::PolylineVertex {
+                        position: [vertex.location.x, vertex.location.y, vertex.location.z],
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    })
+                    .collect(),
+                closed: mesh.is_closed_m(),
+            },
+        )),
+        ar::EntityType::PolyfaceMesh(mesh) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::PolyfaceMesh,
+                vertices: mesh
+                    .vertices
+                    .iter()
+                    .map(|vertex| nm::PolylineVertex {
+                        position: [vertex.location.x, vertex.location.y, vertex.location.z],
+                        bulge: vertex.bulge,
+                        start_width: vertex.start_width,
+                        end_width: vertex.end_width,
+                    })
+                    .collect(),
+                closed: mesh.flags.contains(ar::PolyfaceMeshFlags::CLOSED),
+            },
+        )),
+        ar::EntityType::Hatch(hatch) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Hatch {
+                pattern_name: hatch.pattern.name.clone(),
+                solid_fill: hatch.is_solid,
+                boundary_paths: hatch.paths.iter().map(acad_hatch_path_to_native).collect(),
             },
         )),
         ar::EntityType::Dimension(dimension) => acad_dimension_to_native(entity, dimension),
@@ -1109,6 +1266,93 @@ fn lineweight_to_native(value: &LineWeight) -> i16 {
     }
 }
 
+fn native_hatch_path_to_acadrust(path: &nm::HatchBoundaryPath) -> ar::BoundaryPath {
+    let flags = ar::BoundaryPathFlags::from_bits(path.flags as u32);
+    let mut out = ar::BoundaryPath::with_flags(flags);
+    for edge in &path.edges {
+        out.add_edge(match edge {
+            nm::HatchEdge::Line { start, end } => ar::BoundaryEdge::Line(ar::LineEdge {
+                start: Vector2::new(start[0], start[1]),
+                end: Vector2::new(end[0], end[1]),
+            }),
+            nm::HatchEdge::CircularArc {
+                center,
+                radius,
+                start_angle,
+                end_angle,
+                is_ccw,
+            } => ar::BoundaryEdge::CircularArc(ar::CircularArcEdge {
+                center: Vector2::new(center[0], center[1]),
+                radius: *radius,
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+                counter_clockwise: *is_ccw,
+            }),
+            nm::HatchEdge::EllipticArc {
+                center,
+                major_endpoint,
+                minor_ratio,
+                start_angle,
+                end_angle,
+                is_ccw,
+            } => ar::BoundaryEdge::EllipticArc(ar::EllipticArcEdge {
+                center: Vector2::new(center[0], center[1]),
+                major_axis_endpoint: Vector2::new(major_endpoint[0], major_endpoint[1]),
+                minor_axis_ratio: *minor_ratio,
+                start_angle: *start_angle,
+                end_angle: *end_angle,
+                counter_clockwise: *is_ccw,
+            }),
+            nm::HatchEdge::Polyline { closed, vertices } => {
+                ar::BoundaryEdge::Polyline(ar::PolylineEdge {
+                    is_closed: *closed,
+                    vertices: vertices
+                        .iter()
+                        .map(|vertex| Vector3::new(vertex[0], vertex[1], vertex[2]))
+                        .collect(),
+                })
+            }
+        });
+    }
+    out
+}
+
+fn acad_hatch_path_to_native(path: &ar::BoundaryPath) -> nm::HatchBoundaryPath {
+    nm::HatchBoundaryPath {
+        flags: path.flags.bits() as i32,
+        edges: path
+            .edges
+            .iter()
+            .map(|edge| match edge {
+                ar::BoundaryEdge::Line(line) => nm::HatchEdge::Line {
+                    start: [line.start.x, line.start.y],
+                    end: [line.end.x, line.end.y],
+                },
+                ar::BoundaryEdge::CircularArc(arc) => nm::HatchEdge::CircularArc {
+                    center: [arc.center.x, arc.center.y],
+                    radius: arc.radius,
+                    start_angle: arc.start_angle,
+                    end_angle: arc.end_angle,
+                    is_ccw: arc.counter_clockwise,
+                },
+                ar::BoundaryEdge::EllipticArc(arc) => nm::HatchEdge::EllipticArc {
+                    center: [arc.center.x, arc.center.y],
+                    major_endpoint: [arc.major_axis_endpoint.x, arc.major_axis_endpoint.y],
+                    minor_ratio: arc.minor_axis_ratio,
+                    start_angle: arc.start_angle,
+                    end_angle: arc.end_angle,
+                    is_ccw: arc.counter_clockwise,
+                },
+                ar::BoundaryEdge::Polyline(poly) => nm::HatchEdge::Polyline {
+                    closed: poly.is_closed,
+                    vertices: poly.vertices.iter().map(|v| [v.x, v.y, v.z]).collect(),
+                },
+                ar::BoundaryEdge::Spline(_) => panic!("unsupported hatch spline edge in bridge"),
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1490,5 +1734,305 @@ mod tests {
             ar::EntityType::MultiLeader(ml) => assert_eq!(ml.context.leader_roots.len(), 2),
             other => panic!("expected compat multileader, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn polyline_family_bridge_roundtrips_preserve_family_and_vertex_fields() {
+        let cases = vec![
+            (
+                nm::EntityData::Polyline {
+                    polyline_type: nm::PolylineType::Polyline2D,
+                    vertices: vec![
+                        nm::PolylineVertex {
+                            position: [0.0, 0.0, 0.0],
+                            bulge: 0.25,
+                            start_width: 1.5,
+                            end_width: 2.5,
+                        },
+                        nm::PolylineVertex {
+                            position: [4.0, 1.0, 0.0],
+                            bulge: -0.5,
+                            start_width: 0.5,
+                            end_width: 0.75,
+                        },
+                    ],
+                    closed: true,
+                },
+                "Polyline2D",
+            ),
+            (
+                nm::EntityData::Polyline {
+                    polyline_type: nm::PolylineType::Polyline3D,
+                    vertices: vec![
+                        nm::PolylineVertex {
+                            position: [1.0, 2.0, 3.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
+                        nm::PolylineVertex {
+                            position: [4.0, 5.0, 6.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
+                    ],
+                    closed: false,
+                },
+                "Polyline3D",
+            ),
+            (
+                nm::EntityData::Polyline {
+                    polyline_type: nm::PolylineType::PolygonMesh,
+                    vertices: vec![
+                        nm::PolylineVertex {
+                            position: [0.0, 0.0, 0.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
+                        nm::PolylineVertex {
+                            position: [1.0, 0.0, 1.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
+                        nm::PolylineVertex {
+                            position: [1.0, 1.0, 2.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
+                    ],
+                    closed: true,
+                },
+                "PolygonMesh",
+            ),
+            (
+                nm::EntityData::Polyline {
+                    polyline_type: nm::PolylineType::PolyfaceMesh,
+                    vertices: vec![
+                        nm::PolylineVertex {
+                            position: [2.0, 0.0, 0.0],
+                            bulge: 0.0,
+                            start_width: 3.0,
+                            end_width: 4.0,
+                        },
+                        nm::PolylineVertex {
+                            position: [3.0, 1.0, 0.0],
+                            bulge: 0.0,
+                            start_width: 5.0,
+                            end_width: 6.0,
+                        },
+                    ],
+                    closed: true,
+                },
+                "PolyfaceMesh",
+            ),
+        ];
+
+        for (data, family_name) in cases {
+            let mut native = nm::Entity::new(data.clone());
+            native.handle = nm::Handle::new(0x60);
+            native.layer_name = family_name.into();
+
+            let acad = native_entity_to_acadrust(&native)
+                .unwrap_or_else(|| panic!("{family_name} should bridge to acad"));
+            match (&acad, &data) {
+                (
+                    ar::EntityType::Polyline2D(pline),
+                    nm::EntityData::Polyline {
+                        vertices, closed, ..
+                    },
+                ) => {
+                    assert_eq!(pline.vertices.len(), vertices.len());
+                    assert_eq!(pline.is_closed(), *closed);
+                    assert_eq!(pline.vertices[0].start_width, vertices[0].start_width);
+                    assert_eq!(pline.vertices[0].end_width, vertices[0].end_width);
+                    assert_eq!(pline.vertices[0].bulge, vertices[0].bulge);
+                }
+                (
+                    ar::EntityType::Polyline3D(pline),
+                    nm::EntityData::Polyline {
+                        vertices, closed, ..
+                    },
+                ) => {
+                    assert_eq!(pline.vertices.len(), vertices.len());
+                    assert_eq!(pline.is_closed(), *closed);
+                }
+                (
+                    ar::EntityType::PolygonMesh(mesh),
+                    nm::EntityData::Polyline {
+                        vertices, closed, ..
+                    },
+                ) => {
+                    assert_eq!(mesh.vertices.len(), vertices.len());
+                    assert_eq!(mesh.is_closed_m(), *closed);
+                }
+                (
+                    ar::EntityType::PolyfaceMesh(mesh),
+                    nm::EntityData::Polyline {
+                        vertices, closed, ..
+                    },
+                ) => {
+                    assert_eq!(mesh.vertices.len(), vertices.len());
+                    assert_eq!(mesh.flags.contains(ar::PolyfaceMeshFlags::CLOSED), *closed);
+                    assert_eq!(mesh.vertices[0].start_width, vertices[0].start_width);
+                    assert_eq!(mesh.vertices[0].end_width, vertices[0].end_width);
+                }
+                other => panic!("unexpected compat entity for {family_name}: {other:?}"),
+            }
+
+            let roundtrip = acadrust_entity_to_native(&acad)
+                .unwrap_or_else(|| panic!("{family_name} should bridge back to native"));
+            assert_eq!(roundtrip.data, data, "{family_name} payload should survive roundtrip");
+        }
+    }
+
+    #[test]
+    fn hatch_bridge_roundtrips_preserve_metadata_and_boundary_structure() {
+        let mut native = nm::Entity::new(nm::EntityData::Hatch {
+            pattern_name: "ANSI31".into(),
+            solid_fill: false,
+            boundary_paths: vec![
+                nm::HatchBoundaryPath {
+                    flags: 3,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![[0.0, 0.0, 0.25], [5.0, 0.0, -0.5], [5.0, 4.0, 0.0]],
+                    }],
+                },
+                nm::HatchBoundaryPath {
+                    flags: 1,
+                    edges: vec![
+                        nm::HatchEdge::Line {
+                            start: [1.0, 1.0],
+                            end: [4.0, 1.0],
+                        },
+                        nm::HatchEdge::CircularArc {
+                            center: [4.0, 2.0],
+                            radius: 1.0,
+                            start_angle: 0.0,
+                            end_angle: 90.0,
+                            is_ccw: true,
+                        },
+                    ],
+                },
+            ],
+        });
+        native.handle = nm::Handle::new(0x70);
+
+        let acad = native_entity_to_acadrust(&native).expect("hatch should bridge to acad");
+        match &acad {
+            ar::EntityType::Hatch(hatch) => {
+                assert_eq!(hatch.pattern.name, "ANSI31");
+                assert!(!hatch.is_solid);
+                assert_eq!(hatch.paths.len(), 2);
+                assert!(hatch.paths[0].is_polyline());
+                assert_eq!(hatch.paths[0].edges.len(), 1);
+                assert_eq!(hatch.paths[1].edges.len(), 2);
+            }
+            other => panic!("expected compat hatch, got {other:?}"),
+        }
+
+        let roundtrip = acadrust_entity_to_native(&acad).expect("hatch should bridge back to native");
+        match &roundtrip.data {
+            nm::EntityData::Hatch {
+                pattern_name,
+                solid_fill,
+                boundary_paths,
+            } => {
+                assert_eq!(pattern_name, "ANSI31");
+                assert!(!solid_fill);
+                assert_eq!(boundary_paths.len(), 2);
+                assert!(matches!(boundary_paths[0].edges[0], nm::HatchEdge::Polyline { .. }));
+                assert_eq!(boundary_paths[1].edges.len(), 2);
+            }
+            other => panic!("expected native hatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn document_bridge_exposes_polyline_families_and_hatch_on_compat_side() {
+        let mut native = nm::CadDocument::new();
+        for data in [
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::Polyline2D,
+                vertices: vec![nm::PolylineVertex {
+                    position: [0.0, 0.0, 0.0],
+                    bulge: 0.0,
+                    start_width: 1.0,
+                    end_width: 1.5,
+                }],
+                closed: true,
+            },
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::Polyline3D,
+                vertices: vec![nm::PolylineVertex {
+                    position: [1.0, 2.0, 3.0],
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                }],
+                closed: false,
+            },
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::PolygonMesh,
+                vertices: vec![nm::PolylineVertex {
+                    position: [2.0, 3.0, 4.0],
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                }],
+                closed: true,
+            },
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::PolyfaceMesh,
+                vertices: vec![nm::PolylineVertex {
+                    position: [3.0, 4.0, 5.0],
+                    bulge: 0.0,
+                    start_width: 2.0,
+                    end_width: 2.5,
+                }],
+                closed: true,
+            },
+            nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 2.0, 0.0]],
+                    }],
+                }],
+            },
+        ] {
+            native.add_entity(nm::Entity::new(data)).expect("entity should add");
+        }
+
+        let compat = native_doc_to_acadrust(&native);
+        let mut saw_polyline2d = 0;
+        let mut saw_polyline3d = 0;
+        let mut saw_polygon_mesh = 0;
+        let mut saw_polyface_mesh = 0;
+        let mut saw_hatch = 0;
+
+        for entity in compat.entities() {
+            match entity {
+                ar::EntityType::Polyline2D(_) => saw_polyline2d += 1,
+                ar::EntityType::Polyline3D(_) => saw_polyline3d += 1,
+                ar::EntityType::PolygonMesh(_) => saw_polygon_mesh += 1,
+                ar::EntityType::PolyfaceMesh(_) => saw_polyface_mesh += 1,
+                ar::EntityType::Hatch(_) => saw_hatch += 1,
+                _ => {}
+            }
+        }
+
+        assert_eq!(saw_polyline2d, 1);
+        assert_eq!(saw_polyline3d, 1);
+        assert_eq!(saw_polygon_mesh, 1);
+        assert_eq!(saw_polyface_mesh, 1);
+        assert_eq!(saw_hatch, 1);
     }
 }
