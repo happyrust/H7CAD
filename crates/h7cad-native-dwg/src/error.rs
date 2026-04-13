@@ -1,0 +1,61 @@
+use crate::DwgVersion;
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DwgReadError {
+    TruncatedHeader { expected_at_least: usize },
+    InvalidMagic { found: String },
+    UnsupportedVersion(DwgVersion),
+    UnsupportedHeaderLayout { version: DwgVersion },
+    TruncatedSectionDirectory {
+        version: DwgVersion,
+        expected_at_least: usize,
+        actual: usize,
+    },
+    SectionOutOfBounds {
+        index: u32,
+        offset: usize,
+        size: usize,
+        actual: usize,
+    },
+    UnexpectedEof {
+        context: &'static str,
+    },
+}
+
+impl fmt::Display for DwgReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TruncatedHeader { expected_at_least } => {
+                write!(f, "truncated DWG header: expected at least {expected_at_least} bytes")
+            }
+            Self::InvalidMagic { found } => write!(f, "invalid DWG magic `{found}`"),
+            Self::UnsupportedVersion(version) => {
+                write!(f, "unsupported DWG version `{version}`")
+            }
+            Self::UnsupportedHeaderLayout { version } => {
+                write!(f, "unsupported DWG header layout for version `{version}`")
+            }
+            Self::TruncatedSectionDirectory {
+                version,
+                expected_at_least,
+                actual,
+            } => write!(
+                f,
+                "truncated DWG section directory for `{version}`: expected at least {expected_at_least} bytes, got {actual}"
+            ),
+            Self::SectionOutOfBounds {
+                index,
+                offset,
+                size,
+                actual,
+            } => write!(
+                f,
+                "DWG section {index} is out of bounds: offset {offset}, size {size}, file size {actual}"
+            ),
+            Self::UnexpectedEof { context } => write!(f, "unexpected EOF: {context}"),
+        }
+    }
+}
+
+impl std::error::Error for DwgReadError {}
