@@ -268,6 +268,113 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Shape(e))
         }
+        nm::EntityData::Attrib {
+            tag,
+            value,
+            insertion,
+            height,
+        } => {
+            let mut e = ar::AttributeEntity::new(tag.clone(), value.clone());
+            e.insertion_point = v3(insertion);
+            e.alignment_point = v3(insertion);
+            e.height = *height;
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::AttributeEntity(e))
+        }
+        nm::EntityData::AttDef {
+            tag,
+            prompt,
+            default_value,
+            insertion,
+            height,
+        } => {
+            let mut e =
+                ar::AttributeDefinition::new(tag.clone(), prompt.clone(), default_value.clone());
+            e.insertion_point = v3(insertion);
+            e.alignment_point = v3(insertion);
+            e.height = *height;
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::AttributeDefinition(e))
+        }
+        nm::EntityData::Leader {
+            vertices,
+            has_arrowhead,
+        } => {
+            let mut e = ar::Leader::from_vertices(vertices.iter().map(v3).collect());
+            e.arrow_enabled = *has_arrowhead;
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Leader(e))
+        }
+        nm::EntityData::MLine {
+            vertices,
+            style_name,
+            scale,
+        } => {
+            let mut e = ar::MLine::from_points(&vertices.iter().map(v3).collect::<Vec<_>>());
+            e.style_name = style_name.clone();
+            e.scale_factor = *scale;
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::MLine(e))
+        }
+        nm::EntityData::Image {
+            insertion,
+            u_vector,
+            v_vector,
+            image_size,
+        } => {
+            let mut e = ar::RasterImage::new("", v3(insertion), image_size[0], image_size[1]);
+            e.u_vector = v3(u_vector);
+            e.v_vector = v3(v_vector);
+            e.size = Vector2::new(image_size[0], image_size[1]);
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::RasterImage(e))
+        }
+        nm::EntityData::Wipeout { clip_vertices } => {
+            let mut e = if clip_vertices.len() >= 3 {
+                ar::Wipeout::polygonal(
+                    &clip_vertices
+                        .iter()
+                        .map(|vertex| Vector2::new(vertex[0], vertex[1]))
+                        .collect::<Vec<_>>(),
+                    0.0,
+                )
+            } else if clip_vertices.len() == 2 {
+                ar::Wipeout::from_corners(
+                    Vector3::new(clip_vertices[0][0], clip_vertices[0][1], 0.0),
+                    Vector3::new(clip_vertices[1][0], clip_vertices[1][1], 0.0),
+                )
+            } else {
+                ar::Wipeout::new()
+            };
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Wipeout(e))
+        }
+        nm::EntityData::Tolerance { text, insertion } => {
+            let mut e = ar::Tolerance::with_text(v3(insertion), text.clone());
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Tolerance(e))
+        }
+        nm::EntityData::Solid3D { acis_data } => {
+            let mut e = ar::Solid3D::from_sat(acis_data);
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Solid3D(e))
+        }
+        nm::EntityData::Region { acis_data } => {
+            let mut e = ar::Region::from_sat(acis_data);
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Region(e))
+        }
+        nm::EntityData::PdfUnderlay { insertion, scale } => {
+            let mut e = ar::Underlay::pdf_at(v3(insertion));
+            e.set_scale_xyz(scale[0], scale[1], scale[2]);
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Underlay(e))
+        }
+        nm::EntityData::Unknown { entity_type } => {
+            let mut e = ar::UnknownEntity::new(entity_type.clone());
+            apply_common(&mut e.common, entity);
+            Some(ar::EntityType::Unknown(e))
+        }
         nm::EntityData::Polyline {
             polyline_type,
             vertices,
@@ -568,6 +675,121 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 shape_number: shape.shape_number as i16,
             },
         )),
+        ar::EntityType::AttributeDefinition(attdef) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::AttDef {
+                tag: attdef.tag.clone(),
+                prompt: attdef.prompt.clone(),
+                default_value: attdef.default_value.clone(),
+                insertion: [
+                    attdef.insertion_point.x,
+                    attdef.insertion_point.y,
+                    attdef.insertion_point.z,
+                ],
+                height: attdef.height,
+            },
+        )),
+        ar::EntityType::AttributeEntity(attrib) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Attrib {
+                tag: attrib.tag.clone(),
+                value: attrib.value.clone(),
+                insertion: [
+                    attrib.insertion_point.x,
+                    attrib.insertion_point.y,
+                    attrib.insertion_point.z,
+                ],
+                height: attrib.height,
+            },
+        )),
+        ar::EntityType::Leader(leader) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Leader {
+                vertices: leader
+                    .vertices
+                    .iter()
+                    .map(|vertex| [vertex.x, vertex.y, vertex.z])
+                    .collect(),
+                has_arrowhead: leader.arrow_enabled,
+            },
+        )),
+        ar::EntityType::MLine(mline) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::MLine {
+                vertices: mline
+                    .vertices
+                    .iter()
+                    .map(|vertex| [vertex.position.x, vertex.position.y, vertex.position.z])
+                    .collect(),
+                style_name: mline.style_name.clone(),
+                scale: mline.scale_factor,
+            },
+        )),
+        ar::EntityType::RasterImage(image) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Image {
+                insertion: [
+                    image.insertion_point.x,
+                    image.insertion_point.y,
+                    image.insertion_point.z,
+                ],
+                u_vector: [image.u_vector.x, image.u_vector.y, image.u_vector.z],
+                v_vector: [image.v_vector.x, image.v_vector.y, image.v_vector.z],
+                image_size: [image.size.x, image.size.y],
+            },
+        )),
+        ar::EntityType::Wipeout(wipeout) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Wipeout {
+                clip_vertices: wipeout
+                    .world_boundary_vertices()
+                    .iter()
+                    .map(|vertex| [vertex.x, vertex.y])
+                    .collect(),
+            },
+        )),
+        ar::EntityType::Tolerance(tolerance) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Tolerance {
+                text: tolerance.text.clone(),
+                insertion: [
+                    tolerance.insertion_point.x,
+                    tolerance.insertion_point.y,
+                    tolerance.insertion_point.z,
+                ],
+            },
+        )),
+        ar::EntityType::Solid3D(solid) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Solid3D {
+                acis_data: solid.acis_data.sat_data.clone(),
+            },
+        )),
+        ar::EntityType::Region(region) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Region {
+                acis_data: region.acis_data.sat_data.clone(),
+            },
+        )),
+        ar::EntityType::Underlay(underlay) if underlay.underlay_type == ar::UnderlayType::Pdf => {
+            Some(native_common_from_acadrust(
+                entity,
+                nm::EntityData::PdfUnderlay {
+                    insertion: [
+                        underlay.insertion_point.x,
+                        underlay.insertion_point.y,
+                        underlay.insertion_point.z,
+                    ],
+                    scale: [underlay.x_scale, underlay.y_scale, underlay.z_scale],
+                },
+            ))
+        }
+        ar::EntityType::Unknown(unknown) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Unknown {
+                entity_type: unknown.dxf_name.clone(),
+            },
+        )),
         ar::EntityType::Polyline2D(pline) => Some(native_common_from_acadrust(
             entity,
             nm::EntityData::Polyline {
@@ -693,6 +915,7 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
 fn native_common_from_acadrust(entity: &ar::EntityType, data: nm::EntityData) -> nm::Entity {
     let common = entity.common();
     let (color_index, true_color) = color_to_native(&common.color);
+    let transparency = common.transparency.alpha();
     let mut native = nm::Entity::new(data);
     native.handle = nm::Handle::new(common.handle.value());
     native.owner_handle = nm::Handle::new(common.owner_handle.value());
@@ -702,6 +925,7 @@ fn native_common_from_acadrust(entity: &ar::EntityType, data: nm::EntityData) ->
     native.true_color = true_color;
     native.lineweight = lineweight_to_native(&common.line_weight);
     native.invisible = common.invisible;
+    native.transparency = i32::from(transparency);
     native
 }
 
@@ -721,6 +945,7 @@ fn apply_common(common: &mut ar::EntityCommon, entity: &nm::Entity) {
     };
     common.line_weight = native_lineweight(entity.lineweight);
     common.invisible = entity.invisible;
+    common.transparency = native_transparency(entity.transparency);
 }
 
 fn native_dimension_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> {
@@ -1263,6 +1488,16 @@ fn lineweight_to_native(value: &LineWeight) -> i16 {
         LineWeight::ByBlock => -2,
         LineWeight::Default => -3,
         LineWeight::Value(v) => *v,
+    }
+}
+
+fn native_transparency(value: i32) -> acadrust::types::Transparency {
+    if value == 0 {
+        acadrust::types::Transparency::OPAQUE
+    } else if (value >> 24) == 0 {
+        acadrust::types::Transparency::new(value.clamp(0, 255) as u8)
+    } else {
+        acadrust::types::Transparency::from_alpha_value(value as u32)
     }
 }
 
@@ -2034,5 +2269,393 @@ mod tests {
         assert_eq!(saw_polygon_mesh, 1);
         assert_eq!(saw_polyface_mesh, 1);
         assert_eq!(saw_hatch, 1);
+    }
+
+    #[test]
+    fn annotation_bridge_roundtrips_leader_mline_and_tolerance_payloads() {
+        let mut leader = nm::Entity::new(nm::EntityData::Leader {
+            vertices: vec![[0.0, 0.0, 0.0], [1.5, 2.5, 0.0], [4.0, 2.5, 0.0]],
+            has_arrowhead: false,
+        });
+        leader.handle = nm::Handle::new(0x80);
+        leader.layer_name = "ANNO".into();
+
+        let mut mline = nm::Entity::new(nm::EntityData::MLine {
+            vertices: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 2.0, 0.0]],
+            style_name: "BATT".into(),
+            scale: 2.25,
+        });
+        mline.handle = nm::Handle::new(0x81);
+
+        let mut tolerance = nm::Entity::new(nm::EntityData::Tolerance {
+            text: "{\\Fgdt;p}%%v0.25%%vA^JB".into(),
+            insertion: [8.0, 1.5, 0.0],
+        });
+        tolerance.handle = nm::Handle::new(0x82);
+
+        for native in [leader, mline, tolerance] {
+            let expected = native.data.clone();
+            let acad = native_entity_to_acadrust(&native)
+                .unwrap_or_else(|| panic!("{} should bridge to acad", expected.type_name()));
+            let roundtrip = acadrust_entity_to_native(&acad)
+                .unwrap_or_else(|| panic!("{} should bridge to native", expected.type_name()));
+            assert_eq!(roundtrip.data, expected, "{} payload should survive roundtrip", expected.type_name());
+        }
+    }
+
+    #[test]
+    fn payload_bridge_roundtrips_text_opaque_and_acis_entities() {
+        let cases = vec![
+            nm::Entity::new(nm::EntityData::AttDef {
+                tag: "PARTNO".into(),
+                prompt: "Enter part number".into(),
+                default_value: "PN-42".into(),
+                insertion: [1.0, 2.0, 0.0],
+                height: 2.5,
+            }),
+            nm::Entity::new(nm::EntityData::Attrib {
+                tag: "SERIAL".into(),
+                value: "A-001".into(),
+                insertion: [2.0, 3.0, 0.0],
+                height: 1.75,
+            }),
+            nm::Entity::new(nm::EntityData::PdfUnderlay {
+                insertion: [4.0, 5.0, 0.0],
+                scale: [1.5, 0.75, 1.0],
+            }),
+            nm::Entity::new(nm::EntityData::Unknown {
+                entity_type: "ACAD_PROXY_ENTITY".into(),
+            }),
+            nm::Entity::new(nm::EntityData::Solid3D {
+                acis_data: "body\nline-two\n".into(),
+            }),
+            nm::Entity::new(nm::EntityData::Region {
+                acis_data: "region-body\nedge-two\n".into(),
+            }),
+        ];
+
+        for native in cases {
+            let expected = native.data.clone();
+            let acad = native_entity_to_acadrust(&native)
+                .unwrap_or_else(|| panic!("{} should bridge to acad", expected.type_name()));
+            let roundtrip = acadrust_entity_to_native(&acad)
+                .unwrap_or_else(|| panic!("{} should bridge to native", expected.type_name()));
+            assert_eq!(roundtrip.data, expected, "{} payload should survive roundtrip", expected.type_name());
+        }
+    }
+
+    fn representative_entity_with_common_fields(
+        data: nm::EntityData,
+        handle: u64,
+        owner: u64,
+    ) -> nm::Entity {
+        let mut entity = nm::Entity::new(data);
+        entity.handle = nm::Handle::new(handle);
+        entity.owner_handle = nm::Handle::new(owner);
+        entity.layer_name = "BridgeLayer".into();
+        entity.linetype_name = "DASHED".into();
+        entity.color_index = 5;
+        entity.true_color = 0x12_34_56;
+        entity.lineweight = 35;
+        entity.invisible = true;
+        entity.transparency = 77;
+        entity.thickness = 2.25;
+        entity.extrusion = [0.0, 0.5, 1.0];
+        entity
+    }
+
+    fn assert_common_fields_preserved(entity: &nm::Entity, handle: u64, owner: u64) {
+        assert_eq!(entity.handle, nm::Handle::new(handle));
+        assert_eq!(entity.owner_handle, nm::Handle::new(owner));
+        assert_eq!(entity.layer_name, "BridgeLayer");
+        assert_eq!(entity.linetype_name, "DASHED");
+        assert_eq!(entity.color_index, 256);
+        assert_eq!(entity.true_color, 0x12_34_56);
+        assert_eq!(entity.lineweight, 35);
+        assert!(entity.invisible);
+        assert_eq!(entity.transparency, 77);
+    }
+
+    #[test]
+    fn bridge_roundtrips_preserve_common_fields_for_representative_families() {
+        let cases = vec![
+            representative_entity_with_common_fields(
+                nm::EntityData::Ellipse {
+                    center: [1.0, 2.0, 0.0],
+                    major_axis: [4.0, 0.0, 0.0],
+                    ratio: 0.5,
+                    start_param: 0.0,
+                    end_param: 3.14,
+                },
+                0x91,
+                0x191,
+            ),
+            representative_entity_with_common_fields(
+                nm::EntityData::Polyline {
+                    polyline_type: nm::PolylineType::Polyline2D,
+                    vertices: vec![nm::PolylineVertex {
+                        position: [0.0, 0.0, 0.0],
+                        bulge: 0.25,
+                        start_width: 1.0,
+                        end_width: 2.0,
+                    }],
+                    closed: true,
+                },
+                0x92,
+                0x192,
+            ),
+            representative_entity_with_common_fields(
+                nm::EntityData::Hatch {
+                    pattern_name: "ANSI31".into(),
+                    solid_fill: false,
+                    boundary_paths: vec![nm::HatchBoundaryPath {
+                        flags: 2,
+                        edges: vec![nm::HatchEdge::Polyline {
+                            closed: true,
+                            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.5], [1.0, 1.0, 0.0]],
+                        }],
+                    }],
+                },
+                0x93,
+                0x193,
+            ),
+            representative_entity_with_common_fields(
+                nm::EntityData::Leader {
+                    vertices: vec![[0.0, 0.0, 0.0], [2.0, 1.0, 0.0]],
+                    has_arrowhead: true,
+                },
+                0x94,
+                0x194,
+            ),
+            representative_entity_with_common_fields(
+                nm::EntityData::MLine {
+                    vertices: vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+                    style_name: "BATT".into(),
+                    scale: 1.5,
+                },
+                0x95,
+                0x195,
+            ),
+            representative_entity_with_common_fields(
+                nm::EntityData::Tolerance {
+                    text: "%%v0.25".into(),
+                    insertion: [3.0, 2.0, 0.0],
+                },
+                0x96,
+                0x196,
+            ),
+            representative_entity_with_common_fields(
+                nm::EntityData::Image {
+                    insertion: [10.0, 20.0, 0.0],
+                    u_vector: [0.5, 0.0, 0.0],
+                    v_vector: [0.0, 0.25, 0.0],
+                    image_size: [640.0, 480.0],
+                },
+                0x97,
+                0x197,
+            ),
+            representative_entity_with_common_fields(
+                nm::EntityData::Wipeout {
+                    clip_vertices: vec![[0.0, 0.0], [4.0, 0.0], [3.0, 2.0], [0.0, 3.0]],
+                },
+                0x98,
+                0x198,
+            ),
+        ];
+
+        for native in cases {
+            let handle = native.handle.value();
+            let owner = native.owner_handle.value();
+            let kind = native.data.type_name().to_string();
+            let compat = native_entity_to_acadrust(&native)
+                .unwrap_or_else(|| panic!("{kind} should bridge to acad"));
+            let roundtrip = acadrust_entity_to_native(&compat)
+                .unwrap_or_else(|| panic!("{kind} should bridge back to native"));
+
+            assert_common_fields_preserved(&roundtrip, handle, owner);
+        }
+    }
+
+    #[test]
+    fn document_bridge_keeps_prioritized_entity_counts_visible_on_compat_side() {
+        let mut native = nm::CadDocument::new();
+        let prioritized = vec![
+            nm::EntityData::Ellipse {
+                center: [1.0, 2.0, 0.0],
+                major_axis: [4.0, 0.0, 0.0],
+                ratio: 0.25,
+                start_param: 0.1,
+                end_param: 2.9,
+            },
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::Polyline2D,
+                vertices: vec![nm::PolylineVertex {
+                    position: [0.0, 0.0, 0.0],
+                    bulge: 0.5,
+                    start_width: 0.5,
+                    end_width: 1.0,
+                }],
+                closed: true,
+            },
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::Polyline3D,
+                vertices: vec![nm::PolylineVertex {
+                    position: [0.0, 0.0, 1.0],
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                }],
+                closed: false,
+            },
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::PolygonMesh,
+                vertices: vec![nm::PolylineVertex {
+                    position: [1.0, 0.0, 1.0],
+                    bulge: 0.0,
+                    start_width: 0.0,
+                    end_width: 0.0,
+                }],
+                closed: true,
+            },
+            nm::EntityData::Polyline {
+                polyline_type: nm::PolylineType::PolyfaceMesh,
+                vertices: vec![nm::PolylineVertex {
+                    position: [2.0, 0.0, 1.0],
+                    bulge: 0.0,
+                    start_width: 2.0,
+                    end_width: 2.5,
+                }],
+                closed: true,
+            },
+            nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 2.0, 0.0]],
+                    }],
+                }],
+            },
+            nm::EntityData::Leader {
+                vertices: vec![[0.0, 0.0, 0.0], [1.5, 2.5, 0.0], [4.0, 2.5, 0.0]],
+                has_arrowhead: false,
+            },
+            nm::EntityData::MLine {
+                vertices: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 2.0, 0.0]],
+                style_name: "BATT".into(),
+                scale: 2.25,
+            },
+            nm::EntityData::Image {
+                insertion: [10.0, 20.0, 0.0],
+                u_vector: [0.5, 0.0, 0.0],
+                v_vector: [0.0, 0.25, 0.0],
+                image_size: [640.0, 480.0],
+            },
+            nm::EntityData::Wipeout {
+                clip_vertices: vec![[0.0, 0.0], [4.0, 0.0], [3.0, 2.0], [0.0, 3.0]],
+            },
+            nm::EntityData::Tolerance {
+                text: "{\\Fgdt;p}%%v0.25%%vA^JB".into(),
+                insertion: [8.0, 1.5, 0.0],
+            },
+        ];
+
+        for data in prioritized {
+            native.add_entity(nm::Entity::new(data)).expect("entity should add");
+        }
+
+        let compat = native_doc_to_acadrust(&native);
+        let mut saw_ellipse = 0;
+        let mut saw_polyline2d = 0;
+        let mut saw_polyline3d = 0;
+        let mut saw_polygon_mesh = 0;
+        let mut saw_polyface_mesh = 0;
+        let mut saw_hatch = 0;
+        let mut saw_leader = 0;
+        let mut saw_mline = 0;
+        let mut saw_image = 0;
+        let mut saw_wipeout = 0;
+        let mut saw_tolerance = 0;
+
+        for entity in compat.entities() {
+            match entity {
+                ar::EntityType::Ellipse(_) => saw_ellipse += 1,
+                ar::EntityType::Polyline2D(_) => saw_polyline2d += 1,
+                ar::EntityType::Polyline3D(_) => saw_polyline3d += 1,
+                ar::EntityType::PolygonMesh(_) => saw_polygon_mesh += 1,
+                ar::EntityType::PolyfaceMesh(_) => saw_polyface_mesh += 1,
+                ar::EntityType::Hatch(_) => saw_hatch += 1,
+                ar::EntityType::Leader(_) => saw_leader += 1,
+                ar::EntityType::MLine(_) => saw_mline += 1,
+                ar::EntityType::RasterImage(_) => saw_image += 1,
+                ar::EntityType::Wipeout(_) => saw_wipeout += 1,
+                ar::EntityType::Tolerance(_) => saw_tolerance += 1,
+                _ => {}
+            }
+        }
+
+        assert_eq!(saw_ellipse, 1);
+        assert_eq!(saw_polyline2d, 1);
+        assert_eq!(saw_polyline3d, 1);
+        assert_eq!(saw_polygon_mesh, 1);
+        assert_eq!(saw_polyface_mesh, 1);
+        assert_eq!(saw_hatch, 1);
+        assert_eq!(saw_leader, 1);
+        assert_eq!(saw_mline, 1);
+        assert_eq!(saw_image, 1);
+        assert_eq!(saw_wipeout, 1);
+        assert_eq!(saw_tolerance, 1);
+    }
+
+    #[test]
+    fn image_and_wipeout_bridge_survive_document_roundtrip_with_geometry() {
+        let mut native = nm::CadDocument::new();
+        let image_data = nm::EntityData::Image {
+            insertion: [10.0, 20.0, 0.0],
+            u_vector: [0.5, 0.0, 0.0],
+            v_vector: [0.0, 0.25, 0.0],
+            image_size: [640.0, 480.0],
+        };
+        let wipeout_data = nm::EntityData::Wipeout {
+            clip_vertices: vec![[0.0, 0.0], [4.0, 0.0], [3.0, 2.0], [0.0, 3.0]],
+        };
+        native
+            .add_entity(nm::Entity::new(image_data.clone()))
+            .expect("image should add");
+        native
+            .add_entity(nm::Entity::new(wipeout_data.clone()))
+            .expect("wipeout should add");
+
+        let compat = native_doc_to_acadrust(&native);
+        let mut saw_image = false;
+        let mut saw_wipeout = false;
+        let mut image_roundtrip = None;
+        let mut wipeout_roundtrip = None;
+
+        for entity in compat.entities() {
+            match entity {
+                ar::EntityType::RasterImage(_) => {
+                    saw_image = true;
+                    image_roundtrip = Some(
+                        acadrust_entity_to_native(entity).expect("compat image should bridge back"),
+                    );
+                }
+                ar::EntityType::Wipeout(_) => {
+                    saw_wipeout = true;
+                    wipeout_roundtrip = Some(
+                        acadrust_entity_to_native(entity)
+                            .expect("compat wipeout should bridge back"),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_image, "image should be exposed on compat side");
+        assert!(saw_wipeout, "wipeout should be exposed on compat side");
+        assert_eq!(image_roundtrip.expect("image roundtrip").data, image_data);
+        assert_eq!(wipeout_roundtrip.expect("wipeout roundtrip").data, wipeout_data);
     }
 }
