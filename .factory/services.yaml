@@ -5,7 +5,7 @@ commands:
   check_facade: cargo check -p h7cad-native-facade
   test: cargo test -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade -- --test-threads=16
   test_dxf: cargo test -p h7cad-native-dxf -- --test-threads=16
-  test_bridge: cargo test --lib native_bridge -- --test-threads=16
+  test_bridge: cargo test --bin H7CAD native_bridge -- --test-threads=16
   test_workspace: cargo test -- --test-threads=16
   build: cargo build
 
