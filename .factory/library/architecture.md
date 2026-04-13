@@ -1,204 +1,208 @@
 # Architecture
 
-Environment-independent high-level architecture for the DWG parser mission.
+High-level architecture for the DXF native migration mission.
 
-This document captures the worker-facing structure of the current `h7cad-native-dwg` parser-only mission. It should describe stable pipeline stages, mission boundaries, invariants, and risk concentration areas. It should not be used for patch notes, task journaling, or implementation diffs.
+This document captures the worker-facing structure of the current DXF mission. It describes stable data flows, mission boundaries, invariants, and risk concentration areas. It should not be used for patch notes or implementation journaling.
 
-Use this document for high-level intent and invariants. Use `validation-contract.md` for the exact observable requirements that define done.
+Use this document for high-level system intent. Use `validation-contract.md` for the exact observable behaviors that define done.
 
 ## Mission Scope
 
-This mission is parser-only and is intentionally bounded to `crates/h7cad-native-dwg`, with compile-surface awareness for `crates/h7cad-native-facade`.
+This mission is intentionally bounded to the DXF-native pipeline and its runtime bridge surfaces:
 
-Current implementation reality:
-- recognize `AC1015` and `AC1018` from file magic
-- parse version-specific header metadata needed to locate section descriptors
-- decode section directory entries and extract raw section payload bytes
-- convert extracted payloads into a parser-side pending graph
-- resolve that pending graph into a seeded `h7cad-native-model::CadDocument`
-- preserve facade compile compatibility without switching the application runtime DWG path
+- `crates/h7cad-native-dxf`
+- `crates/h7cad-native-model`
+- `crates/h7cad-native-facade`
+- `src/io/mod.rs`
+- `src/io/native_bridge.rs`
+- quick-win runtime files under `src/` that only need Handle/Color/LineWeight migration
 
-Target contract direction during this mission:
-- replace zero-delimiter tokenization with decoded semantic record boundaries and explicit semantic-path failures
-- replace section-index bucket heuristics with outward-facing semantic identity/provenance derived from decoded DWG meaning
-- populate parser-facing layer/entity/block/layout semantics on `PendingDocument` before depending on resolved-model assertions
-- strengthen resolver-facing invariants and semantic materialization without implying runtime rollout
+Out of scope:
 
-Out of scope for this mission:
-- changing `src/io` so the desktop/runtime DWG open path defaults to native
-- broad bridge/runtime rollout work outside compile-surface compatibility
-- full real-DWG object decoding across later DWG versions
-- UI behavior, rendering, or desktop smoke as done criteria
-- replacing the current placeholder pending/object classification with complete DWG semantic decoding in one step
+- changing the DWG parser or DWG runtime rollout
+- modifying the `acadrust` dependency directly
+- GUI automation or desktop smoke testing
+- large refactors of deep compat-coupled systems in `src/app`, `src/scene`, and `src/entities`
 
-The practical support boundary is therefore: parser crate progress is allowed, facade compile health matters, and runtime integration remains unchanged.
+## Current Runtime Shape
 
-## Current Parser Pipeline
+The runtime is mixed-mode today:
 
-The current end-to-end flow in `h7cad-native-dwg` is:
+1. **DXF native read**  
+   `src/io/mod.rs::load_dxf_native()` reads bytes and calls `h7cad_native_dxf::read_dxf_bytes()`, producing `h7cad_native_model::CadDocument`.
 
-1. **Version sniffing / file-header parse**  
-   `sniff_version()` and `DwgFileHeader::parse()` identify a known DWG version and read the version-specific section-count/header fields.
+2. **Compat bridge for runtime**  
+   Runtime/UI code still expects `acadrust::CadDocument`, so `native_bridge::native_doc_to_acadrust()` converts the native document into compat entities.
 
-2. **Section directory decode**  
-   `SectionMap::parse()` turns header-driven directory bytes into ordered `SectionDescriptor` entries with stable `(index, offset, size)` metadata.
+3. **Runtime mutation paths**  
+   Most editing, scene, command, and UI code still works on compat types. Some paths synchronize compat changes back into native documents through `acadrust_doc_to_native()` or entity-level bridge helpers.
 
-3. **Section payload extraction**  
-   `SectionMap::read_section_payloads()` slices the file into raw payload buffers exactly as referenced by section descriptors.
+4. **DXF native save**  
+   Native documents are written through `h7cad_native_dxf::write_dxf()`. The save path may start from an already-native document or from compat data first bridged into native.
 
-4. **Pending graph construction**  
-   `build_pending_document()` creates `PendingDocument`, copies section metadata into `PendingSection`, and is the primary seam where structural payload bytes are turned into parser-emitted semantic records. Today this still includes placeholder tokenization/classification; this mission replaces those seams with decoded semantic identity, handle/owner provenance, and typed pending surfaces such as layers/entities.
+The mission therefore improves the system by making the native read/write path and the compat bridge boundary trustworthy enough for M4 preparation, without replacing all compat runtime code.
 
-5. **Dispatch summarization surface**  
-   `dispatch_object()` and `summarize_object()` expose a stable outward-facing interpretation of each parser-emitted record via `DispatchTarget` and `ParsedRecordSummary`. During this mission those outward summaries must become semantic/provenance-bearing enough to distinguish same-sized, reordered, and same-kind records without falling back to helper-only labels.
+## Canonical Flows
 
-6. **Resolution into native model**  
-   `resolve_document()` seeds a fresh `CadDocument`, preserves pending handles/owner handles, materializes parser-derived structures onto outward-facing native-model surfaces, advances handle allocation state, and restores document relationships. This mission hardens that step so parser-emitted provenance survives resolution and impossible semantic relationships fail closed.
+### Native DXF read flow
+`bytes -> h7cad_native_dxf::read_dxf_bytes() -> native CadDocument`
 
-This pipeline is deliberately shallow today: it proves parser structure and dataflow before full DWG object semantics are implemented.
+This flow must preserve:
+- DXF header/version metadata
+- entities, layers, tables, blocks, and objects needed by supported DXF surfaces
+- ownership and handle relationships needed by later bridge/write stages
 
-## Current Implementation Status
+### Runtime bridge flow
+`native CadDocument -> native_bridge::native_doc_to_acadrust() -> compat CadDocument`
 
-Workers should keep the distinction between **current behavior** and **target contract** explicit:
+This is the key seam where silent loss currently occurs. Mission work here must:
+- bridge prioritized native entities into compat equivalents
+- preserve common fields and payload fields
+- keep supported entities enumerable and usable by runtime surfaces
+- preserve supported block-owned content and referenced-handle relationships
 
-- file-structure parsing is real for the current baseline versions, but supported-version breadth is intentionally narrow
-- pending-record extraction is still placeholder tokenization over payload bytes, not real DWG semantic record decode
-- pending-object classification is still a coarse synthetic bucket, not decoded table/entity/object/layout/block meaning
-- `PendingLayer` and `PendingEntity` exist as parser-facing surfaces, but current parser flow barely populates them
-- resolver output is still mostly native-document scaffolding plus generic projections derived from parser provenance
-- many contract assertions are intentionally stronger than today’s evidence because this mission exists to close those semantic/provenance gaps
+### Reverse bridge flow
+`compat CadDocument / EntityType -> native_bridge::acadrust_doc_to_native() / acadrust_entity_to_native() -> native CadDocument`
 
-## Semantic Mission Focus
+This flow must preserve:
+- entity family/type
+- geometry and annotation payloads
+- shared fields
+- enough ownership intent for save and post-process logic to remain valid
 
-Workers should treat the following seams as the deliberate implementation focus for this mission:
+### Native DXF write flow
+`native CadDocument -> h7cad_native_dxf::write_dxf() -> DXF text`
 
-1. **Semantic record boundaries and fail-closed decode.**  
-   Replace delimiter-driven splitting with decoded record boundaries while keeping structural failures distinguishable from semantic failures.
+This flow must emit DXF that rereads cleanly and does not lose:
+- hatch boundary structure
+- classic polyline widths and flags
+- insert/attrib handle relationships
+- ACIS-backed payloads
 
-2. **Parser-facing semantic surfaces.**  
-   Make `PendingDocument.layers`, `PendingDocument.entities`, and related provenance summaries reflect decoded DWG handles, owners, layout/block identity, and semantic kinds directly from parse results.
+## Mission Focus Areas
 
-3. **Provenance stability.**  
-   Ensure parser-emitted records remain matchable across repeated parses, reordered-equivalent fixtures, and later resolved projections without relying on payload size or ordinal-only identity.
+### 1. Bridge completion
+Primary risk is `src/io/native_bridge.rs`, where unsupported native entities currently fall through to `None` and disappear from compat runtime documents.
 
-4. **Resolver semantic materialization.**  
-   Move from generic unknown-object summaries toward outward-facing resolved relationships that preserve parser-emitted handles, owners, layout/block links, layer mappings, and entity placement.
+The mission completes bidirectional support for:
+- ellipse and direct-map geometry entities
+- polyline families
+- hatch
+- leader-like annotation entities
+- image/wipeout
+- payload-bearing direct-map entities including ACIS-backed types
+
+Contract-critical bridge entities for this mission are:
+- `ELLIPSE`
+- classic polyline families (`POLYLINE`, `POLYLINE2D`, `POLYLINE3D`, `PolygonMesh`, `PolyfaceMesh`)
+- `HATCH`
+- `LEADER`
+- `MLINE`
+- `TOLERANCE`
+- `IMAGE`
+- `WIPEOUT`
+- direct-map geometry entities (`Face3D`, `Solid`, `Ray`, `XLine`, `Shape`)
+- text/opaque direct-map entities (`ATTDEF`, standalone `ATTRIB`, `PdfUnderlay`, `Unknown`)
+- ACIS-backed entities (`Solid3D`, `Region`)
+
+### 2. Writer hardening
+Primary risk is field-level data loss in `crates/h7cad-native-dxf/src/writer.rs`.
+
+The mission focuses on known high-risk cases:
+- hatch polyline boundaries
+- classic polyline vertex widths
+- insert/attrib/seqend handle integrity
+- 3DSOLID and REGION ACIS payload fidelity
+
+### 3. Integration regression
+Primary risk is that individually-correct pieces still lose data in the full pipeline:
+
+`read_dxf_bytes -> native_bridge::native_doc_to_acadrust -> native_bridge::acadrust_doc_to_native -> write_dxf -> read_dxf`
+
+This mission uses real ACadSharp DXF samples to validate:
+- supported-entity preservation
+- ownership/model-space/layout validity
+- referenced-handle resolvability
+- block-owned content observability
+
+### 4. Dependency reduction
+Primary risk is widening scope too early. This mission only targets quick-win files that are mostly Handle/Color/LineWeight consumers.
+
+Concrete examples of quick-win targets:
+- `src/modules/home/groups/*`
+- `src/modules/home/clipboard/paste.rs`
+- `src/modules/home/select.rs`
+- other similar files whose main compat dependency is `Handle`, `Color`, or `LineWeight`
+
+The mission does **not** rewrite:
+- `src/entities/*`
+- `src/scene/*`
+- large `src/app/*` compat dispatch code
+
+Instead it reduces low-risk dependency surface while keeping the mixed compat/native runtime compiling.
 
 ## Canonical Observable Surfaces
 
-For this mission, workers should treat the following as the canonical observable/test-facing surfaces:
+Workers should treat the following as test-facing truths:
 
-- **Parser-facing truth:** `PendingDocument` (`sections`, `objects`, `layers`, `entities`)
-- **Outward summary/provenance surface:** `dispatch_object()` and `ParsedRecordSummary`
-- **Resolved truth:** the parser-emitted subset of resolved `CadDocument` projections, explicitly distinguished from resolver-seeded scaffold objects
+- **Native document truth:** `h7cad_native_model::CadDocument`
+- **Compat bridge truth:** `native_doc_to_acadrust()` / `acadrust_doc_to_native()`
+- **Writer truth:** `write_dxf()` followed by reread through `read_dxf()` / `read_dxf_bytes()`
+- **Public API truth:** `h7cad-native-facade` DXF load/save functions
+- **Runtime compile truth:** targeted `src/` quick-win files plus dependent command/app compile surfaces
 
-If a change only looks correct through helper-only state or implicit scaffold behavior, it is not yet done.
-
-## Key Data Structures and Flows
-
-### `DwgFileHeader`
-The header is the first version-aware checkpoint. It establishes which layout rules apply and how many section descriptors should be read. Everything downstream assumes header parsing chose the correct version-specific offsets.
-
-### `SectionMap` and `SectionDescriptor`
-`SectionMap` is the structural boundary between raw bytes and parser-addressable regions. Descriptor order is meaningful and must remain directory order, not offset-sorted order. Payload extraction is expected to be exact and fail closed on bounds violations.
-
-### `PendingDocument`
-`PendingDocument` is the parser-side staging graph between structural decode and model resolution. It currently contains:
-- `sections`: stable per-section metadata plus raw payload bytes
-- `objects`: parser-emitted pending records with synthetic handles, owner state, section provenance, and coarse record kind
-- `layers` / `entities`: reserved collections for later typed expansion
-
-### `PendingSection`
-Each `PendingSection` mirrors one decoded section descriptor and carries:
-- section identity (`index`)
-- byte span metadata (`offset`, `size`)
-- parser-emitted `record_count`
-- raw `payload`
-
-This is the bridge between file-structure validation and pending-graph validation.
-
-### `PendingObject` and `PendingObjectKind`
-Each emitted pending object records:
-- a deterministic handle/provenance identity (currently often synthetic, but targeted to become decoded DWG handle/owner/semantic identity as this mission progresses)
-- visible owner state (`owner_handle`)
-- originating `section_index`
-- coarse semantic bucket (`TableRecord`, `EntityRecord`, `ObjectRecord`) with `record_index` and `payload_size`
-
-These objects are the current parser’s unit of provenance that flows into both dispatch summaries and final resolution.
-
-### Object reader / dispatch surface
-`object_reader` is currently a compile-stable semantic boundary, not yet a full DWG decoder. Its role is to keep outward-facing dispatch and summary behavior stable while the underlying parser evolves from synthetic bucketing toward real typed record readers.
-
-### Resolver and native model
-`resolve_document()` is the late-binding boundary. The resolver takes parser-side pending state and produces a valid native `CadDocument`. Important distinction: much of the base scaffold comes from `CadDocument::new()`, while the resolver’s DWG-specific job is to preserve pending handles/owners, insert pending-derived layers/objects, keep object order/provenance stable, and then rely on ownership repair to restore document relationships. Parser-emitted resolved records must stay outwardly distinguishable from resolver-seeded scaffold records.
+If a change only looks correct inside helper functions but cannot be asserted through cargo tests or cargo checks, it is not done.
 
 ## Invariants To Preserve
 
-Workers should treat the following as mission-level invariants:
+- **No silent entity drops for prioritized bridge families.**
+- **Shared entity fields remain stable across bridge round-trips.**
+- **Supported block-owned content remains observable where the contract requires it.**
+- **Block-owned content is most likely to disappear at document-level bridge boundaries, so workers must validate it explicitly when a feature fulfills those assertions.**
+- **Referenced handles remain resolvable, not merely unique or monotonic.**
+- **Writer output remains rereadable with field fidelity on known-risk entities.**
+- **Facade DXF load/save remains healthy without GUI activation.**
+- **Quick-win runtime migration must not expand into deep compat refactors.**
 
-- **Known parser phases remain explicit.** Invalid magic, truncated headers, known-but-unsupported baseline-adjacent versions, structural decode failure, pending-graph construction, and resolution should stay distinguishable at the observable API level.
-- **Failure boundaries stay explicit.** Malformed/truncated structure must fail as structural error with no semantic output; structurally valid but semantically undecodable records must fail as semantic decode errors with no placeholder downgrade.
-- **Version-specific header rules are authoritative.** AC1015 and AC1018 currently define the supported baseline and must use their own offsets/boundaries.
-- **Section descriptor order is stable.** Directory order drives emitted section order, payload order, pending section order, and downstream record provenance.
-- **Payload extraction is exact and fail-closed.** Out-of-bounds or truncated spans must error rather than returning partial results.
-- **Pending graph accounting must stay synchronized.** `PendingSection.record_count`, per-section emitted objects, and aggregate `PendingDocument.objects.len()` must agree.
-- **Pending provenance remains externally visible.** Section index, record index, payload size, dispatch target, handle, and owner state must stay assertable from public/test-facing surfaces.
-- **Handle behavior is deterministic.** Identical inputs must yield the same pending handle/order and stable resolved object summaries.
-- **Resolution preserves ownership/handle intent.** Resolver work must not silently drop supplied owner handles or regress seeded native-document scaffold relationships.
-- **Facade compatibility is compile-surface only for this mission.** Parser evolution may not break `h7cad-native-facade` compilation, but should not assume runtime activation.
+## Risk Concentration
 
-## Current Gaps / Risk Concentration
+### `src/io/native_bridge.rs`
+This is the highest-risk seam because:
+- it currently handles only a subset of native entity families
+- document-level bridging can silently omit entities
+- runtime correctness depends on compat-side observability after native load
 
-Current complexity is concentrated in the places where the parser is intentionally still synthetic or incomplete:
+### `crates/h7cad-native-dxf/src/writer.rs`
+This is the main write-path risk because small omissions create structurally valid DXF with silently degraded semantics.
 
-1. **Record extraction is placeholder-driven.**  
-   `classify_section_records()` currently tokenizes payloads by zero delimiters instead of decoding semantic record boundaries.
+### `src/io/mod.rs`
+This is the integration boundary where native read/write and compat runtime expectations meet.
 
-2. **Record typing is bucketed, not decoded.**  
-   `classify_record_kind()` assigns table/entity/object kind from section index modulo arithmetic, which is only a temporary scaffold for pipeline validation.
-
-3. **Pending graph is broader than current semantic population.**  
-   `PendingLayer` and `PendingEntity` exist, but most parser output still lands in generic `PendingObject` form and block/layout identity is still too implicit.
-
-4. **Resolver currently preserves structure more than semantics.**  
-   Parser-derived objects resolve to generic summaries more often than to outward-facing semantic native-model relationships.
-
-5. **Version support is intentionally narrow.**  
-   The mission baseline is AC1015 and AC1018. Later versions and richer decode paths should not be implied by architecture text.
-
-6. **Facade relation is easy to over-read.**  
-   The parser must not drift into runtime-integration assumptions; the facade is only part of the validation surface for compile compatibility.
-
-These are the main areas where workers should expect implementation churn while still preserving the outward architecture contract.
+### Quick-win runtime files under `src/`
+These are low-risk migration targets only when they stay in the Handle/Color/LineWeight lane. If a task discovers deeper entity-model coupling, it should return to the orchestrator.
 
 ## Validation Surface Mapping
 
-### Fixtures
-Synthetic fixtures are the primary validation surface for this mission. They provide deterministic coverage for:
-- version sniffing
-- version-specific header boundaries
-- section directory ordering and bounds
-- payload extraction exactness
-- pending-graph record accounting
-- resolver determinism
+### Synthetic tests
+Use synthetic docs/tests to isolate:
+- specific bridge mappings
+- common-field preservation
+- writer bug regressions
+- handle and owner invariants
 
-Selective real DWG fixtures are only milestone-gate supplements, not the default development surface.
+### Real ACadSharp samples
+Use sample DXF files for milestone-gate regression of:
+- real header/version handling
+- end-to-end pipeline preservation
+- ownership/block/layout behavior on realistic content
 
-### Pending graph
-The pending graph is the core parser-facing regression seam. It links structural file decode to resolver behavior and exposes the mission’s most important intermediate artifacts:
-- section metadata
-- emitted object counts
-- stable per-record provenance
-- visible owner/handle state
+### Compile surfaces
+Use `cargo check` and `cargo test` to validate quick-win runtime migration without launching the app.
 
-### Resolver
-The resolver validates that parser-side state can be turned into a stable `CadDocument` without losing handles, ownership intent, or seeded document scaffolding. It is the architectural handoff from parser internals to native-model observability.
+## Relationship Summary
 
-### Facade compile surface
-`h7cad-native-facade` is part of the validation map only as a compile-surface consumer of the DWG parser crate. For this mission, it confirms API compatibility and linkage stability; it is not evidence that the application runtime DWG path has switched to the native parser.
-
-### Relationship summary
 The architecture relationship for workers is:
 
-`fixtures -> header/section decode -> pending graph -> dispatch summaries -> resolver -> native model`  
-with `facade compile checks` observing the public surface from outside the parser crate.
+`DXF bytes -> native document -> compat bridge -> native bridge-back -> DXF writer -> native reread`
+
+with `facade DXF APIs` and `runtime compile surfaces` observing that pipeline from outside the native crates.

@@ -1,9 +1,12 @@
 commands:
   install: cargo fetch --locked
-  check: cargo check -p h7cad-native-dwg
-  test: cargo test -p h7cad-native-dwg -- --test-threads=1
-  test_integration: cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1
-  compile_surface: cargo check -p h7cad-native-facade
-  build: cargo build -p h7cad-native-dwg
+  check: cargo check
+  check_native: cargo check -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade
+  check_facade: cargo check -p h7cad-native-facade
+  test: cargo test -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade -- --test-threads=16
+  test_dxf: cargo test -p h7cad-native-dxf -- --test-threads=16
+  test_bridge: cargo test --lib native_bridge -- --test-threads=16
+  test_workspace: cargo test -- --test-threads=16
+  build: cargo build
 
 services: {}

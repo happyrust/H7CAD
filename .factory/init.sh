@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""No-op init for the DWG parser mission.
+"""No-op init for the DXF native migration mission.
 
-The current mission requires no environment bootstrap. Keeping this file as a
-Python no-op makes it safe for worker environments that invoke `.factory/init.sh`
-through Python on Windows.
+Validation is cargo-only on Windows and requires no extra bootstrap beyond the
+workspace itself. Keeping this file as a Python no-op makes it safe for worker
+environments that invoke `.factory/init.sh` through Python.
 """
 
 raise SystemExit(0)
