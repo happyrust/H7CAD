@@ -226,6 +226,60 @@ fn pending_document_preserves_section_directory_entries() {
 }
 
 #[test]
+fn pending_document_uses_pending_graph_edge_case_fixtures() {
+    let payloads = pending_graph_payloads();
+
+    let bytes = fixture_ac1018_with_pending_graph_payloads();
+    let header = DwgFileHeader::parse(&bytes).unwrap();
+    let sections = SectionMap::parse(&bytes, &header).unwrap();
+    let payload_bytes = sections.read_section_payloads(&bytes).unwrap();
+    let pending = build_pending_document(&header, &sections, payload_bytes);
+
+    assert_eq!(pending.section_count, payloads.len() as u32);
+    assert_eq!(pending.sections.len(), payloads.len());
+    assert_eq!(pending.sections[0].payload, payloads[0].to_vec());
+    assert_eq!(pending.sections[1].payload, payloads[1].to_vec());
+    assert_eq!(pending.sections[2].payload, payloads[2].to_vec());
+    assert_eq!(pending.sections[3].payload, payloads[3].to_vec());
+    assert_eq!(pending.sections[4].payload, payloads[4].to_vec());
+    assert_eq!(pending.sections[5].payload, payloads[5].to_vec());
+    assert_eq!(
+        pending.sections.iter().map(|section| section.record_count).collect::<Vec<_>>(),
+        vec![0, 1, 1, 1, 3, 2]
+    );
+    assert_eq!(pending.objects.len(), 8);
+}
+
+#[test]
+fn pending_graph_fixture_payloads_cover_edge_cases() {
+    let payloads = pending_graph_payloads();
+
+    assert_eq!(classify_section_records(payloads[0]), Vec::<Vec<u8>>::new());
+    assert_eq!(classify_section_records(payloads[1]), vec![b"\0\0\0".to_vec()]);
+    assert_eq!(classify_section_records(payloads[2]), vec![b"solo".to_vec()]);
+    assert_eq!(classify_section_records(payloads[3]), vec![b"tail".to_vec()]);
+    assert_eq!(
+        classify_section_records(payloads[4]),
+        vec![b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]
+    );
+    assert_eq!(
+        classify_section_records(payloads[5]),
+        vec![b"left".to_vec(), b"right".to_vec()]
+    );
+}
+
+#[test]
+fn repeated_pending_graph_fixture_parse_is_stable() {
+    let bytes = fixture_ac1018_with_pending_graph_payloads();
+
+    let first = parse_pending_fixture(&bytes);
+    let second = parse_pending_fixture(&bytes);
+
+    assert_eq!(first.sections, second.sections);
+    assert_eq!(first.objects, second.objects);
+}
+
+#[test]
 fn section_payloads_are_read_from_directory_offsets() {
     let bytes = fixture_ac1015(2, &[(0x29, 3), (0x40, 4)], &[b"abc", b"DEFG"]);
     let header = DwgFileHeader::parse(&bytes).unwrap();
@@ -291,6 +345,42 @@ fn dispatch_entry_points_follow_pending_object_kind() {
             payload_size: 5,
         }
     );
+}
+
+fn parse_pending_fixture(bytes: &[u8]) -> h7cad_native_dwg::PendingDocument {
+    let header = DwgFileHeader::parse(bytes).unwrap();
+    let sections = SectionMap::parse(bytes, &header).unwrap();
+    let payloads = sections.read_section_payloads(bytes).unwrap();
+    build_pending_document(&header, &sections, payloads)
+}
+
+fn fixture_ac1018_with_pending_graph_payloads() -> Vec<u8> {
+    let payloads = pending_graph_payloads();
+    let entries = pending_graph_entries(&payloads);
+    fixture_ac1018(payloads.len() as u32, &entries, &payloads)
+}
+
+fn pending_graph_payloads() -> Vec<&'static [u8]> {
+    vec![
+        b"",
+        b"\0\0\0",
+        b"\0solo",
+        b"tail\0",
+        b"alpha\0\0beta\0gamma",
+        b"left\0right",
+    ]
+}
+
+fn pending_graph_entries(payloads: &[&[u8]]) -> Vec<(u32, u32)> {
+    let mut next_offset = 0x80_u32;
+    payloads
+        .iter()
+        .map(|payload| {
+            let entry = (next_offset, payload.len() as u32);
+            next_offset += payload.len() as u32 + 0x10;
+            entry
+        })
+        .collect()
 }
 
 fn fixture_ac1015(section_count: u32, entries: &[(u32, u32)], payloads: &[&[u8]]) -> Vec<u8> {
