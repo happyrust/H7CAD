@@ -85,6 +85,8 @@ pub fn build_pending_document(
                     owner_handle: semantic_owner_handle(record).unwrap_or(Handle::NULL),
                     section_index: section.index,
                     kind: classify_record_kind(section.index, record_index as u32, record),
+                    semantic_identity: semantic_identity(record),
+                    semantic_link: semantic_link(record),
                 })
                 .collect::<Vec<_>>()
         })
@@ -355,6 +357,48 @@ fn semantic_entity(record: &[u8]) -> Option<PendingEntity> {
     })
 }
 
+fn semantic_identity(record: &[u8]) -> Option<String> {
+    let fields = semantic_fields(record)?;
+    match fields.first().copied()? {
+        "TBL" => Some(format!("table:{}:{}", fields.get(1)?, fields.get(2)?)),
+        "ENT" => Some(format!("entity:{}", fields.get(1)?)),
+        "OBJ" => match fields.get(1).copied()? {
+            "BLOCK" => Some(format!("block:{}", fields.get(2)?)),
+            "LAYOUT" => Some(format!("layout:{}", fields.get(2)?)),
+            other => Some(format!("object:{other}")),
+        },
+        _ => None,
+    }
+}
+
+fn semantic_link(record: &[u8]) -> Option<String> {
+    let fields = semantic_fields(record)?;
+    match fields.first().copied()? {
+        "TBL" => Some(format!("handle:{:X}", semantic_handle(record)?.value())),
+        "ENT" => fields
+            .iter()
+            .skip(2)
+            .find_map(|field| field.strip_prefix('L'))
+            .map(|layer| format!("layer:{layer}"))
+            .or_else(|| Some(format!("owner:{:X}", semantic_owner_handle(record)?.value()))),
+        "OBJ" => match fields.get(1).copied()? {
+            "BLOCK" => fields
+                .iter()
+                .skip(2)
+                .find_map(|field| field.strip_prefix("LAYOUT="))
+                .map(|layout| format!("layout:{layout}")),
+            "LAYOUT" => fields
+                .iter()
+                .skip(2)
+                .find_map(|field| field.strip_prefix('B'))
+                .filter(|handle| handle.chars().all(|ch| ch.is_ascii_hexdigit()))
+                .map(|handle| format!("block_handle:{handle}")),
+            other => Some(format!("object:{other}")),
+        },
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +501,8 @@ mod tests {
                     record_index: 0,
                     payload_size: 0x20,
                 },
+                semantic_identity: None,
+                semantic_link: None,
             }]
         );
     }
@@ -548,6 +594,8 @@ mod tests {
                 record_index: 0,
                 payload_size: 1,
             },
+            semantic_identity: None,
+            semantic_link: None,
         };
         let entity = PendingObject {
             handle: h7cad_native_model::Handle::new(2),
@@ -557,6 +605,8 @@ mod tests {
                 record_index: 0,
                 payload_size: 1,
             },
+            semantic_identity: None,
+            semantic_link: None,
         };
         let object = PendingObject {
             handle: h7cad_native_model::Handle::new(3),
@@ -566,6 +616,8 @@ mod tests {
                 record_index: 0,
                 payload_size: 1,
             },
+            semantic_identity: None,
+            semantic_link: None,
         };
 
         assert_eq!(dispatch_object(&table), DispatchTarget::Table);
@@ -582,6 +634,8 @@ mod tests {
                 section_index: 1,
                 record_index: 0,
                 payload_size: 1,
+                semantic_identity: "entity".to_string(),
+                semantic_link: String::new(),
             }
         );
     }
@@ -592,7 +646,7 @@ mod tests {
         assert_eq!(doc.objects.len(), 1);
         match &doc.objects[0].data {
             h7cad_native_model::ObjectData::Unknown { object_type } => {
-                assert_eq!(object_type, "DWG_TABLE_SECTION_0_RECORD_0_SIZE_2");
+                assert_eq!(object_type, "DWG_TABLE_SECTION_0_RECORD_0_SIZE_2_TABLE_");
             }
             other => panic!("expected unknown object summary, got {other:?}"),
         }

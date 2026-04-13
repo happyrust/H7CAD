@@ -144,6 +144,8 @@ fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
                 record_index: 0,
                 payload_size: 3,
             },
+            semantic_identity: None,
+            semantic_link: None,
         },
         PendingObject {
             handle: h7cad_native_model::Handle::new(0x41),
@@ -153,6 +155,8 @@ fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
                 record_index: 1,
                 payload_size: 4,
             },
+            semantic_identity: None,
+            semantic_link: None,
         },
         PendingObject {
             handle: h7cad_native_model::Handle::new(0x52),
@@ -162,6 +166,8 @@ fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
                 record_index: 2,
                 payload_size: 5,
             },
+            semantic_identity: None,
+            semantic_link: None,
         },
     ];
 
@@ -172,9 +178,9 @@ fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
     assert_eq!(
         resolved_projection,
         vec![
-            (0x30, 0, "DWG_TABLE_SECTION_0_RECORD_0_SIZE_3".to_string()),
-            (0x41, 0x90, "DWG_ENTITY_SECTION_1_RECORD_1_SIZE_4".to_string()),
-            (0x52, 0x91, "DWG_OBJECT_SECTION_2_RECORD_2_SIZE_5".to_string()),
+            (0x30, 0, "DWG_TABLE_SECTION_0_RECORD_0_SIZE_3_TABLE_".to_string()),
+            (0x41, 0x90, "DWG_ENTITY_SECTION_1_RECORD_1_SIZE_4_ENTITY_".to_string()),
+            (0x52, 0x91, "DWG_OBJECT_SECTION_2_RECORD_2_SIZE_5_OBJECT_".to_string()),
         ]
     );
     assert_eq!(doc.next_handle(), 0x92);
@@ -662,19 +668,19 @@ fn semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit() 
     assert_eq!(
         semantic_fixture_graph_projection(&valid),
         vec![
-            "record=DWG_TABLE_SECTION_0_RECORD_0_SIZE_24 owner=0".to_string(),
-            "record=DWG_OBJECT_SECTION_1_RECORD_0_SIZE_39 owner=0".to_string(),
-            "record=DWG_OBJECT_SECTION_1_RECORD_1_SIZE_24 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_2_RECORD_0_SIZE_28 owner=129".to_string(),
-            "record=DWG_ENTITY_SECTION_2_RECORD_1_SIZE_30 owner=144".to_string(),
-            "record=DWG_OBJECT_SECTION_3_RECORD_0_SIZE_23 owner=0".to_string(),
+            "record=DWG_TABLE_SECTION_0_RECORD_0_SIZE_24_TABLE_LAYER_LAYERMODEL_HANDLE_80 owner=0".to_string(),
+            "record=DWG_OBJECT_SECTION_1_RECORD_0_SIZE_39_BLOCK_*MODEL_SPACE_LAYOUT_MODEL owner=0".to_string(),
+            "record=DWG_OBJECT_SECTION_1_RECORD_1_SIZE_24_LAYOUT_MODEL_BLOCK_HANDLE_81 owner=0".to_string(),
+            "record=DWG_ENTITY_SECTION_2_RECORD_0_SIZE_28_ENTITY_LINE_LAYER_LAYERMODEL owner=129".to_string(),
+            "record=DWG_ENTITY_SECTION_2_RECORD_1_SIZE_30_ENTITY_INSERT_LAYER_LAYERMODEL owner=144".to_string(),
+            "record=DWG_OBJECT_SECTION_3_RECORD_0_SIZE_23_BLOCK_DOORBLOCK_ owner=0".to_string(),
         ]
     );
     assert_eq!(
         semantic_fixture_graph_projection(&invalid),
         vec![
-            "record=DWG_OBJECT_SECTION_0_RECORD_0_SIZE_25 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_29 owner=255".to_string(),
+            "record=DWG_OBJECT_SECTION_0_RECORD_0_SIZE_25_LAYOUT_BROKEN_ owner=0".to_string(),
+            "record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_29_ENTITY_LINE_LAYER_LAYERBROKEN owner=255".to_string(),
         ]
     );
 }
@@ -783,6 +789,48 @@ fn semantic_provenance_projection_is_stable_across_repeated_parses() {
 }
 
 #[test]
+fn block_layout_semantics_are_outwardly_distinguishable_on_parser_surfaces() {
+    let pending = parse_pending_fixture(&semantic_record_fixture("layout-variant"));
+    let projection = pending_provenance_projection(&pending);
+
+    assert!(projection.iter().any(|tuple| {
+        tuple.semantic_identity == "block:*Paper_Space" && tuple.semantic_link == "layout:LayoutA"
+    }));
+    assert!(projection.iter().any(|tuple| {
+        tuple.semantic_identity == "layout:LayoutA" && tuple.semantic_link == "block_handle:72"
+    }));
+    assert!(projection.iter().any(|tuple| {
+        tuple.semantic_identity == "entity:TEXT" && tuple.semantic_link == "layer:LayerPaper"
+    }));
+}
+
+#[test]
+fn outward_summaries_distinguish_same_size_semantic_records_by_identity_fields() {
+    let pending = parse_pending_fixture(&semantic_record_fixture("same-size-collision"));
+    let summaries = pending
+        .objects
+        .iter()
+        .map(summarize_object)
+        .collect::<Vec<_>>();
+
+    assert_eq!(summaries.len(), 2);
+    assert_eq!(summaries[0].payload_size, summaries[1].payload_size);
+    assert_ne!(summaries[0].semantic_identity, summaries[1].semantic_identity);
+    assert_ne!(summaries[0].semantic_link, summaries[1].semantic_link);
+}
+
+#[test]
+fn provenance_projection_stays_deterministic_across_equivalent_layout_variants() {
+    let first = parse_pending_fixture(&semantic_record_fixture("layout-variant"));
+    let second = parse_pending_fixture(&semantic_record_fixture("layout-variant"));
+
+    assert_eq!(
+        pending_provenance_projection(&first),
+        pending_provenance_projection(&second)
+    );
+}
+
+#[test]
 fn typed_record_classifier_maps_section_buckets() {
     assert_eq!(
         classify_record_kind(0, 0, b"A"),
@@ -817,6 +865,8 @@ fn dispatch_entry_points_follow_pending_object_kind() {
             record_index: 2,
             payload_size: 5,
         },
+        semantic_identity: None,
+        semantic_link: None,
     };
 
     assert_eq!(dispatch_object(&object), DispatchTarget::Entity);
@@ -828,6 +878,8 @@ fn dispatch_entry_points_follow_pending_object_kind() {
             section_index: 1,
             record_index: 2,
             payload_size: 5,
+            semantic_identity: "entity".to_string(),
+            semantic_link: String::new(),
         }
     );
 }
@@ -869,6 +921,41 @@ fn pending_semantic_projection(
                     })
                     .unwrap_or_default(),
             )
+        })
+        .collect::<Vec<_>>();
+    projection.sort();
+    projection
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PendingProvenanceTuple {
+    handle: u64,
+    owner: u64,
+    target: &'static str,
+    semantic_identity: String,
+    semantic_link: String,
+}
+
+fn pending_provenance_projection(
+    pending: &h7cad_native_dwg::PendingDocument,
+) -> Vec<PendingProvenanceTuple> {
+    let mut projection = pending
+        .objects
+        .iter()
+        .map(|object| {
+            let target = match object.kind {
+                PendingObjectKind::TableRecord { .. } => "table",
+                PendingObjectKind::EntityRecord { .. } => "entity",
+                PendingObjectKind::ObjectRecord { .. } => "object",
+            };
+            let summary = summarize_object(object);
+            PendingProvenanceTuple {
+                handle: object.handle.value(),
+                owner: object.owner_handle.value(),
+                target,
+                semantic_identity: summary.semantic_identity,
+                semantic_link: summary.semantic_link,
+            }
         })
         .collect::<Vec<_>>();
     projection.sort();

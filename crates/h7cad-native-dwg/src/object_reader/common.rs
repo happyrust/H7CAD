@@ -6,6 +6,8 @@ pub struct ParsedRecordSummary {
     pub section_index: u32,
     pub record_index: u32,
     pub payload_size: usize,
+    pub semantic_identity: String,
+    pub semantic_link: String,
 }
 
 pub fn record_payload_size(object: &PendingObject) -> usize {

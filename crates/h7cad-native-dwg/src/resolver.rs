@@ -22,8 +22,12 @@ pub fn resolve_document(pending: &PendingDocument) -> CadDocument {
         };
         let data = ObjectData::Unknown {
             object_type: format!(
-                "{prefix}_SECTION_{}_RECORD_{}_SIZE_{}",
-                summary.section_index, summary.record_index, summary.payload_size
+                "{prefix}_SECTION_{}_RECORD_{}_SIZE_{}_{}_{}",
+                summary.section_index,
+                summary.record_index,
+                summary.payload_size,
+                summary.semantic_identity.to_ascii_uppercase().replace(':', "_"),
+                summary.semantic_link.to_ascii_uppercase().replace(':', "_")
             ),
         };
         doc.objects.push(CadObject {

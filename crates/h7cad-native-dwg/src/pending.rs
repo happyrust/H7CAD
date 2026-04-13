@@ -52,6 +52,8 @@ pub struct PendingObject {
     pub owner_handle: Handle,
     pub section_index: u32,
     pub kind: PendingObjectKind,
+    pub semantic_identity: Option<String>,
+    pub semantic_link: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
