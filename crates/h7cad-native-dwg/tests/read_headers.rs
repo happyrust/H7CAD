@@ -226,6 +226,41 @@ fn pending_document_preserves_section_directory_entries() {
 }
 
 #[test]
+fn pending_document_section_accounting_matches_emitted_objects() {
+    let bytes = fixture_ac1018_with_pending_graph_payloads();
+    let pending = parse_pending_fixture(&bytes);
+
+    assert_eq!(
+        pending
+            .sections
+            .iter()
+            .map(|section| (section.index, section.offset, section.size, section.record_count))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, 0x80, 0, 0),
+            (1, 0x90, 3, 1),
+            (2, 0xA3, 5, 1),
+            (3, 0xB8, 5, 1),
+            (4, 0xCD, 17, 3),
+            (5, 0xEE, 10, 2),
+        ]
+    );
+    assert_eq!(
+        pending.sections.iter().map(|section| section.record_count).sum::<u32>() as usize,
+        pending.objects.len()
+    );
+
+    for section in &pending.sections {
+        let per_section_count = pending
+            .objects
+            .iter()
+            .filter(|object| object.section_index == section.index)
+            .count();
+        assert_eq!(per_section_count, section.record_count as usize);
+    }
+}
+
+#[test]
 fn pending_document_uses_pending_graph_edge_case_fixtures() {
     let payloads = pending_graph_payloads();
 
@@ -265,6 +300,39 @@ fn pending_graph_fixture_payloads_cover_edge_cases() {
     assert_eq!(
         classify_section_records(payloads[5]),
         vec![b"left".to_vec(), b"right".to_vec()]
+    );
+}
+
+#[test]
+fn pending_object_section_mapping_covers_each_real_section() {
+    let bytes = fixture_ac1018_with_pending_graph_payloads();
+    let pending = parse_pending_fixture(&bytes);
+
+    let mapped_sections = pending
+        .objects
+        .iter()
+        .map(|object| {
+            let section = pending
+                .sections
+                .iter()
+                .find(|section| section.index == object.section_index)
+                .expect("pending object should map to a real section");
+            (object.section_index, record_payload_size(object), section.record_count)
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        mapped_sections,
+        vec![
+            (1, 3, 1),
+            (2, 4, 1),
+            (3, 4, 1),
+            (4, 5, 3),
+            (4, 4, 3),
+            (4, 5, 3),
+            (5, 4, 2),
+            (5, 5, 2),
+        ]
     );
 }
 
