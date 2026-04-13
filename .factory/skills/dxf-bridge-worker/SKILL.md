@@ -47,6 +47,7 @@ Typical work:
 10. Invoke `verification-before-completion`, confirm no required evidence is missing, then hand off.
 
 Before trusting a narrow manifest command, verify it actually matches the current workspace layout. If a manifest command is stale, use the working equivalent and note the deviation in the handoff.
+If the assigned target files were already dirty before you started, you should still create a feature commit by staging the assigned file set only. Note any mixed file ancestry in the handoff rather than returning solely because the files were pre-modified.
 
 ## Example Handoff
 
