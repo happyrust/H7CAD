@@ -183,6 +183,51 @@ fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
 }
 
 #[test]
+fn read_dwg_rejects_invalid_and_known_unsupported_versions_at_public_api_boundary() {
+    assert_eq!(
+        read_dwg(b"ZZ9999fixture").unwrap_err(),
+        DwgReadError::InvalidMagic {
+            found: "ZZ9999".to_string(),
+        }
+    );
+
+    for version in [
+        DwgVersion::Ac1021,
+        DwgVersion::Ac1024,
+        DwgVersion::Ac1027,
+        DwgVersion::Ac1032,
+    ] {
+        let err = read_dwg(version.to_string().as_bytes()).unwrap_err();
+        assert_eq!(err, DwgReadError::UnsupportedVersion(version));
+    }
+}
+
+#[test]
+fn read_dwg_fails_closed_on_structural_corruption_after_version_recognition() {
+    let truncated_directory = fixture_ac1018_truncated_directory(2, &[(0x40, 3)]);
+    assert_eq!(
+        read_dwg(&truncated_directory).unwrap_err(),
+        DwgReadError::TruncatedSectionDirectory {
+            version: DwgVersion::Ac1018,
+            expected_at_least: 45,
+            actual: 37,
+        }
+    );
+
+    let out_of_bounds =
+        fixture_ac1015_with_declared_spans(2, &[(0x29, 3), (0x80, 5)], &[(0x29, b"abc")]);
+    assert_eq!(
+        read_dwg(&out_of_bounds).unwrap_err(),
+        DwgReadError::SectionOutOfBounds {
+            index: 1,
+            offset: 0x80,
+            size: 5,
+            actual: out_of_bounds.len(),
+        }
+    );
+}
+
+#[test]
 fn read_dwg_produces_deterministic_resolved_object_summaries() {
     let bytes = fixture_ac1018_with_pending_graph_payloads();
 
