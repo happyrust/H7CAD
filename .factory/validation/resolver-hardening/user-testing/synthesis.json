@@ -1,0 +1,41 @@
+{
+  "milestone": "resolver-hardening",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 20,
+    "passed": 19,
+    "failed": 0,
+    "blocked": 1
+  },
+  "passedAssertions": [
+    "VAL-SEM-007",
+    "VAL-PROV-001",
+    "VAL-PROV-002",
+    "VAL-PROV-004",
+    "VAL-PROV-005",
+    "VAL-HARDEN-001",
+    "VAL-HARDEN-002",
+    "VAL-HARDEN-003",
+    "VAL-HARDEN-004",
+    "VAL-HARDEN-005",
+    "VAL-HARDEN-006",
+    "VAL-HARDEN-007",
+    "VAL-HARDEN-008",
+    "VAL-HARDEN-009",
+    "VAL-HARDEN-010",
+    "VAL-HARDEN-011",
+    "VAL-CROSS2-001",
+    "VAL-CROSS2-002",
+    "VAL-CROSS2-003"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [
+    {
+      "id": "VAL-CROSS2-004",
+      "blockedBy": "The required cargo parser/facade checks passed, but no cargo-surface command output in this run demonstrates an outward-facing unavailable/not-implemented runtime DWG load attempt on the facade/app path."
+    }
+  ],
+  "appliedUpdates": [],
+  "previousRound": null
+}

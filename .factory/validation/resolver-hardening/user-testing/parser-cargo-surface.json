@@ -1,0 +1,210 @@
+{
+  "surface": "DWG parser cargo surface",
+  "tool": "cargo",
+  "assertions": [
+    {
+      "id": "VAL-SEM-007",
+      "status": "pass",
+      "reason": "Resolved-output tests covering semantic categories and relationships passed on the cargo surface.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolve_document_materializes_layout_block_and_entity_semantics ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test block_layout_semantics_are_outwardly_distinguishable_on_parser_surfaces ... ok"
+      ]
+    },
+    {
+      "id": "VAL-PROV-001",
+      "status": "pass",
+      "reason": "End-to-end ownership/provenance tests passed, showing parser-supplied identities survive into resolved outputs.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolver_preserves_handles_owners_order_and_advances_allocation_state ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test read_dwg_preserves_parser_supplied_ownership_intent_end_to_end ... ok"
+      ]
+    },
+    {
+      "id": "VAL-PROV-002",
+      "status": "pass",
+      "reason": "Tests exercising parser-supplied ownership intent and resolver preservation passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test pending_entity_semantics_preserve_handle_owner_and_layer_relationships ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test read_dwg_preserves_parser_supplied_ownership_intent_end_to_end ... ok"
+      ]
+    },
+    {
+      "id": "VAL-PROV-004",
+      "status": "pass",
+      "reason": "Section-accounting and mapping tests passed, indicating parser-emitted semantic records stay synchronized with section counts and downstream projections.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test pending_document_section_accounting_matches_emitted_objects ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test pending_object_section_mapping_covers_each_real_section ... ok"
+      ]
+    },
+    {
+      "id": "VAL-PROV-005",
+      "status": "pass",
+      "reason": "Resolved naming/projection derivation tests passed, showing resolved identities remain explainable from pending provenance.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg -- --test-threads=1: test tests::resolve_document_uses_parsed_record_summary_naming ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test read_dwg_produces_deterministic_resolved_object_summaries ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-001",
+      "status": "pass",
+      "reason": "Resolver preservation test covering handles passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolver_preserves_handles_owners_order_and_advances_allocation_state ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-002",
+      "status": "pass",
+      "reason": "Resolver preservation test covering non-null owners passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolver_preserves_handles_owners_order_and_advances_allocation_state ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-003",
+      "status": "pass",
+      "reason": "Resolver preservation test covering parser emission order passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolver_preserves_handles_owners_order_and_advances_allocation_state ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-004",
+      "status": "pass",
+      "reason": "Resolver allocation advancement test passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolver_preserves_handles_owners_order_and_advances_allocation_state ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-005",
+      "status": "pass",
+      "reason": "Scaffold-preservation tests for layers/layout links passed on the outward resolver surface.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolve_document_preserves_pending_layers_and_repairs_layout_links ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolve_document_preserves_pending_layers_and_repairs_layout_links_for_resolver_fixtures ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-006",
+      "status": "pass",
+      "reason": "Layout/block association test passed on resolved outputs.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolve_document_materializes_layout_block_and_entity_semantics ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-007",
+      "status": "pass",
+      "reason": "Layer consistency preservation test passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolve_document_preserves_pending_layers_and_repairs_layout_links ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-008",
+      "status": "pass",
+      "reason": "Paper/model space classification test passed for parsed ownership.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolve_document_places_paper_space_entities_in_paper_space_outputs ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-009",
+      "status": "pass",
+      "reason": "Block-owned entity preservation test passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolve_document_keeps_block_owned_entities_on_their_parsed_block ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-010",
+      "status": "pass",
+      "reason": "Invalid semantic ownership/layout reference coverage test passed, indicating fail-closed behavior on impossible references.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test resolver_ownership_fixture_cases_cover_layer_layout_space_and_invalid_reference_scenarios ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit ... ok"
+      ]
+    },
+    {
+      "id": "VAL-HARDEN-011",
+      "status": "pass",
+      "reason": "Resolved outputs remained distinguishable by provenance in outward-facing summary tests.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test read_dwg_produces_deterministic_resolved_object_summaries ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test outward_summaries_distinguish_same_size_semantic_records_by_identity_fields ... ok"
+      ]
+    },
+    {
+      "id": "VAL-CROSS2-001",
+      "status": "pass",
+      "reason": "End-to-end parser-to-resolver provenance mapping tests passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test read_dwg_preserves_parser_supplied_ownership_intent_end_to_end ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test semantic_provenance_projection_is_stable_across_repeated_parses ... ok"
+      ]
+    },
+    {
+      "id": "VAL-CROSS2-002",
+      "status": "pass",
+      "reason": "End-to-end ownership intent preservation test passed.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test read_dwg_preserves_parser_supplied_ownership_intent_end_to_end ... ok"
+      ]
+    },
+    {
+      "id": "VAL-CROSS2-003",
+      "status": "pass",
+      "reason": "Parser-to-resolver section accounting stayed synchronized in dedicated accounting tests.",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test pending_document_section_accounting_matches_emitted_objects ... ok",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1: test pending_object_section_mapping_covers_each_real_section ... ok"
+      ]
+    },
+    {
+      "id": "VAL-CROSS2-004",
+      "status": "blocked",
+      "reason": "The required cargo parser/facade checks passed, but no cargo-surface command output in this run demonstrates an outward-facing unavailable/not-implemented runtime DWG load attempt on the facade/app path.",
+      "evidence": [
+        "cargo check -p h7cad-native-dwg: Finished dev profile [unoptimized + debuginfo] target(s) in 0.18s",
+        "cargo test -p h7cad-native-dwg -- --test-threads=1: test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+        "cargo check -p h7cad-native-facade: warning: h7cad-native-dxf (lib) generated 1 warning; Finished dev profile [unoptimized + debuginfo] target(s) in 0.18s"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0,
+      "observation": "Succeeded; no test execution; compile surface clean for h7cad-native-dwg."
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "Succeeded; integration suite reported 51 passed, 0 failed, including named semantic/provenance/resolver-hardening tests."
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "Succeeded; crate unit tests (15), integration tests (51), and doc-tests (0) all passed; total outward evidence 66 passed, 0 failed."
+    },
+    {
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0,
+      "observation": "Succeeded with one pre-existing dead_code warning from h7cad-native-dxf::tokenizer::read_i64_le; no facade compile errors."
+    }
+  ],
+  "frictions": [
+    "PowerShell/host formatting guidance was applicable, but saved logs and exit codes remained clear enough to use as authoritative evidence.",
+    "cargo check -p h7cad-native-facade emitted a pre-existing dead_code warning from h7cad-native-dxf, which was non-blocking per mission guidance."
+  ],
+  "blockers": [
+    "VAL-CROSS2-004 remains blocked because this cargo-only run did not include outward-facing runtime DWG load evidence from the facade/app path, so the unavailable/not-implemented boundary could not be proven from command output alone."
+  ],
+  "toolsUsed": [
+    "cargo"
+  ]
+}
