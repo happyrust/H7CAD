@@ -17,6 +17,7 @@
 - Dry run confirmed the cargo-based parser validation path is executable in the current environment.
 - Existing parser skeleton and current test baseline run without requiring new services, ports, credentials, or desktop automation setup.
 - Resource demand was reported as low-to-moderate during the dry run, but the user explicitly selected sequential validation for this mission.
+- On this Windows host, PowerShell `Tee-Object` output can show noisy `RemoteException` formatting even when cargo commands succeed; validators should trust command exit codes plus saved evidence logs over console formatting alone.
 
 ## Validation Concurrency
 
@@ -34,6 +35,6 @@
 - Operate only through cargo commands in the shared repository at D:/work/plant-code/cad/H7CAD.
 - Do not edit source files or mission metadata while validating.
 - Use sequential cargo execution only; do not start concurrent cargo jobs or background services.
-- Evidence should come from command output and, when useful, captured logs saved under the assigned evidence directory.
+- Evidence should come from command output and, when useful, captured logs saved under the assigned evidence directory; treat exit codes and saved logs as authoritative if PowerShell formatting is noisy.
 - Stay within parser-only scope: validate h7cad-native-dwg and h7cad-native-facade compile surface only.
 
