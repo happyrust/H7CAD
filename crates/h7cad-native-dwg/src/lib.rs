@@ -53,7 +53,7 @@ pub fn build_pending_document(
         .iter()
         .zip(payloads)
         .map(|descriptor| {
-            let records = classify_section_records(&descriptor.1)?;
+            let records = classify_section_records_for_section(descriptor.0.index, &descriptor.1)?;
             let record_count = records.len() as u32;
             Ok((
                 PendingSection {
@@ -106,13 +106,20 @@ pub fn build_pending_document(
 }
 
 pub fn classify_section_records(payload: &[u8]) -> Result<Vec<Vec<u8>>, DwgReadError> {
+    classify_section_records_for_section(0, payload)
+}
+
+fn classify_section_records_for_section(
+    section_index: u32,
+    payload: &[u8],
+) -> Result<Vec<Vec<u8>>, DwgReadError> {
     if payload.is_empty() {
         return Ok(Vec::new());
     }
 
     if payload.starts_with(b"TBL:") || payload.starts_with(b"ENT:") || payload.starts_with(b"OBJ:")
     {
-        return decode_semantic_section_records(0, payload);
+        return decode_semantic_section_records(section_index, payload);
     }
 
     Ok(split_zero_delimited_records(payload))
@@ -375,12 +382,21 @@ fn semantic_link(record: &[u8]) -> Option<String> {
     let fields = semantic_fields(record)?;
     match fields.first().copied()? {
         "TBL" => Some(format!("handle:{:X}", semantic_handle(record)?.value())),
-        "ENT" => fields
-            .iter()
-            .skip(2)
-            .find_map(|field| field.strip_prefix('L'))
-            .map(|layer| format!("layer:{layer}"))
-            .or_else(|| Some(format!("owner:{:X}", semantic_owner_handle(record)?.value()))),
+        "ENT" => {
+            let layer = fields
+                .iter()
+                .skip(2)
+                .find_map(|field| field.strip_prefix('L'));
+            let owner = semantic_owner_handle(record)
+                .filter(|handle| *handle != Handle::NULL)
+                .map(|handle| format!("owner:{:X}", handle.value()));
+            match (layer, owner) {
+                (Some(layer), Some(owner)) => Some(format!("layer:{layer}|{owner}")),
+                (Some(layer), None) => Some(format!("layer:{layer}")),
+                (None, Some(owner)) => Some(owner),
+                (None, None) => None,
+            }
+        }
         "OBJ" => match fields.get(1).copied()? {
             "BLOCK" => fields
                 .iter()

@@ -668,19 +668,19 @@ fn semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit() 
     assert_eq!(
         semantic_fixture_graph_projection(&valid),
         vec![
-            "record=DWG_TABLE_SECTION_0_RECORD_0_SIZE_24_TABLE_LAYER_LAYERMODEL_HANDLE_80 owner=0".to_string(),
-            "record=DWG_OBJECT_SECTION_1_RECORD_0_SIZE_39_BLOCK_*MODEL_SPACE_LAYOUT_MODEL owner=0".to_string(),
-            "record=DWG_OBJECT_SECTION_1_RECORD_1_SIZE_24_LAYOUT_MODEL_BLOCK_HANDLE_81 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_2_RECORD_0_SIZE_28_ENTITY_LINE_LAYER_LAYERMODEL owner=129".to_string(),
-            "record=DWG_ENTITY_SECTION_2_RECORD_1_SIZE_30_ENTITY_INSERT_LAYER_LAYERMODEL owner=144".to_string(),
-            "record=DWG_OBJECT_SECTION_3_RECORD_0_SIZE_23_BLOCK_DOORBLOCK_ owner=0".to_string(),
+            "handle=128 owner=0 record=DWG_TABLE_SECTION_0_RECORD_0_SIZE_24_TABLE_LAYER_LAYERMODEL_HANDLE_80".to_string(),
+            "handle=129 owner=0 record=DWG_OBJECT_SECTION_1_RECORD_0_SIZE_39_BLOCK_*MODEL_SPACE_LAYOUT_MODEL".to_string(),
+            "handle=130 owner=0 record=DWG_OBJECT_SECTION_1_RECORD_1_SIZE_24_LAYOUT_MODEL_BLOCK_HANDLE_81".to_string(),
+            "handle=131 owner=129 record=DWG_ENTITY_SECTION_2_RECORD_0_SIZE_28_ENTITY_LINE_LAYER_LAYERMODEL|OWNER_81".to_string(),
+            "handle=132 owner=144 record=DWG_ENTITY_SECTION_2_RECORD_1_SIZE_30_ENTITY_INSERT_LAYER_LAYERMODEL|OWNER_90".to_string(),
+            "handle=144 owner=0 record=DWG_OBJECT_SECTION_3_RECORD_0_SIZE_23_BLOCK_DOORBLOCK_".to_string(),
         ]
     );
     assert_eq!(
         semantic_fixture_graph_projection(&invalid),
         vec![
-            "record=DWG_OBJECT_SECTION_0_RECORD_0_SIZE_25_LAYOUT_BROKEN_ owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_29_ENTITY_LINE_LAYER_LAYERBROKEN owner=255".to_string(),
+            "handle=149 owner=0 record=DWG_OBJECT_SECTION_0_RECORD_0_SIZE_25_LAYOUT_BROKEN_".to_string(),
+            "handle=150 owner=255 record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_29_ENTITY_LINE_LAYER_LAYERBROKEN|OWNER_FF".to_string(),
         ]
     );
 }
@@ -800,8 +800,50 @@ fn block_layout_semantics_are_outwardly_distinguishable_on_parser_surfaces() {
         tuple.semantic_identity == "layout:LayoutA" && tuple.semantic_link == "block_handle:72"
     }));
     assert!(projection.iter().any(|tuple| {
-        tuple.semantic_identity == "entity:TEXT" && tuple.semantic_link == "layer:LayerPaper"
+        tuple.semantic_identity == "entity:TEXT"
+            && tuple.semantic_link == "layer:LayerPaper|owner:72"
     }));
+}
+
+#[test]
+fn pending_entity_summary_exposes_owner_and_layer_provenance_together() {
+    let pending = parse_pending_fixture(&semantic_record_fixture("ownership-graph"));
+    let summaries = pending
+        .objects
+        .iter()
+        .map(summarize_object)
+        .collect::<Vec<_>>();
+
+    assert!(summaries.iter().any(|summary| {
+        summary.semantic_identity == "entity:LINE"
+            && summary.semantic_link == "layer:LayerModel|owner:81"
+    }));
+    assert!(summaries.iter().any(|summary| {
+        summary.semantic_identity == "entity:INSERT"
+            && summary.semantic_link == "layer:LayerModel|owner:90"
+    }));
+}
+
+#[test]
+fn semantic_decode_reports_real_nonzero_section_index() {
+    let bytes = fixture_ac1018(
+        2,
+        &[(0x80, 3), (0xC0, 42)],
+        &[b"abc", b"OBJ:LAYOUT:Broken:H95:BFF\0ENT:LINE:EXX:OFF"],
+    );
+    let header = DwgFileHeader::parse(&bytes).unwrap();
+    let sections = SectionMap::parse(&bytes, &header).unwrap();
+    let payloads = sections.read_section_payloads(&bytes).unwrap();
+    let err = build_pending_document(&header, &sections, payloads).unwrap_err();
+
+    assert_eq!(
+        err,
+        DwgReadError::SemanticDecode {
+            section_index: 1,
+            record_index: 1,
+            reason: "invalid semantic handle fragment `EXX`".to_string(),
+        }
+    );
 }
 
 #[test]
@@ -1107,10 +1149,7 @@ fn semantic_fixture_graph_projection(bytes: &[u8]) -> Vec<String> {
     projection.sort();
     projection
         .into_iter()
-        .map(|(handle, owner, object_type)| {
-            let _ = handle;
-            format!("record={object_type} owner={owner}")
-        })
+        .map(|(handle, owner, object_type)| format!("handle={handle} owner={owner} record={object_type}"))
         .collect()
 }
 
