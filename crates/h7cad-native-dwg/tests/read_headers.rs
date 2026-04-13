@@ -784,6 +784,7 @@ fn semantic_fixture_payloads_cover_reordered_embedded_zero_and_collision_cases()
 fn mixed_type_fixture_preserves_expanded_semantic_identity_and_accounting() {
     let bytes = semantic_record_fixture("mixed-type-accounting");
     let pending = parse_pending_fixture(&bytes);
+    let resolved = read_dwg(&bytes).unwrap();
 
     assert_eq!(
         pending.sections.iter().map(|section| section.record_count).collect::<Vec<_>>(),
@@ -817,6 +818,40 @@ fn mixed_type_fixture_preserves_expanded_semantic_identity_and_accounting() {
             ("table:LAYER:LayerMixed".to_string(), "handle:80".to_string()),
             ("table:LTYPE:Dashed".to_string(), "handle:81".to_string()),
             ("table:STYLE:Annotative".to_string(), "handle:82".to_string()),
+        ]
+    );
+
+    let mut resolved_projection = resolved_parser_emitted_object_projection(
+        &resolved,
+        &[0x80, 0x81, 0x82, 0x92],
+    );
+    resolved_projection.sort();
+    assert_eq!(
+        resolved_projection,
+        vec![
+            (
+                0x80,
+                0,
+                "DWG_TABLE_SECTION_0_RECORD_0_SIZE_24_TABLE_LAYER_LAYERMIXED_HANDLE_80"
+                    .to_string(),
+            ),
+            (
+                0x81,
+                0,
+                "DWG_TABLE_SECTION_1_RECORD_0_SIZE_20_TABLE_LTYPE_DASHED_HANDLE_81"
+                    .to_string(),
+            ),
+            (
+                0x82,
+                0,
+                "DWG_TABLE_SECTION_1_RECORD_1_SIZE_24_TABLE_STYLE_ANNOTATIVE_HANDLE_82"
+                    .to_string(),
+            ),
+            (
+                0x92,
+                0x90,
+                "DWG_OBJECT_SECTION_3_RECORD_0_SIZE_26_OBJECT_NOTE_OBJECT_NOTE".to_string(),
+            ),
         ]
     );
 }
@@ -1206,6 +1241,13 @@ fn provenance_projection_stays_deterministic_across_equivalent_layout_variants()
         pending_provenance_projection(&first),
         pending_provenance_projection(&second)
     );
+
+    let first_resolved = read_dwg(&semantic_record_fixture("layout-variant")).unwrap();
+    let second_resolved = read_dwg(&semantic_record_fixture("layout-variant")).unwrap();
+    assert_eq!(
+        resolved_parser_emitted_object_projection(&first_resolved, &[0x62, 0x72, 0x73]),
+        resolved_parser_emitted_object_projection(&second_resolved, &[0x62, 0x72, 0x73])
+    );
 }
 
 #[test]
@@ -1357,6 +1399,27 @@ fn resolved_object_projection(
             )
         })
         .collect()
+}
+
+fn resolved_parser_emitted_object_projection(
+    doc: &h7cad_native_model::CadDocument,
+    handles: &[u64],
+) -> Vec<(u64, u64, String)> {
+    let mut projection = doc
+        .objects
+        .iter()
+        .filter_map(|object| {
+            handles.contains(&object.handle.value()).then(|| {
+                let summary = match &object.data {
+                    h7cad_native_model::ObjectData::Unknown { object_type } => object_type.clone(),
+                    other => panic!("expected parser-emitted unknown object summary, got {other:?}"),
+                };
+                (object.handle.value(), object.owner_handle.value(), summary)
+            })
+        })
+        .collect::<Vec<_>>();
+    projection.sort();
+    projection
 }
 
 fn fixture_ac1018_with_pending_graph_payloads() -> Vec<u8> {
