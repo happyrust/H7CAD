@@ -1,17 +1,29 @@
-// Insert module — file import, solid primitives, and blocks.
+// Insert module — references, point clouds, blocks, attributes, import, content.
 
-mod box_prim;
-mod clear;
+mod attdef;
+mod attedit;
+mod attman;
+mod attsync;
+mod base_point;
 pub(crate) mod create_block;
-mod cylinder;
+mod content_browser;
+mod design_center;
+mod edit_block;
 pub(crate) mod insert_block;
+mod landxml;
+mod mview_block;
 mod open_obj;
+mod pc_attach;
+mod snap_underlays;
 pub(crate) mod solid3d_cmds;
-mod sphere;
+mod underlay_frames;
+mod underlay_layers;
 pub(crate) mod wblock;
 pub(crate) mod xattach;
+mod xadjust;
+mod xclip;
 
-use crate::modules::{CadModule, RibbonGroup};
+use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
 
 pub struct InsertModule;
 
@@ -25,25 +37,69 @@ impl CadModule for InsertModule {
 
     fn ribbon_groups(&self) -> Vec<RibbonGroup> {
         vec![
+            // ── Reference ────────────────────────────────────────────────────
             RibbonGroup {
-                title: "Import",
-                tools: vec![open_obj::tool().into(), clear::tool().into()],
-            },
-            RibbonGroup {
-                title: "Primitives",
+                title: "Reference",
                 tools: vec![
-                    box_prim::tool().into(),
-                    sphere::tool().into(),
-                    cylinder::tool().into(),
+                    RibbonItem::LargeTool(xattach::tool()),
+                    RibbonItem::LargeTool(xclip::tool()),
+                    RibbonItem::LargeTool(xadjust::tool()),
+                    RibbonItem::Tool(underlay_layers::tool()),
+                    RibbonItem::Dropdown {
+                        id: "FRAMES_DROPDOWN",
+                        icon: IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg")),
+                        items: vec![
+                            ("FRAMES0", "Frames Off",    IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg"))),
+                            ("FRAMES1", "Frames On",     IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg"))),
+                            ("FRAMES2", "Frames & Print",IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg"))),
+                        ],
+                        default: "FRAMES1",
+                    },
+                    RibbonItem::Tool(snap_underlays::tool()),
                 ],
             },
+            // ── Point Cloud ───────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Point Cloud",
+                tools: vec![
+                    RibbonItem::LargeTool(pc_attach::tool()),
+                ],
+            },
+            // ── Block ─────────────────────────────────────────────────────────
             RibbonGroup {
                 title: "Block",
                 tools: vec![
-                    create_block::tool().into(),
-                    insert_block::tool().into(),
-                    wblock::tool().into(),
-                    xattach::tool().into(),
+                    RibbonItem::LargeTool(mview_block::tool()),
+                    RibbonItem::LargeTool(insert_block::tool()),
+                    RibbonItem::Tool(create_block::tool()),
+                    RibbonItem::Tool(edit_block::tool()),
+                    RibbonItem::Tool(base_point::tool()),
+                ],
+            },
+            // ── Attributes ────────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Attributes",
+                tools: vec![
+                    RibbonItem::LargeTool(attdef::tool()),
+                    RibbonItem::LargeTool(attedit::tool()),
+                    RibbonItem::Tool(attman::tool()),
+                    RibbonItem::Tool(attsync::tool()),
+                ],
+            },
+            // ── Import ────────────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Import",
+                tools: vec![
+                    RibbonItem::LargeTool(open_obj::tool()),
+                    RibbonItem::LargeTool(landxml::tool()),
+                ],
+            },
+            // ── Content ───────────────────────────────────────────────────────
+            RibbonGroup {
+                title: "Content",
+                tools: vec![
+                    RibbonItem::LargeTool(content_browser::tool()),
+                    RibbonItem::LargeTool(design_center::tool()),
                 ],
             },
         ]

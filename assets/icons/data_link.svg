@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Table grid -->
+  <rect x="2" y="4" width="12" height="12" rx="1"/>
+  <line x1="2" y1="8" x2="14" y2="8"/>
+  <line x1="2" y1="12" x2="14" y2="12"/>
+  <line x1="6" y1="4" x2="6" y2="16"/>
+  <!-- Link chain -->
+  <path d="M17 10 h2 a3 3 0 0 1 0 6 h-2"/>
+  <path d="M19 13 h-4"/>
+  <path d="M17 13 h-2 a3 3 0 0 1 0-6 h2"/>
+</svg>

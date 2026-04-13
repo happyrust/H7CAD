@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Two viewports side by side -->
+  <rect x="2" y="4" width="9" height="16" rx="1"/>
+  <rect x="13" y="4" width="9" height="16" rx="1"/>
+  <!-- Label line on each -->
+  <line x1="4" y1="7" x2="9" y2="7"/>
+  <line x1="15" y1="7" x2="20" y2="7"/>
+</svg>

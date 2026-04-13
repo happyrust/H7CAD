@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Tag shape -->
+  <path d="M3 5 h7 l9 7 -9 7 H3 Z"/>
+  <circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+  <!-- Pencil edit -->
+  <line x1="17" y1="3" x2="22" y2="8"/>
+  <polygon points="15,5 20,10 18,12 13,7"/>
+  <line x1="13" y1="7" x2="12" y2="12"/>
+  <line x1="12" y1="12" x2="17" y2="11"/>
+</svg>

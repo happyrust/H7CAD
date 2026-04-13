@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Tag shape -->
+  <path d="M3 3 h8 l10 9 -10 9 H3 Z"/>
+  <circle cx="8" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+  <!-- "A" attribute letter -->
+  <text x="5" y="14" font-size="6" fill="currentColor" stroke="none" font-weight="bold">A</text>
+  <!-- Plus (define/create) -->
+  <line x1="19" y1="3" x2="19" y2="9"/>
+  <line x1="16" y1="6" x2="22" y2="6"/>
+</svg>

@@ -1,6 +1,8 @@
 // Annotate module — dimension, text, leader, table, and markup tools.
 
 pub mod aligned_dim;
+pub mod data_extract;
+pub mod data_link;
 pub mod angular_dim;
 pub mod ddedit;
 pub mod diameter_dim;
@@ -152,7 +154,12 @@ impl CadModule for AnnotateModule {
                         style_key: StyleKey::TableStyle,
                         combo_id: "TABLE_STYLE_COMBO",
                         manager_cmd: Some("TABLESTYLE"),
-                        rows: vec![],
+                        rows: vec![
+                            vec![
+                                data_extract::tool(),
+                                data_link::tool(),
+                            ],
+                        ],
                     },
                 ],
             },

@@ -20,6 +20,7 @@ pub enum ModuleEvent {
     /// Open the OS file dialog.
     OpenFileDialog,
     /// Remove all loaded models from the scene.
+    #[allow(dead_code)]
     ClearModels,
     /// Toggle wireframe rendering.
     SetWireframe(bool),

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Clipboard with checkmarks -->
+  <path d="M9 3 H5 a1 1 0 0 0 -1 1 v16 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 V4 a1 1 0 0 0 -1 -1 h-4"/>
+  <rect x="9" y="1" width="6" height="4" rx="1"/>
+  <!-- Check items -->
+  <polyline points="7,10 9,12 13,8"/>
+  <line x1="15" y1="10" x2="17" y2="10"/>
+  <polyline points="7,15 9,17 13,13"/>
+  <line x1="15" y1="15" x2="17" y2="15"/>
+</svg>
