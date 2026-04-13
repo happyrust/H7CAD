@@ -132,6 +132,68 @@ fn resolve_document_preserves_pending_layers_and_repairs_layout_links() {
 }
 
 #[test]
+fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
+    let mut pending = h7cad_native_dwg::PendingDocument::new(DwgVersion::Ac1018, 0);
+    pending.objects = vec![
+        PendingObject {
+            handle: h7cad_native_model::Handle::new(0x30),
+            owner_handle: h7cad_native_model::Handle::NULL,
+            section_index: 0,
+            kind: PendingObjectKind::TableRecord {
+                record_index: 0,
+                payload_size: 3,
+            },
+        },
+        PendingObject {
+            handle: h7cad_native_model::Handle::new(0x41),
+            owner_handle: h7cad_native_model::Handle::new(0x90),
+            section_index: 1,
+            kind: PendingObjectKind::EntityRecord {
+                record_index: 1,
+                payload_size: 4,
+            },
+        },
+        PendingObject {
+            handle: h7cad_native_model::Handle::new(0x52),
+            owner_handle: h7cad_native_model::Handle::new(0x91),
+            section_index: 2,
+            kind: PendingObjectKind::ObjectRecord {
+                record_index: 2,
+                payload_size: 5,
+            },
+        },
+    ];
+
+    let mut doc = h7cad_native_dwg::resolve_document(&pending);
+
+    assert_eq!(doc.objects.len(), pending.objects.len());
+    let resolved_projection = resolved_object_projection(&doc);
+    assert_eq!(
+        resolved_projection,
+        vec![
+            (0x30, 0, "DWG_TABLE_SECTION_0_RECORD_0_SIZE_3".to_string()),
+            (0x41, 0x90, "DWG_ENTITY_SECTION_1_RECORD_1_SIZE_4".to_string()),
+            (0x52, 0x91, "DWG_OBJECT_SECTION_2_RECORD_2_SIZE_5".to_string()),
+        ]
+    );
+    assert_eq!(doc.next_handle(), 0x92);
+    let allocated = doc.allocate_handle();
+    assert_eq!(allocated.value(), 0x92);
+    assert!(allocated.value() > 0x91);
+}
+
+#[test]
+fn read_dwg_produces_deterministic_resolved_object_summaries() {
+    let bytes = fixture_ac1018_with_pending_graph_payloads();
+
+    let first = read_dwg(&bytes).unwrap();
+    let second = read_dwg(&bytes).unwrap();
+
+    assert_eq!(first.objects.len(), second.objects.len());
+    assert_eq!(resolved_object_projection(&first), resolved_object_projection(&second));
+}
+
+#[test]
 fn read_header_extracts_ac1015_section_count() {
     let bytes = fixture_ac1015(3, &[], &[]);
     let header = DwgFileHeader::parse(&bytes).unwrap();
@@ -503,6 +565,25 @@ fn parse_pending_fixture(bytes: &[u8]) -> h7cad_native_dwg::PendingDocument {
     let sections = SectionMap::parse(bytes, &header).unwrap();
     let payloads = sections.read_section_payloads(bytes).unwrap();
     build_pending_document(&header, &sections, payloads)
+}
+
+fn resolved_object_projection(
+    doc: &h7cad_native_model::CadDocument,
+) -> Vec<(u64, u64, String)> {
+    doc.objects
+        .iter()
+        .map(|object| {
+            let object_type = match &object.data {
+                h7cad_native_model::ObjectData::Unknown { object_type } => object_type.clone(),
+                other => panic!("expected unknown object summary, got {other:?}"),
+            };
+            (
+                object.handle.value(),
+                object.owner_handle.value(),
+                object_type,
+            )
+        })
+        .collect()
 }
 
 fn fixture_ac1018_with_pending_graph_payloads() -> Vec<u8> {
