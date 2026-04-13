@@ -405,7 +405,7 @@ fn pending_document_preserves_section_directory_entries() {
     let header = DwgFileHeader::parse(&bytes).unwrap();
     let sections = SectionMap::parse(&bytes, &header).unwrap();
     let payloads = sections.read_section_payloads(&bytes).unwrap();
-    let pending = build_pending_document(&header, &sections, payloads);
+    let pending = build_pending_document(&header, &sections, payloads).unwrap();
 
     assert_eq!(pending.section_count, 2);
     assert_eq!(pending.sections.len(), 2);
@@ -458,7 +458,7 @@ fn pending_document_uses_pending_graph_edge_case_fixtures() {
     let header = DwgFileHeader::parse(&bytes).unwrap();
     let sections = SectionMap::parse(&bytes, &header).unwrap();
     let payload_bytes = sections.read_section_payloads(&bytes).unwrap();
-    let pending = build_pending_document(&header, &sections, payload_bytes);
+    let pending = build_pending_document(&header, &sections, payload_bytes).unwrap();
 
     assert_eq!(pending.section_count, payloads.len() as u32);
     assert_eq!(pending.sections.len(), payloads.len());
@@ -479,16 +479,16 @@ fn pending_document_uses_pending_graph_edge_case_fixtures() {
 fn pending_graph_fixture_payloads_cover_edge_cases() {
     let payloads = pending_graph_payloads();
 
-    assert_eq!(classify_section_records(payloads[0]), Vec::<Vec<u8>>::new());
-    assert_eq!(classify_section_records(payloads[1]), vec![b"\0\0\0".to_vec()]);
-    assert_eq!(classify_section_records(payloads[2]), vec![b"solo".to_vec()]);
-    assert_eq!(classify_section_records(payloads[3]), vec![b"tail".to_vec()]);
+    assert_eq!(classify_section_records(payloads[0]).unwrap(), Vec::<Vec<u8>>::new());
+    assert_eq!(classify_section_records(payloads[1]).unwrap(), vec![b"\0\0\0".to_vec()]);
+    assert_eq!(classify_section_records(payloads[2]).unwrap(), vec![b"solo".to_vec()]);
+    assert_eq!(classify_section_records(payloads[3]).unwrap(), vec![b"tail".to_vec()]);
     assert_eq!(
-        classify_section_records(payloads[4]),
+        classify_section_records(payloads[4]).unwrap(),
         vec![b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]
     );
     assert_eq!(
-        classify_section_records(payloads[5]),
+        classify_section_records(payloads[5]).unwrap(),
         vec![b"left".to_vec(), b"right".to_vec()]
     );
 }
@@ -662,17 +662,17 @@ fn semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit() 
         semantic_fixture_graph_projection(&valid),
         vec![
             "record=DWG_TABLE_SECTION_0_RECORD_0_SIZE_24 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_39 owner=0".to_string(),
-            "record=DWG_ENTITY_SECTION_1_RECORD_1_SIZE_24 owner=0".to_string(),
-            "record=DWG_OBJECT_SECTION_2_RECORD_0_SIZE_28 owner=0".to_string(),
-            "record=DWG_OBJECT_SECTION_2_RECORD_1_SIZE_30 owner=0".to_string(),
-            "record=DWG_TABLE_SECTION_3_RECORD_0_SIZE_23 owner=0".to_string(),
+            "record=DWG_OBJECT_SECTION_1_RECORD_0_SIZE_39 owner=0".to_string(),
+            "record=DWG_OBJECT_SECTION_1_RECORD_1_SIZE_24 owner=0".to_string(),
+            "record=DWG_ENTITY_SECTION_2_RECORD_0_SIZE_28 owner=0".to_string(),
+            "record=DWG_ENTITY_SECTION_2_RECORD_1_SIZE_30 owner=0".to_string(),
+            "record=DWG_OBJECT_SECTION_3_RECORD_0_SIZE_23 owner=0".to_string(),
         ]
     );
     assert_eq!(
         semantic_fixture_graph_projection(&invalid),
         vec![
-            "record=DWG_TABLE_SECTION_0_RECORD_0_SIZE_25 owner=0".to_string(),
+            "record=DWG_OBJECT_SECTION_0_RECORD_0_SIZE_25 owner=0".to_string(),
             "record=DWG_ENTITY_SECTION_1_RECORD_0_SIZE_29 owner=0".to_string(),
         ]
     );
@@ -691,8 +691,49 @@ fn section_payloads_are_read_from_directory_offsets() {
 #[test]
 fn record_classifier_splits_zero_delimited_payload() {
     assert_eq!(
-        classify_section_records(b"one\0two\0three"),
+        classify_section_records(b"one\0two\0three").unwrap(),
         vec![b"one".to_vec(), b"two".to_vec(), b"three".to_vec()]
+    );
+}
+
+#[test]
+fn semantic_decode_keeps_classification_stable_across_section_reordering() {
+    let a = parse_pending_fixture(&semantic_record_fixture("reordered-equivalent-a"));
+    let b = parse_pending_fixture(&semantic_record_fixture("reordered-equivalent-b"));
+
+    let mut a_projection = a
+        .objects
+        .iter()
+        .map(|object| format!("{:?}", object.kind))
+        .collect::<Vec<_>>();
+    let mut b_projection = b
+        .objects
+        .iter()
+        .map(|object| format!("{:?}", object.kind))
+        .collect::<Vec<_>>();
+    a_projection.sort();
+    b_projection.sort();
+    assert_eq!(a_projection, b_projection);
+}
+
+#[test]
+fn semantic_decode_embedded_zero_and_same_size_records_keep_distinct_identities() {
+    let embedded = parse_semantic_record_tuples(&semantic_record_fixture("embedded-zero"));
+    let collision = parse_semantic_record_tuples(&semantic_record_fixture("same-size-collision"));
+
+    assert_eq!(
+        embedded,
+        vec![
+            "size=26 semantic=ENT:ARC:E44:O22:LLayerZero".to_string(),
+            "size=29 semantic=OBJ:TEXT:Zero\0Payload:H44:O22".to_string(),
+        ]
+    );
+    assert_eq!(
+        collision,
+        vec![
+            "size=18 semantic=TBL:LTYPE:Dash:H50".to_string(),
+            "size=18 semantic=TBL:STYLE:Wide:H51".to_string(),
+        ]
     );
 }
 
@@ -750,7 +791,7 @@ fn parse_pending_fixture(bytes: &[u8]) -> h7cad_native_dwg::PendingDocument {
     let header = DwgFileHeader::parse(bytes).unwrap();
     let sections = SectionMap::parse(bytes, &header).unwrap();
     let payloads = sections.read_section_payloads(bytes).unwrap();
-    build_pending_document(&header, &sections, payloads)
+    build_pending_document(&header, &sections, payloads).unwrap()
 }
 
 fn resolved_object_projection(

@@ -37,7 +37,7 @@ pub fn read_dwg(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
     let header = DwgFileHeader::parse(bytes)?;
     let sections = SectionMap::parse(bytes, &header)?;
     let payloads = sections.read_section_payloads(bytes)?;
-    let pending = build_pending_document(&header, &sections, payloads);
+    let pending = build_pending_document(&header, &sections, payloads)?;
     Ok(resolve_document(&pending))
 }
 
@@ -45,46 +45,149 @@ pub fn build_pending_document(
     header: &DwgFileHeader,
     sections: &SectionMap,
     payloads: Vec<Vec<u8>>,
-) -> PendingDocument {
+) -> Result<PendingDocument, DwgReadError> {
     let mut pending = PendingDocument::new(header.version, header.section_count);
     pending.sections = sections
         .descriptors
         .iter()
         .zip(payloads)
-        .map(|descriptor| PendingSection {
-            index: descriptor.0.index,
-            offset: descriptor.0.offset,
-            size: descriptor.0.size,
-            record_count: classify_section_records(&descriptor.1).len() as u32,
-            payload: descriptor.1,
+        .map(|descriptor| {
+            let record_count = classify_section_records(&descriptor.1)?.len() as u32;
+            Ok(PendingSection {
+                index: descriptor.0.index,
+                offset: descriptor.0.offset,
+                size: descriptor.0.size,
+                record_count,
+                payload: descriptor.1,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     pending.objects = pending
         .sections
         .iter()
         .enumerate()
-        .flat_map(|(index, section)| {
-            classify_section_records(&section.payload)
-                .into_iter()
-                .enumerate()
-                .map(move |(record_index, record)| PendingObject {
-                    handle: h7cad_native_model::Handle::new(
-                        0x100 + index as u64 * 0x10 + record_index as u64,
-                    ),
-                    owner_handle: h7cad_native_model::Handle::NULL,
-                    section_index: section.index,
-                    kind: classify_record_kind(section.index, record_index as u32, &record),
-                })
+        .map(|(index, section)| {
+            classify_section_records(&section.payload).map(|records| {
+                records
+                    .into_iter()
+                    .enumerate()
+                    .map(|(record_index, record)| PendingObject {
+                        handle: h7cad_native_model::Handle::new(
+                            0x100 + index as u64 * 0x10 + record_index as u64,
+                        ),
+                        owner_handle: h7cad_native_model::Handle::NULL,
+                        section_index: section.index,
+                        kind: classify_record_kind(section.index, record_index as u32, &record),
+                    })
+                    .collect::<Vec<_>>()
+            })
         })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
         .collect();
-    pending
+    Ok(pending)
 }
 
-pub fn classify_section_records(payload: &[u8]) -> Vec<Vec<u8>> {
+pub fn classify_section_records(payload: &[u8]) -> Result<Vec<Vec<u8>>, DwgReadError> {
     if payload.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
+    if payload.starts_with(b"TBL:") || payload.starts_with(b"ENT:") || payload.starts_with(b"OBJ:")
+    {
+        return decode_semantic_section_records(0, payload);
+    }
+
+    Ok(split_zero_delimited_records(payload))
+}
+
+pub fn classify_record_kind(
+    section_index: u32,
+    record_index: u32,
+    record: &[u8],
+) -> PendingObjectKind {
+    let payload_size = record.len();
+    match semantic_record_category(record) {
+        Some(SemanticRecordCategory::Table) => PendingObjectKind::TableRecord {
+            record_index,
+            payload_size,
+        },
+        Some(SemanticRecordCategory::Entity) => PendingObjectKind::EntityRecord {
+            record_index,
+            payload_size,
+        },
+        Some(SemanticRecordCategory::Object) => PendingObjectKind::ObjectRecord {
+            record_index,
+            payload_size,
+        },
+        None => match section_index % 3 {
+            0 => PendingObjectKind::TableRecord {
+                record_index,
+                payload_size,
+            },
+            1 => PendingObjectKind::EntityRecord {
+                record_index,
+                payload_size,
+            },
+            _ => PendingObjectKind::ObjectRecord {
+                record_index,
+                payload_size,
+            },
+        },
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SemanticRecordCategory {
+    Table,
+    Entity,
+    Object,
+}
+
+fn decode_semantic_section_records(
+    section_index: u32,
+    payload: &[u8],
+) -> Result<Vec<Vec<u8>>, DwgReadError> {
+    let mut records = Vec::new();
+    let mut current = Vec::new();
+    let mut index = 0usize;
+
+    while index < payload.len() {
+        if payload[index] == 0 {
+            let tail = &payload[index + 1..];
+            if tail.starts_with(b"TBL:") || tail.starts_with(b"ENT:") || tail.starts_with(b"OBJ:")
+            {
+                if current.is_empty() {
+                    return Err(DwgReadError::SemanticDecode {
+                        section_index,
+                        record_index: records.len() as u32,
+                        reason: "encountered semantic delimiter before record content".to_string(),
+                    });
+                }
+                validate_semantic_record(section_index, records.len() as u32, &current)?;
+                records.push(std::mem::take(&mut current));
+                index += 1;
+                continue;
+            }
+        }
+        current.push(payload[index]);
+        index += 1;
+    }
+
+    if !current.is_empty() {
+        validate_semantic_record(section_index, records.len() as u32, &current)?;
+        records.push(current);
+    }
+
+    if records.is_empty() && payload.iter().any(|byte| *byte == 0) {
+        return Ok(vec![payload.to_vec()]);
+    }
+
+    Ok(records)
+}
+
+fn split_zero_delimited_records(payload: &[u8]) -> Vec<Vec<u8>> {
     let mut records = Vec::new();
     let mut start = 0usize;
     for (idx, byte) in payload.iter().enumerate() {
@@ -104,25 +207,77 @@ pub fn classify_section_records(payload: &[u8]) -> Vec<Vec<u8>> {
     records
 }
 
-pub fn classify_record_kind(
+fn validate_semantic_record(
     section_index: u32,
     record_index: u32,
     record: &[u8],
-) -> PendingObjectKind {
-    let payload_size = record.len();
-    match section_index % 3 {
-        0 => PendingObjectKind::TableRecord {
+) -> Result<(), DwgReadError> {
+    if semantic_record_category(record).is_none() {
+        return Ok(());
+    }
+
+    let text = std::str::from_utf8(record).map_err(|_| DwgReadError::SemanticDecode {
+        section_index,
+        record_index,
+        reason: "semantic record is not valid UTF-8".to_string(),
+    })?;
+    let parts = text.split(':').collect::<Vec<_>>();
+    if parts.len() < 4 {
+        return Err(DwgReadError::SemanticDecode {
+            section_index,
             record_index,
-            payload_size,
-        },
-        1 => PendingObjectKind::EntityRecord {
+            reason: "semantic record is truncated".to_string(),
+        });
+    }
+
+    let handle_fragment = parts
+        .iter()
+        .rev()
+        .find(|part| part.starts_with('H') || part.starts_with('E'))
+        .copied();
+    if let Some(fragment) = handle_fragment {
+        if fragment.len() < 2 || !fragment[1..].chars().all(|ch| ch.is_ascii_hexdigit()) {
+            return Err(DwgReadError::SemanticDecode {
+                section_index,
+                record_index,
+                reason: format!("invalid semantic handle fragment `{fragment}`"),
+            });
+        }
+    } else {
+        return Err(DwgReadError::SemanticDecode {
+            section_index,
             record_index,
-            payload_size,
-        },
-        _ => PendingObjectKind::ObjectRecord {
-            record_index,
-            payload_size,
-        },
+            reason: "semantic record is missing a handle fragment".to_string(),
+        });
+    }
+
+    let owner_fragment = parts
+        .iter()
+        .find(|part| part.starts_with('O') && part.len() > 1 && part.as_bytes()[1] != b'B')
+        .copied();
+    if let Some(owner_fragment) = owner_fragment {
+        if owner_fragment.len() < 2 || !owner_fragment[1..].chars().all(|ch| ch.is_ascii_hexdigit())
+        {
+            return Err(DwgReadError::SemanticDecode {
+                section_index,
+                record_index,
+                reason: format!("invalid semantic owner fragment `{owner_fragment}`"),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn semantic_record_category(record: &[u8]) -> Option<SemanticRecordCategory> {
+    if record.starts_with(b"TBL:") {
+        Some(SemanticRecordCategory::Table)
+    } else if record.starts_with(b"ENT:") {
+        Some(SemanticRecordCategory::Entity)
+    } else if record.starts_with(b"OBJ:") {
+        Some(SemanticRecordCategory::Object)
+    } else {
+        None
     }
 }
 
@@ -203,7 +358,7 @@ mod tests {
         let header = DwgFileHeader::parse(&bytes).unwrap();
         let sections = SectionMap::parse(&bytes, &header).unwrap();
         let payloads = sections.read_section_payloads(&bytes).unwrap();
-        let pending = build_pending_document(&header, &sections, payloads);
+        let pending = build_pending_document(&header, &sections, payloads).unwrap();
 
         assert_eq!(pending.version, DwgVersion::Ac1015);
         assert_eq!(pending.section_count, 1);
@@ -244,7 +399,7 @@ mod tests {
 
     #[test]
     fn classify_section_records_splits_on_zero_delimiters() {
-        let records = classify_section_records(b"ABC\0DE\0F");
+        let records = classify_section_records(b"ABC\0DE\0F").unwrap();
         assert_eq!(records, vec![b"ABC".to_vec(), b"DE".to_vec(), b"F".to_vec()]);
     }
 
@@ -271,6 +426,42 @@ mod tests {
                 payload_size: 4,
             }
         );
+    }
+
+    #[test]
+    fn classify_section_records_decodes_semantic_boundaries_without_splitting_embedded_zero() {
+        let records = decode_semantic_section_records(
+            4,
+            b"OBJ:TEXT:Zero\0Payload:H44:O22\0ENT:ARC:E44:O22:LLayerZero",
+        )
+        .unwrap();
+        assert_eq!(
+            records,
+            vec![
+                b"OBJ:TEXT:Zero\0Payload:H44:O22".to_vec(),
+                b"ENT:ARC:E44:O22:LLayerZero".to_vec()
+            ]
+        );
+    }
+
+    #[test]
+    fn classify_section_records_rejects_structurally_valid_semantic_corruption() {
+        let err = decode_semantic_section_records(1, b"OBJ:LAYOUT:Broken:H95:BFF\0ENT:LINE:EXX:OFF")
+            .unwrap_err();
+        assert_eq!(
+            err,
+            DwgReadError::SemanticDecode {
+                section_index: 1,
+                record_index: 1,
+                reason: "invalid semantic handle fragment `EXX`".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn classify_section_records_preserves_nonsemantic_zero_delimiter_behavior() {
+        let records = classify_section_records(b"ABC\0DE\0F").unwrap();
+        assert_eq!(records, vec![b"ABC".to_vec(), b"DE".to_vec(), b"F".to_vec()]);
     }
 
     #[test]

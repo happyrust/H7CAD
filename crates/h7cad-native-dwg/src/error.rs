@@ -18,6 +18,11 @@ pub enum DwgReadError {
         size: usize,
         actual: usize,
     },
+    SemanticDecode {
+        section_index: u32,
+        record_index: u32,
+        reason: String,
+    },
     UnexpectedEof {
         context: &'static str,
     },
@@ -52,6 +57,14 @@ impl fmt::Display for DwgReadError {
             } => write!(
                 f,
                 "DWG section {index} is out of bounds: offset {offset}, size {size}, file size {actual}"
+            ),
+            Self::SemanticDecode {
+                section_index,
+                record_index,
+                reason,
+            } => write!(
+                f,
+                "semantic decode failure in section {section_index} record {record_index}: {reason}"
             ),
             Self::UnexpectedEof { context } => write!(f, "unexpected EOF: {context}"),
         }
