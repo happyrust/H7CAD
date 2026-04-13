@@ -46,6 +46,89 @@ fn read_dwg_returns_seeded_document_scaffold_for_supported_fixture() {
     let doc = read_dwg(&fixture_ac1018(1, &[(0x25, 0x03)], &[b"DWG"])).unwrap();
     assert_eq!(doc.model_space_handle().value(), 1);
     assert_eq!(doc.paper_space_handle().value(), 2);
+    assert!(doc.block_records.contains_key(&doc.model_space_handle()));
+    assert!(doc.block_records.contains_key(&doc.paper_space_handle()));
+    let model_layout = doc.layout_by_name("Model").expect("model layout should exist");
+    let paper_layout = doc
+        .layout_by_name("Layout1")
+        .expect("paper layout should exist");
+    assert_eq!(model_layout.owner, doc.root_dictionary.handle);
+    assert_eq!(paper_layout.owner, doc.root_dictionary.handle);
+    assert_eq!(
+        doc.block_records
+            .get(&doc.model_space_handle())
+            .and_then(|record| record.layout_handle),
+        Some(model_layout.handle)
+    );
+    assert_eq!(
+        doc.block_records
+            .get(&doc.paper_space_handle())
+            .and_then(|record| record.layout_handle),
+        Some(paper_layout.handle)
+    );
+    assert_eq!(
+        doc.root_dictionary
+            .entries
+            .get("ACAD_LAYOUT"),
+        Some(&doc.root_dictionary.handle)
+    );
+    assert_eq!(
+        doc.root_dictionary
+            .entries
+            .get(&format!("LAYOUT_{:X}", model_layout.handle.value())),
+        Some(&model_layout.handle)
+    );
+    assert_eq!(
+        doc.root_dictionary
+            .entries
+            .get(&format!("LAYOUT_{:X}", paper_layout.handle.value())),
+        Some(&paper_layout.handle)
+    );
+}
+
+#[test]
+fn resolve_document_preserves_pending_layers_and_repairs_layout_links() {
+    let mut pending = h7cad_native_dwg::PendingDocument::new(DwgVersion::Ac1018, 0);
+    pending.layers.push(h7cad_native_dwg::PendingLayer {
+        handle: h7cad_native_model::Handle::new(0x40),
+        name: "Visible".to_string(),
+    });
+
+    let doc = h7cad_native_dwg::resolve_document(&pending);
+
+    let model_layout = doc.layout_by_name("Model").expect("model layout should exist");
+    let paper_layout = doc
+        .layout_by_name("Layout1")
+        .expect("paper layout should exist");
+    assert!(doc.layers.contains_key("0"));
+    assert!(doc.layers.contains_key("Visible"));
+    assert_eq!(doc.tables.layer.entries.get("Visible"), Some(&h7cad_native_model::Handle::new(0x40)));
+    assert_eq!(model_layout.owner, doc.root_dictionary.handle);
+    assert_eq!(paper_layout.owner, doc.root_dictionary.handle);
+    assert_eq!(
+        doc.block_records
+            .get(&model_layout.block_record_handle)
+            .and_then(|record| record.layout_handle),
+        Some(model_layout.handle)
+    );
+    assert_eq!(
+        doc.block_records
+            .get(&paper_layout.block_record_handle)
+            .and_then(|record| record.layout_handle),
+        Some(paper_layout.handle)
+    );
+    assert_eq!(
+        doc.root_dictionary
+            .entries
+            .get(&format!("LAYOUT_{:X}", model_layout.handle.value())),
+        Some(&model_layout.handle)
+    );
+    assert_eq!(
+        doc.root_dictionary
+            .entries
+            .get(&format!("LAYOUT_{:X}", paper_layout.handle.value())),
+        Some(&paper_layout.handle)
+    );
 }
 
 #[test]
