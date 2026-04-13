@@ -4,6 +4,10 @@ use acadrust::entities as ar;
 use acadrust::types::{Color, Handle, LineWeight, Vector2, Vector3};
 use h7cad_native_model as nm;
 
+fn normalize_face3d_invisible_edges(bits: u8) -> i16 {
+    i16::from(bits & 0x0F)
+}
+
 pub fn native_doc_to_acadrust(native: &nm::CadDocument) -> acadrust::CadDocument {
     let mut doc = acadrust::CadDocument::new();
 
@@ -226,23 +230,33 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Spline(e))
         }
-        nm::EntityData::Face3D { corners } => {
+        nm::EntityData::Face3D {
+            corners,
+            invisible_edges,
+        } => {
             let mut e = ar::Face3D::new(
                 v3(&corners[0]),
                 v3(&corners[1]),
                 v3(&corners[2]),
                 v3(&corners[3]),
             );
+            e.invisible_edges = ar::InvisibleEdgeFlags::from_bits(*invisible_edges as u8);
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Face3D(e))
         }
-        nm::EntityData::Solid { corners } => {
+        nm::EntityData::Solid {
+            corners,
+            normal,
+            thickness,
+        } => {
             let mut e = ar::Solid::new(
                 v3(&corners[0]),
                 v3(&corners[1]),
                 v3(&corners[2]),
                 v3(&corners[3]),
             );
+            e.normal = v3(normal);
+            e.thickness = *thickness;
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Solid(e))
         }
@@ -260,11 +274,25 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             insertion,
             size,
             shape_number,
+            name,
+            rotation,
+            relative_x_scale,
+            oblique_angle,
+            style_name,
+            normal,
+            thickness,
         } => {
             let mut e = ar::Shape::default();
             e.insertion_point = v3(insertion);
             e.size = *size;
             e.shape_number = i32::from(*shape_number);
+            e.shape_name = name.clone();
+            e.rotation = rotation.to_radians();
+            e.relative_x_scale = *relative_x_scale;
+            e.oblique_angle = oblique_angle.to_radians();
+            e.style_name = style_name.clone();
+            e.normal = v3(normal);
+            e.thickness = *thickness;
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Shape(e))
         }
@@ -636,6 +664,7 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                     [face.third_corner.x, face.third_corner.y, face.third_corner.z],
                     [face.fourth_corner.x, face.fourth_corner.y, face.fourth_corner.z],
                 ],
+                invisible_edges: normalize_face3d_invisible_edges(face.invisible_edges.bits()),
             },
         )),
         ar::EntityType::Solid(solid) => Some(native_common_from_acadrust(
@@ -647,6 +676,8 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                     [solid.third_corner.x, solid.third_corner.y, solid.third_corner.z],
                     [solid.fourth_corner.x, solid.fourth_corner.y, solid.fourth_corner.z],
                 ],
+                normal: [solid.normal.x, solid.normal.y, solid.normal.z],
+                thickness: solid.thickness,
             },
         )),
         ar::EntityType::Ray(ray) => Some(native_common_from_acadrust(
@@ -673,6 +704,13 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 ],
                 size: shape.size,
                 shape_number: shape.shape_number as i16,
+                name: shape.shape_name.clone(),
+                rotation: shape.rotation.to_degrees(),
+                relative_x_scale: shape.relative_x_scale,
+                oblique_angle: shape.oblique_angle.to_degrees(),
+                style_name: shape.style_name.clone(),
+                normal: [shape.normal.x, shape.normal.y, shape.normal.z],
+                thickness: shape.thickness,
             },
         )),
         ar::EntityType::AttributeDefinition(attdef) => Some(native_common_from_acadrust(
@@ -1899,6 +1937,7 @@ mod tests {
                     [1.0, 1.0, 0.0],
                     [0.0, 1.0, 1.0],
                 ],
+                invisible_edges: 0,
             }),
             nm::Entity::new(nm::EntityData::Solid {
                 corners: [
@@ -1907,6 +1946,8 @@ mod tests {
                     [3.0, 1.0, 0.0],
                     [2.0, 1.0, 0.0],
                 ],
+                normal: [0.0, 0.0, 1.0],
+                thickness: 0.0,
             }),
             nm::Entity::new(nm::EntityData::Ray {
                 origin: [4.0, 5.0, 6.0],
@@ -1920,6 +1961,13 @@ mod tests {
                 insertion: [10.0, 11.0, 0.0],
                 size: 2.5,
                 shape_number: 7,
+                name: String::new(),
+                rotation: 0.0,
+                relative_x_scale: 1.0,
+                oblique_angle: 0.0,
+                style_name: String::new(),
+                normal: [0.0, 0.0, 1.0],
+                thickness: 0.0,
             }),
         ];
 
@@ -2121,6 +2169,103 @@ mod tests {
             let roundtrip = acadrust_entity_to_native(&acad)
                 .unwrap_or_else(|| panic!("{family_name} should bridge back to native"));
             assert_eq!(roundtrip.data, data, "{family_name} payload should survive roundtrip");
+        }
+    }
+
+    #[test]
+    fn direct_geometry_bridge_preserves_scrutiny_payload_fidelity() {
+        let mut face = ar::Face3D::new(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(1.0, 1.0, 0.0),
+            Vector3::new(0.0, 1.0, 1.0),
+        );
+        let mut invisible_edges = ar::InvisibleEdgeFlags::new();
+        invisible_edges.set_first_invisible(true);
+        invisible_edges.set_third_invisible(true);
+        face.invisible_edges = invisible_edges;
+        let face = ar::EntityType::Face3D(face);
+        let face_roundtrip =
+            native_entity_to_acadrust(&acadrust_entity_to_native(&face).expect("face to native"))
+                .expect("face back to acad");
+        match face_roundtrip {
+            ar::EntityType::Face3D(face) => {
+                assert!(face.invisible_edges.is_first_invisible());
+                assert!(!face.invisible_edges.is_second_invisible());
+                assert!(face.invisible_edges.is_third_invisible());
+                assert!(!face.invisible_edges.is_fourth_invisible());
+            }
+            other => panic!("expected compat face3d, got {other:?}"),
+        }
+
+        let mut solid = ar::Solid::new(
+            Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(3.0, 0.0, 0.0),
+            Vector3::new(3.0, 1.0, 0.0),
+            Vector3::new(2.0, 1.0, 0.0),
+        );
+        solid.thickness = 2.5;
+        solid.normal = Vector3::new(0.0, 0.6, 1.0);
+        let solid = ar::EntityType::Solid(solid);
+        let solid_roundtrip = native_entity_to_acadrust(
+            &acadrust_entity_to_native(&solid).expect("solid to native"),
+        )
+        .expect("solid back to acad");
+        match solid_roundtrip {
+            ar::EntityType::Solid(solid) => {
+                assert!((solid.thickness - 2.5).abs() < 1e-9);
+                assert_eq!(solid.normal, Vector3::new(0.0, 0.6, 1.0));
+            }
+            other => panic!("expected compat solid, got {other:?}"),
+        }
+
+        let mut shape = ar::Shape::default();
+        shape.insertion_point = Vector3::new(10.0, 11.0, 0.0);
+        shape.size = 2.5;
+        shape.shape_number = 7;
+        shape.shape_name = "DIP8".into();
+        shape.rotation = 30.0_f64.to_radians();
+        shape.relative_x_scale = 1.75;
+        shape.oblique_angle = 12.0_f64.to_radians();
+        shape.style_name = "Symbols".into();
+        shape.thickness = 1.25;
+        shape.normal = Vector3::new(0.0, 1.0, 0.0);
+        let shape = ar::EntityType::Shape(shape);
+        let shape_roundtrip = native_entity_to_acadrust(
+            &acadrust_entity_to_native(&shape).expect("shape to native"),
+        )
+        .expect("shape back to acad");
+        match shape_roundtrip {
+            ar::EntityType::Shape(shape) => {
+                assert_eq!(shape.shape_name, "DIP8");
+                assert!((shape.rotation.to_degrees() - 30.0).abs() < 1e-9);
+                assert!((shape.relative_x_scale - 1.75).abs() < 1e-9);
+                assert!((shape.oblique_angle.to_degrees() - 12.0).abs() < 1e-9);
+                assert_eq!(shape.style_name, "Symbols");
+                assert_eq!(shape.normal, Vector3::new(0.0, 1.0, 0.0));
+                assert!((shape.thickness - 1.25).abs() < 1e-9);
+            }
+            other => panic!("expected compat shape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_geometry_bridge_rejects_out_of_range_face_edge_bits() {
+        let mut face = ar::Face3D::new(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(1.0, 1.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        );
+        face.invisible_edges = ar::InvisibleEdgeFlags::from_bits(0b1_0000);
+
+        let native = acadrust_entity_to_native(&ar::EntityType::Face3D(face))
+            .expect("face should bridge to native");
+        match native.data {
+            nm::EntityData::Face3D {
+                invisible_edges, ..
+            } => assert_eq!(invisible_edges, 0),
+            other => panic!("expected native face3d, got {other:?}"),
         }
     }
 
