@@ -2,6 +2,7 @@ commands:
   install: cargo fetch --locked
   check: cargo check
   check_native: cargo check -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade
+  lint: cargo check -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade
   check_facade: cargo check -p h7cad-native-facade
   test: cargo test -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade -- --test-threads=16
   test_dxf: cargo test -p h7cad-native-dxf -- --test-threads=16
