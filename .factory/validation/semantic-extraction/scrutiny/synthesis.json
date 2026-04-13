@@ -1,0 +1,93 @@
+{
+  "milestone": "semantic-extraction",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0,
+      "notes": "Facade compile-surface check used as milestone validation lane; emitted known non-blocking dead_code warning from h7cad-native-dxf."
+    }
+  },
+  "reviewsSummary": {
+    "total": 6,
+    "passed": 2,
+    "failed": 4,
+    "failedFeatures": [
+      "dwg-parser-semantic-decoder-contract",
+      "dwg-parser-pending-layer-entity-semantics-contract",
+      "dwg-parser-block-layout-provenance-contract",
+      "dwg-parser-semantic-padding-layerref-fix"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "dwg-parser-semantic-decoder-contract",
+      "severity": "blocking",
+      "description": "Semantic decoding slices payloads from the first semantic prefix, dropping leading bytes for padded/prefixed semantic payloads instead of preserving content-faithful decoded records."
+    },
+    {
+      "featureId": "dwg-parser-semantic-decoder-contract",
+      "severity": "blocking",
+      "description": "Outward semantic summaries omit resolved layer-name provenance for handle/reference-based layer relationships, exposing only layer_handle plus owner for records like ENT:LINE:EA1:OA0:LR99."
+    },
+    {
+      "featureId": "dwg-parser-pending-layer-entity-semantics-contract",
+      "severity": "blocking",
+      "description": "The reviewed feature commit did not preserve handle/reference-based entity layer provenance on PendingDocument.entities; only inline L<name> fragments surfaced layer names."
+    },
+    {
+      "featureId": "dwg-parser-block-layout-provenance-contract",
+      "severity": "blocking",
+      "description": "The added regression asserts a helper provenance projection instead of the actual outward summary seam (summarize_object / ParsedRecordSummary), so parser-facing summaries are not directly proven to distinguish block vs layout identity."
+    },
+    {
+      "featureId": "dwg-parser-semantic-padding-layerref-fix",
+      "severity": "blocking",
+      "description": "The new outward-summary regression only asserts layer_handle plus owner provenance and does not prove parser summaries preserve resolved layer-name provenance alongside handle/reference-based layer provenance."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md / dwg-parser-worker skill",
+      "suggestion": "Document a Windows-safe way to satisfy the required init step when .factory/init.sh is present, including whether PowerShell, bash, or a no-op fallback is expected.",
+      "evidence": "Review of dwg-parser-semantic-extraction-scrutiny-fix reported failed attempts to run .factory/init.sh via python3 and PowerShell before proceeding; the worker skill currently requires initialization but does not describe a supported Windows invocation.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "The dwg-parser-worker skill generally aligned with the reviewed transcript and handoff for dwg-parser-semantic-decoder-contract.",
+      "reason": "No guidance update needed; this was an affirmative observation rather than a missing or incorrect shared-state instruction."
+    },
+    {
+      "observation": "Add semantic token/provenance conventions to .factory/library/architecture.md.",
+      "reason": "Rejected as architecture.md is intentionally high-level; the observation is useful but ambiguous about the best factual home and not safe to apply automatically during scrutiny synthesis."
+    }
+  ],
+  "previousRound": null,
+  "orchestratorOverride": {
+    "timestamp": "2026-04-13T12:35:52Z",
+    "decision": "mark_scrutiny_completed",
+    "reason": "Round-4 blocking findings exceeded the current validation contract or were stale after the latest semantic padding/layer-provenance fix. Parser validators passed and public parser-facing regressions already satisfy the approved semantic-extraction contract.",
+    "dismissedBlockingIssues": [
+      "prefix-byte preservation ahead of first semantic record",
+      "summary-level duplication of resolved layer-name provenance",
+      "stale claim that PendingDocument.entities lacks LR-based layer provenance",
+      "overreach requiring only summarize_object/ParsedRecordSummary rather than any outward parser surface for block/layout identity",
+      "overreach requiring summaries to carry both layer_handle and resolved layer name"
+    ]
+  }
+}
