@@ -704,6 +704,32 @@ fn record_classifier_splits_zero_delimited_payload() {
 }
 
 #[test]
+fn semantic_decode_prefixed_payloads_route_through_semantic_decoder() {
+    let pending = parse_pending_fixture(&semantic_record_fixture("prefixed-semantic-payload"));
+
+    assert_eq!(
+        pending.objects
+            .iter()
+            .map(|object| object.semantic_identity.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Some("table:LAYER:LayerPrefixed".to_string()),
+            Some("entity:LINE".to_string()),
+        ]
+    );
+    assert_eq!(
+        pending.objects
+            .iter()
+            .map(|object| format!("{:?}", object.kind))
+            .collect::<Vec<_>>(),
+        vec![
+            "TableRecord { record_index: 0, payload_size: 27 }".to_string(),
+            "EntityRecord { record_index: 1, payload_size: 31 }".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn semantic_decode_keeps_classification_stable_across_section_reordering() {
     let a = parse_pending_fixture(&semantic_record_fixture("reordered-equivalent-a"));
     let b = parse_pending_fixture(&semantic_record_fixture("reordered-equivalent-b"));
@@ -742,6 +768,29 @@ fn semantic_decode_embedded_zero_and_same_size_records_keep_distinct_identities(
             "size=18 semantic=TBL:STYLE:Wide:H51".to_string(),
         ]
     );
+}
+
+#[test]
+fn pending_entity_preserves_handle_based_layer_provenance() {
+    let pending = parse_pending_fixture(&semantic_record_fixture("handle-layer-reference"));
+    let summaries = pending
+        .objects
+        .iter()
+        .map(summarize_object)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        pending.entities,
+        vec![h7cad_native_dwg::PendingEntity {
+            handle: h7cad_native_model::Handle::new(0xA1),
+            owner_handle: h7cad_native_model::Handle::new(0xA0),
+            layer_name: "LayerRef".to_string(),
+        }]
+    );
+    assert!(summaries.iter().any(|summary| {
+        summary.semantic_identity == "entity:LINE"
+            && summary.semantic_link == "layer_handle:99|owner:A0"
+    }));
 }
 
 #[test]
@@ -1090,6 +1139,14 @@ fn semantic_record_fixture_cases() -> Vec<SemanticFixtureCase> {
             ]),
         ),
         SemanticFixtureCase::new(
+            "prefixed-semantic-payload",
+            semantic_entries(
+                &[0x80],
+                &[b"\xAA\xBBnoiseTBL:LAYER:LayerPrefixed:H98\0ENT:LINE:E99:O80:LLayerPrefixed"
+                    .to_vec()],
+            ),
+        ),
+        SemanticFixtureCase::new(
             "embedded-zero",
             semantic_entries(&[0x80], &[semantic_join(&[
                 b"OBJ:TEXT:Zero\0Payload:H44:O22",
@@ -1109,6 +1166,14 @@ fn semantic_record_fixture_cases() -> Vec<SemanticFixtureCase> {
                 semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA"]),
                 semantic_join(&[b"OBJ:LAYOUT:LayoutA:H62:B72"]),
                 semantic_join(&[b"ENT:TEXT:E73:O72:LLayerPaper"]),
+            ]),
+        ),
+        SemanticFixtureCase::new(
+            "handle-layer-reference",
+            semantic_entries(&[0x80, 0xB0, 0xE0], &[
+                semantic_join(&[b"TBL:LAYER:LayerRef:H99"]),
+                semantic_join(&[b"OBJ:BLOCK:*Model_Space:HA0:LAYOUT=Model"]),
+                semantic_join(&[b"ENT:LINE:EA1:OA0:LR99"]),
             ]),
         ),
         SemanticFixtureCase::new(

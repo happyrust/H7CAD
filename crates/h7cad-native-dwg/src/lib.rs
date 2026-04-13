@@ -48,6 +48,14 @@ pub fn build_pending_document(
     payloads: Vec<Vec<u8>>,
 ) -> Result<PendingDocument, DwgReadError> {
     let mut pending = PendingDocument::new(header.version, header.section_count);
+    let semantic_layers = payloads
+        .iter()
+        .flat_map(|payload| collect_semantic_layers(payload))
+        .collect::<Vec<_>>();
+    let layer_by_handle = semantic_layers
+        .iter()
+        .map(|layer| (layer.handle, layer.name.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let section_records = sections
         .descriptors
         .iter()
@@ -97,10 +105,20 @@ pub fn build_pending_document(
     pending.layers = section_records
         .iter()
         .flat_map(|(_, records)| records.iter().filter_map(|record| semantic_layer(record)))
-        .collect();
+        .chain(semantic_layers)
+        .fold(Vec::<PendingLayer>::new(), |mut layers, layer| {
+            if !layers.iter().any(|existing| existing.handle == layer.handle) {
+                layers.push(layer);
+            }
+            layers
+        });
     pending.entities = section_records
         .iter()
-        .flat_map(|(_, records)| records.iter().filter_map(|record| semantic_entity(record)))
+        .flat_map(|(_, records)| {
+            records
+                .iter()
+                .filter_map(|record| semantic_entity(record, &layer_by_handle))
+        })
         .collect();
     Ok(pending)
 }
@@ -117,8 +135,7 @@ fn classify_section_records_for_section(
         return Ok(Vec::new());
     }
 
-    if payload.starts_with(b"TBL:") || payload.starts_with(b"ENT:") || payload.starts_with(b"OBJ:")
-    {
+    if contains_semantic_record_prefix(payload) {
         return decode_semantic_section_records(section_index, payload);
     }
 
@@ -168,10 +185,18 @@ enum SemanticRecordCategory {
     Object,
 }
 
+fn contains_semantic_record_prefix(payload: &[u8]) -> bool {
+    payload
+        .windows(4)
+        .any(|window| matches!(window, b"TBL:" | b"ENT:" | b"OBJ:"))
+}
+
 fn decode_semantic_section_records(
     section_index: u32,
     payload: &[u8],
 ) -> Result<Vec<Vec<u8>>, DwgReadError> {
+    let semantic_start = find_first_semantic_prefix(payload).unwrap_or(0);
+    let payload = &payload[semantic_start..];
     let mut records = Vec::new();
     let mut current = Vec::new();
     let mut index = 0usize;
@@ -208,6 +233,12 @@ fn decode_semantic_section_records(
     }
 
     Ok(records)
+}
+
+fn find_first_semantic_prefix(payload: &[u8]) -> Option<usize> {
+    payload
+        .windows(4)
+        .position(|window| matches!(window, b"TBL:" | b"ENT:" | b"OBJ:"))
 }
 
 fn split_zero_delimited_records(payload: &[u8]) -> Vec<Vec<u8>> {
@@ -346,17 +377,49 @@ fn semantic_layer(record: &[u8]) -> Option<PendingLayer> {
     })
 }
 
-fn semantic_entity(record: &[u8]) -> Option<PendingEntity> {
+fn collect_semantic_layers(payload: &[u8]) -> Vec<PendingLayer> {
+    let mut layers = Vec::new();
+    let mut index = 0usize;
+    while let Some(start) = payload[index..]
+        .windows(10)
+        .position(|window| window == b"TBL:LAYER:")
+    {
+        let start = index + start;
+        let bytes = &payload[start..];
+        let end = bytes
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(bytes.len());
+        let candidate = &bytes[..end];
+        if let Some(layer) = semantic_layer(candidate) {
+            layers.push(layer);
+        }
+        index = start + end;
+        if index >= payload.len() {
+            break;
+        }
+    }
+    layers
+}
+
+fn semantic_entity(
+    record: &[u8],
+    layer_by_handle: &std::collections::BTreeMap<Handle, String>,
+) -> Option<PendingEntity> {
     let fields = semantic_fields(record)?;
     if fields.first().copied()? != "ENT" {
         return None;
     }
-    let layer_name = fields
-        .iter()
-        .skip(2)
-        .find_map(|field| field.strip_prefix('L'))
-        .unwrap_or_default()
-        .to_string();
+    let layer_handle = semantic_layer_handle(record);
+    let layer_name = layer_handle
+        .and_then(|handle| {
+            layer_by_handle
+                .get(&handle)
+                .cloned()
+                .or_else(|| semantic_layer_name_from_fields(&fields, handle))
+        })
+        .or_else(|| semantic_inline_layer_name(&fields))
+        .unwrap_or_default();
     Some(PendingEntity {
         handle: semantic_handle(record)?,
         owner_handle: semantic_owner_handle(record).unwrap_or(Handle::NULL),
@@ -383,18 +446,28 @@ fn semantic_link(record: &[u8]) -> Option<String> {
     match fields.first().copied()? {
         "TBL" => Some(format!("handle:{:X}", semantic_handle(record)?.value())),
         "ENT" => {
-            let layer = fields
-                .iter()
-                .skip(2)
-                .find_map(|field| field.strip_prefix('L'));
+            let layer_handle = semantic_layer_handle(record);
+            let layer = layer_handle
+                .and_then(|handle| semantic_layer_name_from_fields(&fields, handle))
+                .or_else(|| semantic_inline_layer_name(&fields));
             let owner = semantic_owner_handle(record)
                 .filter(|handle| *handle != Handle::NULL)
                 .map(|handle| format!("owner:{:X}", handle.value()));
-            match (layer, owner) {
-                (Some(layer), Some(owner)) => Some(format!("layer:{layer}|{owner}")),
-                (Some(layer), None) => Some(format!("layer:{layer}")),
-                (None, Some(owner)) => Some(owner),
-                (None, None) => None,
+            let layer_handle = layer_handle.map(|handle| format!("layer_handle:{:X}", handle.value()));
+            let layer = layer.map(|layer| format!("layer:{layer}"));
+            let mut parts = Vec::new();
+            if let Some(layer_handle) = layer_handle {
+                parts.push(layer_handle);
+            }
+            if let Some(layer) = layer {
+                parts.push(layer);
+            }
+            if let Some(owner) = owner {
+                parts.push(owner);
+            }
+            match parts.is_empty() {
+                true => None,
+                false => Some(parts.join("|")),
             }
         }
         "OBJ" => match fields.get(1).copied()? {
@@ -413,6 +486,40 @@ fn semantic_link(record: &[u8]) -> Option<String> {
         },
         _ => None,
     }
+}
+
+fn semantic_layer_handle(record: &[u8]) -> Option<Handle> {
+    let fields = semantic_fields(record)?;
+    fields.iter().find_map(|field| {
+        field
+            .strip_prefix("LR")
+            .and_then(|value| u64::from_str_radix(value, 16).ok())
+            .map(Handle::new)
+    })
+}
+
+fn semantic_inline_layer_name(fields: &[&str]) -> Option<String> {
+    fields
+        .iter()
+        .skip(2)
+        .find_map(|field| field.strip_prefix('L'))
+        .filter(|layer| !layer.is_empty() && !layer.starts_with('R'))
+        .map(ToString::to_string)
+}
+
+fn semantic_layer_name_from_fields(fields: &[&str], handle: Handle) -> Option<String> {
+    let handle_hex = format!("{:X}", handle.value());
+    fields
+        .iter()
+        .position(|field| *field == "LAYER")
+        .and_then(|pos| fields.get(pos + 1).copied())
+        .filter(|_| {
+            fields
+                .iter()
+                .find_map(|field| field.strip_prefix('H'))
+                .is_some_and(|value| value == handle_hex)
+        })
+        .map(ToString::to_string)
 }
 
 #[cfg(test)]
