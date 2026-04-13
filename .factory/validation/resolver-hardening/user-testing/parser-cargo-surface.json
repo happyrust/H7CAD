@@ -166,12 +166,12 @@
     },
     {
       "id": "VAL-CROSS2-004",
-      "status": "blocked",
-      "reason": "The required cargo parser/facade checks passed, but no cargo-surface command output in this run demonstrates an outward-facing unavailable/not-implemented runtime DWG load attempt on the facade/app path.",
+      "status": "pass",
+      "reason": "Direct outward-facing facade test now proves the public DWG load path returns the documented unavailable/not-implemented result while parser/facade cargo validation stays green.",
       "evidence": [
-        "cargo check -p h7cad-native-dwg: Finished dev profile [unoptimized + debuginfo] target(s) in 0.18s",
-        "cargo test -p h7cad-native-dwg -- --test-threads=1: test result: ok. 66 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
-        "cargo check -p h7cad-native-facade: warning: h7cad-native-dxf (lib) generated 1 warning; Finished dev profile [unoptimized + debuginfo] target(s) in 0.18s"
+        "cargo test -p h7cad-native-facade dwg_runtime_load_is_unavailable -- --test-threads=1: test tests::dwg_runtime_load_is_unavailable ... ok",
+        "cargo test -p h7cad-native-facade -- --test-threads=1: test tests::dwg_runtime_load_is_unavailable ... ok",
+        "cargo check -p h7cad-native-facade: Finished dev profile [unoptimized + debuginfo] target(s) successfully with only the known non-blocking dead_code warning"
       ]
     }
   ],
@@ -195,15 +195,23 @@
       "command": "cargo check -p h7cad-native-facade",
       "exitCode": 0,
       "observation": "Succeeded with one pre-existing dead_code warning from h7cad-native-dxf::tokenizer::read_i64_le; no facade compile errors."
+    },
+    {
+      "command": "cargo test -p h7cad-native-facade dwg_runtime_load_is_unavailable -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "Succeeded; facade unit test proved load(NativeFormat::Dwg, ...) returns native DWG reader not implemented yet on the public runtime-facing API."
+    },
+    {
+      "command": "cargo test -p h7cad-native-facade -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "Succeeded; facade test suite ran the dwg_runtime_load_is_unavailable regression and passed with 1 test."
     }
   ],
   "frictions": [
     "PowerShell/host formatting guidance was applicable, but saved logs and exit codes remained clear enough to use as authoritative evidence.",
     "cargo check -p h7cad-native-facade emitted a pre-existing dead_code warning from h7cad-native-dxf, which was non-blocking per mission guidance."
   ],
-  "blockers": [
-    "VAL-CROSS2-004 remains blocked because this cargo-only run did not include outward-facing runtime DWG load evidence from the facade/app path, so the unavailable/not-implemented boundary could not be proven from command output alone."
-  ],
+  "blockers": [],
   "toolsUsed": [
     "cargo"
   ]
