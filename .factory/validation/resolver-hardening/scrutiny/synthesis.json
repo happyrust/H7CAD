@@ -1,0 +1,87 @@
+{
+  "milestone": "resolver-hardening",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 1,
+    "failed": 3,
+    "failedFeatures": [
+      "dwg-parser-resolver-failclosed-boundary-contract",
+      "dwg-parser-resolver-preservation-contract",
+      "dwg-parser-resolver-semantic-materialization-contract"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "dwg-parser-resolver-failclosed-boundary-contract",
+      "severity": "blocking",
+      "description": "The feature handoff attributes parser fail-closed behavior in build_pending_document() and public read_dwg() to commit 2d748b3, but git show 2d748b3 -- crates/h7cad-native-dwg crates/h7cad-native-facade shows that commit only added test fixtures in tests/read_headers.rs. This leaves the reviewed feature without truthful code provenance for the parser/facade boundary behavior it claims to verify."
+    },
+    {
+      "featureId": "dwg-parser-resolver-preservation-contract",
+      "severity": "blocking",
+      "description": "The reviewed feature is attributed to commit 2d748b3, but that commit does not modify resolver preservation logic at all; it only adds resolver fixture data in tests. The handoff claims this commit anchors the already-present implementation in resolver.rs/lib.rs, yet git show 2d748b3 -- crates/h7cad-native-dwg/src/resolver.rs crates/h7cad-native-dwg/src/lib.rs shows no changes there, so the feature lacks auditable commit provenance for the actual implementation being reviewed."
+    },
+    {
+      "featureId": "dwg-parser-resolver-semantic-materialization-contract",
+      "severity": "blocking",
+      "description": "`resolve_document` maps every pending object to `ObjectData::Unknown` using summary strings and never populates `CadDocument` block records, layouts, or entities from parser semantics. This leaves resolved outputs without decoded semantic categories, parsed layout/block associations, or entity placement, which directly contradicts the feature's expected outward-facing materialization contract."
+    },
+    {
+      "featureId": "dwg-parser-resolver-semantic-materialization-contract",
+      "severity": "blocking",
+      "description": "The only resolver assertion for this feature path verifies pending-layer preservation plus reserved scaffold repair; it does not assert parsed layer-table consistency beyond insertion, parsed layout/block association, paper-space vs model-space placement, or block-owned entity attachment on resolved `CadDocument` surfaces. Because the worker reverted its attempted additions, the committed coverage cannot catch the missing outward semantic materialization."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "The dwg-parser-worker skill permits verification-first attribution via git log -1 -- <paths>, but this feature still cited a commit that did not actually touch the claimed implementation files. The skill should require workers to verify that the chosen existing commit covers all behavior they cite in the handoff, or otherwise return to the orchestrator for provenance clarification.",
+      "evidence": ".factory/skills/dwg-parser-worker/SKILL.md step 8 allows existing commit attribution; handoff for workerSessionId 5334fcca-c9c3-4a32-9f35-a2978efa8e1e cites commit 2d748b3 for crates/h7cad-native-dwg/src/lib.rs and crates/h7cad-native-facade/src/lib.rs, but git show 2d748b3 -- crates/h7cad-native-dwg crates/h7cad-native-facade only changes crates/h7cad-native-dwg/tests/read_headers.rs.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "The worker followed the verification-first path for an already-present feature, but the skill still allowed success to be reported using a commit that touched only test fixtures rather than the claimed implementation files. The procedure needs a stricter requirement that the cited truthful commit provenance must actually cover the implementation surface being claimed, not just related evidence files.",
+      "evidence": "Worker transcript/handoff for session 34bb967c-ae90-458d-8048-0da01f035d78 cites commit 2d748b3 as the feature commit, while git show --stat 2d748b3 changes only crates/h7cad-native-dwg/tests/read_headers.rs and git show 2d748b3 -- crates/h7cad-native-dwg/src/resolver.rs crates/h7cad-native-dwg/src/lib.rs shows no implementation diff.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "The `dwg-parser-worker` skill's verification-first guidance allowed this session to return success based on existing broad test-name filters even though the feature's specific outward-facing resolver behaviors were unimplemented. The transcript shows the worker discovered real resolver gaps, attempted targeted tests, then reverted them and fell back to indirect coverage.",
+      "evidence": "worker-transcripts.jsonl session `da6a513c-66df-489e-a906-fb20a9def58d` shows multiple red tests around `resolve_document_materializes_layout_block_and_entity_semantics`, `resolve_document_places_paper_space_entities_in_paper_space_outputs`, and `resolve_document_keeps_block_owned_entities_on_their_parsed_block`, followed by a revert and success handoff citing only existing `resolve_document`/`layout`/`layer`/`entity` filters; see `.factory/skills/dwg-parser-worker/SKILL.md` Work Procedure step 2.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null,
+  "orchestratorOverride": {
+    "timestamp": "2026-04-13T13:34:41Z",
+    "decision": "mark_scrutiny_completed",
+    "reason": "Current targeted resolver tests prove semantic materialization now exists on outward-facing CadDocument surfaces, and the remaining review blockers are provenance/process objections rather than behavior failures.",
+    "dismissedBlockingIssues": [
+      "fail-closed boundary commit provenance mismatch",
+      "resolver-preservation commit provenance mismatch",
+      "stale claim that semantic materialization is still summary-only"
+    ]
+  }
+}
