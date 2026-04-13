@@ -8,6 +8,7 @@
   - `cargo check -p h7cad-native-dwg`
   - `cargo test -p h7cad-native-dwg`
   - `cargo check -p h7cad-native-facade`
+- For targeted assertion evidence on integration tests, prefer `cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1` or a single test-name filter; cargo does not support multiple positional TESTNAME filters in one invocation.
 - Use synthetic DWG fixtures first. Add selective real DWG samples only at milestone gates where synthetic data cannot cover the target behavior.
 - The current desktop app DWG path in `src/io` remains on `acadrust`; validators should not treat UI opening of DWG files as part of this mission's done criteria.
 

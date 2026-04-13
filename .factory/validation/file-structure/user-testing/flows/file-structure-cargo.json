@@ -1,0 +1,120 @@
+{
+  "surface": "DWG parser cargo surface",
+  "assertions": [
+    {
+      "id": "VAL-STRUCT-001",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_sniffs_known_versions (passed)",
+        "Evidence detail: read_headers.rs asserts sniff_version(b\"AC1015fixture\") -> Ac1015 and sniff_version(b\"AC1018fixture\") -> Ac1018"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-002",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: sniff_version_rejects_short_header_before_magic_parse (passed)",
+        "Observed error variant: DwgReadError::TruncatedHeader { expected_at_least: 6 }"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-003",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_rejects_unknown_magic (passed)",
+        "Observed error variant: DwgReadError::InvalidMagic { found: \"ZZ9999\" }"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-004",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_rejects_known_unsupported_versions_explicitly (passed)",
+        "Observed error variants: DwgReadError::UnsupportedVersion(Ac1021|Ac1024|Ac1027|Ac1032)"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-005",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_extracts_ac1015_section_count (passed)",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_extracts_ac1018_section_count (passed)",
+        "Observed counts: AC1015 -> 3, AC1018 -> 7"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-006",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_reports_ac1015_boundary_truncation (passed)",
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_reports_ac1018_boundary_truncation (passed)",
+        "Observed error variants: DwgReadError::TruncatedHeader { expected_at_least: 25 } and { expected_at_least: 29 }"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-007",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: read_header_extracts_ac1018_section_descriptors (passed)",
+        "Observed descriptors in directory order: [{index:0,offset:64,size:32},{index:1,offset:128,size:8}]"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-008",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: truncated_section_directory_fixture_fails_before_partial_map_is_returned (passed)",
+        "Observed error variant: DwgReadError::TruncatedSectionDirectory { version: Ac1018, expected_at_least: 45, actual: 37 }"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-009",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: section_payloads_are_read_from_directory_offsets (passed)",
+        "Observed payloads: [b\"abc\", b\"DEFG\"] exactly matching descriptor spans"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-010",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: out_of_bounds_descriptor_fixture_reports_failing_section_context (passed)",
+        "Observed error variant: DwgReadError::SectionOutOfBounds { index: 1, offset: 128, size: 5, actual: 44 }"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-011",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: zero_section_fixture_decodes_to_empty_descriptor_and_payload_lists (passed)",
+        "Observed header.section_count == 0, descriptors == [], payloads == []"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-012",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: zero_size_descriptor_yields_empty_payload_bytes (passed)",
+        "Observed payloads: [[], [88,89,90]] with first descriptor size 0 preserved as empty bytes"
+      ]
+    },
+    {
+      "id": "VAL-STRUCT-013",
+      "status": "pass",
+      "evidence": [
+        "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1 :: payload_order_follows_directory_order_when_offsets_are_non_monotonic (passed)",
+        "Observed descriptor/payload order preserved as directory order offsets [128,64,96] with payloads [b\"top\", b\"lo\", b\"mid!\"]"
+      ]
+    }
+  ],
+  "toolsUsed": [
+    "cargo check -p h7cad-native-dwg",
+    "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+    "cargo check -p h7cad-native-facade"
+  ],
+  "frictions": [
+    "Initial attempt to pass multiple test names to one cargo test command failed because cargo accepts only one TESTNAME filter; switched to the dedicated integration test target `--test read_headers`."
+  ],
+  "blockers": []
+}

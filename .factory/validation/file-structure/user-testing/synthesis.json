@@ -1,0 +1,30 @@
+{
+  "milestone": "file-structure",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-STRUCT-001",
+    "VAL-STRUCT-002",
+    "VAL-STRUCT-003",
+    "VAL-STRUCT-004",
+    "VAL-STRUCT-005",
+    "VAL-STRUCT-006",
+    "VAL-STRUCT-007",
+    "VAL-STRUCT-008",
+    "VAL-STRUCT-009",
+    "VAL-STRUCT-010",
+    "VAL-STRUCT-011",
+    "VAL-STRUCT-012",
+    "VAL-STRUCT-013"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}
