@@ -8,6 +8,19 @@ fn normalize_face3d_invisible_edges(bits: u8) -> i16 {
     i16::from(bits & 0x0F)
 }
 
+fn infer_polygon_mesh_dimensions(vertex_count: usize) -> (i16, i16) {
+    if vertex_count == 0 {
+        return (0, 0);
+    }
+    let target = (vertex_count as f64).sqrt().floor() as usize;
+    for m in (1..=target.max(1)).rev() {
+        if vertex_count.is_multiple_of(m) {
+            return (m as i16, (vertex_count / m) as i16);
+        }
+    }
+    (1, vertex_count as i16)
+}
+
 pub fn native_doc_to_acadrust(native: &nm::CadDocument) -> acadrust::CadDocument {
     let mut doc = acadrust::CadDocument::new();
 
@@ -436,6 +449,11 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             }
             nm::PolylineType::PolygonMesh => {
                 let mut e = ar::PolygonMeshEntity::new();
+                if !vertices.is_empty() {
+                    let (m_count, n_count) = infer_polygon_mesh_dimensions(vertices.len());
+                    e.m_vertex_count = m_count;
+                    e.n_vertex_count = n_count;
+                }
                 e.vertices = vertices
                     .iter()
                     .map(|vertex| {
@@ -1596,31 +1614,31 @@ fn acad_hatch_path_to_native(path: &ar::BoundaryPath) -> nm::HatchBoundaryPath {
         edges: path
             .edges
             .iter()
-            .map(|edge| match edge {
-                ar::BoundaryEdge::Line(line) => nm::HatchEdge::Line {
+            .filter_map(|edge| match edge {
+                ar::BoundaryEdge::Line(line) => Some(nm::HatchEdge::Line {
                     start: [line.start.x, line.start.y],
                     end: [line.end.x, line.end.y],
-                },
-                ar::BoundaryEdge::CircularArc(arc) => nm::HatchEdge::CircularArc {
+                }),
+                ar::BoundaryEdge::CircularArc(arc) => Some(nm::HatchEdge::CircularArc {
                     center: [arc.center.x, arc.center.y],
                     radius: arc.radius,
                     start_angle: arc.start_angle,
                     end_angle: arc.end_angle,
                     is_ccw: arc.counter_clockwise,
-                },
-                ar::BoundaryEdge::EllipticArc(arc) => nm::HatchEdge::EllipticArc {
+                }),
+                ar::BoundaryEdge::EllipticArc(arc) => Some(nm::HatchEdge::EllipticArc {
                     center: [arc.center.x, arc.center.y],
                     major_endpoint: [arc.major_axis_endpoint.x, arc.major_axis_endpoint.y],
                     minor_ratio: arc.minor_axis_ratio,
                     start_angle: arc.start_angle,
                     end_angle: arc.end_angle,
                     is_ccw: arc.counter_clockwise,
-                },
-                ar::BoundaryEdge::Polyline(poly) => nm::HatchEdge::Polyline {
+                }),
+                ar::BoundaryEdge::Polyline(poly) => Some(nm::HatchEdge::Polyline {
                     closed: poly.is_closed,
                     vertices: poly.vertices.iter().map(|v| [v.x, v.y, v.z]).collect(),
-                },
-                ar::BoundaryEdge::Spline(_) => panic!("unsupported hatch spline edge in bridge"),
+                }),
+                ar::BoundaryEdge::Spline(_) => None,
             })
             .collect(),
     }
@@ -2086,6 +2104,24 @@ mod tests {
                             start_width: 0.0,
                             end_width: 0.0,
                         },
+                        nm::PolylineVertex {
+                            position: [0.0, 1.0, 3.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
+                        nm::PolylineVertex {
+                            position: [2.0, 0.0, 4.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
+                        nm::PolylineVertex {
+                            position: [2.0, 1.0, 5.0],
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        },
                     ],
                     closed: true,
                 },
@@ -2151,6 +2187,9 @@ mod tests {
                 ) => {
                     assert_eq!(mesh.vertices.len(), vertices.len());
                     assert_eq!(mesh.is_closed_m(), *closed);
+                    assert_eq!(mesh.m_vertex_count, 2);
+                    assert_eq!(mesh.n_vertex_count, 3);
+                    assert_eq!(mesh.vertices[4].location, Vector3::new(2.0, 0.0, 4.0));
                 }
                 (
                     ar::EntityType::PolyfaceMesh(mesh),
@@ -2162,6 +2201,7 @@ mod tests {
                     assert_eq!(mesh.flags.contains(ar::PolyfaceMeshFlags::CLOSED), *closed);
                     assert_eq!(mesh.vertices[0].start_width, vertices[0].start_width);
                     assert_eq!(mesh.vertices[0].end_width, vertices[0].end_width);
+                    assert!(mesh.faces.is_empty(), "flat polyface bridge should not invent faces");
                 }
                 other => panic!("unexpected compat entity for {family_name}: {other:?}"),
             }
@@ -2330,6 +2370,52 @@ mod tests {
             }
             other => panic!("expected native hatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hatch_bridge_back_safely_accounts_for_spline_boundary_edges() {
+        let mut spline = ar::SplineEdge {
+            degree: 3,
+            rational: true,
+            periodic: false,
+            knots: vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+            control_points: vec![
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(2.0, 3.0, 0.5),
+                Vector3::new(4.0, 3.0, 1.5),
+                Vector3::new(6.0, 0.0, 1.0),
+            ],
+            fit_points: vec![
+                Vector2::new(0.0, 0.0),
+                Vector2::new(3.0, 2.0),
+                Vector2::new(6.0, 0.0),
+            ],
+            start_tangent: Vector2::new(1.0, 0.0),
+            end_tangent: Vector2::new(0.0, -1.0),
+        };
+        let mut path = ar::BoundaryPath::with_flags(ar::BoundaryPathFlags::from_bits(5));
+        path.add_edge(ar::BoundaryEdge::Spline(spline.clone()));
+        let mut hatch = ar::Hatch::new();
+        hatch.pattern.name = "ANSI31".into();
+        hatch.paths.push(path);
+
+        let native =
+            acadrust_entity_to_native(&ar::EntityType::Hatch(hatch)).expect("hatch should bridge");
+
+        match native.data {
+            nm::EntityData::Hatch { boundary_paths, .. } => {
+                assert_eq!(boundary_paths.len(), 1);
+                assert_eq!(boundary_paths[0].flags, 5);
+                assert!(
+                    boundary_paths[0].edges.is_empty(),
+                    "unsupported compat spline edges should be skipped instead of panicking"
+                );
+            }
+            other => panic!("expected native hatch, got {other:?}"),
+        }
+
+        spline.fit_points.push(Vector2::new(7.0, -1.0));
+        assert_eq!(spline.fit_points.len(), 4);
     }
 
     #[test]
