@@ -1,0 +1,178 @@
+{
+  "surface": "DWG parser cargo surface",
+  "assertionsTested": [
+    "VAL-SEM-001",
+    "VAL-SEM-002",
+    "VAL-SEM-003",
+    "VAL-SEM-004",
+    "VAL-SEM-005",
+    "VAL-SEM-006",
+    "VAL-SEM-008",
+    "VAL-PROV-003",
+    "VAL-PROV-006",
+    "VAL-CROSS2-005"
+  ],
+  "statusByAssertion": {
+    "VAL-SEM-001": {
+      "status": "passed",
+      "evidence": [
+        "semantic_decode_prefixed_payloads_route_through_semantic_decoder",
+        "semantic_decode_embedded_zero_and_same_size_records_keep_distinct_identities",
+        "record_classifier_splits_zero_delimited_payload"
+      ]
+    },
+    "VAL-SEM-002": {
+      "status": "passed",
+      "evidence": [
+        "semantic_decode_keeps_classification_stable_across_section_reordering",
+        "payload_order_follows_directory_order_when_offsets_are_non_monotonic",
+        "pending_object_section_mapping_covers_each_real_section"
+      ]
+    },
+    "VAL-SEM-003": {
+      "status": "passed",
+      "evidence": [
+        "pending_layer_semantics_come_from_decoded_records",
+        "resolve_document_preserves_pending_layers_and_repairs_layout_links",
+        "pending_document_section_accounting_matches_emitted_objects"
+      ]
+    },
+    "VAL-SEM-004": {
+      "status": "passed",
+      "evidence": [
+        "pending_entity_semantics_preserve_handle_owner_and_layer_relationships",
+        "pending_entity_summary_exposes_owner_and_layer_provenance_together",
+        "resolver_preserves_handles_owners_order_and_advances_allocation_state"
+      ]
+    },
+    "VAL-SEM-005": {
+      "status": "passed",
+      "evidence": [
+        "block_layout_semantics_are_outwardly_distinguishable_on_parser_surfaces",
+        "semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit"
+      ]
+    },
+    "VAL-SEM-006": {
+      "status": "passed",
+      "evidence": [
+        "outward_summaries_distinguish_same_size_semantic_records_by_identity_fields",
+        "read_dwg_produces_deterministic_resolved_object_summaries"
+      ]
+    },
+    "VAL-SEM-008": {
+      "status": "passed",
+      "evidence": [
+        "semantic_decode_reports_real_nonzero_section_index",
+        "pending_document_preserves_section_directory_entries",
+        "section_payloads_are_read_from_directory_offsets"
+      ]
+    },
+    "VAL-PROV-003": {
+      "status": "passed",
+      "evidence": [
+        "pending_entity_preserves_handle_based_layer_provenance",
+        "pending_entity_summary_exposes_owner_and_layer_provenance_together"
+      ]
+    },
+    "VAL-PROV-006": {
+      "status": "passed",
+      "evidence": [
+        "semantic_provenance_projection_is_stable_across_repeated_parses",
+        "provenance_projection_stays_deterministic_across_equivalent_layout_variants"
+      ]
+    },
+    "VAL-CROSS2-005": {
+      "status": "passed",
+      "evidence": [
+        "read_dwg_returns_seeded_document_scaffold_for_supported_fixture",
+        "read_dwg_rejects_invalid_and_known_unsupported_versions_at_public_api_boundary",
+        "cargo check -p h7cad-native-facade"
+      ]
+    }
+  },
+  "commandsRun": [
+    {
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0,
+      "observation": "Compile-surface check for parser crate passed.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\01_cargo_check_h7cad-native-dwg.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg semantic_decode -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "semantic_decode filter passed 4 named tests covering semantic decoder routing, section-order stability, identity separation with embedded zeros, and reporting real section index.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\02_test_semantic_decode.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg pending_layer -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "pending_layer filter passed 2 named tests covering decoded pending layer semantics and resolved-document layer/layout repair behavior.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\03_test_pending_layer.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg pending_entity -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "pending_entity filter passed 3 named tests covering handle/layer provenance, owner-layer relationship preservation, and outward summary provenance pairing.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\04_test_pending_entity.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg semantic_provenance -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "semantic_provenance filter passed deterministic repeated-parse projection test.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\05_test_semantic_provenance.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg block_layout -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "block_layout filter passed parser-surface distinction test for outward block/layout semantics.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\06_test_block_layout.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg provenance -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "provenance filter passed 4 named tests covering deterministic provenance behavior and pending-entity provenance summaries.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\07_test_provenance.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "Integration test lane passed all 45 tests, including semantic fixture, pending-document, resolver, provenance, and public API coverage.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\08_test_read_headers.log"
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "Full parser crate test suite passed: 15 unit tests, 45 integration tests, and 0 doc tests failed.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\09_test_all_h7cad-native-dwg.log"
+    },
+    {
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0,
+      "observation": "Facade compile-surface check passed after parser validation lane.",
+      "logPath": "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\10_cargo_check_h7cad-native-facade.log"
+    }
+  ],
+  "toolsUsed": [
+    "Read",
+    "LS",
+    "Execute",
+    "TodoWrite"
+  ],
+  "frictions": [
+    "PowerShell variable assignment quoting failed for directory creation; used Python instead.",
+    "Windows console guidance about noisy PowerShell formatting was avoided by relying on saved logs and exit codes."
+  ],
+  "blockers": [],
+  "evidenceFiles": [
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\01_cargo_check_h7cad-native-dwg.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\02_test_semantic_decode.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\03_test_pending_layer.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\04_test_pending_entity.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\05_test_semantic_provenance.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\06_test_block_layout.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\07_test_provenance.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\08_test_read_headers.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\09_test_all_h7cad-native-dwg.log",
+    "C:/Users/Administrator/.factory/missions/f0d64c74-1f12-4cd4-aade-9b60eed14d76/evidence/semantic-extraction/parser-cargo\\10_cargo_check_h7cad-native-facade.log"
+  ]
+}
