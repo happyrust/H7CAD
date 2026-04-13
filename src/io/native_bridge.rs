@@ -798,7 +798,7 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
             entity,
             nm::EntityData::Wipeout {
                 clip_vertices: wipeout
-                    .world_boundary_vertices()
+                    .clip_boundary_vertices
                     .iter()
                     .map(|vertex| [vertex.x, vertex.y])
                     .collect(),
@@ -2850,7 +2850,7 @@ mod tests {
             image_size: [640.0, 480.0],
         };
         let wipeout_data = nm::EntityData::Wipeout {
-            clip_vertices: vec![[0.0, 0.0], [4.0, 0.0], [3.0, 2.0], [0.0, 3.0]],
+            clip_vertices: vec![[0.0, 0.0], [1.0, 0.0], [0.75, 2.0 / 3.0], [0.0, 1.0]],
         };
         native
             .add_entity(nm::Entity::new(image_data.clone()))
@@ -2888,5 +2888,70 @@ mod tests {
         assert!(saw_wipeout, "wipeout should be exposed on compat side");
         assert_eq!(image_roundtrip.expect("image roundtrip").data, image_data);
         assert_eq!(wipeout_roundtrip.expect("wipeout roundtrip").data, wipeout_data);
+        let compat_wipeout = compat
+            .entities()
+            .find_map(|entity| match entity {
+                ar::EntityType::Wipeout(wipeout) => Some(wipeout),
+                _ => None,
+            })
+            .expect("compat wipeout should exist");
+        assert_eq!(
+            compat_wipeout.clip_boundary_vertices,
+            vec![
+                Vector2::new(0.0, 0.0),
+                Vector2::new(1.0, 0.0),
+                Vector2::new(0.75, 2.0 / 3.0),
+                Vector2::new(0.0, 1.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn wipeout_bridge_preserves_local_clip_vertices_on_roundtrip() {
+        let local_clip_vertices = vec![[0.0, 0.0], [1.0, 0.0], [0.75, 2.0 / 3.0], [0.0, 1.0]];
+        let native_entity = representative_entity_with_common_fields(
+            nm::EntityData::Wipeout {
+                clip_vertices: local_clip_vertices.clone(),
+            },
+            0x99,
+            0x199,
+        );
+
+        let compat = native_entity_to_acadrust(&native_entity).expect("wipeout should bridge out");
+        let compat_wipeout = match &compat {
+            ar::EntityType::Wipeout(wipeout) => wipeout,
+            other => panic!("expected wipeout, got {other:?}"),
+        };
+
+        let expected_local_vertices = vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(1.0, 0.0),
+            Vector2::new(0.75, 2.0 / 3.0),
+            Vector2::new(0.0, 1.0),
+        ];
+        assert_eq!(
+            compat_wipeout.clip_boundary_vertices,
+            expected_local_vertices,
+            "compat wipeout should retain local normalized clip vertices",
+        );
+
+        let world_vertices: Vec<[f64; 2]> = compat_wipeout
+            .world_boundary_vertices()
+            .iter()
+            .map(|vertex| [vertex.x, vertex.y])
+            .collect();
+        assert_eq!(
+            world_vertices,
+            vec![[0.0, 0.0], [1.0, 0.0], [0.75, 2.0 / 3.0], [0.0, 1.0]],
+            "world vertices should reflect the same visible wipeout polygon",
+        );
+
+        let roundtrip = acadrust_entity_to_native(&compat).expect("wipeout should bridge back");
+        assert_eq!(
+            roundtrip.data,
+            nm::EntityData::Wipeout {
+                clip_vertices: local_clip_vertices,
+            }
+        );
     }
 }
