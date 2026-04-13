@@ -1,0 +1,15 @@
+{
+  "featureId": "dwg-parser-resolver-determinism-contract",
+  "reviewedAt": "2026-04-13T10:13:43Z",
+  "commitId": "4fa5cf8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature is implemented as focused regression coverage in crates/h7cad-native-dwg/tests/read_headers.rs and matches the resolver determinism contract. The new resolver-facing test proves preserved handle/order/owner projections and observable allocation-state advancement against resolve_document(), while the end-to-end read_dwg() test proves deterministic resolved object summaries across repeated parses of the same supported fixture.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, transcript skeleton, skill file, and commit 4fa5cf8. I found no blocking or non-blocking issues: the added tests cover VAL-RESOLVE-002/005/006/007 directly, align with the current resolver architecture, and no shared-state gaps were evident from this feature review."
+}

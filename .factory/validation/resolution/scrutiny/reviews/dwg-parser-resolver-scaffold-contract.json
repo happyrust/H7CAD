@@ -1,0 +1,21 @@
+{
+  "featureId": "dwg-parser-resolver-scaffold-contract",
+  "reviewedAt": "2026-04-13T10:12:20Z",
+  "commitId": "3e180b1c6fc660d92bf6fcfa22c21cf4efbaf891",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Commit 3e180b1 only strengthens resolver-scaffold regression coverage in crates/h7cad-native-dwg/tests/read_headers.rs. The reviewed assertions match the existing resolver behavior in crates/h7cad-native-dwg/src/resolver.rs and CadDocument ownership repair in crates/h7cad-native-model/src/lib.rs for seeded scaffold links and pending-layer preservation.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The worker took a verification-first path because resolver scaffolding already existed before this feature commit; that workflow is allowed by the dwg-parser-worker skill, but the mission shared state does not explicitly record that the resolution milestone starts from preexisting resolver code in commit baa8770f. Recording that provenance in shared state would make later scrutiny easier.",
+      "evidence": "git blame crates/h7cad-native-dwg/src/resolver.rs attributes the resolver implementation to commit baa8770f, while feature commit 3e180b1 only adds tests in crates/h7cad-native-dwg/tests/read_headers.rs."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. The feature commit adds focused regression coverage for seeded document scaffold links, ownership repair, and pending-layer visibility, and those assertions align with the existing resolver/model implementation without introducing scope violations."
+}

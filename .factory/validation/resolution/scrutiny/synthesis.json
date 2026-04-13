@@ -1,0 +1,45 @@
+{
+  "milestone": "resolution",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Clarify when dwg-fixture-worker may be used for parser end-to-end regression coverage that adds tests but no new fixture assets, or retag such features to dwg-parser-worker when the work is primarily assertion coverage.",
+      "evidence": "Feature dwg-parser-end-to-end-failclosed-and-facade-compile was assigned dwg-fixture-worker, but review found commit b14a6ca only changed crates/h7cad-native-dwg/tests/read_headers.rs with no fixture/manifests updates.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Record resolver provenance in shared state because resolver scaffolding predates feature commit 3e180b1.",
+      "reason": "ambiguous; useful historical context, but not a concrete operational/library/services update and not clearly systemic guidance for future workers."
+    }
+  ],
+  "previousRound": null
+}
