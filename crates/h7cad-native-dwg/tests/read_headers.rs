@@ -686,6 +686,114 @@ fn semantic_fixture_graph_cases_make_valid_and_invalid_relationships_explicit() 
 }
 
 #[test]
+fn resolver_ownership_fixture_cases_cover_layer_layout_space_and_invalid_reference_scenarios() {
+    let cases = resolver_ownership_fixture_cases();
+    let ids = cases.iter().map(|case| case.id).collect::<Vec<_>>();
+
+    assert_eq!(
+        ids,
+        vec![
+            "layer-table-consistency",
+            "layout-block-pairing",
+            "space-classification-ownership",
+            "non-layout-block-ownership",
+            "invalid-semantic-reference",
+        ]
+    );
+
+    let layer_case = cases
+        .iter()
+        .find(|case| case.id == "layer-table-consistency")
+        .expect("layer-table-consistency fixture should exist");
+    assert_eq!(
+        semantic_fixture_sections(&layer_case.fixture),
+        vec![vec![
+            b"TBL:LAYER:LayerModel:H80".to_vec(),
+            b"TBL:LAYER:LayerPaper:H88".to_vec(),
+        ]]
+    );
+    assert_eq!(layer_case.parser_emitted_handles, vec![0x80, 0x88]);
+
+    let layout_case = cases
+        .iter()
+        .find(|case| case.id == "layout-block-pairing")
+        .expect("layout-block-pairing fixture should exist");
+    assert_eq!(
+        semantic_fixture_sections(&layout_case.fixture),
+        vec![
+            vec![
+                b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model".to_vec(),
+                b"OBJ:LAYOUT:Model:H82:B81".to_vec(),
+            ],
+            vec![
+                b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1".to_vec(),
+                b"OBJ:LAYOUT:Layout1:H92:B91".to_vec(),
+            ],
+        ]
+    );
+    assert_eq!(layout_case.parser_emitted_handles, vec![0x81, 0x82, 0x91, 0x92]);
+
+    let space_case = cases
+        .iter()
+        .find(|case| case.id == "space-classification-ownership")
+        .expect("space-classification-ownership fixture should exist");
+    assert_eq!(
+        semantic_fixture_sections(&space_case.fixture),
+        vec![
+            vec![
+                b"TBL:LAYER:LayerModel:H80".to_vec(),
+                b"TBL:LAYER:LayerPaper:H88".to_vec(),
+            ],
+            vec![
+                b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model".to_vec(),
+                b"OBJ:LAYOUT:Model:H82:B81".to_vec(),
+            ],
+            vec![
+                b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1".to_vec(),
+                b"OBJ:LAYOUT:Layout1:H92:B91".to_vec(),
+            ],
+            vec![
+                b"ENT:LINE:EA0:O81:LLayerModel".to_vec(),
+                b"ENT:TEXT:EA1:O91:LLayerPaper".to_vec(),
+            ],
+        ]
+    );
+    assert_eq!(
+        space_case.parser_emitted_handles,
+        vec![0x80, 0x88, 0x81, 0x82, 0x91, 0x92, 0xA0, 0xA1]
+    );
+
+    let block_owned_case = cases
+        .iter()
+        .find(|case| case.id == "non-layout-block-ownership")
+        .expect("non-layout-block-ownership fixture should exist");
+    assert_eq!(
+        semantic_fixture_sections(&block_owned_case.fixture),
+        vec![
+            vec![
+                b"TBL:LAYER:LayerModel:H80".to_vec(),
+                b"OBJ:BLOCK:DoorBlock:H90".to_vec(),
+            ],
+            vec![b"ENT:INSERT:EA2:O90:LLayerModel".to_vec()],
+        ]
+    );
+    assert_eq!(block_owned_case.parser_emitted_handles, vec![0x80, 0x90, 0xA2]);
+
+    let invalid_case = cases
+        .iter()
+        .find(|case| case.id == "invalid-semantic-reference")
+        .expect("invalid-semantic-reference fixture should exist");
+    assert_eq!(
+        semantic_fixture_sections(&invalid_case.fixture),
+        vec![
+            vec![b"OBJ:LAYOUT:Broken:H95:BFF".to_vec()],
+            vec![b"ENT:LINE:E96:OFF:LLayerBroken".to_vec()],
+        ]
+    );
+    assert_eq!(invalid_case.parser_emitted_handles, vec![0x95, 0x96]);
+}
+
+#[test]
 fn section_payloads_are_read_from_directory_offsets() {
     let bytes = fixture_ac1015(2, &[(0x29, 3), (0x40, 4)], &[b"abc", b"DEFG"]);
     let header = DwgFileHeader::parse(&bytes).unwrap();
@@ -1304,6 +1412,95 @@ impl SemanticFixtureCase {
         let (entries, payloads) = fixture;
         Self { id, entries, payloads }
     }
+}
+
+struct ResolverOwnershipFixtureCase {
+    id: &'static str,
+    fixture: SemanticFixtureCase,
+    parser_emitted_handles: Vec<u64>,
+}
+
+fn resolver_ownership_fixture_cases() -> Vec<ResolverOwnershipFixtureCase> {
+    vec![
+        ResolverOwnershipFixtureCase {
+            id: "layer-table-consistency",
+            fixture: SemanticFixtureCase::new(
+                "layer-table-consistency",
+                semantic_entries(&[0x80], &[semantic_join(&[
+                    b"TBL:LAYER:LayerModel:H80",
+                    b"TBL:LAYER:LayerPaper:H88",
+                ])]),
+            ),
+            parser_emitted_handles: vec![0x80, 0x88],
+        },
+        ResolverOwnershipFixtureCase {
+            id: "layout-block-pairing",
+            fixture: SemanticFixtureCase::new(
+                "layout-block-pairing",
+                semantic_entries(&[0x80, 0xC0], &[
+                    semantic_join(&[
+                        b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
+                        b"OBJ:LAYOUT:Model:H82:B81",
+                    ]),
+                    semantic_join(&[
+                        b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1",
+                        b"OBJ:LAYOUT:Layout1:H92:B91",
+                    ]),
+                ]),
+            ),
+            parser_emitted_handles: vec![0x81, 0x82, 0x91, 0x92],
+        },
+        ResolverOwnershipFixtureCase {
+            id: "space-classification-ownership",
+            fixture: SemanticFixtureCase::new(
+                "space-classification-ownership",
+                semantic_entries(&[0x80, 0xC0, 0x100, 0x140], &[
+                    semantic_join(&[
+                        b"TBL:LAYER:LayerModel:H80",
+                        b"TBL:LAYER:LayerPaper:H88",
+                    ]),
+                    semantic_join(&[
+                        b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
+                        b"OBJ:LAYOUT:Model:H82:B81",
+                    ]),
+                    semantic_join(&[
+                        b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1",
+                        b"OBJ:LAYOUT:Layout1:H92:B91",
+                    ]),
+                    semantic_join(&[
+                        b"ENT:LINE:EA0:O81:LLayerModel",
+                        b"ENT:TEXT:EA1:O91:LLayerPaper",
+                    ]),
+                ]),
+            ),
+            parser_emitted_handles: vec![0x80, 0x88, 0x81, 0x82, 0x91, 0x92, 0xA0, 0xA1],
+        },
+        ResolverOwnershipFixtureCase {
+            id: "non-layout-block-ownership",
+            fixture: SemanticFixtureCase::new(
+                "non-layout-block-ownership",
+                semantic_entries(&[0x80, 0xB0], &[
+                    semantic_join(&[
+                        b"TBL:LAYER:LayerModel:H80",
+                        b"OBJ:BLOCK:DoorBlock:H90",
+                    ]),
+                    semantic_join(&[b"ENT:INSERT:EA2:O90:LLayerModel"]),
+                ]),
+            ),
+            parser_emitted_handles: vec![0x80, 0x90, 0xA2],
+        },
+        ResolverOwnershipFixtureCase {
+            id: "invalid-semantic-reference",
+            fixture: SemanticFixtureCase::new(
+                "invalid-semantic-reference",
+                semantic_entries(&[0x80, 0xC0], &[
+                    semantic_join(&[b"OBJ:LAYOUT:Broken:H95:BFF"]),
+                    semantic_join(&[b"ENT:LINE:E96:OFF:LLayerBroken"]),
+                ]),
+            ),
+            parser_emitted_handles: vec![0x95, 0x96],
+        },
+    ]
 }
 
 fn fixture_ac1015(section_count: u32, entries: &[(u32, u32)], payloads: &[&[u8]]) -> Vec<u8> {
