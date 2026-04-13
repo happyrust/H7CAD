@@ -1,0 +1,15 @@
+{
+  "featureId": "dwg-parser-pending-identity-contract",
+  "reviewedAt": "2026-04-13T09:49:25.207388Z",
+  "commitId": "baa8770f75ab919ba1d6dd69c1107283bd7cbece",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature stays within the parser-only mission boundary and the reviewed commit exposes the required outward-facing pending identity surface. PendingObjectKind and dispatch_object agree for each bucket, ParsedRecordSummary carries section/record/payload provenance, synthetic handles are deterministic and duplicate-free for the covered fixtures, and owner_handle remains externally visible with null-owner behavior preserved.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the worker transcript skeleton, handoff, shared-state docs, and commit baa8770f75ab919ba1d6dd69c1107283bd7cbece. The implementation satisfies VAL-PENDING-004/005/006/007 with parser-local code and regression coverage, and I found no blocking or non-blocking correctness issues for this feature."
+}

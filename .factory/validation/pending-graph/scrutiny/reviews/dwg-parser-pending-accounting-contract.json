@@ -1,0 +1,21 @@
+{
+  "featureId": "dwg-parser-pending-accounting-contract",
+  "reviewedAt": "2026-04-13T00:00:00Z",
+  "commitId": "bab33938d41d1d60f884a35e323e5dbf8140099d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Feature satisfies the pending-accounting contract in scope. Existing parser code already provided one-to-one PendingSection identity, explicit empty/delimiter-only tokenization fallback, aggregate record accounting, and per-object section provenance; commit bab3393 adds regression coverage for the aggregate and per-section mapping gaps without changing parser semantics.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker skill still underspecifies the Windows startup path for .factory/init.sh. This worker had to deviate because the prescribed init step is a POSIX shell script and the current Windows shell could not execute it via the available command runner.",
+      "evidence": "The handoff for worker session 7f864142-95e2-4b5a-9cc5-e1f10f4de5ac records a failed attempt to run the init script through Python and notes the deviation in skillFeedback, while mission.md and AGENTS.md already say no environment setup is required on this host."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the handoff, transcript skeleton, commit bab3393, and current h7cad-native-dwg pending-graph code. The feature is correct and in scope for VAL-PENDING-001/002/003/008/009, and the committed tests now explicitly cover the remaining accounting and object-to-section mapping assertions."
+}
