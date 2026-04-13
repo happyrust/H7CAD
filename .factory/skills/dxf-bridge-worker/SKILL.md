@@ -42,8 +42,11 @@ Typical work:
    - `check_native`
    - `test` if the feature only touches native crates / bridge
    - `check` if the feature touches wider runtime compile surfaces
+   - use `cargo test --bin H7CAD native_bridge -- --test-threads=16` for the bridge-focused target surface when the manifest shortcut is insufficient or being verified
 9. If the feature involves block-owned content or referenced handles, include at least one document-level regression check in addition to unit-style entity checks.
 10. Invoke `verification-before-completion`, confirm no required evidence is missing, then hand off.
+
+Before trusting a narrow manifest command, verify it actually matches the current workspace layout. If a manifest command is stale, use the working equivalent and note the deviation in the handoff.
 
 ## Example Handoff
 
@@ -55,7 +58,7 @@ Typical work:
   "verification": {
     "commandsRun": [
       {
-        "command": "cargo test --lib native_bridge -- --test-threads=16",
+        "command": "cargo test --bin H7CAD native_bridge -- --test-threads=16",
         "exitCode": 0,
         "observation": "New bridge tests passed, including per-field equality and document-level count assertions."
       },
