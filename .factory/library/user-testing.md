@@ -30,3 +30,10 @@
 - `h7cad-native-facade` is only a compile-surface check unless a later milestone explicitly expands scope.
 - Real DWG fixtures are selective milestone-gate evidence, not a requirement for every feature.
 - Current uncommitted DWG parser skeleton is baseline mission context and should be extended rather than restarted.
+## Flow Validator Guidance: DWG parser cargo surface
+- Operate only through cargo commands in the shared repository at D:/work/plant-code/cad/H7CAD.
+- Do not edit source files or mission metadata while validating.
+- Use sequential cargo execution only; do not start concurrent cargo jobs or background services.
+- Evidence should come from command output and, when useful, captured logs saved under the assigned evidence directory.
+- Stay within parser-only scope: validate h7cad-native-dwg and h7cad-native-facade compile surface only.
+

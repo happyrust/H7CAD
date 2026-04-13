@@ -1,0 +1,78 @@
+{
+  "surface": "DWG parser cargo surface",
+  "groupId": "pending-graph-cargo",
+  "testedAt": "2026-04-13T00:00:00Z",
+  "assertions": [
+    {
+      "id": "VAL-PENDING-001",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg pending_ -- --test-threads=1: tests::build_pending_document_keeps_section_metadata, pending_document_preserves_section_directory_entries, and pending_document_section_accounting_matches_emitted_objects all passed; assertions verify PendingSection metadata/index-offset-size alignment and emitted object linkage."
+    },
+    {
+      "id": "VAL-PENDING-002",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg pending_ -- --test-threads=1: pending_document_preserves_section_directory_entries, pending_document_uses_pending_graph_edge_case_fixtures, and pending_document_section_accounting_matches_emitted_objects passed; record_count values observed as [0,1,1,1,3,2] align with emitted objects for single-record and multi-record payloads."
+    },
+    {
+      "id": "VAL-PENDING-003",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg pending_ -- --test-threads=1: pending_graph_fixture_payloads_cover_edge_cases passed, proving empty payload -> 0 records, delimiter-only payload fallback behavior, and ordered non-empty token extraction for alpha/beta/gamma and left/right fixtures."
+    },
+    {
+      "id": "VAL-PENDING-004",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg dispatch_entry_points_follow_pending_object_kind -- --test-threads=1 passed; dispatch_entry_points_follow_pending_object_kind confirms PendingObjectKind::EntityRecord dispatches to DispatchTarget::Entity."
+    },
+    {
+      "id": "VAL-PENDING-005",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg dispatch_entry_points_follow_pending_object_kind -- --test-threads=1 passed; summarize_object returned ParsedRecordSummary with target Entity, section_index 1, record_index 2, payload_size 5 exactly as asserted."
+    },
+    {
+      "id": "VAL-PENDING-006",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg pending_ -- --test-threads=1: repeated_pending_graph_fixture_parse_is_stable passed and build_pending_document_keeps_section_metadata passed in the filtered unit suite, evidencing stable, repeatable pending object identity and ordering for identical input."
+    },
+    {
+      "id": "VAL-PENDING-007",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg dispatch_entry_points_follow_pending_object_kind -- --test-threads=1 plus pending_ suite context: owner_handle remains externally visible on PendingObject under the synthetic null-owner baseline."
+    },
+    {
+      "id": "VAL-PENDING-008",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg pending_ -- --test-threads=1: pending_document_section_accounting_matches_emitted_objects passed, explicitly asserting aggregate record-count equality between sections and emitted objects."
+    },
+    {
+      "id": "VAL-PENDING-009",
+      "status": "pass",
+      "evidence": "cargo test -p h7cad-native-dwg pending_ -- --test-threads=1: pending_object_section_mapping_covers_each_real_section and pending_document_section_accounting_matches_emitted_objects both passed, proving each object maps to an existing PendingSection and per-section counts equal record_count."
+    }
+  ],
+  "toolsUsed": ["cargo"],
+  "frictions": [
+    {
+      "description": "PowerShell Tee-Object promoted native stderr lines into RemoteException-style noise while cargo still exited 0 and logs were captured successfully.",
+      "resolved": true,
+      "resolution": "Used exit code plus saved log files as source of truth and continued sequentially."
+    }
+  ],
+  "blockers": [],
+  "commands": [
+    {
+      "command": "cargo test -p h7cad-native-dwg pending_ -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "1 filtered unit test and 7 read_headers.rs pending-graph tests passed: build_pending_document_keeps_section_metadata, dispatch_entry_points_follow_pending_object_kind, pending_document_preserves_section_directory_entries, pending_document_section_accounting_matches_emitted_objects, pending_document_uses_pending_graph_edge_case_fixtures, pending_graph_fixture_payloads_cover_edge_cases, pending_object_section_mapping_covers_each_real_section, repeated_pending_graph_fixture_parse_is_stable."
+    },
+    {
+      "command": "cargo test -p h7cad-native-dwg dispatch_entry_points_follow_pending_object_kind -- --test-threads=1",
+      "exitCode": 0,
+      "observation": "Focused dispatch and summary assertion passed; summarize_object exposed ParsedRecordSummary with target Entity, section_index 1, record_index 2, payload_size 5."
+    },
+    {
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0,
+      "observation": "Compile surface passed. Observed non-blocking warning from h7cad-native-dxf: method read_i64_le is never used."
+    }
+  ]
+}

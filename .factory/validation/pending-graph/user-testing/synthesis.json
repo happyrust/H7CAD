@@ -1,0 +1,32 @@
+{
+  "milestone": "pending-graph",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-PENDING-001",
+    "VAL-PENDING-002",
+    "VAL-PENDING-003",
+    "VAL-PENDING-004",
+    "VAL-PENDING-005",
+    "VAL-PENDING-006",
+    "VAL-PENDING-007",
+    "VAL-PENDING-008",
+    "VAL-PENDING-009"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added flow validator guidance for the DWG parser cargo surface to enforce sequential cargo-only validation boundaries.",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null
+}
