@@ -28,13 +28,15 @@ This mission is synthetic-first. Real DWG samples are only allowed when the feat
    - keep it as small as possible,
    - record its source/provenance in the manifest or adjacent test comments,
    - avoid adding samples with unclear licensing or oversized engineering data.
-5. Keep fixture work isolated to parser validation surfaces. Do not modify `src/io`, desktop app routing, or unrelated crates unless the feature explicitly requires a shared summary/helper update.
-6. Before handoff, run sequential validation commands:
+5. Keep fixture work isolated to the feature’s declared parser validation surface. Do not absorb unrelated pending-graph, dispatch, or resolver assertions unless the feature description explicitly expands scope.
+6. Do not modify `src/io`, desktop app routing, or unrelated crates unless the feature explicitly requires a shared summary/helper update.
+7. Before handoff, run sequential validation commands:
    - `cargo test -p h7cad-native-dwg --test read_headers`
    - `cargo test -p h7cad-native-dwg`
    - `cargo check -p h7cad-native-facade`
    Add any extra targeted cargo command that proves the new fixture coverage specifically exercised the intended path.
-7. In the handoff, enumerate every added or changed fixture, what parser behavior it covers, and any remaining fixture gaps that still block later milestones.
+8. In the shared dirty workspace, create an isolated feature commit by staging only the fixture/helper files touched for this feature. Never reuse an unrelated commit ID; if a clean fixture-only commit is impossible, return to the orchestrator.
+9. In the handoff, enumerate every added or changed fixture, what parser behavior it covers, and any remaining fixture gaps that still block later milestones.
 
 ## Example Handoff
 

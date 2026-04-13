@@ -22,18 +22,20 @@ This mission is parser-only. Do not modify `src/io`, do not switch the desktop a
 ## Work Procedure
 
 1. Read `mission.md`, `AGENTS.md`, `.factory/library/architecture.md` if present, and `.factory/library/user-testing.md`. Restate the feature scope, constraints, and `fulfills` assertion IDs in your notes before editing.
-2. Add or update failing tests first. Prefer crate-local unit tests or `crates/h7cad-native-dwg/tests/*.rs`. When a feature changes parser output, add assertions against `CadDocument`, pending structures, or record summaries before implementation.
-3. Implement the smallest parser-only change that makes the new tests pass. Keep edits focused on `crates/h7cad-native-dwg` unless the feature explicitly calls for a compile-surface adjustment in `crates/h7cad-native-facade`.
-4. Preserve DWG mission boundaries:
+2. Check whether the feature is already materially present in the shared worktree. If so, take a verification-first path: prove the current implementation satisfies the feature’s `fulfills` assertions, then make only the smallest follow-up changes still needed for clarity, coverage, or auditability. Do not manufacture churn just to create edits.
+3. If the feature is not already present, add or update failing tests first. Prefer crate-local unit tests or `crates/h7cad-native-dwg/tests/*.rs`. When a feature changes parser output, add assertions against `CadDocument`, pending structures, or record summaries before implementation.
+4. Implement the smallest parser-only change that makes the new tests pass. Keep edits focused on `crates/h7cad-native-dwg` unless the feature explicitly calls for a compile-surface adjustment in `crates/h7cad-native-facade`.
+5. Preserve DWG mission boundaries:
    - No edits to `src/io` or desktop DWG routing.
    - No new runtime services, background processes, or ports.
    - Prefer synthetic fixtures and inline byte layouts unless the feature explicitly requires a real DWG sample.
-5. Re-run targeted tests during iteration until the new behavior is stable. Before handoff, run these sequential baseline commands unless the feature description requires a wider scope:
+6. Re-run targeted tests during iteration until the new behavior is stable. Before handoff, run these sequential baseline commands unless the feature description requires a wider scope:
    - `cargo check -p h7cad-native-dwg`
    - `cargo test -p h7cad-native-dwg`
    - `cargo check -p h7cad-native-facade`
-6. Manually inspect parser invariants through assertions or debug-oriented test expectations: version detection, section offsets/sizes, record counts, handle stability, owner relationships, and block/layout presence when relevant to the feature.
-7. Prepare a concrete handoff. List exact files changed, tests added, commands run with observations, and any unresolved parser gaps or format ambiguities. If anything is incomplete, say exactly what remains and why.
+7. Manually inspect parser invariants through assertions or debug-oriented test expectations: version detection, section offsets/sizes, record counts, handle stability, owner relationships, and block/layout presence when relevant to the feature.
+8. In the shared dirty workspace, create an isolated feature commit by staging only the files touched or intentionally audited for this feature. Never reuse an unrelated commit ID. If an isolated feature commit is impossible because relevant and unrelated edits are interleaved in the same file, return to the orchestrator instead of claiming success under the wrong commit.
+9. Prepare a concrete handoff. List exact files changed, whether the work was new implementation or verification-first audit of existing in-worktree behavior, tests added, commands run with observations, and any unresolved parser gaps or format ambiguities. If anything is incomplete, say exactly what remains and why.
 
 ## Example Handoff
 
