@@ -1,0 +1,21 @@
+{
+  "featureId": "dwg-parser-section-map-payload-contract",
+  "reviewedAt": "2026-04-13T09:22:29.853918+00:00",
+  "commitId": "cd9cde7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The current worktree satisfies the section-map/payload contract: SectionMap preserves directory order with sequential indices, read_section_payloads fails closed on bounds errors without partial results, and regression coverage exercises zero-section, zero-size, truncated-directory, out-of-bounds, and non-monotonic-offset cases.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The dwg-parser-worker skill mandates test-first changes, but this feature was already implemented in the shared dirty worktree before the reviewed worker session. The worker reasonably performed a no-op verification path instead, so the skill procedure does not fully match mission reality for already-satisfied features.",
+      "evidence": "C:\\Users\\Administrator\\.factory\\missions\\f0d64c74-1f12-4cd4-aade-9b60eed14d76\\worker-transcripts.jsonl entry for workerSessionId 884a0f50-1ffd-440b-b44c-d228de6074ec shows no ApplyPatch calls and records skillFeedback.followedProcedure=false with a deviation for Work Procedure step 2; D:\\work\\plant-code\\cad\\H7CAD\\.factory\\skills\\dwg-parser-worker\\SKILL.md Work Procedure step 2 requires adding or updating failing tests first."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. The reviewed feature behavior is present in the current worktree and covered by focused regression tests; no blocking or non-blocking code issues were identified for the requested contract."
+}

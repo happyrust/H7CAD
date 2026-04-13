@@ -21,7 +21,28 @@ fn read_header_rejects_unknown_magic() {
 }
 
 #[test]
-fn read_dwg_reports_known_version_as_unimplemented_parser() {
+fn sniff_version_rejects_short_header_before_magic_parse() {
+    assert_eq!(
+        sniff_version(b"AC10").unwrap_err(),
+        DwgReadError::TruncatedHeader { expected_at_least: 6 }
+    );
+}
+
+#[test]
+fn read_header_rejects_known_unsupported_versions_explicitly() {
+    for version in [
+        DwgVersion::Ac1021,
+        DwgVersion::Ac1024,
+        DwgVersion::Ac1027,
+        DwgVersion::Ac1032,
+    ] {
+        let err = DwgFileHeader::parse(version.to_string().as_bytes()).unwrap_err();
+        assert_eq!(err, DwgReadError::UnsupportedVersion(version));
+    }
+}
+
+#[test]
+fn read_dwg_returns_seeded_document_scaffold_for_supported_fixture() {
     let doc = read_dwg(&fixture_ac1018(1, &[(0x25, 0x03)], &[b"DWG"])).unwrap();
     assert_eq!(doc.model_space_handle().value(), 1);
     assert_eq!(doc.paper_space_handle().value(), 2);
@@ -34,6 +55,29 @@ fn read_header_extracts_ac1015_section_count() {
 
     assert_eq!(header.version, DwgVersion::Ac1015);
     assert_eq!(header.section_count, 3);
+}
+
+#[test]
+fn read_header_extracts_ac1018_section_count() {
+    let bytes = fixture_ac1018(7, &[], &[]);
+    let header = DwgFileHeader::parse(&bytes).unwrap();
+
+    assert_eq!(header.version, DwgVersion::Ac1018);
+    assert_eq!(header.section_count, 7);
+}
+
+#[test]
+fn read_header_reports_ac1015_boundary_truncation() {
+    let err = DwgFileHeader::parse(&truncated_supported_header(DwgVersion::Ac1015)).unwrap_err();
+
+    assert_eq!(err, DwgReadError::TruncatedHeader { expected_at_least: 25 });
+}
+
+#[test]
+fn read_header_reports_ac1018_boundary_truncation() {
+    let err = DwgFileHeader::parse(&truncated_supported_header(DwgVersion::Ac1018)).unwrap_err();
+
+    assert_eq!(err, DwgReadError::TruncatedHeader { expected_at_least: 29 });
 }
 
 #[test]
@@ -344,4 +388,16 @@ fn fixture_with_sparse_layout(
     }
 
     bytes
+}
+
+fn truncated_supported_header(version: DwgVersion) -> Vec<u8> {
+    match version {
+        DwgVersion::Ac1015 => version.to_string().as_bytes()[..].to_vec(),
+        DwgVersion::Ac1018 => {
+            let mut bytes = vec![0; 28];
+            bytes[..6].copy_from_slice(version.to_string().as_bytes());
+            bytes
+        }
+        other => panic!("unsupported test fixture version: {other:?}"),
+    }
 }

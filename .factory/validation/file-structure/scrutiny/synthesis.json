@@ -1,0 +1,68 @@
+{
+  "milestone": "file-structure",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 1,
+    "failed": 2,
+    "failedFeatures": [
+      "dwg-fixtures-file-structure-edge-cases",
+      "dwg-parser-header-error-contract"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "dwg-parser-header-error-contract",
+      "severity": "blocking",
+      "description": "Feature handoff cites commit cd9cde7, but that commit does not include the parser change in crates/h7cad-native-dwg/src/file_header.rs, so the implementation lacks auditable commit provenance."
+    }
+  ],
+  "orchestratorOverride": {
+    "applied": true,
+    "reason": "The validator failure is limited to commit provenance in a user-approved shared dirty workspace, while cargo validators passed and the audit-fix feature confirmed behavior plus test-name clarity. The attempted audit-fix could not produce an isolated feature-only commit because the same test file already contains interleaved pre-existing file-structure edits. The milestone proceeds with this explicit audit trail rather than blocking parser progress on workspace hygiene.",
+    "deferredWork": [
+      "If a clean worktree is created later, re-run file-structure audit/provenance cleanup there instead of in the current shared workspace."
+    ]
+  },
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skill:dwg-parser-worker",
+      "suggestion": "Document a valid success/handoff path for shared dirty workspaces when isolated feature-only commits are unsafe, instead of requiring workers to reuse unrelated commit IDs.",
+      "evidence": "The review for dwg-parser-header-error-contract failed because EndFeatureRun required a commitId and the worker reported cd9cde7 even though that commit only changed tests, not the parser implementation in src/file_header.rs.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill:dwg-parser-worker",
+      "suggestion": "Allow an explicit already-implemented verification path when a feature is already present in the shared worktree, instead of always requiring test-first code edits.",
+      "evidence": "The section-map feature review passed but recorded a skill deviation because the current skill assumes test-first implementation work even when the feature had already landed in the shared dirty worktree.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill:dwg-fixture-worker",
+      "suggestion": "Clarify fixture-worker scope boundaries so fixture features do not also absorb pending-graph/dispatch assertions unless the mission explicitly asks for cross-milestone coverage.",
+      "evidence": "The fixture feature review found read_headers.rs additions for pending_document_preserves_section_directory_entries and dispatch_entry_points_follow_pending_object_kind even though the feature description was limited to file-structure fixture foundation.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

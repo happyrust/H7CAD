@@ -1,0 +1,28 @@
+{
+  "featureId": "dwg-fixtures-file-structure-edge-cases",
+  "reviewedAt": "2026-04-13T09:21:56Z",
+  "commitId": "cd9cde7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The fixture feature mostly delivers the requested synthetic edge-case builders and tests in crates/h7cad-native-dwg/tests/read_headers.rs, but it also folds parser-behavior assertions and pending/resolver coverage into the same file. That extra scope does not break the fixture work, but one test name now misstates behavior by claiming read_dwg is unimplemented even though the assertion only checks the seeded document scaffold.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/tests/read_headers.rs",
+        "line": 45,
+        "severity": "non_blocking",
+        "description": "`read_dwg_reports_known_version_as_unimplemented_parser` is misleadingly named: it asserts that `read_dwg()` succeeds and returns the seeded document handles, which is the opposite of an \u201cunimplemented parser\u201d outcome. This weakens the review surface for later parser milestones because the test name no longer matches the behavior it documents."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `dwg-fixture-worker` skill says fixture features should keep work isolated to fixture/manifests/regression support code, but this feature commit also includes pending-graph and dispatch/resolver-facing assertions in the same integration test file.",
+      "evidence": "`crates/h7cad-native-dwg/tests/read_headers.rs:213` adds `pending_document_preserves_section_directory_entries`; `crates/h7cad-native-dwg/tests/read_headers.rs:263` adds `dispatch_entry_points_follow_pending_object_kind`; the handoff states the feature was only for file-structure fixture foundation."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the mission metadata, handoff, transcript skeleton, skill file, architecture/services docs, and commit `cd9cde7`. The feature adds the requested synthetic edge-case fixture helpers and regression coverage, but I marked the review failed because the suite contains at least one misleadingly named test (`read_dwg_reports_known_version_as_unimplemented_parser`) that documents the opposite behavior of what its name claims."
+}

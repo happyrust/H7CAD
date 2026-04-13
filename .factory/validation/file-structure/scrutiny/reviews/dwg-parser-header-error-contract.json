@@ -1,0 +1,28 @@
+{
+  "featureId": "dwg-parser-header-error-contract",
+  "reviewedAt": "2026-04-13T09:21:44.267838+00:00",
+  "commitId": "cd9cde7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The header parser now distinguishes supported and unsupported versions and the added tests cover the requested AC1015/AC1018 boundaries, but the feature is not cleanly attributable to the reported commit. The handoff cites commit cd9cde7, yet that commit only touched tests/read_headers.rs and does not include the parser change in src/file_header.rs that the feature depends on.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/src/file_header.rs",
+        "line": 39,
+        "severity": "blocking",
+        "description": "The reviewed feature cannot be traced to the reported commit. The handoff and review metadata point to commit cd9cde7, but git show cd9cde7 --stat -- crates/h7cad-native-dwg/src/file_header.rs crates/h7cad-native-dwg/tests/read_headers.rs shows only test-file changes; the parser behavior change in section_count_offset() is outside that commit, so the feature lacks auditable implementation provenance."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The dwg-parser-worker skill does not give a workable path for success reporting when the workspace is shared and dirty, yet EndFeatureRun requires a commitId. The worker reused an unrelated prior commit ID because there was no documented no-commit path.",
+      "evidence": "Handoff skillFeedback marks followedProcedure=false and says cd9cde7 was reused because creating an isolated commit was unsafe. AGENTS.md documents shared dirty workspace constraints, but .factory/skills/dwg-parser-worker/SKILL.md step 7 still assumes a concrete commit-backed handoff."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Fail: behavior and tests look correct in the current worktree, but the feature review fails because the reported commit provenance is incorrect and does not contain the parser-side implementation it claims to review."
+}
