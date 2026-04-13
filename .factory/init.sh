@@ -1,6 +1,9 @@
-#!/usr/bin/env bash
-set -e
+#!/usr/bin/env python3
+"""No-op init for the DWG parser mission.
 
-# No extra environment bootstrap is required for this parser-only mission.
-# Workers should use the cargo commands from .factory/services.yaml directly.
-exit 0
+The current mission requires no environment bootstrap. Keeping this file as a
+Python no-op makes it safe for worker environments that invoke `.factory/init.sh`
+through Python on Windows.
+"""
+
+raise SystemExit(0)
