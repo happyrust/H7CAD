@@ -1,0 +1,28 @@
+{
+  "featureId": "bridge-common-fields-and-document-counts",
+  "reviewedAt": "2026-04-14T00:00:00Z",
+  "commitId": "c77ab7d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The added regressions improve bridge coverage, but the feature does not actually satisfy its shared-field preservation goal for WIPEOUT: native polygon vertices are converted to world coordinates on compat->native roundtrip, so wipeout geometry is not preserved even though the new tests only count compat presence.",
+    "issues": [
+      {
+        "file": "src/io/native_bridge.rs",
+        "line": 741,
+        "severity": "blocking",
+        "description": "The Wipeout reverse bridge rebuilds native clip vertices from `wipeout.world_boundary_vertices()`, which yields world-space points after `native_entity_to_acadrust()` created the compat wipeout with insertion/u/v vectors. Native `EntityData::Wipeout.clip_vertices` stores local clip vertices, so a native->compat->native roundtrip mutates polygonal wipeout geometry (for example [[0,0],[4,0],[3,2],[0,3]] becomes [[0,0],[4,0],[12,6],[0,9]]). The feature's shared-field regression explicitly includes WIPEOUT as a representative family, but the test only asserts common fields and therefore misses this payload corruption."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The dxf-bridge-worker skill says to prefer explicit field assertions rather than only counts, but this feature's shared-field test covered WIPEOUT only via common fields and the document-level test only counted compat exposure, allowing a geometry regression to slip through.",
+      "evidence": "Skill: .factory/skills/dxf-bridge-worker/SKILL.md step 4. Feature tests in src/io/native_bridge.rs:2380 and 2480 include WIPEOUT in representative/count coverage, but there is no WIPEOUT payload equality assertion despite the roundtrip using `world_boundary_vertices()` at src/io/native_bridge.rs:744."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: WIPEOUT geometry is still corrupted on native->compat->native roundtrip, so the feature does not fully deliver shared-field preservation across representative supported families."
+}

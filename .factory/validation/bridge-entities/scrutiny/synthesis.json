@@ -1,0 +1,90 @@
+{
+  "milestone": "bridge-entities",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade -- --test-threads=16",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo check",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 0,
+    "failed": 4,
+    "failedFeatures": [
+      "bridge-ellipse-and-direct-geometry",
+      "bridge-polyline-and-hatch",
+      "bridge-annotations-images-and-payload-entities",
+      "bridge-common-fields-and-document-counts"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "bridge-ellipse-and-direct-geometry",
+      "severity": "blocking",
+      "description": "SOLID bridge drops compat-visible `normal` and `thickness`, so payload fidelity is not preserved through native/compat/native roundtrip."
+    },
+    {
+      "featureId": "bridge-ellipse-and-direct-geometry",
+      "severity": "blocking",
+      "description": "Face3D bridge cannot preserve compat `invisible_edges`, and coverage misses this observable payload regression."
+    },
+    {
+      "featureId": "bridge-ellipse-and-direct-geometry",
+      "severity": "blocking",
+      "description": "SHAPE bridge only preserves insertion, size, and shape number while dropping other compat-visible payload fields such as name, rotation/scaling, normal, thickness, and style metadata."
+    },
+    {
+      "featureId": "bridge-polyline-and-hatch",
+      "severity": "blocking",
+      "description": "PolygonMesh and PolyfaceMesh bridge-back collapses mesh dimensions/face records into flat vertex lists, so family semantics are not preserved."
+    },
+    {
+      "featureId": "bridge-polyline-and-hatch",
+      "severity": "blocking",
+      "description": "HATCH bridge-back panics on spline boundary edges instead of preserving or safely accounting for valid compat hatch content."
+    },
+    {
+      "featureId": "bridge-annotations-images-and-payload-entities",
+      "severity": "blocking",
+      "description": "Recorded feature commit `11579d20f655a7713823cf86ca37770006efc7f3` only updates `.factory/services.yaml` and does not contain the claimed bridge implementation/tests, so the feature lacks attributable completed-change evidence."
+    },
+    {
+      "featureId": "bridge-common-fields-and-document-counts",
+      "severity": "blocking",
+      "description": "WIPEOUT reverse bridge rebuilds local clip vertices from world-space boundary vertices, corrupting wipeout geometry on native/compat/native roundtrip."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update the `dxf-bridge-worker` skill to use the working bridge test command `cargo test --bin H7CAD native_bridge -- --test-threads=16` instead of `cargo test --lib native_bridge`, and note that workers should verify stale manifest commands before using them.",
+      "evidence": "All four review reports flagged the stale bridge test command as a repeated issue; the worker transcripts had to deviate because the root package has no library target.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Update `.factory/services.yaml` with the working bridge test command.",
+      "reason": "already applied in the repository state reviewed by scrutiny"
+    },
+    {
+      "observation": "Add AGENTS guidance to require payload-level assertions for WIPEOUT-like entities.",
+      "reason": "ambiguous; the existing AGENTS and skill guidance already require field-level assertions, and the concrete gap is reviewer/feature execution rather than missing mission guidance"
+    }
+  ],
+  "previousRound": null
+}

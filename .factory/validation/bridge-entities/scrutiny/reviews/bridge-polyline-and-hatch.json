@@ -1,0 +1,34 @@
+{
+  "featureId": "bridge-polyline-and-hatch",
+  "reviewedAt": "2026-04-14T00:00:00Z",
+  "commitId": "7087298770a18c5246ba3aebd43abba72b3d596c",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds coverage for polyline families and hatch document visibility, but the bridge still drops semantics required by the feature contract. In particular, polyface/polygon mesh structure is collapsed to a flat vertex list and hatch conversion hard-panics on valid spline boundary paths.",
+    "issues": [
+      {
+        "file": "src/io/native_bridge.rs",
+        "line": 827,
+        "severity": "blocking",
+        "description": "`PolygonMesh` and `PolyfaceMesh` are converted to native `EntityData::Polyline` by copying only vertex positions (and, for polyface, width/bulge fields). acadrust meshes also carry mesh dimensions / face records (`vendor_tmp/acadrust/src/entities/polygon_mesh.rs`, `vendor_tmp/acadrust/src/entities/polyface_mesh.rs`), but h7cad-native-model has no fields for them and the bridge silently discards them on compat->native conversion. This violates the feature requirement to preserve family type and vertex data for classic polyline families, because a bridged polyface mesh cannot round-trip its boundary/face structure and a polygon mesh loses its M/N mesh shape metadata."
+      },
+      {
+        "file": "src/io/native_bridge.rs",
+        "line": 1585,
+        "severity": "blocking",
+        "description": "`acad_hatch_path_to_native()` panics on `BoundaryEdge::Spline(_)`. acadrust HATCH boundary paths explicitly support spline edges (`vendor_tmp/acadrust/src/entities/hatch.rs`), so any compat document containing a spline hatch loop will crash during bridge-back instead of preserving boundary structure or failing gracefully. The feature contract explicitly calls for preserving hatch boundary structure through native/compat/native conversion, so this hard panic leaves valid HATCH content unsupported."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `dxf-bridge-worker` skill tells workers to run `cargo test --lib native_bridge`, but this workspace has no root library target; the worker transcript shows that command failing before switching to the working binary test filter `cargo test --bin H7CAD native_bridge -- --test-threads=16`.",
+      "evidence": "`D:/work/plant-code/cad/H7CAD/.factory/skills/dxf-bridge-worker/SKILL.md` step 8 vs. worker transcript skeleton for session `79b1291b-b0ac-4e4e-92ac-d096142409a8`, which records `cargo test --lib native_bridge -- --test-threads=16` failing with `error: no library targets found in package `H7CAD``."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. The bridge no longer drops the targeted entities entirely, but it still does not preserve polyface/polygon mesh semantics and it can panic on spline hatch boundaries, so the implementation does not fully satisfy the feature requirements."
+}
