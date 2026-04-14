@@ -39,7 +39,7 @@ pub fn read_dwg(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
     let sections = SectionMap::parse(bytes, &header)?;
     let payloads = sections.read_section_payloads(bytes)?;
     let pending = build_pending_document(&header, &sections, payloads)?;
-    Ok(resolve_document(&pending))
+    resolve_document(&pending)
 }
 
 pub fn build_pending_document(
