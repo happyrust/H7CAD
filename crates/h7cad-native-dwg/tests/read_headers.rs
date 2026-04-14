@@ -680,8 +680,8 @@ fn semantic_fixture_payloads_cover_reordered_embedded_zero_and_collision_cases()
         .expect("same-size-collision fixture should exist");
     let layout_variant = cases
         .iter()
-        .find(|case| case.id == "layout-variant")
-        .expect("layout-variant fixture should exist");
+        .find(|case| case.id == "layout-variant-a")
+        .expect("layout-variant-a fixture should exist");
     let ownership = cases
         .iter()
         .find(|case| case.id == "ownership-graph")
@@ -734,9 +734,14 @@ fn semantic_fixture_payloads_cover_reordered_embedded_zero_and_collision_cases()
     assert_eq!(
         semantic_fixture_sections(layout_variant),
         vec![
+            vec![b"TBL:LAYER:LayerPaper:H70".to_vec()],
             vec![b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA".to_vec()],
-            vec![b"OBJ:LAYOUT:LayoutA:H62:B72".to_vec()],
-            vec![b"ENT:TEXT:E73:O72:LLayerPaper".to_vec()],
+            vec![
+                b"OBJ:LAYOUT:LayoutA:H62:B72".to_vec(),
+                b"ENT:TEXT:E73:O72:LLayerPaper".to_vec(),
+                b"ENT:MTXT:E74:O72:LLayerPaper".to_vec(),
+                b"ENT:INSERT:E75:O72:LLayerPaper:TB72".to_vec(),
+            ],
         ]
     );
     assert_eq!(
@@ -857,19 +862,89 @@ fn mixed_type_fixture_preserves_expanded_semantic_identity_and_accounting() {
 }
 
 #[test]
+fn equivalent_layout_variants_preserve_expanded_family_identity_on_parser_and_resolved_surfaces() {
+    let first = semantic_record_fixture("layout-variant-a");
+    let second = semantic_record_fixture("layout-variant-b");
+
+    let first_pending = parse_pending_fixture(&first);
+    let second_pending = parse_pending_fixture(&second);
+    let first_resolved = read_dwg(&first).unwrap();
+    let second_resolved = read_dwg(&second).unwrap();
+
+    let mut first_projection = pending_provenance_projection(&first_pending);
+    let mut second_projection = pending_provenance_projection(&second_pending);
+    first_projection.sort();
+    second_projection.sort();
+    assert_eq!(first_projection, second_projection);
+    assert_eq!(
+        first_projection
+            .iter()
+            .map(|tuple| {
+                (
+                    tuple.semantic_identity.clone(),
+                    tuple.semantic_link.clone(),
+                    tuple.target,
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "layout:LayoutA".to_string(),
+                "block_handle:72".to_string(),
+                "object",
+            ),
+            (
+                "table:LAYER:LayerPaper".to_string(),
+                "handle:70".to_string(),
+                "table",
+            ),
+            (
+                "block:*Paper_Space".to_string(),
+                "layout:LayoutA".to_string(),
+                "object",
+            ),
+            (
+                "entity:TEXT".to_string(),
+                "layer:LayerPaper|owner:72".to_string(),
+                "entity",
+            ),
+            (
+                "entity:MTXT".to_string(),
+                "layer:LayerPaper|owner:72".to_string(),
+                "entity",
+            ),
+            (
+                "entity:INSERT".to_string(),
+                "layer:LayerPaper|owner:72".to_string(),
+                "entity",
+            ),
+        ]
+    );
+
+    assert_eq!(
+        resolved_entity_projection(&first_resolved, &[0x73, 0x74, 0x75]),
+        resolved_entity_projection(&second_resolved, &[0x73, 0x74, 0x75])
+    );
+}
+
+#[test]
 fn semantic_fixture_bytes_remain_stable_across_layout_variants() {
     let fixture = semantic_record_fixture("reordered-equivalent-a");
     let reordered = semantic_record_fixture("reordered-equivalent-b");
-    let first = semantic_record_fixture("layout-variant");
-    let second = semantic_record_fixture("layout-variant");
+    let first = semantic_record_fixture("layout-variant-a");
+    let second = semantic_record_fixture("layout-variant-b");
 
-    assert_eq!(parse_pending_fixture(&first), parse_pending_fixture(&second));
     assert_ne!(fixture, reordered);
     let mut first_projection = parse_semantic_record_tuples(&fixture);
     let mut second_projection = parse_semantic_record_tuples(&reordered);
     first_projection.sort();
     second_projection.sort();
     assert_eq!(first_projection, second_projection);
+    let mut first_variant_projection = pending_provenance_projection(&parse_pending_fixture(&first));
+    let mut second_variant_projection = pending_provenance_projection(&parse_pending_fixture(&second));
+    first_variant_projection.sort();
+    second_variant_projection.sort();
+    assert_eq!(first_variant_projection, second_variant_projection);
 }
 
 #[test]
@@ -1161,7 +1236,7 @@ fn semantic_provenance_projection_is_stable_across_repeated_parses() {
 
 #[test]
 fn block_layout_semantics_are_outwardly_distinguishable_on_parser_surfaces() {
-    let pending = parse_pending_fixture(&semantic_record_fixture("layout-variant"));
+    let pending = parse_pending_fixture(&semantic_record_fixture("layout-variant-a"));
     let projection = pending_provenance_projection(&pending);
 
     assert!(projection.iter().any(|tuple| {
@@ -1234,16 +1309,16 @@ fn outward_summaries_distinguish_same_size_semantic_records_by_identity_fields()
 
 #[test]
 fn provenance_projection_stays_deterministic_across_equivalent_layout_variants() {
-    let first = parse_pending_fixture(&semantic_record_fixture("layout-variant"));
-    let second = parse_pending_fixture(&semantic_record_fixture("layout-variant"));
+    let first = parse_pending_fixture(&semantic_record_fixture("layout-variant-a"));
+    let second = parse_pending_fixture(&semantic_record_fixture("layout-variant-b"));
 
     assert_eq!(
         pending_provenance_projection(&first),
         pending_provenance_projection(&second)
     );
 
-    let first_resolved = read_dwg(&semantic_record_fixture("layout-variant")).unwrap();
-    let second_resolved = read_dwg(&semantic_record_fixture("layout-variant")).unwrap();
+    let first_resolved = read_dwg(&semantic_record_fixture("layout-variant-a")).unwrap();
+    let second_resolved = read_dwg(&semantic_record_fixture("layout-variant-b")).unwrap();
     assert_eq!(
         resolved_parser_emitted_object_projection(&first_resolved, &[0x62, 0x72, 0x73]),
         resolved_parser_emitted_object_projection(&second_resolved, &[0x62, 0x72, 0x73])
@@ -1422,6 +1497,28 @@ fn resolved_parser_emitted_object_projection(
     projection
 }
 
+fn resolved_entity_projection(
+    doc: &h7cad_native_model::CadDocument,
+    handles: &[u64],
+) -> Vec<(u64, u64, String)> {
+    let mut projection = doc
+        .entities
+        .iter()
+        .chain(doc.block_records.values().flat_map(|block| block.entities.iter()))
+        .filter_map(|entity| {
+            handles.contains(&entity.handle.value()).then(|| {
+                (
+                    entity.handle.value(),
+                    entity.owner_handle.value(),
+                    entity.layer_name.clone(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    projection.sort();
+    projection
+}
+
 fn fixture_ac1018_with_pending_graph_payloads() -> Vec<u8> {
     let payloads = pending_graph_payloads();
     let entries = pending_graph_entries(&payloads);
@@ -1511,11 +1608,29 @@ fn semantic_record_fixture_cases() -> Vec<SemanticFixtureCase> {
             ])]),
         ),
         SemanticFixtureCase::new(
-            "layout-variant",
+            "layout-variant-a",
             semantic_entries(&[0x80, 0xC0, 0xF0], &[
+                semantic_join(&[b"TBL:LAYER:LayerPaper:H70"]),
+                semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA"]),
+                semantic_join(&[
+                    b"OBJ:LAYOUT:LayoutA:H62:B72",
+                    b"ENT:TEXT:E73:O72:LLayerPaper",
+                    b"ENT:MTXT:E74:O72:LLayerPaper",
+                    b"ENT:INSERT:E75:O72:LLayerPaper:TB72",
+                ]),
+            ]),
+        ),
+        SemanticFixtureCase::new(
+            "layout-variant-b",
+            semantic_entries(&[0x80, 0xB0, 0xE0, 0x120, 0x150], &[
+                semantic_join(&[b"TBL:LAYER:LayerPaper:H70"]),
+                semantic_join(&[b"ENT:TEXT:E73:O72:LLayerPaper"]),
                 semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA"]),
                 semantic_join(&[b"OBJ:LAYOUT:LayoutA:H62:B72"]),
-                semantic_join(&[b"ENT:TEXT:E73:O72:LLayerPaper"]),
+                semantic_join(&[
+                    b"ENT:MTXT:E74:O72:LLayerPaper",
+                    b"ENT:INSERT:E75:O72:LLayerPaper:TB72",
+                ]),
             ]),
         ),
         SemanticFixtureCase::new(
