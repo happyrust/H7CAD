@@ -1,0 +1,46 @@
+{
+  "milestone": "semantic-type-coverage",
+  "round": 2,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md / services.yaml alignment",
+      "suggestion": "Align repository-level .factory/services.yaml baseline commands with the DWG parser validation lane used by this mission, or document the mission-specific override in a single authoritative place.",
+      "evidence": ".factory/services.yaml lists cargo test -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade -- --test-threads=16, while mission AGENTS.md specifies the DWG lane baseline cargo check -p h7cad-native-dwg, cargo test -p h7cad-native-dwg -- --test-threads=1, and cargo check -p h7cad-native-facade. The fix handoff for worker 98a92667-3fb8-4844-a3f1-f34fe94cb894 explicitly calls out this mismatch in discoveredIssues.",
+      "isSystemic": true
+    },
+    {
+      "target": "skill:dwg-fixture-worker",
+      "suggestion": "Update the dwg-fixture-worker startup guidance so it does not direct DWG parser workers to the DXF-oriented .factory/library/user-testing.md file as primary context.",
+      "evidence": "dwg-fixture-worker SKILL.md work procedure step 1 requires `.factory/library/user-testing.md`. The file at `D:/work/plant-code/cad/H7CAD/.factory/library/user-testing.md` is DXF-native focused and does not describe the DWG semantic-type-coverage mission, while the fix transcript shows the worker separately read `mission.md`, `AGENTS.md`, `validation-contract.md`, and `features.json` for actual DWG context.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/semantic-type-coverage/scrutiny/synthesis.json"
+}

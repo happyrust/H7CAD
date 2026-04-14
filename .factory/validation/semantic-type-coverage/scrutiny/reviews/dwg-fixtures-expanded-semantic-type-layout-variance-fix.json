@@ -1,0 +1,15 @@
+{
+  "featureId": "dwg-fixtures-expanded-semantic-type-layout-variance-fix",
+  "reviewedAt": "2026-04-14T04:18:34Z",
+  "commitId": "8e165defa6ea99b4c490b4f5929a57a429209470",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix commit directly addresses the prior failure by replacing the single layout-variant fixture with paired layout-variant-a/layout-variant-b cases that exercise the expanded semantic families across non-semantic layout differences, then asserting both parser-facing provenance and resolved entity projections remain identical across those variants. The change stays fixture-only within crates/h7cad-native-dwg/tests/read_headers.rs and preserves the atomic evidence chain requested by the follow-up feature.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/semantic-type-coverage/scrutiny/reviews/dwg-fixtures-expanded-semantic-type-cases.json",
+  "summary": "Pass: reviewed the original failed feature diff (8c96475) and the fix diff (8e165de). The original commit missed equivalent-layout coverage for the expanded semantic families; the fix adds paired layout-variant fixtures plus targeted parser/resolved assertions that cover TEXT, MTXT, INSERT, layer-table, block, and layout semantics across equivalent layouts while staying fixture-only."
+}

@@ -1,0 +1,21 @@
+{
+  "featureId": "dwg-parser-expanded-semantic-type-provenance-contract",
+  "reviewedAt": "2026-04-14T04:18:52Z",
+  "commitId": "8cca950",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The parser feature fix adequately addresses the prior scrutiny failure by correcting provenance to commit 8cca950, the commit that actually adds the missing resolved-projection assertions for mixed semantic families and equivalent-layout determinism. The original parser-facing behavior was already present in 8c96475, and the fix feature truthfully re-anchors the evidence chain to the commit containing the outward-facing resolved coverage required by the feature contract.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "The fix handoff relied on .factory/services.yaml baseline commands that are still DXF-oriented, even though this mission's AGENTS guidance defines a DWG-parser-specific validation sequence. That mismatch can keep provenance-only follow-up workers from using the most relevant default validation surface.",
+      "evidence": ".factory/services.yaml lists cargo test -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade -- --test-threads=16, while mission AGENTS.md specifies the DWG lane baseline cargo check -p h7cad-native-dwg, cargo test -p h7cad-native-dwg -- --test-threads=1, and cargo check -p h7cad-native-facade. The fix handoff for worker 98a92667-3fb8-4844-a3f1-f34fe94cb894 explicitly calls out this mismatch in discoveredIssues."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/semantic-type-coverage/scrutiny/reviews/dwg-parser-expanded-semantic-type-provenance-contract.json",
+  "summary": "Pass: the fix review confirms the original failure was a provenance mismatch, not a missing implementation. The follow-up feature correctly identifies commit 8cca950 as the truthful evidence commit because that commit adds the resolved mixed-type projection assertions and resolved equivalent-layout determinism assertions scrutiny required."
+}

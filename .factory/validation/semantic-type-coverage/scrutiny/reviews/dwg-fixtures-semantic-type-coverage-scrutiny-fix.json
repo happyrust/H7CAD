@@ -1,0 +1,21 @@
+{
+  "featureId": "dwg-fixtures-semantic-type-coverage-scrutiny-fix",
+  "reviewedAt": "2026-04-14T04:20:00Z",
+  "commitId": "8cca95077c41d980977062be31eb81f726ec427b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fixture-only follow-up stays within scope and adds the missing end-to-end assertions the feature promised. The mixed-type regression now checks parser-emitted resolved projections for the expanded table/object families, and the equivalent-layout regression now verifies resolved projection determinism for the expanded semantic-family handles without touching parser/runtime code.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The dwg-fixture-worker procedure says to read `.factory/library/user-testing.md`, but that library doc currently describes the DXF-native migration mission rather than this DWG parser fixture mission. The fix worker followed the procedure and still had to rely on mission-specific docs instead, so the shared guidance remains misleading for DWG parser workers.",
+      "evidence": "dwg-fixture-worker SKILL.md work procedure step 1 requires `.factory/library/user-testing.md`. The file at `D:/work/plant-code/cad/H7CAD/.factory/library/user-testing.md` is DXF-native focused and does not describe the DWG semantic-type-coverage mission, while the fix transcript shows the worker separately read `mission.md`, `AGENTS.md`, `validation-contract.md`, and `features.json` for actual DWG context."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/semantic-type-coverage/scrutiny/reviews/dwg-fixtures-expanded-semantic-type-cases.json",
+  "summary": "Pass: reviewed the prior failing feature diff (`8c96475`) and the fix diff (`8cca950`). The prior commit lacked equivalent-layout coverage and mixed-type resolved-projection assertions; the fix commit adds both in `crates/h7cad-native-dwg/tests/read_headers.rs` without widening scope beyond fixture-side scrutiny coverage."
+}

@@ -1,0 +1,21 @@
+{
+  "featureId": "dwg-parser-expanded-semantic-type-provenance-commit-fix",
+  "reviewedAt": "2026-04-14T04:18:19Z",
+  "commitId": "8cca950",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix adequately resolves the prior failure by switching provenance to commit 8cca950, the first commit that actually contains the resolved-projection assertions scrutiny required. Reviewing both diffs shows the original cited commit 8c96475 only added parser-facing mixed-type coverage, while 8cca950 added the missing resolved parser-emitted object projection assertions and resolved determinism check that the prior review flagged.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "services",
+      "observation": "The fix worker followed the mission and AGENTS guidance to validate the DWG parser surface, but the repository-level .factory/services.yaml still points at DXF-oriented baseline commands instead of the DWG parser lane used by this mission. That mismatch can send verification-first workers to an irrelevant baseline unless they notice the mission-specific override.",
+      "evidence": "Fix handoff verification ran cargo test -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade -- --test-threads=16 from .factory/services.yaml plus separate DWG-specific cargo commands, while mission AGENTS.md says semantic-type-coverage validation should use cargo check -p h7cad-native-dwg, cargo test -p h7cad-native-dwg -- --test-threads=1, and cargo check -p h7cad-native-facade."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/semantic-type-coverage/scrutiny/reviews/dwg-parser-expanded-semantic-type-provenance-contract.json",
+  "summary": "Pass: the provenance-only fix correctly addresses the original failure by citing commit 8cca950, which does contain the resolved mixed-type projection assertions and equivalent-layout resolved determinism evidence that were missing from the original cited commit 8c96475."
+}

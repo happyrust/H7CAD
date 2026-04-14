@@ -1,0 +1,15 @@
+{
+  "featureId": "dwg-fixtures-expanded-semantic-type-cases",
+  "reviewedAt": "2026-04-14T04:18:22Z",
+  "commitId": "8e165defa6ea99b4c490b4f5929a57a429209470",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix addresses the prior blocking gap by adding paired layout-variant fixtures and direct assertions that expanded text/reference families preserve identical parser-facing provenance and resolved entity projections across equivalent layouts. The remaining changes stay within the shared fixture test surface, and I did not find a correctness issue in the follow-up patch.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/semantic-type-coverage/scrutiny/reviews/dwg-fixtures-expanded-semantic-type-cases.json",
+  "summary": "Pass: reviewed the original failing commit 8c96475 and the fix commit 8e165de. The follow-up closes the missing equivalent-layout coverage by adding layout-variant-a/layout-variant-b plus equivalent_layout_variants_preserve_expanded_family_identity_on_parser_and_resolved_surfaces, which compares expanded-family parser provenance and resolved entity projections across both variants."
+}
