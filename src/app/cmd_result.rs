@@ -1510,65 +1510,36 @@ impl H7CAD {
             }
             CmdResult::DdeditEntity { handle, new_text } => {
                 let mut updated = false;
-                let mut compat_changed = false;
-                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                    match entity {
-                        acadrust::EntityType::Text(t) => {
-                            t.value = new_text;
-                            compat_changed = true;
-                            updated = true;
+                let nh = nm::Handle::new(handle.value());
+                if let Some(store) = self.tabs[i].scene.native_store.as_mut() {
+                    if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                        match &mut entity.data {
+                            nm::EntityData::Text { value, .. } => {
+                                *value = new_text.clone();
+                                updated = true;
+                            }
+                            nm::EntityData::MText { value, .. } => {
+                                *value = new_text.clone();
+                                updated = true;
+                            }
+                            nm::EntityData::AttDef { default_value, .. } => {
+                                *default_value = new_text.clone();
+                                updated = true;
+                            }
+                            nm::EntityData::Attrib { value, .. } => {
+                                *value = new_text.clone();
+                                updated = true;
+                            }
+                            nm::EntityData::Dimension { text_override, .. } => {
+                                *text_override = new_text.clone();
+                                updated = true;
+                            }
+                            _ => {}
                         }
-                        acadrust::EntityType::MText(t) => {
-                            t.value = new_text;
-                            compat_changed = true;
-                            updated = true;
-                        }
-                        acadrust::EntityType::AttributeDefinition(a) => {
-                            a.default_value = new_text;
-                            compat_changed = true;
-                            updated = true;
-                        }
-                        acadrust::EntityType::AttributeEntity(a) => {
-                            a.set_value(new_text);
-                            compat_changed = true;
-                            updated = true;
-                        }
-                        acadrust::EntityType::Dimension(d) => {
-                            // Empty string resets to auto-measured value; otherwise set override.
-                            let base = d.base_mut();
-                            base.text = new_text;
-                            compat_changed = true;
-                            updated = true;
-                        }
-                        _ => {}
-                    }
-                } else if let Some(entity) = self.tabs[i].scene.native_entity_mut(handle) {
-                    match &mut entity.data {
-                        nm::EntityData::Text { value, .. } => {
-                            *value = new_text.clone();
-                            updated = true;
-                        }
-                        nm::EntityData::MText { value, .. } => {
-                            *value = new_text.clone();
-                            updated = true;
-                        }
-                        nm::EntityData::AttDef { default_value, .. } => {
-                            *default_value = new_text.clone();
-                            updated = true;
-                        }
-                        nm::EntityData::Attrib { value, .. } => {
-                            *value = new_text.clone();
-                            updated = true;
-                        }
-                        nm::EntityData::Dimension { text_override, .. } => {
-                            *text_override = new_text.clone();
-                            updated = true;
-                        }
-                        _ => {}
                     }
                 }
-                if compat_changed {
-                    self.sync_native_entity_from_compat(i, handle);
+                if updated {
+                    self.sync_compat_from_native(i, handle);
                 }
                 if updated {
                     self.push_undo_snapshot(i, "DDEDIT");
