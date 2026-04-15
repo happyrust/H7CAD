@@ -1,7 +1,7 @@
 // I/O module — open, save, and export CAD documents.
 //
-// All file reading/writing goes through acadrust.
-// Default save format: DWG (AC1032 / R2018+).
+// Native I/O helpers are the forward path. Compatibility wrappers remain for
+// the current UI/runtime until scene/document migration is complete.
 
 pub mod obj;
 pub mod pdf_export;
@@ -12,7 +12,8 @@ pub mod stl;
 pub mod xref;
 
 use acadrust::io::dwg::DwgReader;
-use acadrust::{CadDocument, DwgWriter, DxfReader, DxfWriter};
+use acadrust::{CadDocument, DwgWriter};
+use h7cad_native_model::CadDocument as NativeCadDocument;
 use std::path::{Path, PathBuf};
 
 pub mod native_bridge;
@@ -21,7 +22,7 @@ pub mod native_bridge;
 
 /// Show a file-open dialog and load the selected DWG or DXF file.
 /// Returns `(filename, path, document)` or an error string.
-pub async fn pick_and_open() -> Result<(String, PathBuf, CadDocument), String> {
+pub async fn pick_and_open() -> Result<(String, PathBuf, CadDocument, Option<NativeCadDocument>), String> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("Open CAD file")
         .add_filter("CAD Files", &["dwg", "dxf", "DWG", "DXF"])
@@ -41,17 +42,31 @@ pub async fn pick_and_open() -> Result<(String, PathBuf, CadDocument), String> {
 }
 
 /// Load a CAD file from a known path (used by recent files).
-pub async fn open_path(path: PathBuf) -> Result<(String, PathBuf, CadDocument), String> {
+pub async fn open_path(path: PathBuf) -> Result<(String, PathBuf, CadDocument, Option<NativeCadDocument>), String> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "unknown".into());
-    let doc = load_file(&path)?;
-    Ok((name, path, doc))
+    let (doc, native_doc) = load_file_with_native(&path)?;
+    Ok((name, path, doc, native_doc))
 }
 
 /// Load a DWG or DXF file directly from a path (auto-detect by extension).
 pub fn load_file(path: &Path) -> Result<CadDocument, String> {
+    let (doc, _) = load_file_with_native(path)?;
+    Ok(doc)
+}
+
+pub fn load_file_with_native(
+    path: &Path,
+) -> Result<(CadDocument, Option<NativeCadDocument>), String> {
+    let native = load_file_native(path)?;
+    let compat = native_bridge::native_doc_to_acadrust(&native);
+    Ok((compat, Some(native)))
+}
+
+/// Native-first load path used by the ongoing runtime migration.
+pub fn load_file_native(path: &Path) -> Result<NativeCadDocument, String> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -60,7 +75,8 @@ pub fn load_file(path: &Path) -> Result<CadDocument, String> {
     match ext.as_str() {
         "dwg" => {
             let mut reader = DwgReader::from_file(path).map_err(|e| e.to_string())?;
-            reader.read().map_err(|e| e.to_string())
+            let acad_doc = reader.read().map_err(|e| e.to_string())?;
+            Ok(native_bridge::acadrust_doc_to_native(&acad_doc))
         }
         "dxf" => load_dxf_native(path),
         _ => Err(format!("Unsupported file format: .{ext}")),
@@ -142,6 +158,12 @@ pub async fn pick_image_file() -> Result<(PathBuf, u32, u32), String> {
 /// Save the document to the given path.
 /// Format is auto-detected from the extension (dwg / dxf).
 pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
+    let native = native_bridge::acadrust_doc_to_native(doc);
+    save_native(&native, path)
+}
+
+/// Native-first save path used by the ongoing runtime migration.
+pub fn save_native(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -152,20 +174,19 @@ pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
     }
 }
 
-pub fn save_dwg(doc: &CadDocument, path: &Path) -> Result<(), String> {
-    DwgWriter::write_to_file(path, doc).map_err(|e| e.to_string())
+pub fn save_dwg(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
+    let acad_doc = native_bridge::native_doc_to_acadrust(doc);
+    DwgWriter::write_to_file(path, &acad_doc).map_err(|e| e.to_string())
 }
 
-/// Load a DXF file via the native reader, converting to acadrust CadDocument.
-fn load_dxf_native(path: &Path) -> Result<CadDocument, String> {
+/// Load a DXF file via the native reader.
+fn load_dxf_native(path: &Path) -> Result<NativeCadDocument, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("failed to read DXF: {e}"))?;
-    let native_doc =
-        h7cad_native_dxf::read_dxf_bytes(&bytes).map_err(|e| format!("native DXF: {e}"))?;
-    Ok(native_bridge::native_doc_to_acadrust(&native_doc))
+    h7cad_native_dxf::read_dxf_bytes(&bytes).map_err(|e| format!("native DXF: {e}"))
 }
 
-pub fn save_dxf(doc: &CadDocument, path: &Path) -> Result<(), String> {
-    DxfWriter::new(doc)
-        .write_to_file(path)
-        .map_err(|e| e.to_string())
+pub fn save_dxf(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
+    let text = h7cad_native_dxf::write_dxf(doc)?;
+    std::fs::write(path, text).map_err(|e| e.to_string())
 }
+

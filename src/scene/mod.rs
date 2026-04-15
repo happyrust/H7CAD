@@ -25,7 +25,7 @@ pub use camera::Projection;
 pub use hatch_model::HatchModel;
 pub use image_model::ImageModel;
 pub use mesh_model::MeshModel;
-pub use object::{GripApply, GripDef};
+pub use object::GripDef;
 pub use pipeline::uniforms::Uniforms;
 pub use pipeline::viewcube::{
     hit_test, CubeRegion, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
@@ -2823,30 +2823,6 @@ impl Scene {
             new_handles.push(h);
         }
         new_handles
-    }
-
-    // ── Grip editing ──────────────────────────────────────────────────────
-
-    pub fn apply_grip(&mut self, handle: Handle, grip_id: usize, apply: GripApply) {
-        if let Some(entity) = self.document.get_entity_mut(handle) {
-            dispatch::apply_grip(entity, grip_id, apply);
-        }
-        // Rebuild GPU hatch/solid model when a boundary vertex or corner moves.
-        match self.document.get_entity(handle) {
-            Some(EntityType::Hatch(dxf)) => {
-                let color = tessellate::aci_to_rgba(&dxf.common.color);
-                if let Some(model) = Self::hatch_model_from_dxf(dxf, color) {
-                    self.hatches.insert(handle, model);
-                } else {
-                    self.hatches.remove(&handle);
-                }
-            }
-            Some(EntityType::Solid(solid)) => {
-                let color = tessellate::aci_to_rgba(&solid.common.color);
-                self.hatches.insert(handle, Self::solid_hatch_model(solid, color));
-            }
-            _ => {}
-        }
     }
 
     /// Rebuild GPU hatch/solid model after a grip edit changed geometry.
