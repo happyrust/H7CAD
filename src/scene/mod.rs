@@ -32,13 +32,16 @@ pub use pipeline::viewcube::{
 };
 pub use selection::SelectionState;
 pub use wire_model::WireModel;
+use wire_model::TangentGeom;
 
 use crate::command::EntityTransform;
+use crate::store::NativeStore;
 use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid};
 use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
 use acadrust::objects::ObjectType;
 use acadrust::types::Vector2;
 use acadrust::{CadDocument, EntityType, Handle, TableEntry};
+use h7cad_native_model as nm;
 use glam;
 
 use iced::time::Duration;
@@ -49,8 +52,12 @@ use std::rc::Rc;
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
     pub selection: Rc<RefCell<SelectionState>>,
-    /// The CAD document — single source of truth for all entities.
+    /// The CAD document — compat projection kept during migration.
     pub document: CadDocument,
+    /// Native document store — the forward-looking single source of truth.
+    pub native_store: Option<NativeStore>,
+    /// Temporary runtime switch for the native render debug path.
+    pub native_render_enabled: bool,
     /// Currently selected entity handles.
     pub selected: HashSet<Handle>,
     /// In-progress preview wires while a command is active (rubber-band + object ghosts).
@@ -83,6 +90,8 @@ impl Scene {
             camera: Rc::new(RefCell::new(Camera::default())),
             selection: Rc::new(RefCell::new(SelectionState::default())),
             document: CadDocument::new(),
+            native_store: None,
+            native_render_enabled: false,
             selected: HashSet::new(),
             preview_wires: vec![],
             interim_wire: None,
@@ -95,6 +104,18 @@ impl Scene {
             bg_color: [0.11, 0.11, 0.11, 1.0],
             paper_bg_color: [0.22, 0.24, 0.28, 1.0],
         }
+    }
+
+    pub fn native_doc(&self) -> Option<&nm::CadDocument> {
+        self.native_store.as_ref().map(|s| s.inner())
+    }
+
+    pub fn native_doc_mut(&mut self) -> Option<&mut nm::CadDocument> {
+        self.native_store.as_mut().map(|s| s.inner_mut())
+    }
+
+    pub fn set_native_doc(&mut self, doc: Option<nm::CadDocument>) {
+        self.native_store = doc.map(NativeStore::new);
     }
 
     /// Public accessor for the block-record handle of the current layout.
@@ -392,6 +413,13 @@ impl Scene {
             }
         });
 
+        let (mut native_wires, native_handles) = if self.native_render_active_for_block(block_handle)
+        {
+            self.native_wires_for_model_space()
+        } else {
+            (Vec::new(), HashSet::new())
+        };
+
         let mut wires: Vec<WireModel> = self.document
             .entities()
             .filter(|e| {
@@ -408,10 +436,16 @@ impl Scene {
                 {
                     return false;
                 }
+                if native_handles.contains(&c.handle.value()) {
+                    return false;
+                }
                 self.belongs_to_visible_block(e.common().handle, c.owner_handle, block_handle)
             })
             .flat_map(|e| self.tessellate_one(e))
             .collect();
+
+        native_wires.append(&mut wires);
+        let mut wires = native_wires;
 
         // Apply draw order if a SortEntitiesTable exists and has entries.
         if let Some(table) = sort_table {
@@ -456,6 +490,524 @@ impl Scene {
             .iter()
             .filter(|br| br.handle != block_handle)
             .any(|br| br.entity_handles.contains(&entity_handle))
+    }
+
+    fn native_render_active_for_block(&self, block_handle: Handle) -> bool {
+        self.native_render_enabled
+            && self.current_layout == "Model"
+            && self.native_store.is_some()
+            && block_handle == self.model_space_block_handle()
+    }
+
+    fn native_render_supported_entity(entity: &nm::Entity) -> bool {
+        matches!(
+            entity.data,
+            nm::EntityData::Point { .. }
+                | nm::EntityData::Line { .. }
+                | nm::EntityData::Circle { .. }
+                | nm::EntityData::Arc { .. }
+                | nm::EntityData::LwPolyline { .. }
+                | nm::EntityData::Text { .. }
+                | nm::EntityData::MText { .. }
+                | nm::EntityData::Insert { .. }
+                | nm::EntityData::Dimension { .. }
+                | nm::EntityData::MultiLeader { .. }
+        )
+    }
+
+    fn native_entity_visible(document: &nm::CadDocument, entity: &nm::Entity) -> bool {
+        !entity.invisible
+            && !document
+                .layers
+                .get(&entity.layer_name)
+                .map(|layer| !layer.is_on() || layer.is_frozen)
+                .unwrap_or(false)
+    }
+
+    fn native_wires_for_model_space(&self) -> (Vec<WireModel>, HashSet<u64>) {
+        let Some(document) = self.native_doc() else {
+            return (Vec::new(), HashSet::new());
+        };
+
+        let selected_handles: HashSet<u64> = self.selected.iter().map(|h| h.value()).collect();
+        let mut native_handles = HashSet::new();
+        let mut wires = Vec::new();
+        for entity in document.model_space_entities() {
+            if !Self::native_entity_visible(document, entity)
+                || !Self::native_render_supported_entity(entity)
+            {
+                continue;
+            }
+
+            let mut visited_blocks = HashSet::new();
+            let Some(entity_wires) = self.native_render_entity_wires(
+                document,
+                entity,
+                entity.handle,
+                selected_handles.contains(&entity.handle.value()),
+                &mut visited_blocks,
+            ) else {
+                continue;
+            };
+            native_handles.insert(entity.handle.value());
+            wires.extend(entity_wires);
+        }
+
+        (wires, native_handles)
+    }
+
+    fn native_render_entity_wires(
+        &self,
+        document: &nm::CadDocument,
+        entity: &nm::Entity,
+        display_handle: nm::Handle,
+        selected: bool,
+        visited_blocks: &mut HashSet<u64>,
+    ) -> Option<Vec<WireModel>> {
+        if !Self::native_entity_visible(document, entity) {
+            return Some(Vec::new());
+        }
+
+        match &entity.data {
+            nm::EntityData::Insert { .. } => {
+                self.native_insert_wires(document, entity, display_handle, selected, visited_blocks)
+            }
+            nm::EntityData::Dimension { .. } => {
+                let (entity_color, _, _, line_weight_px, _) =
+                    render::render_style_native(document, entity);
+                tessellate::tessellate_native_dimension(
+                    document,
+                    display_handle,
+                    entity,
+                    selected,
+                    entity_color,
+                    line_weight_px,
+                )
+            }
+            nm::EntityData::MultiLeader { .. } => {
+                let (entity_color, _, _, line_weight_px, _) =
+                    render::render_style_native(document, entity);
+                tessellate::tessellate_native_multileader(
+                    document,
+                    display_handle,
+                    entity,
+                    selected,
+                    entity_color,
+                    line_weight_px,
+                )
+            }
+            _ => {
+                let (entity_color, pattern_length, pattern, line_weight_px, aci) =
+                    render::render_style_native(document, entity);
+                let mut wire = tessellate::tessellate_native(
+                    document,
+                    display_handle,
+                    entity,
+                    selected,
+                    entity_color,
+                    pattern_length,
+                    pattern,
+                    line_weight_px,
+                );
+                wire.aci = aci;
+                Some(vec![wire])
+            }
+        }
+    }
+
+    fn native_insert_wires(
+        &self,
+        document: &nm::CadDocument,
+        entity: &nm::Entity,
+        display_handle: nm::Handle,
+        selected: bool,
+        visited_blocks: &mut HashSet<u64>,
+    ) -> Option<Vec<WireModel>> {
+        let nm::EntityData::Insert {
+            insertion,
+            scale,
+            rotation,
+            has_attribs,
+            attribs,
+            ..
+        } = &entity.data else {
+            return None;
+        };
+
+        if *has_attribs || !attribs.is_empty() {
+            return None;
+        }
+
+        let block_record = document.resolve_insert_block(entity)?;
+        if !visited_blocks.insert(block_record.handle.value()) {
+            return None;
+        }
+
+        let mut wires = Vec::new();
+        for child in &block_record.entities {
+            if !Self::native_entity_visible(document, child) {
+                continue;
+            }
+            if matches!(child.data, nm::EntityData::Hatch { .. }) {
+                continue;
+            }
+            if !Self::native_render_supported_entity(child) {
+                visited_blocks.remove(&block_record.handle.value());
+                return None;
+            }
+
+            let Some(child_wires) =
+                self.native_render_entity_wires(document, child, display_handle, selected, visited_blocks)
+            else {
+                visited_blocks.remove(&block_record.handle.value());
+                return None;
+            };
+
+            for mut wire in child_wires {
+                Self::apply_insert_transform_to_wire(
+                    &mut wire,
+                    block_record.base_point,
+                    *insertion,
+                    *scale,
+                    *rotation,
+                );
+                wires.push(wire);
+            }
+        }
+
+        visited_blocks.remove(&block_record.handle.value());
+        Some(wires)
+    }
+
+    fn native_insert_hatch_models(
+        &self,
+        document: &nm::CadDocument,
+        entity: &nm::Entity,
+        selected: bool,
+        visited_blocks: &mut HashSet<u64>,
+    ) -> Option<Vec<HatchModel>> {
+        let nm::EntityData::Insert {
+            insertion,
+            scale,
+            rotation,
+            has_attribs,
+            attribs,
+            ..
+        } = &entity.data else {
+            return None;
+        };
+
+        if *has_attribs || !attribs.is_empty() {
+            return None;
+        }
+
+        let block_record = document.resolve_insert_block(entity)?;
+        if !visited_blocks.insert(block_record.handle.value()) {
+            return None;
+        }
+
+        let mut models = Vec::new();
+        for child in &block_record.entities {
+            if !Self::native_entity_visible(document, child) {
+                continue;
+            }
+
+            match &child.data {
+                nm::EntityData::Hatch { .. } => {
+                    let color = render::render_style_native(document, child).0;
+                    let mut model = Self::hatch_model_from_native(child, color)?;
+                    Self::apply_insert_transform_to_hatch_model(
+                        &mut model,
+                        block_record.base_point,
+                        *insertion,
+                        *scale,
+                        *rotation,
+                    );
+                    if selected {
+                        model.color = [0.15, 0.55, 1.00, model.color[3]];
+                    }
+                    models.push(model);
+                }
+                nm::EntityData::Insert { .. } => {
+                    let nested =
+                        self.native_insert_hatch_models(document, child, selected, visited_blocks)?;
+                    for mut model in nested {
+                        Self::apply_insert_transform_to_hatch_model(
+                            &mut model,
+                            block_record.base_point,
+                            *insertion,
+                            *scale,
+                            *rotation,
+                        );
+                        models.push(model);
+                    }
+                }
+                _ if Self::native_render_supported_entity(child) => {}
+                _ => {
+                    visited_blocks.remove(&block_record.handle.value());
+                    return None;
+                }
+            }
+        }
+
+        visited_blocks.remove(&block_record.handle.value());
+        Some(models)
+    }
+
+    fn apply_insert_transform_to_wire(
+        wire: &mut WireModel,
+        base_point: [f64; 3],
+        insertion: [f64; 3],
+        scale: [f64; 3],
+        rotation_deg: f64,
+    ) {
+        let transform = |point: [f32; 3]| -> [f32; 3] {
+            if point[0].is_nan() || point[1].is_nan() || point[2].is_nan() {
+                return point;
+            }
+
+            let local_x = (point[0] - base_point[0] as f32) * scale[0] as f32;
+            let local_y = (point[1] - base_point[1] as f32) * scale[1] as f32;
+            let local_z = (point[2] - base_point[2] as f32) * scale[2] as f32;
+            let rotation = rotation_deg.to_radians() as f32;
+            let (sin_r, cos_r) = rotation.sin_cos();
+
+            [
+                insertion[0] as f32 + local_x * cos_r - local_y * sin_r,
+                insertion[1] as f32 + local_x * sin_r + local_y * cos_r,
+                insertion[2] as f32 + local_z,
+            ]
+        };
+
+        for point in &mut wire.points {
+            *point = transform(*point);
+        }
+        for (snap_point, _) in &mut wire.snap_pts {
+            let transformed = transform([snap_point.x, snap_point.y, snap_point.z]);
+            *snap_point = glam::Vec3::new(transformed[0], transformed[1], transformed[2]);
+        }
+        for vertex in &mut wire.key_vertices {
+            *vertex = transform(*vertex);
+        }
+
+        let avg_xy_scale = ((scale[0].abs() + scale[1].abs()) as f32 * 0.5).max(0.0001);
+        wire.pattern_length *= avg_xy_scale;
+        for part in &mut wire.pattern {
+            *part *= avg_xy_scale;
+        }
+
+        let uniform_xy = (scale[0] - scale[1]).abs() < 1e-6;
+        wire.tangent_geoms = wire
+            .tangent_geoms
+            .iter()
+            .filter_map(|geom| match geom {
+                TangentGeom::Line { p1, p2 } => Some(TangentGeom::Line {
+                    p1: transform(*p1),
+                    p2: transform(*p2),
+                }),
+                TangentGeom::Circle { center, radius } if uniform_xy => Some(TangentGeom::Circle {
+                    center: transform(*center),
+                    radius: *radius * scale[0].abs() as f32,
+                }),
+                TangentGeom::Circle { .. } => None,
+            })
+            .collect();
+    }
+
+    fn apply_insert_transform_to_hatch_model(
+        model: &mut HatchModel,
+        base_point: [f64; 3],
+        insertion: [f64; 3],
+        scale: [f64; 3],
+        rotation_deg: f64,
+    ) {
+        let transform = |point: [f32; 2]| -> [f32; 2] {
+            let local_x = (point[0] - base_point[0] as f32) * scale[0] as f32;
+            let local_y = (point[1] - base_point[1] as f32) * scale[1] as f32;
+            let rotation = rotation_deg.to_radians() as f32;
+            let (sin_r, cos_r) = rotation.sin_cos();
+            [
+                insertion[0] as f32 + local_x * cos_r - local_y * sin_r,
+                insertion[1] as f32 + local_x * sin_r + local_y * cos_r,
+            ]
+        };
+
+        for point in &mut model.boundary {
+            *point = transform(*point);
+        }
+
+        let avg_xy_scale = ((scale[0].abs() + scale[1].abs()) as f32 * 0.5).max(0.0001);
+        match &mut model.pattern {
+            hatch_model::HatchPattern::Solid => {}
+            hatch_model::HatchPattern::Pattern(_) => {
+                model.angle_offset += rotation_deg.to_radians() as f32;
+                model.scale *= avg_xy_scale;
+            }
+            hatch_model::HatchPattern::Gradient { angle_deg, .. } => {
+                *angle_deg += rotation_deg as f32;
+                model.scale *= avg_xy_scale;
+            }
+        }
+    }
+
+    fn native_model_hatch_entries(&self, native_doc: &nm::CadDocument) -> Vec<(Handle, HatchModel)> {
+        let mut models = Vec::new();
+        for entity in native_doc.model_space_entities() {
+            match &entity.data {
+                nm::EntityData::Hatch { .. } => {
+                    let handle = Handle::new(entity.handle.value());
+                    if !Self::native_entity_visible(native_doc, entity) {
+                        continue;
+                    }
+                    let color = render::render_style_native(native_doc, entity).0;
+                    if let Some(mut model) = Self::hatch_model_from_native(entity, color) {
+                        if self.selected.contains(&handle) {
+                            model.color = [0.15, 0.55, 1.00, model.color[3]];
+                        }
+                        models.push((handle, model));
+                    }
+                }
+                nm::EntityData::Insert { .. } => {
+                    let handle = Handle::new(entity.handle.value());
+                    if !Self::native_entity_visible(native_doc, entity) {
+                        continue;
+                    }
+                    if let Some(insert_models) = self.native_insert_hatch_models(
+                        native_doc,
+                        entity,
+                        self.selected.contains(&handle),
+                        &mut HashSet::new(),
+                    ) {
+                        models.extend(insert_models.into_iter().map(|model| (handle, model)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        models
+    }
+
+    fn projected_native_hatch_entries_for_paper_space(
+        &self,
+        paper_block: Handle,
+        only_vp: Option<Handle>,
+    ) -> Vec<(Handle, HatchModel)> {
+        use acadrust::entities::Viewport;
+
+        let Some(native_doc) = self.native_doc() else {
+            return vec![];
+        };
+
+        let viewports: Vec<&Viewport> = self
+            .document
+            .entities()
+            .filter_map(|e| {
+                if let EntityType::Viewport(vp) = e {
+                    Some(vp)
+                } else {
+                    None
+                }
+            })
+            .filter(|vp| {
+                vp.id > 1
+                    && vp.common.owner_handle == paper_block
+                    && vp.status.is_on
+                    && only_vp.map_or(true, |h| vp.common.handle == h)
+            })
+            .collect();
+
+        if viewports.is_empty() {
+            return vec![];
+        }
+
+        let model_hatches = self.native_model_hatch_entries(native_doc);
+        let mut result = Vec::new();
+
+        for vp in viewports {
+            let vd = glam::Vec3::new(
+                vp.view_direction.x as f32,
+                vp.view_direction.y as f32,
+                vp.view_direction.z as f32,
+            )
+            .normalize_or(glam::Vec3::Z);
+            let world_z = glam::Vec3::Z;
+            let view_right = if (vd.dot(world_z)).abs() > 0.99 {
+                glam::Vec3::X
+            } else {
+                world_z.cross(vd).normalize()
+            };
+            let view_up = vd.cross(view_right).normalize();
+            let scale = if vp.custom_scale.abs() > 1e-9 {
+                vp.custom_scale as f32
+            } else if vp.view_height.abs() > 1e-9 {
+                (vp.height / vp.view_height) as f32
+            } else {
+                1.0
+            };
+            let target = glam::Vec3::new(
+                vp.view_target.x as f32,
+                vp.view_target.y as f32,
+                vp.view_target.z as f32,
+            );
+            let pcx = vp.center.x as f32;
+            let pcy = vp.center.y as f32;
+            let hw = (vp.width / 2.0) as f32;
+            let hh = (vp.height / 2.0) as f32;
+            let vp_x0 = pcx - hw;
+            let vp_x1 = pcx + hw;
+            let vp_y0 = pcy - hh;
+            let vp_y1 = pcy + hh;
+            let use_perspective = vp.status.perspective && vp.lens_length > 1.0;
+            let camera_dist = if use_perspective {
+                (vp.view_height as f32 * vp.lens_length as f32 / 24.0).max(0.001)
+            } else {
+                0.0
+            };
+
+            for (handle, hatch) in &model_hatches {
+                let projected: Vec<[f32; 2]> = hatch
+                    .boundary
+                    .iter()
+                    .map(|&[mx, my]| {
+                        let mp = glam::Vec3::new(mx, my, 0.0) - target;
+                        let u = mp.dot(view_right);
+                        let v = mp.dot(view_up);
+                        if use_perspective {
+                            let d_vd = mp.dot(vd);
+                            let fwd = camera_dist - d_vd;
+                            if fwd <= 0.001 {
+                                return [f32::NAN, f32::NAN];
+                            }
+                            let factor = camera_dist / fwd;
+                            [pcx + u * factor * scale, pcy + v * factor * scale]
+                        } else {
+                            [pcx + u * scale, pcy + v * scale]
+                        }
+                    })
+                    .filter(|p| p[0].is_finite() && p[1].is_finite())
+                    .collect();
+
+                if projected.len() < 3 {
+                    continue;
+                }
+
+                let mut model = hatch.clone();
+                model.boundary = clip_polygon_to_rect(&projected, vp_x0, vp_y0, vp_x1, vp_y1);
+                if model.boundary.len() < 3 {
+                    continue;
+                }
+                match &mut model.pattern {
+                    hatch_model::HatchPattern::Solid => {}
+                    hatch_model::HatchPattern::Pattern(_) => {
+                        model.scale *= scale.abs().max(0.0001);
+                    }
+                    hatch_model::HatchPattern::Gradient { .. } => {}
+                }
+                result.push((*handle, model));
+            }
+        }
+
+        result
     }
 
     /// Full tessellation pipeline for one entity.
@@ -724,34 +1276,69 @@ impl Scene {
             let hw = (vp.width / 2.0) as f32;
             let hh = (vp.height / 2.0) as f32;
 
+            let frozen_layer_names: HSet<String> = vp
+                .frozen_layers
+                .iter()
+                .filter_map(|&handle| {
+                    self.document
+                        .layers
+                        .iter()
+                        .find(|layer| layer.handle == handle)
+                        .map(|layer| layer.name.clone())
+                })
+                .collect();
+
             // ── Collect model wires with per-vp layer freeze ──────────────
-            let model_wires: Vec<WireModel> = self
-                .document
-                .entities()
-                .filter(|e| {
-                    let c = e.common();
-                    if c.invisible || matches!(e, EntityType::Viewport(_)) {
-                        return false;
-                    }
-                    // Global layer visibility.
-                    if self.document.layers.get(&c.layer)
-                        .map(|l| l.flags.off || l.flags.frozen)
-                        .unwrap_or(false)
-                    {
-                        return false;
-                    }
-                    // Per-viewport frozen layers.
-                    if !frozen.is_empty() {
-                        if let Some(lh) = self.document.layers.get(&c.layer).map(|l| l.handle) {
-                            if frozen.contains(&lh) {
+            let model_wires: Vec<WireModel> =
+                if self.native_render_enabled && self.native_store.is_some() {
+                    let native_doc = self.native_doc().expect("checked");
+                    let selected_handles: HSet<u64> =
+                        self.selected.iter().map(|h| h.value()).collect();
+                    native_doc
+                        .model_space_entities()
+                        .filter(|entity| {
+                            Self::native_entity_visible(native_doc, entity)
+                                && !frozen_layer_names.contains(&entity.layer_name)
+                        })
+                        .flat_map(|entity| {
+                            self.native_render_entity_wires(
+                                native_doc,
+                                entity,
+                                entity.handle,
+                                selected_handles.contains(&entity.handle.value()),
+                                &mut HashSet::new(),
+                            )
+                            .unwrap_or_default()
+                        })
+                        .collect()
+                } else {
+                    self.document
+                        .entities()
+                        .filter(|e| {
+                            let c = e.common();
+                            if c.invisible || matches!(e, EntityType::Viewport(_)) {
                                 return false;
                             }
-                        }
-                    }
-                    self.belongs_to_visible_block(c.handle, c.owner_handle, model_block)
-                })
-                .flat_map(|e| self.tessellate_one(e))
-                .collect();
+                            // Global layer visibility.
+                            if self.document.layers.get(&c.layer)
+                                .map(|l| l.flags.off || l.flags.frozen)
+                                .unwrap_or(false)
+                            {
+                                return false;
+                            }
+                            // Per-viewport frozen layers.
+                            if !frozen.is_empty() {
+                                if let Some(lh) = self.document.layers.get(&c.layer).map(|l| l.handle) {
+                                    if frozen.contains(&lh) {
+                                        return false;
+                                    }
+                                }
+                            }
+                            self.belongs_to_visible_block(c.handle, c.owner_handle, model_block)
+                        })
+                        .flat_map(|e| self.tessellate_one(e))
+                        .collect()
+                };
 
             // ── Project and clip wires into viewport ──────────────────────
             let vp_x0 = pcx - hw;
@@ -1143,6 +1730,23 @@ impl Scene {
         };
 
         if !handle.is_null() {
+            if let Some(store) = self.native_store.as_mut() {
+                let native_doc = store.inner_mut();
+                if let Some(entity) = self.document.get_entity(handle).cloned() {
+                    if let Some(mut native_entity) = crate::io::native_bridge::acadrust_entity_to_native(&entity) {
+                        let owner_handle = if self.current_layout != "Model" && self.active_viewport.is_none() {
+                            native_doc
+                                .layout_by_name(&self.current_layout)
+                                .map(|layout| layout.block_record_handle)
+                                .unwrap_or_else(|| native_doc.model_space_handle())
+                        } else {
+                            native_doc.model_space_handle()
+                        };
+                        native_entity.owner_handle = owner_handle;
+                        let _ = native_doc.add_entity(native_entity);
+                    }
+                }
+            }
             if let Some(model) = hatch_seed {
                 self.hatches.insert(handle, model);
             }
@@ -1245,8 +1849,8 @@ impl Scene {
         Ok(self.add_entity(EntityType::Insert(insert)))
     }
 
-    fn synced_hatch_models(&self) -> Vec<HatchModel> {
-        let mut models: Vec<HatchModel> = self
+    pub(crate) fn synced_hatch_entries(&self) -> Vec<(Handle, HatchModel)> {
+        let mut models: Vec<(Handle, HatchModel)> = self
             .hatches
             .iter()
             .map(|(&handle, model)| {
@@ -1269,14 +1873,67 @@ impl Scene {
                 if self.selected.contains(&handle) {
                     m.color = [0.15, 0.55, 1.00, m.color[3]];
                 }
-                m
+                (handle, m)
             })
             .collect();
+
+        let mut native_insert_hatch_handles = HashSet::new();
+
+        if self.native_render_enabled {
+            if self.current_layout == "Model" {
+                if let Some(native_doc) = self.native_doc() {
+                    for entity in native_doc.model_space_entities() {
+                        match &entity.data {
+                            nm::EntityData::Hatch { .. } => {
+                                let handle = Handle::new(entity.handle.value());
+                                if self.hatches.contains_key(&handle)
+                                    || !Self::native_entity_visible(native_doc, entity)
+                                {
+                                    continue;
+                                }
+                                let color = render::render_style_native(native_doc, entity).0;
+                                if let Some(mut model) = Self::hatch_model_from_native(entity, color) {
+                                    if self.selected.contains(&handle) {
+                                        model.color = [0.15, 0.55, 1.00, model.color[3]];
+                                    }
+                                    models.push((handle, model));
+                                }
+                            }
+                            nm::EntityData::Insert { .. } => {
+                                let handle = Handle::new(entity.handle.value());
+                                let Some(insert_models) = self.native_insert_hatch_models(
+                                    native_doc,
+                                    entity,
+                                    self.selected.contains(&handle),
+                                    &mut HashSet::new(),
+                                ) else {
+                                    continue;
+                                };
+                                if !insert_models.is_empty() {
+                                    native_insert_hatch_handles.insert(handle);
+                                    models.extend(insert_models.into_iter().map(|model| (handle, model)));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            } else {
+                let projected = self.projected_native_hatch_entries_for_paper_space(
+                    self.current_layout_block_handle(),
+                    self.active_viewport,
+                );
+                models.extend(projected);
+            }
+        }
 
         for entity in self.document.entities() {
             let EntityType::Insert(ins) = entity else {
                 continue;
             };
+            if native_insert_hatch_handles.contains(&ins.common.handle) {
+                continue;
+            }
             let selected = self.selected.contains(&ins.common.handle);
             for sub in ins
                 .explode_from_document(&self.document)
@@ -1291,12 +1948,28 @@ impl Scene {
                     if selected {
                         model.color = [0.15, 0.55, 1.00, model.color[3]];
                     }
-                    models.push(model);
+                    models.push((ins.common.handle, model));
                 }
             }
         }
 
         models
+    }
+
+    fn synced_hatch_models(&self) -> Vec<HatchModel> {
+        self.synced_hatch_entries()
+            .into_iter()
+            .map(|(_, model)| model)
+            .collect()
+    }
+
+    pub(crate) fn hatch_model_for_handle(&self, handle: Handle) -> Option<HatchModel> {
+        if let Some(model) = self.hatches.get(&handle) {
+            return Some(model.clone());
+        }
+        self.synced_hatch_entries()
+            .into_iter()
+            .find_map(|(entry_handle, model)| (entry_handle == handle).then_some(model))
     }
 
     /// Wipeout fill models — rendered in a separate pass AFTER wires so that
@@ -1554,6 +2227,175 @@ impl Scene {
         })
     }
 
+    fn hatch_model_from_native(hatch: &nm::Entity, color: [f32; 4]) -> Option<HatchModel> {
+        let nm::EntityData::Hatch {
+            pattern_name,
+            solid_fill,
+            boundary_paths,
+        } = &hatch.data else {
+            return None;
+        };
+
+        let path = boundary_paths.first()?;
+        let mut boundary: Vec<[f32; 2]> = Vec::new();
+
+        for edge in &path.edges {
+            match edge {
+                nm::HatchEdge::Polyline { closed, vertices } => {
+                    let count = vertices.len();
+                    let seg_count = if *closed {
+                        count
+                    } else {
+                        count.saturating_sub(1)
+                    };
+                    for i in 0..seg_count {
+                        let v0 = vertices[i];
+                        let v1 = vertices[(i + 1) % count];
+                        let bulge = v0[2] as f32;
+                        if bulge.abs() < 1e-9 {
+                            boundary.push([v0[0] as f32, v0[1] as f32]);
+                        } else {
+                            let p0 = [v0[0] as f32, v0[1] as f32];
+                            let p1 = [v1[0] as f32, v1[1] as f32];
+                            let angle = 4.0 * bulge.atan();
+                            let dx = p1[0] - p0[0];
+                            let dy = p1[1] - p0[1];
+                            let d = (dx * dx + dy * dy).sqrt();
+                            let r = (d / 2.0) / (angle / 2.0).sin().abs();
+                            let mx = (p0[0] + p1[0]) * 0.5;
+                            let my = (p0[1] + p1[1]) * 0.5;
+                            let len = d.max(1e-9);
+                            let px = -dy / len;
+                            let py = dx / len;
+                            let sign = if bulge > 0.0 { 1.0_f32 } else { -1.0_f32 };
+                            let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
+                            let cx = mx - sign * px * (r - h);
+                            let cy = my - sign * py * (r - h);
+                            let a0 = (p0[1] - cy).atan2(p0[0] - cx);
+                            let a1 = (p1[1] - cy).atan2(p1[0] - cx);
+                            let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
+                            if ea < sa {
+                                ea += std::f32::consts::TAU;
+                            }
+                            let span = ea - sa;
+                            let segs = ((span.abs() / std::f32::consts::TAU) * 16.0)
+                                .ceil()
+                                .max(4.0) as u32;
+                            for j in 0..segs {
+                                let t = sa + span * (j as f32 / segs as f32);
+                                boundary.push([cx + r * t.cos(), cy + r * t.sin()]);
+                            }
+                        }
+                    }
+                    if *closed {
+                        if let Some(&first) = boundary.first() {
+                            boundary.push(first);
+                        }
+                    }
+                }
+                nm::HatchEdge::Line { start, end } => {
+                    boundary.push([start[0] as f32, start[1] as f32]);
+                    boundary.push([end[0] as f32, end[1] as f32]);
+                }
+                nm::HatchEdge::CircularArc {
+                    center,
+                    radius,
+                    start_angle,
+                    end_angle,
+                    is_ccw,
+                } => {
+                    let cx = center[0] as f32;
+                    let cy = center[1] as f32;
+                    let r = *radius as f32;
+                    let (sa, ea) = if *is_ccw {
+                        (*start_angle as f32, *end_angle as f32)
+                    } else {
+                        (*end_angle as f32, *start_angle as f32)
+                    };
+                    let mut end = ea;
+                    if end < sa {
+                        end += std::f32::consts::TAU;
+                    }
+                    let span = end - sa;
+                    let segs = ((span / std::f32::consts::TAU) * 32.0).ceil().max(4.0) as u32;
+                    for i in 0..=segs {
+                        let t = sa + span * (i as f32 / segs as f32);
+                        boundary.push([cx + r * t.cos(), cy + r * t.sin()]);
+                    }
+                }
+                nm::HatchEdge::EllipticArc {
+                    center,
+                    major_endpoint,
+                    minor_ratio,
+                    start_angle,
+                    end_angle,
+                    is_ccw,
+                } => {
+                    let cx = center[0] as f32;
+                    let cy = center[1] as f32;
+                    let maj_x = major_endpoint[0] as f32;
+                    let maj_y = major_endpoint[1] as f32;
+                    let r_maj = (maj_x * maj_x + maj_y * maj_y).sqrt();
+                    let r_min = r_maj * *minor_ratio as f32;
+                    let rot = maj_y.atan2(maj_x);
+                    let (sa, ea) = if *is_ccw {
+                        (*start_angle as f32, *end_angle as f32)
+                    } else {
+                        (*end_angle as f32, *start_angle as f32)
+                    };
+                    let mut end = ea;
+                    if end < sa {
+                        end += std::f32::consts::TAU;
+                    }
+                    let span = end - sa;
+                    let segs = ((span / std::f32::consts::TAU) * 32.0).ceil().max(4.0) as u32;
+                    for i in 0..=segs {
+                        let t = sa + span * (i as f32 / segs as f32);
+                        let lx = r_maj * t.cos();
+                        let ly = r_min * t.sin();
+                        boundary.push([
+                            cx + lx * rot.cos() - ly * rot.sin(),
+                            cy + lx * rot.sin() + ly * rot.cos(),
+                        ]);
+                    }
+                }
+            }
+        }
+
+        if boundary.is_empty() {
+            return None;
+        }
+        boundary.truncate(64);
+
+        let pattern = if *solid_fill {
+            hatch_model::HatchPattern::Solid
+        } else if let Some(entry) = crate::scene::hatch_patterns::find(pattern_name) {
+            entry.gpu.clone()
+        } else {
+            hatch_model::HatchPattern::Pattern(vec![hatch_model::PatFamily {
+                angle_deg: 0.0,
+                x0: 0.0,
+                y0: 0.0,
+                dx: 0.0,
+                dy: 5.0,
+                dashes: vec![],
+            }])
+        };
+
+        Some(HatchModel {
+            boundary,
+            pattern,
+            name: if *solid_fill {
+                "SOLID".into()
+            } else {
+                pattern_name.clone()
+            },
+            color,
+            angle_offset: 0.0,
+            scale: 1.0,
+        })
+    }
+
     /// Decode and cache all RasterImage entities from the current document.
     /// Silently skips images whose files cannot be read.
     pub fn populate_images_from_document(&mut self) {
@@ -1770,14 +2612,28 @@ impl Scene {
             .collect()
     }
 
+    pub fn native_entity(&self, handle: Handle) -> Option<&nm::Entity> {
+        self.native_doc()
+            .and_then(|doc| doc.get_entity(nm::Handle::new(handle.value())))
+    }
+
+    pub fn native_entity_mut(&mut self, handle: Handle) -> Option<&mut nm::Entity> {
+        self.native_doc_mut()
+            .and_then(|doc| doc.get_entity_mut(nm::Handle::new(handle.value())))
+    }
+
     // ── Erase ─────────────────────────────────────────────────────────────
 
     pub fn erase_entities(&mut self, handles: &[Handle]) {
         for &h in handles {
             self.document.remove_entity(h);
+            if let Some(native_doc) = self.native_doc_mut() {
+                let _ = native_doc.remove_entity(nm::Handle::new(h.value()));
+            }
             self.selected.remove(&h);
             self.hatches.remove(&h);
             self.meshes.remove(&h);
+            self.images.remove(&h);
         }
         // Remove erased handles from all groups; delete groups that become empty.
         let group_dict_handle = self.document.header.acad_group_dict_handle;
@@ -1903,9 +2759,32 @@ impl Scene {
 
     pub fn transform_entities(&mut self, handles: &[Handle], t: &EntityTransform) {
         for &h in handles {
-            if let Some(entity) = self.document.get_entity_mut(h) {
+            let nh = nm::Handle::new(h.value());
+            let native_applied = if let Some(store) = self.native_store.as_mut() {
+                if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                    dispatch::apply_transform_native(entity, t);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if native_applied {
+                if let Some(native_entity) = self.native_doc()
+                    .and_then(|doc| doc.get_entity(nh))
+                {
+                    if let Some(compat) = crate::io::native_bridge::native_entity_to_acadrust(native_entity) {
+                        if let Some(existing) = self.document.get_entity_mut(h) {
+                            *existing = compat;
+                        }
+                    }
+                }
+            } else if let Some(entity) = self.document.get_entity_mut(h) {
                 dispatch::apply_transform(entity, t);
             }
+
             if self.hatches.contains_key(&h) {
                 let existing_color = self.hatches[&h].color;
                 let new_model = if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(h) {
@@ -1953,6 +2832,25 @@ impl Scene {
             dispatch::apply_grip(entity, grip_id, apply);
         }
         // Rebuild GPU hatch/solid model when a boundary vertex or corner moves.
+        match self.document.get_entity(handle) {
+            Some(EntityType::Hatch(dxf)) => {
+                let color = tessellate::aci_to_rgba(&dxf.common.color);
+                if let Some(model) = Self::hatch_model_from_dxf(dxf, color) {
+                    self.hatches.insert(handle, model);
+                } else {
+                    self.hatches.remove(&handle);
+                }
+            }
+            Some(EntityType::Solid(solid)) => {
+                let color = tessellate::aci_to_rgba(&solid.common.color);
+                self.hatches.insert(handle, Self::solid_hatch_model(solid, color));
+            }
+            _ => {}
+        }
+    }
+
+    /// Rebuild GPU hatch/solid model after a grip edit changed geometry.
+    pub fn rebuild_gpu_model_after_grip(&mut self, handle: Handle) {
         match self.document.get_entity(handle) {
             Some(EntityType::Hatch(dxf)) => {
                 let color = tessellate::aci_to_rgba(&dxf.common.color);
@@ -2089,6 +2987,875 @@ impl Scene {
     pub fn update(&mut self, _dt: Duration) {}
 }
 
+#[cfg(test)]
+mod tests {
+    use super::Scene;
+    use acadrust::EntityType;
+    use acadrust::entities::Viewport;
+    use crate::io::native_bridge;
+    use h7cad_native_model as nm;
+    use std::collections::HashSet;
+
+    fn scene_with_native(native: nm::CadDocument) -> Scene {
+        let compat = native_bridge::native_doc_to_acadrust(&native);
+        let mut scene = Scene::new();
+        scene.document = compat;
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = true;
+        scene
+    }
+
+    fn block_with_entities(
+        doc: &mut nm::CadDocument,
+        name: &str,
+        entities: Vec<nm::Entity>,
+    ) -> nm::Handle {
+        let handle = doc.allocate_handle();
+        let mut block = nm::BlockRecord::new(handle, name);
+        block.entities = entities;
+        doc.insert_block_record(block);
+        handle
+    }
+
+    #[test]
+    fn new_scene_starts_without_native_document() {
+        let scene = Scene::new();
+        assert!(scene.native_doc().is_none());
+    }
+
+    #[test]
+    fn nativerender_mixes_supported_native_and_compat_fallback_without_duplicates() {
+        let mut native = nm::CadDocument::new();
+        let _line_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+
+        let compat = native_bridge::native_doc_to_acadrust(&native);
+        let mut scene = Scene::new();
+        scene.document = compat;
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = true;
+
+        let mut viewport = Viewport::new();
+        viewport.id = 2;
+        let viewport_handle = scene.add_entity(EntityType::Viewport(viewport));
+
+        let wires = scene.entity_wires();
+        let viewport_matches = wires
+            .iter()
+            .filter(|wire| wire.name == viewport_handle.value().to_string())
+            .count();
+        let line_matches = wires
+            .iter()
+            .filter(|wire| !wire.name.is_empty() && wire.name != viewport_handle.value().to_string())
+            .count();
+
+        assert_eq!(viewport_matches, 1, "unsupported compat viewport should remain visible");
+        assert_eq!(line_matches, 1, "supported native entity should not be double-rendered");
+        assert_eq!(wires.len(), 2, "expected one native wire and one compat fallback wire");
+    }
+
+    #[test]
+    fn nativerender_insert_uses_native_when_block_is_fully_supported() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "BLOCK_A",
+            vec![nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [2.0, 0.0, 0.0],
+            })],
+        );
+        let insert_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_A".into(),
+                insertion: [10.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = scene_with_native(native);
+        let wires = scene.entity_wires();
+        assert!(wires.iter().any(|wire| wire.name == insert_handle.value().to_string()));
+    }
+
+    #[test]
+    fn nativerender_insert_falls_back_when_block_contains_unsupported_entity() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "BLOCK_UNSUPPORTED",
+            vec![nm::Entity::new(nm::EntityData::Viewport {
+                center: [0.0, 0.0, 0.0],
+                width: 10.0,
+                height: 5.0,
+            })],
+        );
+        let insert_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_UNSUPPORTED".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = scene_with_native(native.clone());
+        let entity = native.get_entity(insert_handle).expect("insert entity");
+        let rendered = scene.native_render_entity_wires(
+            scene.native_doc().expect("native doc"),
+            entity,
+            insert_handle,
+            false,
+            &mut HashSet::new(),
+        );
+        assert!(rendered.is_none());
+    }
+
+    #[test]
+    fn nativerender_insert_with_hatch_adds_native_hatch_model() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "BLOCK_HATCH",
+            vec![
+                nm::Entity::new(nm::EntityData::Line {
+                    start: [0.0, 0.0, 0.0],
+                    end: [2.0, 0.0, 0.0],
+                }),
+                nm::Entity::new(nm::EntityData::Hatch {
+                    pattern_name: "SOLID".into(),
+                    solid_fill: true,
+                    boundary_paths: vec![nm::HatchBoundaryPath {
+                        flags: 2,
+                        edges: vec![nm::HatchEdge::Polyline {
+                            closed: true,
+                            vertices: vec![
+                                [0.0, 0.0, 0.0],
+                                [2.0, 0.0, 0.0],
+                                [2.0, 2.0, 0.0],
+                                [0.0, 2.0, 0.0],
+                            ],
+                        }],
+                    }],
+                }),
+            ],
+        );
+        let insert_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_HATCH".into(),
+                insertion: [10.0, 5.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = scene_with_native(native);
+        let wires = scene.entity_wires();
+        let hatches = scene.synced_hatch_models();
+
+        assert!(wires.iter().any(|wire| wire.name == insert_handle.value().to_string()));
+        assert_eq!(hatches.len(), 1, "insert-contained hatch should produce one native hatch model");
+        assert_eq!(hatches[0].name, "SOLID");
+    }
+
+    #[test]
+    fn nativerender_selected_insert_tints_nested_native_hatch_model() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "BLOCK_HATCH_SELECTED",
+            vec![nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Line {
+                        start: [0.0, 0.0],
+                        end: [1.0, 0.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [1.0, 0.0],
+                        end: [1.0, 1.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [1.0, 1.0],
+                        end: [0.0, 1.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [0.0, 1.0],
+                        end: [0.0, 0.0],
+                    }],
+                }],
+            })],
+        );
+        let insert_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_HATCH_SELECTED".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let mut scene = scene_with_native(native);
+        scene.selected.insert(acadrust::Handle::new(insert_handle.value()));
+        let hatches = scene.synced_hatch_models();
+
+        assert_eq!(hatches.len(), 1);
+        assert_eq!(hatches[0].color, [0.15, 0.55, 1.00, hatches[0].color[3]]);
+    }
+
+    #[test]
+    fn nativerender_projects_native_model_wires_into_paper_viewport() {
+        let mut native = nm::CadDocument::new();
+        let line_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+
+        let mut scene = Scene::new();
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = true;
+        scene.current_layout = "Layout1".into();
+
+        let mut viewport = Viewport::new();
+        viewport.id = 2;
+        viewport.status.is_on = true;
+        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.width = 100.0;
+        viewport.height = 100.0;
+        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_height = 100.0;
+        let viewport_handle = scene.add_entity(EntityType::Viewport(viewport));
+
+        let wires = scene.entity_wires();
+        assert!(wires.iter().any(|wire| wire.name == viewport_handle.value().to_string()));
+        assert!(
+            wires.iter().any(|wire| wire.name == line_handle.value().to_string()),
+            "paper viewport should project native model wires",
+        );
+    }
+
+    #[test]
+    fn nativerender_hit_test_wires_in_active_viewport_uses_native_projection() {
+        let mut native = nm::CadDocument::new();
+        let line_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+
+        let mut scene = Scene::new();
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = true;
+        scene.current_layout = "Layout1".into();
+
+        let mut viewport = Viewport::new();
+        viewport.id = 2;
+        viewport.status.is_on = true;
+        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.width = 100.0;
+        viewport.height = 100.0;
+        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_height = 100.0;
+        let viewport_handle = scene.add_entity(EntityType::Viewport(viewport));
+
+        scene.active_viewport = Some(viewport_handle);
+        let wires = scene.hit_test_wires();
+        assert_eq!(wires.len(), 1, "MSPACE hit-test should only expose viewport content");
+        assert_eq!(wires[0].name, line_handle.value().to_string());
+    }
+
+    #[test]
+    fn nativerender_projects_native_hatch_into_paper_viewport() {
+        let mut native = nm::CadDocument::new();
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [10.0, 0.0, 0.0],
+                            [10.0, 10.0, 0.0],
+                            [0.0, 10.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("native hatch");
+
+        let mut scene = Scene::new();
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = true;
+        scene.current_layout = "Layout1".into();
+
+        let mut viewport = Viewport::new();
+        viewport.id = 2;
+        viewport.status.is_on = true;
+        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.width = 100.0;
+        viewport.height = 100.0;
+        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_height = 100.0;
+        let _vp_handle = scene.add_entity(EntityType::Viewport(viewport));
+
+        let hatches = scene.synced_hatch_models();
+        assert_eq!(hatches.len(), 1);
+        assert_eq!(hatches[0].name, "SOLID");
+        assert!(hatches[0].boundary.iter().all(|[x, y]| *x >= 0.0 && *y >= 0.0));
+    }
+
+    #[test]
+    fn nativerender_mspace_hatch_projection_uses_only_active_viewport() {
+        let mut native = nm::CadDocument::new();
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![
+                        nm::HatchEdge::Line {
+                            start: [0.0, 0.0],
+                            end: [10.0, 0.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [10.0, 0.0],
+                            end: [10.0, 10.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [10.0, 10.0],
+                            end: [0.0, 10.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [0.0, 10.0],
+                            end: [0.0, 0.0],
+                        },
+                    ],
+                }],
+            }))
+            .expect("native hatch");
+
+        let mut scene = Scene::new();
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = true;
+        scene.current_layout = "Layout1".into();
+
+        let mut vp1 = Viewport::new();
+        vp1.id = 2;
+        vp1.status.is_on = true;
+        vp1.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        vp1.width = 100.0;
+        vp1.height = 100.0;
+        vp1.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        vp1.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        vp1.view_height = 100.0;
+        let vp1_handle = scene.add_entity(EntityType::Viewport(vp1));
+
+        let mut vp2 = Viewport::new();
+        vp2.id = 3;
+        vp2.status.is_on = true;
+        vp2.center = acadrust::types::Vector3::new(200.0, 200.0, 0.0);
+        vp2.width = 100.0;
+        vp2.height = 100.0;
+        vp2.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        vp2.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        vp2.view_height = 100.0;
+        let _vp2_handle = scene.add_entity(EntityType::Viewport(vp2));
+
+        scene.active_viewport = Some(vp1_handle);
+        let hatches = scene.synced_hatch_models();
+        assert_eq!(hatches.len(), 1, "MSPACE should only project hatch content for the active viewport");
+    }
+
+    #[test]
+    fn nativerender_paper_viewport_hatch_entries_preserve_native_handle() {
+        let mut native = nm::CadDocument::new();
+        let hatch_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [10.0, 0.0, 0.0],
+                            [10.0, 10.0, 0.0],
+                            [0.0, 10.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("native hatch");
+
+        let mut scene = Scene::new();
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = true;
+        scene.current_layout = "Layout1".into();
+
+        let mut viewport = Viewport::new();
+        viewport.id = 2;
+        viewport.status.is_on = true;
+        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.width = 100.0;
+        viewport.height = 100.0;
+        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_height = 100.0;
+        let _vp_handle = scene.add_entity(EntityType::Viewport(viewport));
+
+        let entries = scene.synced_hatch_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, acadrust::Handle::new(hatch_handle.value()));
+    }
+
+    #[test]
+    fn nativerender_hatch_model_for_handle_returns_native_model() {
+        let mut native = nm::CadDocument::new();
+        let hatch_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Line {
+                        start: [0.0, 0.0],
+                        end: [1.0, 0.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [1.0, 0.0],
+                        end: [1.0, 1.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [1.0, 1.0],
+                        end: [0.0, 1.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [0.0, 1.0],
+                        end: [0.0, 0.0],
+                    }],
+                }],
+            }))
+            .expect("native hatch");
+
+        let scene = scene_with_native(native);
+        let model = scene.hatch_model_for_handle(acadrust::Handle::new(hatch_handle.value()));
+        assert!(model.is_some(), "native hatch should be retrievable by handle");
+        assert_eq!(model.unwrap().name, "SOLID");
+    }
+
+    #[test]
+    fn nativerender_insert_falls_back_when_attribs_present() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(&mut native, "BLOCK_ATTR", vec![]);
+        let attrib = nm::Entity::new(nm::EntityData::Attrib {
+            tag: "TAG".into(),
+            value: "VAL".into(),
+            insertion: [0.0, 0.0, 0.0],
+            height: 1.0,
+        });
+        let insert_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_ATTR".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: true,
+                attribs: vec![attrib],
+            }))
+            .expect("insert");
+
+        let scene = scene_with_native(native.clone());
+        let entity = native.get_entity(insert_handle).expect("insert entity");
+        let rendered = scene.native_render_entity_wires(
+            scene.native_doc().expect("native doc"),
+            entity,
+            insert_handle,
+            false,
+            &mut HashSet::new(),
+        );
+        assert!(rendered.is_none());
+    }
+
+    #[test]
+    fn nativerender_insert_breaks_recursion_with_compat_fallback() {
+        let mut native = nm::CadDocument::new();
+        let recurse_handle = block_with_entities(
+            &mut native,
+            "BLOCK_RECURSE",
+            vec![nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_RECURSE".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            })],
+        );
+        let insert_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_RECURSE".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = scene_with_native(native.clone());
+        let entity = native.get_entity(insert_handle).expect("insert entity");
+        let mut visited = HashSet::from([recurse_handle.value()]);
+        let rendered = scene.native_render_entity_wires(
+            scene.native_doc().expect("native doc"),
+            entity,
+            insert_handle,
+            false,
+            &mut visited,
+        );
+        assert!(rendered.is_none());
+    }
+
+    #[test]
+    fn nativerender_dimension_uses_native_adapter_for_linear_or_aligned() {
+        let mut native = nm::CadDocument::new();
+        let dim_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: "*D1".into(),
+                style_name: "Standard".into(),
+                definition_point: [5.0, 2.0, 0.0],
+                text_midpoint: [2.5, 2.0, 0.0],
+                text_override: "".into(),
+                attachment_point: 0,
+                measurement: 5.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [5.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("dimension");
+
+        let scene = scene_with_native(native);
+        let wires = scene.entity_wires();
+        let matches = wires
+            .iter()
+            .filter(|wire| wire.name == dim_handle.value().to_string())
+            .count();
+        assert!(matches >= 1, "dimension should render through native adapter");
+    }
+
+    #[test]
+    fn nativerender_multileader_uses_native_adapter() {
+        let mut native = nm::CadDocument::new();
+        let mleader_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::MultiLeader {
+                content_type: 1,
+                text_label: "TAG".into(),
+                style_name: "Standard".into(),
+                arrowhead_size: 2.5,
+                landing_gap: 0.0,
+                dogleg_length: 2.5,
+                property_override_flags: 0,
+                path_type: 1,
+                line_color: 256,
+                leader_line_weight: -1,
+                enable_landing: true,
+                enable_dogleg: true,
+                enable_annotation_scale: false,
+                scale_factor: 1.0,
+                text_attachment_direction: 0,
+                text_bottom_attachment_type: 9,
+                text_top_attachment_type: 9,
+                text_location: Some([6.0, 0.0, 4.0]),
+                leader_vertices: vec![
+                    [0.0, 0.0, 0.0],
+                    [2.0, 0.0, 1.0],
+                    [6.0, 0.0, 4.0],
+                    [10.0, 0.0, 0.0],
+                    [6.0, 0.0, 4.0],
+                ],
+                leader_root_lengths: vec![3, 2],
+            }))
+            .expect("multileader");
+
+        let scene = scene_with_native(native);
+        let wires = scene.entity_wires();
+        let matches = wires
+            .iter()
+            .filter(|wire| wire.name == mleader_handle.value().to_string() && !wire.points.is_empty())
+            .count();
+        assert!(matches >= 1, "multileader should render through native adapter");
+    }
+
+    #[test]
+    fn nativerender_dimension_uses_native_adapter_for_angular2ln() {
+        let mut native = nm::CadDocument::new();
+        let dim_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 2,
+                block_name: "*D2".into(),
+                style_name: "Standard".into(),
+                definition_point: [0.0, 1.0, 0.0],
+                text_midpoint: [1.0, 1.0, 0.0],
+                text_override: "".into(),
+                attachment_point: 0,
+                measurement: 45.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [1.0, 0.0, 0.0],
+                second_point: [0.0, 1.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [1.0, 1.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("dimension");
+
+        let scene = scene_with_native(native);
+        let wires = scene.entity_wires();
+        let matches = wires
+            .iter()
+            .filter(|wire| wire.name == dim_handle.value().to_string())
+            .count();
+        assert!(matches >= 1, "Angular2Ln should render through native adapter");
+    }
+
+    #[test]
+    fn nativerender_dimension_falls_back_for_unsupported_dim_type() {
+        let mut native = nm::CadDocument::new();
+        let dim_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 7,
+                block_name: "*D7".into(),
+                style_name: "Standard".into(),
+                definition_point: [0.0, 0.0, 0.0],
+                text_midpoint: [0.0, 0.0, 0.0],
+                text_override: "".into(),
+                attachment_point: 0,
+                measurement: 45.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [1.0, 0.0, 0.0],
+                second_point: [0.0, 1.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [1.0, 1.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("dimension");
+
+        let scene = scene_with_native(native.clone());
+        let entity = native.get_entity(dim_handle).expect("dim entity");
+        let rendered = scene.native_render_entity_wires(
+            scene.native_doc().expect("native doc"),
+            entity,
+            dim_handle,
+            false,
+            &mut HashSet::new(),
+        );
+        assert!(rendered.is_none());
+    }
+
+    #[test]
+    fn nativerender_mixed_insert_dimension_does_not_duplicate_parent_handle() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "BLOCK_DIM",
+            vec![nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [1.0, 0.0, 0.0],
+            })],
+        );
+        let insert_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "BLOCK_DIM".into(),
+                insertion: [10.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+        let dim_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 1,
+                block_name: "*D1".into(),
+                style_name: "Standard".into(),
+                definition_point: [4.0, 2.0, 0.0],
+                text_midpoint: [2.0, 2.0, 0.0],
+                text_override: "".into(),
+                attachment_point: 0,
+                measurement: 4.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [4.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("dimension");
+
+        let scene = scene_with_native(native);
+        let wires = scene.entity_wires();
+        let unique_names: std::collections::HashSet<_> =
+            wires.iter().map(|wire| wire.name.clone()).collect();
+
+        assert!(wires.iter().any(|wire| wire.name == insert_handle.value().to_string()));
+        assert!(wires.iter().any(|wire| wire.name == dim_handle.value().to_string()));
+        assert_eq!(unique_names.len(), 2, "insert and dimension should each own one parent handle namespace");
+    }
+
+    #[test]
+    fn nativerender_hatch_adds_native_model_when_compat_missing() {
+        let mut native = nm::CadDocument::new();
+        let hatch_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [2.0, 0.0, 0.0],
+                            [2.0, 2.0, 0.0],
+                            [0.0, 2.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("hatch");
+
+        let scene = scene_with_native(native);
+        assert!(scene.hatches.is_empty(), "compat bridge should not have a native hatch cache entry");
+        let models = scene.synced_hatch_models();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "SOLID");
+        assert_eq!(models[0].boundary.len(), 5);
+        assert!(!models[0].boundary.is_empty());
+        let _ = hatch_handle;
+    }
+
+    #[test]
+    fn nativerender_hatch_selection_tints_native_model() {
+        let mut native = nm::CadDocument::new();
+        let hatch_handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Line {
+                        start: [0.0, 0.0],
+                        end: [2.0, 0.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [2.0, 0.0],
+                        end: [2.0, 2.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [2.0, 2.0],
+                        end: [0.0, 2.0],
+                    },
+                    nm::HatchEdge::Line {
+                        start: [0.0, 2.0],
+                        end: [0.0, 0.0],
+                    }],
+                }],
+            }))
+            .expect("hatch");
+
+        let mut scene = scene_with_native(native);
+        scene.selected.insert(acadrust::Handle::new(hatch_handle.value()));
+        let models = scene.synced_hatch_models();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].color, [0.15, 0.55, 1.00, models[0].color[3]]);
+    }
+
+    #[test]
+    fn add_entity_syncs_supported_entity_into_native_document() {
+        let mut scene = scene_with_native(nm::CadDocument::new());
+
+        let handle = scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
+            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
+            acadrust::types::Vector3::new(5.0, 0.0, 0.0),
+        )));
+
+        let native_entity = scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(nm::Handle::new(handle.value())));
+        assert!(native_entity.is_some(), "supported compat add should mirror into native document");
+    }
+
+    #[test]
+    fn erase_entities_removes_entity_from_native_document() {
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [5.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+        let mut scene = scene_with_native(native);
+
+        scene.erase_entities(&[acadrust::Handle::new(handle.value())]);
+
+        assert!(
+            scene
+                .native_doc()
+                .and_then(|doc| doc.get_entity(handle))
+                .is_none(),
+            "erase_entities should remove mirrored native entity"
+        );
+    }
+}
+
 impl Default for Scene {
     fn default() -> Self {
         Self::new()
@@ -2206,6 +3973,62 @@ fn clip_polyline_to_rect(
         result.pop();
     }
     result
+}
+
+fn clip_polygon_to_rect(
+    poly: &[[f32; 2]],
+    xmin: f32,
+    ymin: f32,
+    xmax: f32,
+    ymax: f32,
+) -> Vec<[f32; 2]> {
+    fn clip_against_edge(
+        input: &[[f32; 2]],
+        inside: impl Fn([f32; 2]) -> bool,
+        intersect: impl Fn([f32; 2], [f32; 2]) -> [f32; 2],
+    ) -> Vec<[f32; 2]> {
+        if input.is_empty() {
+            return vec![];
+        }
+
+        let mut output = Vec::new();
+        let mut prev = *input.last().expect("non-empty");
+        let mut prev_inside = inside(prev);
+
+        for &curr in input {
+            let curr_inside = inside(curr);
+            match (prev_inside, curr_inside) {
+                (true, true) => output.push(curr),
+                (true, false) => output.push(intersect(prev, curr)),
+                (false, true) => {
+                    output.push(intersect(prev, curr));
+                    output.push(curr);
+                }
+                (false, false) => {}
+            }
+            prev = curr;
+            prev_inside = curr_inside;
+        }
+
+        output
+    }
+
+    let left = clip_against_edge(poly, |p| p[0] >= xmin, |a, b| {
+        let t = (xmin - a[0]) / (b[0] - a[0]);
+        [xmin, a[1] + (b[1] - a[1]) * t]
+    });
+    let right = clip_against_edge(&left, |p| p[0] <= xmax, |a, b| {
+        let t = (xmax - a[0]) / (b[0] - a[0]);
+        [xmax, a[1] + (b[1] - a[1]) * t]
+    });
+    let bottom = clip_against_edge(&right, |p| p[1] >= ymin, |a, b| {
+        let t = (ymin - a[1]) / (b[1] - a[1]);
+        [a[0] + (b[0] - a[0]) * t, ymin]
+    });
+    clip_against_edge(&bottom, |p| p[1] <= ymax, |a, b| {
+        let t = (ymax - a[1]) / (b[1] - a[1]);
+        [a[0] + (b[0] - a[0]) * t, ymax]
+    })
 }
 
 /// A thin white rectangle wire that represents the printable-area boundary

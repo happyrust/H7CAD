@@ -7,6 +7,7 @@ mod modules;
 mod patterns;
 mod scene;
 mod snap;
+mod store;
 mod ui;
 
 fn main() -> iced::Result {

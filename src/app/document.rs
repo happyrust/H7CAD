@@ -7,6 +7,7 @@ use crate::scene::GripDef;
 use crate::modules::home::modify::refedit::RefEditSession;
 use acadrust::{CadDocument, Handle};
 use acadrust::tables::Ucs;
+use h7cad_native_model as nm;
 use crate::linetypes;
 use std::path::PathBuf;
 use iced;
@@ -15,6 +16,7 @@ use iced;
 
 pub(super) struct DocumentTab {
     pub(super) scene: Scene,
+    pub(super) native_render_enabled: bool,
     pub(super) current_path: Option<PathBuf>,
     pub(super) dirty: bool,
     pub(super) tab_title: String,
@@ -50,6 +52,7 @@ impl DocumentTab {
         linetypes::populate_document(&mut scene.document);
         Self {
             scene,
+            native_render_enabled: false,
             current_path: None,
             dirty: false,
             tab_title: format!("Drawing{}", n),
@@ -90,6 +93,7 @@ impl DocumentTab {
 #[derive(Clone)]
 pub(super) struct HistorySnapshot {
     pub(super) document: CadDocument,
+    pub(super) native_doc_clone: Option<nm::CadDocument>,
     pub(super) current_layout: String,
     pub(super) selected: Vec<Handle>,
     pub(super) dirty: bool,
@@ -100,4 +104,40 @@ pub(super) struct HistorySnapshot {
 pub(super) struct HistoryState {
     pub(super) undo_stack: Vec<HistorySnapshot>,
     pub(super) redo_stack: Vec<HistorySnapshot>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nativerender_new_drawing_disables_flag_by_default() {
+        let tab = DocumentTab::new_drawing(1);
+        assert!(!tab.native_render_enabled);
+    }
+
+    #[test]
+    fn history_snapshot_clone_preserves_native_document() {
+        let mut native = h7cad_native_model::CadDocument::new();
+        native
+            .add_entity(h7cad_native_model::Entity::new(
+                h7cad_native_model::EntityData::Line {
+                    start: [0.0, 0.0, 0.0],
+                    end: [1.0, 0.0, 0.0],
+                },
+            ))
+            .expect("native line should be added");
+
+        let snapshot = HistorySnapshot {
+            document: CadDocument::new(),
+            native_doc_clone: Some(native.clone()),
+            current_layout: "Model".into(),
+            selected: vec![],
+            dirty: false,
+            label: "test".into(),
+        };
+
+        let cloned = snapshot.clone();
+        assert_eq!(cloned.native_doc_clone, Some(native));
+    }
 }

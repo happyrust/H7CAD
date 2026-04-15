@@ -1,10 +1,56 @@
 use super::{H7CAD, Message};
 use crate::command::CadCommand;
 use crate::scene::Scene;
+use h7cad_native_model as nm;
 use iced::Task;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 impl H7CAD {
+    fn selected_handles_snapshot(&self, i: usize) -> Vec<acadrust::Handle> {
+        self.tabs[i].scene.selected.iter().copied().collect()
+    }
+
+    fn wire_models_for_handles(&self, i: usize, handles: &[acadrust::Handle]) -> Vec<crate::scene::WireModel> {
+        let wanted: HashSet<_> = handles.iter().copied().collect();
+        self.tabs[i]
+            .scene
+            .entity_wires()
+            .into_iter()
+            .filter(|wire| {
+                Scene::handle_from_wire_name(&wire.name)
+                    .map(|handle| wanted.contains(&handle))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    fn compat_entities_for_visible_wires(&self, i: usize) -> Vec<acadrust::EntityType> {
+        let mut seen = HashSet::new();
+        self.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter_map(|wire| {
+                let handle = Scene::handle_from_wire_name(&wire.name)?;
+                if !seen.insert(handle) {
+                    return None;
+                }
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(handle)
+                    .cloned()
+                    .or_else(|| {
+                        self.tabs[i]
+                            .scene
+                            .native_entity(handle)
+                            .and_then(crate::io::native_bridge::native_entity_to_acadrust)
+                    })
+            })
+            .collect()
+    }
+
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
         let i = self.active_tab;
         // Cancel any running command before starting a new one.
@@ -31,6 +77,56 @@ impl H7CAD {
             "CLEAR"|"CLR"        => return Task::done(Message::ClearScene),
             "WIREFRAME"|"VW"     => return Task::done(Message::SetWireframe(true)),
             "SOLID"|"VS"         => return Task::done(Message::SetWireframe(false)),
+
+            cmd if cmd == "NATIVERENDER" || cmd.starts_with("NATIVERENDER ") => {
+                let args: Vec<_> = cmd.split_whitespace().skip(1).collect();
+                let has_native = self.tabs[i].scene.native_store.is_some();
+                let current = self.tabs[i].native_render_enabled;
+
+                let desired = match args.first().copied() {
+                    None => {
+                        let state = if current { "ON" } else { "OFF" };
+                        self.command_line
+                            .push_info(&format!("NATIVERENDER is {state}."));
+                        return Task::none();
+                    }
+                    Some("ON") => Some(true),
+                    Some("OFF") => Some(false),
+                    Some("TOGGLE") => Some(!current),
+                    Some(_) => {
+                        self.command_line.push_info(
+                            "Usage: NATIVERENDER [ON|OFF|TOGGLE]",
+                        );
+                        return Task::none();
+                    }
+                };
+
+                if desired == Some(true) && !has_native {
+                    self.tabs[i].native_render_enabled = false;
+                    self.tabs[i].scene.native_render_enabled = false;
+                    self.command_line.push_info(
+                        "NATIVERENDER: native document is not available for this tab.",
+                    );
+                    self.refresh_properties();
+                    self.refresh_selected_grips();
+                    return Task::none();
+                }
+
+                let enabled = desired.unwrap_or(false);
+                self.tabs[i].native_render_enabled = enabled;
+                self.tabs[i].scene.native_render_enabled = enabled;
+                self.refresh_properties();
+                self.refresh_selected_grips();
+
+                if enabled {
+                    self.command_line
+                        .push_output("NATIVERENDER: native render debug mode enabled.");
+                } else {
+                    self.command_line
+                        .push_output("NATIVERENDER: reverted to compat render path.");
+                }
+                return Task::none();
+            }
 
             // ── Background color ───────────────────────────────────────────
             // Usage:  BACKGROUND <r> <g> <b>   (0–255 each)
@@ -555,18 +651,15 @@ impl H7CAD {
             cmd if cmd == "ATTEDIT" || cmd.starts_with("ATTEDIT ") => {
                 let rest = cmd.trim_start_matches("ATTEDIT").trim();
                 let parts: Vec<&str> = rest.splitn(2, char::is_whitespace).collect();
-                let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
-                    .selected_entities()
-                    .iter()
-                    .map(|(h, _)| *h)
-                    .collect();
+                let selected_handles: Vec<acadrust::Handle> =
+                    self.tabs[i].scene.selected.iter().copied().collect();
                 if selected_handles.is_empty() {
                     self.command_line.push_error("ATTEDIT: select an Insert entity first.");
                 } else {
                     let mut found_any = false;
                     for sh in &selected_handles {
                         if let Some(acadrust::EntityType::Insert(ins)) =
-                            self.tabs[i].scene.document.entities().find(|e| e.common().handle == *sh)
+                            self.tabs[i].scene.document.get_entity(*sh)
                         {
                             found_any = true;
                             if rest.is_empty() {
@@ -585,6 +678,25 @@ impl H7CAD {
                                     }
                                 }
                             }
+                        } else if let Some(entity) = self.tabs[i].scene.native_entity(*sh) {
+                            if let Some(attrs) =
+                                crate::modules::home::modify::attedit::native_insert_attrs(entity)
+                            {
+                                found_any = true;
+                                if rest.is_empty() {
+                                    if attrs.is_empty() {
+                                        self.command_line.push_output(&format!(
+                                            "  Insert {:x}: no attributes.", sh.value()
+                                        ));
+                                    } else {
+                                        for (tag, val) in attrs {
+                                            self.command_line.push_output(&format!(
+                                                "  [{tag}] = {val}"
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     if !found_any {
@@ -597,13 +709,35 @@ impl H7CAD {
                         let mut changed = 0usize;
                         self.push_undo_snapshot(i, "ATTEDIT");
                         for sh in &selected_handles {
+                            let mut compat_updated = false;
+                            let mut compat_present = false;
                             if let Some(acadrust::EntityType::Insert(ins)) =
-                                self.tabs[i].scene.document.entities_mut().find(|e| e.common().handle == *sh)
+                                self.tabs[i].scene.document.get_entity_mut(*sh)
                             {
+                                compat_present = true;
                                 for attr in &mut ins.attributes {
                                     if attr.tag.to_uppercase() == tag_up {
                                         attr.set_value(new_val);
                                         changed += 1;
+                                        compat_updated = true;
+                                    }
+                                }
+                            }
+                            if compat_present {
+                                if compat_updated {
+                                    self.sync_native_entity_from_compat(i, *sh);
+                                }
+                            } else if let Some(entity) = self.tabs[i].scene.native_entity_mut(*sh) {
+                                if let nm::EntityData::Insert { attribs, .. } = &mut entity.data {
+                                    for attrib in attribs {
+                                        if let nm::EntityData::Attrib { tag, value, .. } =
+                                            &mut attrib.data
+                                        {
+                                            if tag.to_uppercase() == tag_up {
+                                                *value = new_val.to_string();
+                                                changed += 1;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1014,19 +1148,31 @@ impl H7CAD {
             }
 
             "DDEDIT"|"ED" => {
-                use crate::modules::annotate::ddedit::{DdeditCommand, entity_text};
+                use crate::modules::annotate::ddedit::{
+                    DdeditCommand, entity_text, native_entity_text,
+                };
                 // If a single text/mtext entity is already selected, skip the pick step.
-                let sel = self.tabs[i].scene.selected_entities();
-                if sel.len() == 1 {
-                    let (h, _) = sel[0];
-                    if let Some(e) = self.tabs[i].scene.document.get_entity(h) {
-                        if let Some(cur) = entity_text(e) {
-                            let cmd = DdeditCommand::with_handle(h, cur.clone());
-                            self.command_line.push_info(&format!("DDEDIT  Enter new text <{cur}>:"));
-                            self.tabs[i].active_cmd = Some(Box::new(cmd));
-                        } else {
-                            self.command_line.push_error("DDEDIT: selected entity is not text.");
-                        }
+                let selected_handles: Vec<acadrust::Handle> =
+                    self.tabs[i].scene.selected.iter().copied().collect();
+                if selected_handles.len() == 1 {
+                    let h = selected_handles[0];
+                    let current = self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(h)
+                        .and_then(entity_text)
+                        .or_else(|| {
+                            self.tabs[i]
+                                .scene
+                                .native_entity(h)
+                                .and_then(native_entity_text)
+                        });
+                    if let Some(cur) = current {
+                        let cmd = DdeditCommand::with_handle(h, cur.clone());
+                        self.command_line.push_info(&format!("DDEDIT  Enter new text <{cur}>:"));
+                        self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    } else {
+                        self.command_line.push_error("DDEDIT: selected entity is not text.");
                     }
                 } else {
                     let cmd = DdeditCommand::new();
@@ -1270,12 +1416,7 @@ impl H7CAD {
 
             "FILLET"|"F" => {
                 use crate::modules::home::modify::fillet::FilletCommand;
-                let entities: Vec<_> = self.tabs[i].scene.entity_wires().iter()
-                    .filter_map(|w| {
-                        let h = Scene::handle_from_wire_name(&w.name)?;
-                        self.tabs[i].scene.document.get_entity(h).cloned().map(|e| (h, e))
-                    }).collect();
-                let all_entities: Vec<_> = entities.into_iter().map(|(_, e)| e).collect();
+                let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = FilletCommand::new(
                     crate::modules::home::defaults::get_fillet_radius(), all_entities);
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1283,8 +1424,7 @@ impl H7CAD {
             }
 
             "ARRAY"|"AR"|"ARRAYRECT" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let handles = self.selected_handles_snapshot(i);
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ARRAYRECT");
@@ -1292,7 +1432,7 @@ impl H7CAD {
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     use crate::modules::home::modify::array::ArrayRectCommand;
-                    let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    let wires = self.wire_models_for_handles(i, &handles);
                     let new_cmd = ArrayRectCommand::new(handles, wires);
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -1300,8 +1440,7 @@ impl H7CAD {
             }
 
             "ARRAYPOLAR" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let handles = self.selected_handles_snapshot(i);
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ARRAYPOLAR");
@@ -1309,7 +1448,7 @@ impl H7CAD {
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     use crate::modules::home::modify::array::ArrayPolarCommand;
-                    let wires = self.tabs[i].scene.wire_models_for(&handles);
+                    let wires = self.wire_models_for_handles(i, &handles);
                     let new_cmd = ArrayPolarCommand::new(handles, wires);
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -1317,8 +1456,7 @@ impl H7CAD {
             }
 
             "ARRAYPATH" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let handles = self.selected_handles_snapshot(i);
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ARRAYPATH");
@@ -1326,12 +1464,8 @@ impl H7CAD {
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     use crate::modules::home::modify::array::ArrayPathCommand;
-                    let wires = self.tabs[i].scene.wire_models_for(&handles);
-                    let all_entities: Vec<_> = self.tabs[i].scene.entity_wires().iter()
-                        .filter_map(|w| {
-                            let h = Scene::handle_from_wire_name(&w.name)?;
-                            self.tabs[i].scene.document.get_entity(h).cloned()
-                        }).collect();
+                    let wires = self.wire_models_for_handles(i, &handles);
+                    let all_entities = self.compat_entities_for_visible_wires(i);
                     let new_cmd = ArrayPathCommand::new(handles, wires, all_entities);
                     self.command_line.push_info(&new_cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -1356,12 +1490,7 @@ impl H7CAD {
 
             "CHAMFER"|"CHA" => {
                 use crate::modules::home::modify::fillet::ChamferCommand;
-                let entities: Vec<_> = self.tabs[i].scene.entity_wires().iter()
-                    .filter_map(|w| {
-                        let h = Scene::handle_from_wire_name(&w.name)?;
-                        self.tabs[i].scene.document.get_entity(h).cloned().map(|e| (h, e))
-                    }).collect();
-                let all_entities: Vec<_> = entities.into_iter().map(|(_, e)| e).collect();
+                let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = ChamferCommand::new(
                     crate::modules::home::defaults::get_chamfer_dist1(), all_entities);
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1407,11 +1536,7 @@ impl H7CAD {
 
             "OFFSET"|"O" => {
                 use crate::modules::home::modify::offset::OffsetCommand;
-                let all_entities: Vec<_> = self.tabs[i].scene.entity_wires().iter()
-                    .filter_map(|w| {
-                        let h = Scene::handle_from_wire_name(&w.name)?;
-                        self.tabs[i].scene.document.get_entity(h).cloned()
-                    }).collect();
+                let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = OffsetCommand::new(
                     crate::modules::home::defaults::get_offset_dist(), all_entities);
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1420,12 +1545,7 @@ impl H7CAD {
 
             "TRIM"|"TR" => {
                 use crate::modules::home::modify::trim::TrimCommand;
-                let entities: Vec<_> = self.tabs[i].scene.entity_wires().iter()
-                    .filter_map(|w| {
-                        let h = Scene::handle_from_wire_name(&w.name)?;
-                        self.tabs[i].scene.document.get_entity(h).cloned().map(|e| (h, e))
-                    }).collect();
-                let all_entities: Vec<_> = entities.into_iter().map(|(_, e)| e).collect();
+                let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = TrimCommand::new(all_entities);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -1433,12 +1553,7 @@ impl H7CAD {
 
             "EXTEND"|"EX" => {
                 use crate::modules::home::modify::trim::ExtendCommand;
-                let entities: Vec<_> = self.tabs[i].scene.entity_wires().iter()
-                    .filter_map(|w| {
-                        let h = Scene::handle_from_wire_name(&w.name)?;
-                        self.tabs[i].scene.document.get_entity(h).cloned().map(|e| (h, e))
-                    }).collect();
-                let all_entities: Vec<_> = entities.into_iter().map(|(_, e)| e).collect();
+                let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = ExtendCommand::new(all_entities);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -4408,5 +4523,258 @@ fn csv_escape(s: &str) -> String {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::CmdResult;
+    use h7cad_native_model as nm;
+    use glam::Vec3;
+
+    #[test]
+    fn nativerender_on_requires_native_document() {
+        let mut app = H7CAD::new();
+
+        let _ = app.dispatch_command("NATIVERENDER ON");
+
+        assert!(!app.tabs[0].native_render_enabled);
+        assert!(
+            app.command_line
+                .history
+                .last()
+                .expect("history entry")
+                .text
+                .contains("native")
+        );
+    }
+
+    #[test]
+    fn nativerender_command_toggles_flags_per_tab() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [5.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+        app.tabs[0].scene.set_native_doc(Some(native));
+
+        let _ = app.dispatch_command("NATIVERENDER ON");
+        assert!(app.tabs[0].native_render_enabled);
+        assert!(app.tabs[0].scene.native_render_enabled);
+
+        let _ = app.dispatch_command("NATIVERENDER OFF");
+        assert!(!app.tabs[0].native_render_enabled);
+        assert!(!app.tabs[0].scene.native_render_enabled);
+    }
+
+    #[test]
+    fn ddedit_dispatch_uses_selected_native_text() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Text {
+                insertion: [0.0, 0.0, 0.0],
+                height: 2.5,
+                value: "native text".into(),
+                rotation: 0.0,
+                style_name: "Standard".into(),
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                horizontal_alignment: 0,
+                vertical_alignment: 0,
+                alignment_point: None,
+            }))
+            .expect("native text");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(acadrust::Handle::new(handle.value()), true);
+
+        let _ = app.dispatch_command("DDEDIT");
+
+        let active = app.tabs[0]
+            .active_cmd
+            .as_ref()
+            .expect("ddedit command should be active");
+        assert_eq!(active.name(), "DDEDIT");
+        assert!(
+            active.prompt().contains("native text"),
+            "selected native text should seed the DDEDIT prompt"
+        );
+    }
+
+    #[test]
+    fn attedit_direct_command_updates_selected_native_insert() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "ATTR_BLOCK".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: true,
+                attribs: vec![nm::Entity::new(nm::EntityData::Attrib {
+                    tag: "TAG".into(),
+                    value: "OLD".into(),
+                    insertion: [0.0, 0.0, 0.0],
+                    height: 1.0,
+                })],
+            }))
+            .expect("native insert");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(acadrust::Handle::new(handle.value()), true);
+
+        let _ = app.dispatch_command("ATTEDIT TAG NEWVAL");
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native insert should still exist");
+        match &entity.data {
+            nm::EntityData::Insert { attribs, .. } => match &attribs[0].data {
+                nm::EntityData::Attrib { value, .. } => assert_eq!(value, "NEWVAL"),
+                other => panic!("expected native attrib, got {other:?}"),
+            },
+            other => panic!("expected native insert, got {other:?}"),
+        }
+        assert!(app.tabs[0].dirty, "direct ATTEDIT should mark the tab dirty");
+    }
+
+    #[test]
+    fn compat_entities_for_visible_wires_includes_native_only_geometry() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let h1 = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native line 1");
+        let h2 = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [5.0, -5.0, 0.0],
+                end: [5.0, 5.0, 0.0],
+            }))
+            .expect("native line 2");
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0].scene.native_render_enabled = true;
+        app.tabs[0].native_render_enabled = true;
+
+        let entities = app.compat_entities_for_visible_wires(0);
+        let handles: Vec<_> = entities.iter().map(|entity| entity.common().handle).collect();
+        assert_eq!(entities.len(), 2);
+        assert!(handles.contains(&acadrust::Handle::new(h1.value())));
+        assert!(handles.contains(&acadrust::Handle::new(h2.value())));
+    }
+
+    #[test]
+    fn trim_dispatch_builds_command_from_native_only_entities() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let target = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("target line");
+        let _cutter = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [5.0, -5.0, 0.0],
+                end: [5.0, 5.0, 0.0],
+            }))
+            .expect("cutter line");
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0].scene.native_render_enabled = true;
+        app.tabs[0].native_render_enabled = true;
+
+        let _ = app.dispatch_command("TRIM");
+        let cmd = app.tabs[0]
+            .active_cmd
+            .as_mut()
+            .expect("trim command should be active");
+        let result = cmd.on_entity_pick(acadrust::Handle::new(target.value()), Vec3::new(8.0, 0.0, 0.0));
+
+        assert!(
+            matches!(result, CmdResult::ReplaceEntity(_, _)),
+            "trim command should resolve against native-only geometry snapshot"
+        );
+    }
+
+    #[test]
+    fn offset_dispatch_accepts_native_only_entity() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0].scene.native_render_enabled = true;
+        app.tabs[0].native_render_enabled = true;
+
+        let _ = app.dispatch_command("OFFSET");
+        let cmd = app.tabs[0]
+            .active_cmd
+            .as_mut()
+            .expect("offset command should be active");
+        let _ = cmd.on_text_input("");
+        let _ = cmd.on_entity_pick(acadrust::Handle::new(handle.value()), Vec3::ZERO);
+        let result = cmd.on_point(Vec3::new(0.0, 1.0, 0.0));
+
+        assert!(
+            matches!(result, CmdResult::CommitAndExit(_)),
+            "offset command should accept native-only geometry snapshot"
+        );
+    }
+
+    #[test]
+    fn arraypath_dispatch_accepts_native_only_selection_and_path() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let source = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [1.0, 0.0, 0.0],
+            }))
+            .expect("native source");
+        let path = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native path");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0].scene.native_render_enabled = true;
+        app.tabs[0].native_render_enabled = true;
+        app.tabs[0]
+            .scene
+            .select_entity(acadrust::Handle::new(source.value()), true);
+
+        let _ = app.dispatch_command("ARRAYPATH");
+        let cmd = app.tabs[0]
+            .active_cmd
+            .as_mut()
+            .expect("arraypath command should be active");
+        assert_eq!(cmd.name(), "ARRAYPATH");
+        let _ = cmd.on_entity_pick(acadrust::Handle::new(path.value()), Vec3::ZERO);
+        let result = cmd.on_text_input("");
+
+        assert!(
+            matches!(result, Some(CmdResult::BatchCopy(_, _))),
+            "arraypath command should accept native-only source selection and path snapshot"
+        );
     }
 }

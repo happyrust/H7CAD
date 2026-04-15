@@ -1,6 +1,110 @@
-use crate::ui::overlay::GridPlane;
+use super::H7CAD;
 use crate::scene::WireModel;
+use crate::ui::overlay::GridPlane;
 use acadrust::tables::Ucs;
+use acadrust::Handle;
+use h7cad_native_model as nm;
+use std::path::Path;
+
+impl H7CAD {
+    pub(super) fn sync_native_entity_from_compat(&mut self, i: usize, handle: Handle) {
+        let Some(compat_entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
+            return;
+        };
+        let Some(mut native_entity) = crate::io::native_bridge::acadrust_entity_to_native(&compat_entity) else {
+            return;
+        };
+        let Some(native_doc) = self.tabs[i].scene.native_doc_mut() else {
+            return;
+        };
+
+        let native_handle = nm::Handle::new(handle.value());
+        let existing_owner = native_doc
+            .get_entity(native_handle)
+            .map(|entity| entity.owner_handle)
+            .unwrap_or(native_entity.owner_handle);
+        let _ = native_doc.remove_entity(native_handle);
+        if native_entity.owner_handle == nm::Handle::NULL {
+            native_entity.owner_handle = existing_owner;
+        }
+        let _ = native_doc.add_entity(native_entity);
+    }
+
+    pub(super) fn save_active_tab_to_path(&self, i: usize, path: &Path) -> Result<(), String> {
+        use crate::store::CadStore;
+        if let Some(store) = self.tabs[i].scene.native_store.as_ref() {
+            store.save(path)
+        } else {
+            crate::io::save(&self.tabs[i].scene.document, path)
+        }
+    }
+
+    /// Sync a compat entity from its native counterpart (reverse of
+    /// `sync_native_entity_from_compat`).  Used after CadStore-based edits
+    /// so the compat projection stays up-to-date for rendering/selection.
+    pub(super) fn sync_compat_from_native(&mut self, i: usize, handle: Handle) {
+        let nh = nm::Handle::new(handle.value());
+        let Some(native_entity) = self.tabs[i].scene.native_doc()
+            .and_then(|doc| doc.get_entity(nh))
+        else {
+            return;
+        };
+        let Some(compat_entity) = crate::io::native_bridge::native_entity_to_acadrust(native_entity) else {
+            return;
+        };
+        if self.tabs[i].scene.document.get_entity(handle).is_some() {
+            if let Some(existing) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                *existing = compat_entity;
+            }
+        }
+    }
+
+    /// Edit entities through CadStore with a single closure.  This is the
+    /// native-first path: edits go directly to `NativeStore`, then the compat
+    /// projection is updated.  Pushes an undo snapshot before the first change.
+    pub(super) fn apply_store_edit(
+        &mut self,
+        i: usize,
+        label: &'static str,
+        mut edit: impl FnMut(&mut crate::store::NativeStore, nm::Handle),
+    ) -> super::update::EditSummary {
+        use super::update::EditSummary;
+
+        let handles = self.property_target_handles(i);
+        if handles.is_empty() {
+            return EditSummary::default();
+        }
+
+        let mut summary = EditSummary::default();
+        let mut snapshot_pushed = false;
+
+        for handle in handles {
+            let nh = nm::Handle::new(handle.value());
+            let entity_exists = self.tabs[i]
+                .scene
+                .native_store
+                .as_ref()
+                .and_then(|s| s.inner().get_entity(nh))
+                .is_some();
+
+            if entity_exists {
+                if !snapshot_pushed {
+                    self.push_undo_snapshot(i, label);
+                    snapshot_pushed = true;
+                }
+                if let Some(store) = self.tabs[i].scene.native_store.as_mut() {
+                    edit(store, nh);
+                }
+                self.sync_compat_from_native(i, handle);
+                summary.changed = true;
+            } else {
+                summary.unsupported = true;
+            }
+        }
+
+        summary
+    }
+}
 
 // ── Coordinate parsing ─────────────────────────────────────────────────────
 
@@ -186,6 +290,48 @@ pub(super) fn entity_type_key(entity: &acadrust::EntityType) -> String {
         acadrust::EntityType::Insert(_) => "insert",
         acadrust::EntityType::Point(_) => "point",
         acadrust::EntityType::Hatch(_) => "hatch",
+        _ => "entity",
+    }
+    .to_string()
+}
+
+pub(super) fn entity_type_label_native(entity: &nm::Entity) -> String {
+    match &entity.data {
+        nm::EntityData::Line { .. } => "Line",
+        nm::EntityData::Circle { .. } => "Circle",
+        nm::EntityData::Arc { .. } => "Arc",
+        nm::EntityData::Ellipse { .. } => "Ellipse",
+        nm::EntityData::Spline { .. } => "Spline",
+        nm::EntityData::LwPolyline { .. } => "Polyline",
+        nm::EntityData::Text { .. } => "Text",
+        nm::EntityData::MText { .. } => "MText",
+        nm::EntityData::Dimension { .. } => "Dimension",
+        nm::EntityData::Insert { .. } => "Block Reference",
+        nm::EntityData::Point { .. } => "Point",
+        nm::EntityData::Hatch { .. } => "Hatch",
+        nm::EntityData::Leader { .. } => "Leader",
+        nm::EntityData::Viewport { .. } => "Viewport",
+        _ => "Entity",
+    }
+    .to_string()
+}
+
+pub(super) fn entity_type_key_native(entity: &nm::Entity) -> String {
+    match &entity.data {
+        nm::EntityData::LwPolyline { .. } => "pline",
+        nm::EntityData::Circle { .. } => "circle",
+        nm::EntityData::Line { .. } => "line",
+        nm::EntityData::Arc { .. } => "arc",
+        nm::EntityData::Ellipse { .. } => "ellipse",
+        nm::EntityData::Spline { .. } => "spline",
+        nm::EntityData::Text { .. } => "text",
+        nm::EntityData::MText { .. } => "mtext",
+        nm::EntityData::Dimension { .. } => "dimension",
+        nm::EntityData::Insert { .. } => "insert",
+        nm::EntityData::Point { .. } => "point",
+        nm::EntityData::Hatch { .. } => "hatch",
+        nm::EntityData::Leader { .. } => "leader",
+        nm::EntityData::Viewport { .. } => "viewport",
         _ => "entity",
     }
     .to_string()

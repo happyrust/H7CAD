@@ -7,13 +7,107 @@ use crate::modules::ModuleEvent;
 use crate::ui::PropertiesPanel;
 use acadrust::types::Color as AcadColor;
 use acadrust::{EntityType as AcadEntityType, Handle};
+use h7cad_native_model as nm;
 use iced::time::Instant;
 use iced::window;
 use iced::{mouse, Task};
 
 const VIEWCUBE_HIT_SIZE: f32 = VIEWCUBE_DRAW_PX;
+const NATIVE_EDIT_UNSUPPORTED_MSG: &str =
+    "NATIVERENDER: editing is not supported for the selected native entity type.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditTargetKind {
+    Compat,
+    NativeSupported,
+    NativeUnsupported,
+    Missing,
+}
+
+#[derive(Default)]
+pub(super) struct EditSummary {
+    pub(super) changed: bool,
+    pub(super) unsupported: bool,
+}
 
 impl H7CAD {
+    fn command_pick_entity(&self, i: usize, handle: Handle) -> Option<AcadEntityType> {
+        self.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .cloned()
+            .or_else(|| {
+                self.tabs[i]
+                    .scene
+                    .native_entity(handle)
+                    .and_then(crate::io::native_bridge::native_entity_to_acadrust)
+            })
+    }
+
+    fn native_direct_edit_supported(entity: &nm::Entity) -> bool {
+        matches!(
+            entity.data,
+            nm::EntityData::Point { .. }
+                | nm::EntityData::Line { .. }
+                | nm::EntityData::Circle { .. }
+                | nm::EntityData::Arc { .. }
+                | nm::EntityData::LwPolyline { .. }
+                | nm::EntityData::Text { .. }
+                | nm::EntityData::MText { .. }
+                | nm::EntityData::Dimension { .. }
+                | nm::EntityData::MultiLeader { .. }
+        )
+    }
+
+    fn classify_edit_target(&self, i: usize, handle: Handle) -> EditTargetKind {
+        if self.tabs[i].scene.document.get_entity(handle).is_some() {
+            EditTargetKind::Compat
+        } else if let Some(entity) = self.tabs[i].scene.native_entity(handle) {
+            if Self::native_direct_edit_supported(entity) {
+                EditTargetKind::NativeSupported
+            } else {
+                EditTargetKind::NativeUnsupported
+            }
+        } else {
+            EditTargetKind::Missing
+        }
+    }
+
+    fn finish_property_edit(&mut self, i: usize, summary: EditSummary) {
+        if summary.unsupported {
+            self.command_line.push_info(NATIVE_EDIT_UNSUPPORTED_MSG);
+        }
+        if summary.changed {
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
+        }
+    }
+
+    fn apply_active_grip_edit(&mut self, i: usize, grip: &GripEdit, apply: GripApply) -> bool {
+        let nh = nm::Handle::new(grip.handle.value());
+        let entity_exists = self.tabs[i]
+            .scene
+            .native_store
+            .as_ref()
+            .and_then(|s| s.inner().get_entity(nh))
+            .is_some();
+
+        if entity_exists {
+            if let Some(store) = self.tabs[i].scene.native_store.as_mut() {
+                if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                    crate::scene::dispatch::apply_grip_native(entity, grip.grip_id, apply);
+                }
+            }
+            self.sync_compat_from_native(i, grip.handle);
+            self.tabs[i].scene.rebuild_gpu_model_after_grip(grip.handle);
+            true
+        } else {
+            self.command_line.push_info(NATIVE_EDIT_UNSUPPORTED_MSG);
+            false
+        }
+    }
+
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         match msg {
             Message::Tick(t) => {
@@ -23,7 +117,7 @@ impl H7CAD {
 
             Message::OpenFile => Task::perform(crate::io::pick_and_open(), Message::FileOpened),
 
-            Message::FileOpened(Ok((name, path, doc))) => {
+            Message::FileOpened(Ok((name, path, doc, native_doc))) => {
                 let entity_count = doc.entities().count();
                 self.command_line
                     .push_output(&format!("Opened \"{name}\" — {entity_count} entities"));
@@ -48,6 +142,8 @@ impl H7CAD {
 
                 self.tabs[i].current_path = Some(path.clone());
                 self.tabs[i].scene.document = doc;
+                self.tabs[i].scene.set_native_doc(native_doc);
+                self.tabs[i].scene.native_render_enabled = self.tabs[i].native_render_enabled;
 
                 // Auto-resolve XREFs relative to the opened file's directory.
                 if let Some(base_dir) = path.parent() {
@@ -389,7 +485,7 @@ impl H7CAD {
                 let i = self.active_tab;
                 if let Some(path) = &self.tabs[i].current_path {
                     let path = path.clone();
-                    match crate::io::save(&self.tabs[i].scene.document, &path) {
+                    match self.save_active_tab_to_path(i, &path) {
                         Ok(()) => {
                             self.command_line
                                 .push_output(&format!("Saved: {}", path.display()));
@@ -407,7 +503,7 @@ impl H7CAD {
 
             Message::PickedSavePath(Some(path)) => {
                 let i = self.active_tab;
-                match crate::io::save(&self.tabs[i].scene.document, &path) {
+                match self.save_active_tab_to_path(i, &path) {
                     Ok(()) => {
                         self.command_line
                             .push_output(&format!("Saved: {}", path.display()));
@@ -1124,11 +1220,12 @@ impl H7CAD {
                     } else {
                         GripApply::Absolute(snapped)
                     };
-                    self.tabs[i].scene.apply_grip(grip.handle, grip.grip_id, apply);
-                    self.tabs[i].dirty = true;
-                    self.tabs[i].active_grip.as_mut().unwrap().last_world = snapped;
-                    self.refresh_selected_grips();
-                    self.refresh_properties();
+                    if self.apply_active_grip_edit(i, &grip, apply) {
+                        self.tabs[i].dirty = true;
+                        self.tabs[i].active_grip.as_mut().unwrap().last_world = snapped;
+                        self.refresh_selected_grips();
+                        self.refresh_properties();
+                    }
                     return Task::none();
                 }
 
@@ -1411,13 +1508,20 @@ impl H7CAD {
                     {
                         let vp_mat2 = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                         let all_wires2 = self.tabs[i].scene.hit_test_wires();
+                        let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
                         let hit = scene::hit_test::click_hit(p, &all_wires2, vp_mat2, bounds)
-                            .and_then(|s| Scene::handle_from_wire_name(s));
+                            .and_then(|s| Scene::handle_from_wire_name(s))
+                            .or_else(|| scene::hit_test::click_hit_hatch_entries(
+                                p,
+                                &hatch_entries,
+                                vp_mat2,
+                                bounds,
+                            ));
                         if let Some(handle) = hit {
                             let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_entity_pick(handle, world_pt));
                             // HATCHEDIT: after pick, inject hatch model data into the command.
                             if self.tabs[i].active_cmd.as_ref().map(|c| c.name() == "HATCHEDIT").unwrap_or(false) {
-                                if let Some(model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
+                                if let Some(model) = self.tabs[i].scene.hatch_model_for_handle(handle) {
                                     use crate::command::CadCommand;
                                     use crate::modules::home::draw::hatchedit::HatcheditCommand;
                                     let cmd: Box<dyn CadCommand> = Box::new(HatcheditCommand::with_handle(
@@ -1436,7 +1540,7 @@ impl H7CAD {
                                     .map(|c| matches!(c.name(), "DIMTEDIT" | "MLEADERADD" | "MLEADERREMOVE"))
                                     .unwrap_or(false);
                                 if needs_inject {
-                                    if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                                    if let Some(entity) = self.command_pick_entity(i, handle) {
                                         if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
                                             cmd.inject_picked_entity(entity);
                                             let prompt = cmd.prompt();
@@ -1494,22 +1598,23 @@ impl H7CAD {
                 if is_down2 {
                     let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vp_size.0, height: vp_size.1 };
 
-                    if is_dragging {
-                        if elapsed_ms < POLY_START_DELAY_MS {
-                            if let Some(a) = box_anchor {
-                                let crossing = box_crossing;
-                                let all_wires = self.tabs[i].scene.hit_test_wires();
-                                let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                                let mut handles: Vec<Handle> = scene::hit_test::box_hit(
-                                    a, p, crossing, &all_wires, vp_mat, bounds,
-                                ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
-                                handles.extend(scene::hit_test::box_hit_hatch(
-                                    a, p, crossing, &self.tabs[i].scene.hatches, vp_mat, bounds,
-                                ));
-                                self.tabs[i].scene.deselect_all();
-                                for h in &handles { self.tabs[i].scene.select_entity(*h, false); }
-                                self.tabs[i].scene.expand_selection_for_groups(&handles);
-                                self.refresh_properties();
+                        if is_dragging {
+                            if elapsed_ms < POLY_START_DELAY_MS {
+                                if let Some(a) = box_anchor {
+                                    let crossing = box_crossing;
+                                    let all_wires = self.tabs[i].scene.hit_test_wires();
+                                    let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
+                                    let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
+                                    let mut handles: Vec<Handle> = scene::hit_test::box_hit(
+                                        a, p, crossing, &all_wires, vp_mat, bounds,
+                                    ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
+                                    handles.extend(scene::hit_test::box_hit_hatch_entries(
+                                        a, p, crossing, &hatch_entries, vp_mat, bounds,
+                                    ));
+                                    self.tabs[i].scene.deselect_all();
+                                    for h in &handles { self.tabs[i].scene.select_entity(*h, false); }
+                                    self.tabs[i].scene.expand_selection_for_groups(&handles);
+                                    self.refresh_properties();
                                 selection_just_completed = true;
                             }
                         } else {
@@ -1519,12 +1624,13 @@ impl H7CAD {
                             };
                             self.tabs[i].scene.selection.borrow_mut().poly_last_crossing = crossing;
                             let all_wires = self.tabs[i].scene.hit_test_wires();
+                            let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let mut handles: Vec<Handle> = scene::hit_test::poly_hit(
                                 &poly_pts, crossing, &all_wires, vp_mat, bounds,
                             ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
-                            handles.extend(scene::hit_test::poly_hit_hatch(
-                                &poly_pts, crossing, &self.tabs[i].scene.hatches, vp_mat, bounds,
+                            handles.extend(scene::hit_test::poly_hit_hatch_entries(
+                                &poly_pts, crossing, &hatch_entries, vp_mat, bounds,
                             ));
                             self.tabs[i].scene.deselect_all();
                             for h in &handles { self.tabs[i].scene.select_entity(*h, false); }
@@ -1541,11 +1647,12 @@ impl H7CAD {
                     } else {
                         if box_anchor.is_none() {
                             let all_wires = self.tabs[i].scene.hit_test_wires();
+                            let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
-                                .or_else(|| scene::hit_test::click_hit_hatch(
-                                    p, &self.tabs[i].scene.hatches, vp_mat, bounds,
+                                .or_else(|| scene::hit_test::click_hit_hatch_entries(
+                                    p, &hatch_entries, vp_mat, bounds,
                                 ));
                             if let Some(handle) = hit {
                                 self.tabs[i].scene.select_entity(handle, true);
@@ -1564,12 +1671,13 @@ impl H7CAD {
                             let a = box_anchor.unwrap();
                             let crossing = box_crossing;
                             let all_wires = self.tabs[i].scene.hit_test_wires();
+                            let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let mut handles: Vec<Handle> = scene::hit_test::box_hit(
                                 a, p, crossing, &all_wires, vp_mat, bounds,
                             ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
-                            handles.extend(scene::hit_test::box_hit_hatch(
-                                a, p, crossing, &self.tabs[i].scene.hatches, vp_mat, bounds,
+                            handles.extend(scene::hit_test::box_hit_hatch_entries(
+                                a, p, crossing, &hatch_entries, vp_mat, bounds,
                             ));
                             self.tabs[i].scene.deselect_all();
                             for h in &handles { self.tabs[i].scene.select_entity(*h, false); }
@@ -1629,16 +1737,27 @@ impl H7CAD {
                         let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
                             .and_then(|s| Scene::handle_from_wire_name(s));
                         if let Some(handle) = hit {
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity(handle) {
-                                use crate::modules::annotate::ddedit::{DdeditCommand, entity_text};
-                                if let Some(cur) = entity_text(entity) {
-                                    let cmd = DdeditCommand::with_handle(handle, cur.clone());
-                                    self.command_line.push_info(
-                                        &format!("DDEDIT  Enter new text <{cur}>:")
-                                    );
-                                    self.tabs[i].active_cmd = Some(Box::new(cmd));
-                                    return self.focus_cmd_input();
-                                }
+                            use crate::modules::annotate::ddedit::{
+                                DdeditCommand, entity_text, native_entity_text,
+                            };
+                            let current = self.tabs[i]
+                                .scene
+                                .document
+                                .get_entity(handle)
+                                .and_then(entity_text)
+                                .or_else(|| {
+                                    self.tabs[i]
+                                        .scene
+                                        .native_entity(handle)
+                                        .and_then(native_entity_text)
+                                });
+                            if let Some(cur) = current {
+                                let cmd = DdeditCommand::with_handle(handle, cur.clone());
+                                self.command_line.push_info(
+                                    &format!("DDEDIT  Enter new text <{cur}>:")
+                                );
+                                self.tabs[i].active_cmd = Some(Box::new(cmd));
+                                return self.focus_cmd_input();
                             }
                         }
                     }
@@ -1968,67 +2087,51 @@ impl H7CAD {
 
             Message::PropLayerChanged(layer) => {
                 let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for handle in handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_common_prop(entity, "layer", &layer);
-                        }
-                    }
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                }
+                let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
+                    use crate::store::CadStore;
+                    store.set_entity_layer(handle, &layer);
+                });
+                self.finish_property_edit(i, summary);
                 Task::none()
             }
 
             Message::PropColorChanged(color) => {
                 let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for handle in handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_color(entity, color);
-                        }
-                    }
+                let had_targets = !self.property_target_handles(i).is_empty();
+                let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
+                    crate::scene::dispatch::apply_color_native(
+                        store.inner_mut().get_entity_mut(handle).unwrap(),
+                        color,
+                    );
+                });
+                if had_targets {
                     self.tabs[i].properties.color_picker_open = false;
                     self.tabs[i].properties.color_palette_open = false;
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
                 }
+                self.finish_property_edit(i, summary);
                 Task::none()
             }
 
             Message::PropLwChanged(lw) => {
                 let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for handle in handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_line_weight(entity, lw);
-                        }
-                    }
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                }
+                let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
+                    crate::scene::dispatch::apply_line_weight_native(
+                        store.inner_mut().get_entity_mut(handle).unwrap(),
+                        lw,
+                    );
+                });
+                self.finish_property_edit(i, summary);
                 Task::none()
             }
 
             Message::PropLinetypeChanged(lt) => {
                 let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for handle in handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            crate::scene::dispatch::apply_common_prop(entity, "linetype", &lt);
-                        }
-                    }
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                }
+                let linetype = if lt == "ByLayer" { String::new() } else { lt };
+                let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
+                    use crate::store::CadStore;
+                    store.set_entity_linetype(handle, &linetype);
+                });
+                self.finish_property_edit(i, summary);
                 Task::none()
             }
 
@@ -2038,24 +2141,44 @@ impl H7CAD {
                 if !handles.is_empty() {
                     use crate::scene::hatch_patterns;
                     if let Some(entry) = hatch_patterns::find(&name) {
-                        self.push_undo_snapshot(i, "HATCHEDIT");
+                        let mut changed = false;
+                        let mut unsupported = false;
+                        let mut snapshot_pushed = false;
                         for handle in handles {
-                            if let Some(acadrust::EntityType::Hatch(dxf)) =
-                                self.tabs[i].scene.document.get_entity_mut(handle)
-                            {
-                                dxf.pattern = hatch_patterns::build_dxf_pattern(entry);
-                                dxf.is_solid = matches!(
-                                    entry.gpu,
-                                    crate::scene::hatch_model::HatchPattern::Solid
-                                );
-                            }
-                            if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
-                                model.pattern = entry.gpu.clone();
-                                model.name = name.clone();
+                            match self.classify_edit_target(i, handle) {
+                                EditTargetKind::Compat => {
+                                    if !snapshot_pushed {
+                                        self.push_undo_snapshot(i, "HATCHEDIT");
+                                        snapshot_pushed = true;
+                                    }
+                                    if let Some(acadrust::EntityType::Hatch(dxf)) =
+                                        self.tabs[i].scene.document.get_entity_mut(handle)
+                                    {
+                                        dxf.pattern = hatch_patterns::build_dxf_pattern(entry);
+                                        dxf.is_solid = matches!(
+                                            entry.gpu,
+                                            crate::scene::hatch_model::HatchPattern::Solid
+                                        );
+                                        changed = true;
+                                    }
+                                    if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
+                                        model.pattern = entry.gpu.clone();
+                                        model.name = name.clone();
+                                    }
+                                }
+                                EditTargetKind::NativeSupported | EditTargetKind::NativeUnsupported => {
+                                    unsupported = true;
+                                }
+                                EditTargetKind::Missing => {}
                             }
                         }
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
+                        self.finish_property_edit(
+                            i,
+                            EditSummary {
+                                changed,
+                                unsupported,
+                            },
+                        );
                     }
                 }
                 Task::none()
@@ -2063,20 +2186,14 @@ impl H7CAD {
 
             Message::PropBoolToggle(field) => {
                 let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if !handles.is_empty() {
-                    self.push_undo_snapshot(i, "CHPROP");
-                    for handle in handles {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                            match field {
-                                "invisible" => crate::scene::dispatch::toggle_invisible(entity),
-                                _ => crate::scene::dispatch::apply_geom_prop(entity, field, "toggle"),
-                            }
-                        }
+                let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
+                    let entity = store.inner_mut().get_entity_mut(handle).unwrap();
+                    match field {
+                        "invisible" => crate::scene::dispatch::toggle_invisible_native(entity),
+                        _ => crate::scene::dispatch::apply_geom_prop_native(entity, field, "toggle"),
                     }
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                }
+                });
+                self.finish_property_edit(i, summary);
                 Task::none()
             }
 
@@ -2124,11 +2241,15 @@ impl H7CAD {
                             self.tabs[i].scene.camera_generation += 1;
                         }
                     } else {
-                        for handle in handles {
-                            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                                crate::scene::dispatch::apply_geom_prop(entity, field, &value);
-                            }
-                        }
+                        let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
+                            crate::scene::dispatch::apply_geom_prop_native(
+                                store.inner_mut().get_entity_mut(handle).unwrap(),
+                                field,
+                                &value,
+                            );
+                        });
+                        self.finish_property_edit(i, summary);
+                        return Task::none();
                     }
                     self.tabs[i].dirty = true;
                     self.refresh_properties();
@@ -2146,8 +2267,8 @@ impl H7CAD {
                 let handles = self.property_target_handles(i);
                 if !handles.is_empty() {
                     if let Some(val) = self.tabs[i].properties.edit_buf.remove(field) {
-                        self.push_undo_snapshot(i, "CHPROP");
                         if field == "frozen_layers" {
+                            self.push_undo_snapshot(i, "CHPROP");
                             // Resolve layer names → handles, then apply to viewports.
                             let layer_handles: Vec<acadrust::Handle> = val
                                 .split(',')
@@ -2166,22 +2287,26 @@ impl H7CAD {
                                     vp.frozen_layers = layer_handles.clone();
                                 }
                             }
-                        } else {
-                            for handle in handles {
-                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
-                                    match field {
-                                        "linetype_scale" | "transparency" => {
-                                            crate::scene::dispatch::apply_common_prop(entity, field, &val);
-                                        }
-                                        _ => {
-                                            crate::scene::dispatch::apply_geom_prop(entity, field, &val);
-                                        }
-                                    }
+                            self.tabs[i].dirty = true;
+                            self.refresh_properties();
+                            return Task::none();
+                        }
+                        let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
+                            let entity = store.inner_mut().get_entity_mut(handle).unwrap();
+                            match field {
+                                "transparency" => {
+                                    crate::scene::dispatch::apply_common_prop_native(
+                                        entity, field, &val,
+                                    );
+                                }
+                                _ => {
+                                    crate::scene::dispatch::apply_geom_prop_native(
+                                        entity, field, &val,
+                                    );
                                 }
                             }
-                        }
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
+                        });
+                        self.finish_property_edit(i, summary);
                     }
                 }
                 Task::none()
@@ -3460,6 +3585,580 @@ impl H7CAD {
                 Task::none()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::Vec3;
+    use h7cad_native_model as nm;
+    use iced::{Point, Rectangle};
+
+    #[test]
+    fn prop_geom_commit_updates_native_line_when_compat_missing() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [5.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(Handle::new(handle.value()), true);
+        app.refresh_properties();
+
+        let _ = app.update(Message::PropGeomInput {
+            field: "start_x",
+            value: "3.5".into(),
+        });
+        let _ = app.update(Message::PropGeomCommit("start_x"));
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native line should still exist");
+        match &entity.data {
+            nm::EntityData::Line { start, .. } => assert!((start[0] - 3.5).abs() < 1e-9),
+            other => panic!("expected native line, got {other:?}"),
+        }
+        assert!(app.tabs[0].dirty, "native geometry commit should mark the tab dirty");
+    }
+
+    #[test]
+    fn prop_layer_changed_updates_native_text_when_compat_missing() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Text {
+                insertion: [1.0, 2.0, 0.0],
+                height: 2.5,
+                value: "Hello".into(),
+                rotation: 0.0,
+                style_name: "Standard".into(),
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                horizontal_alignment: 0,
+                vertical_alignment: 0,
+                alignment_point: None,
+            }))
+            .expect("native text");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(Handle::new(handle.value()), true);
+        app.refresh_properties();
+
+        let _ = app.update(Message::PropLayerChanged("NOTES".into()));
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native text should still exist");
+        assert_eq!(entity.layer_name, "NOTES");
+        assert!(app.tabs[0].dirty, "native common property change should mark the tab dirty");
+    }
+
+    #[test]
+    fn viewport_move_updates_native_line_grip_when_compat_missing() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [5.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(Handle::new(handle.value()), true);
+        app.refresh_properties();
+        app.tabs[0].scene.selection.borrow_mut().vp_size = (100.0, 100.0);
+
+        let cursor = Point::new(75.0, 50.0);
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let expected = {
+            let paper = app.tabs[0]
+                .scene
+                .camera
+                .borrow()
+                .pick_on_target_plane(cursor, bounds);
+            app.tabs[0].scene.paper_to_model(paper)
+        };
+
+        app.tabs[0].active_grip = Some(GripEdit {
+            handle: Handle::new(handle.value()),
+            grip_id: 0,
+            is_translate: false,
+            origin_world: Vec3::ZERO,
+            last_world: Vec3::ZERO,
+        });
+
+        let _ = app.update(Message::ViewportMove(cursor));
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native line should still exist");
+        match &entity.data {
+            nm::EntityData::Line { start, .. } => {
+                assert!((start[0] - expected.x as f64).abs() < 1e-4);
+                assert!((start[1] - expected.y as f64).abs() < 1e-4);
+            }
+            other => panic!("expected native line, got {other:?}"),
+        }
+        assert!(app.tabs[0].dirty, "native grip move should mark the tab dirty");
+    }
+
+    #[test]
+    fn command_pick_entity_bridges_native_dimension_when_compat_missing() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: String::new(),
+                style_name: "Standard".into(),
+                definition_point: [4.0, 5.0, 0.0],
+                text_midpoint: [2.0, 3.0, 0.0],
+                text_override: "<>".into(),
+                attachment_point: 0,
+                measurement: 12.5,
+                text_rotation: 15.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 25.0,
+                ext_line_rotation: 35.0,
+            }))
+            .expect("native dimension");
+        app.tabs[0].scene.set_native_doc(Some(native));
+
+        let entity = app.command_pick_entity(0, Handle::new(handle.value()));
+        match entity {
+            Some(AcadEntityType::Dimension(_)) => {}
+            other => panic!("expected bridged compat dimension, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command_pick_entity_bridges_native_multileader_when_compat_missing() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::MultiLeader {
+                content_type: 1,
+                text_label: "A".into(),
+                style_name: "Standard".into(),
+                arrowhead_size: 2.5,
+                landing_gap: 0.0,
+                dogleg_length: 2.5,
+                property_override_flags: 0,
+                path_type: 1,
+                line_color: 256,
+                leader_line_weight: -1,
+                enable_landing: true,
+                enable_dogleg: true,
+                enable_annotation_scale: false,
+                scale_factor: 1.0,
+                text_attachment_direction: 0,
+                text_bottom_attachment_type: 9,
+                text_top_attachment_type: 9,
+                text_location: Some([6.0, 0.0, 4.0]),
+                leader_vertices: vec![[0.0, 0.0, 0.0], [6.0, 0.0, 4.0]],
+                leader_root_lengths: vec![2],
+            }))
+            .expect("native multileader");
+        app.tabs[0].scene.set_native_doc(Some(native));
+
+        let entity = app.command_pick_entity(0, Handle::new(handle.value()));
+        match entity {
+            Some(AcadEntityType::MultiLeader(_)) => {}
+            other => panic!("expected bridged compat multileader, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dimtedit_updates_native_dimension_after_injected_pick() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: String::new(),
+                style_name: "Standard".into(),
+                definition_point: [4.0, 5.0, 0.0],
+                text_midpoint: [2.0, 3.0, 0.0],
+                text_override: "<>".into(),
+                attachment_point: 0,
+                measurement: 12.5,
+                text_rotation: 15.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 25.0,
+                ext_line_rotation: 35.0,
+            }))
+            .expect("native dimension");
+        app.tabs[0].scene.set_native_doc(Some(native));
+
+        let mut cmd = crate::modules::annotate::dimtedit::DimTeditCommand::new();
+        let _ = crate::command::CadCommand::on_entity_pick(
+            &mut cmd,
+            Handle::new(handle.value()),
+            Vec3::ZERO,
+        );
+        let entity = app
+            .command_pick_entity(0, Handle::new(handle.value()))
+            .expect("bridged dimension");
+        crate::command::CadCommand::inject_picked_entity(&mut cmd, entity);
+        let result = crate::command::CadCommand::on_point(&mut cmd, Vec3::new(8.0, 0.0, 6.0));
+
+        let _ = app.apply_cmd_result(result);
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native dimension should still exist");
+        match &entity.data {
+            nm::EntityData::Dimension { text_midpoint, .. } => {
+                assert_eq!(*text_midpoint, [8.0, 0.0, 6.0]);
+            }
+            other => panic!("expected native dimension, got {other:?}"),
+        }
+        assert!(app.tabs[0].dirty, "dimtedit should mark the tab dirty");
+    }
+
+    #[test]
+    fn mleaderadd_updates_native_multileader_after_injected_pick() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::MultiLeader {
+                content_type: 1,
+                text_label: "A".into(),
+                style_name: "Standard".into(),
+                arrowhead_size: 2.5,
+                landing_gap: 0.0,
+                dogleg_length: 2.5,
+                property_override_flags: 0,
+                path_type: 1,
+                line_color: 256,
+                leader_line_weight: -1,
+                enable_landing: true,
+                enable_dogleg: true,
+                enable_annotation_scale: false,
+                scale_factor: 1.0,
+                text_attachment_direction: 0,
+                text_bottom_attachment_type: 9,
+                text_top_attachment_type: 9,
+                text_location: Some([6.0, 0.0, 4.0]),
+                leader_vertices: vec![[0.0, 0.0, 0.0], [6.0, 0.0, 4.0]],
+                leader_root_lengths: vec![2],
+            }))
+            .expect("native multileader");
+        app.tabs[0].scene.set_native_doc(Some(native));
+
+        let mut cmd = crate::modules::annotate::mleader_edit::MLeaderAddCommand::new();
+        let _ = crate::command::CadCommand::on_entity_pick(
+            &mut cmd,
+            Handle::new(handle.value()),
+            Vec3::ZERO,
+        );
+        let entity = app
+            .command_pick_entity(0, Handle::new(handle.value()))
+            .expect("bridged multileader");
+        crate::command::CadCommand::inject_picked_entity(&mut cmd, entity);
+        let _ = crate::command::CadCommand::on_point(&mut cmd, Vec3::new(10.0, 0.0, 0.0));
+        let result = crate::command::CadCommand::on_enter(&mut cmd);
+
+        let _ = app.apply_cmd_result(result);
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native multileader should still exist");
+        match &entity.data {
+            nm::EntityData::MultiLeader {
+                leader_vertices,
+                leader_root_lengths,
+                ..
+            } => {
+                assert_eq!(leader_vertices.len(), 3);
+                assert_eq!(leader_vertices[2], [10.0, 0.0, 0.0]);
+                assert_eq!(leader_root_lengths, &vec![2, 1]);
+            }
+            other => panic!("expected native multileader, got {other:?}"),
+        }
+        assert!(app.tabs[0].dirty, "mleaderadd should mark the tab dirty");
+    }
+
+    #[test]
+    fn mleaderremove_updates_native_multileader_after_injected_pick() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::MultiLeader {
+                content_type: 1,
+                text_label: "A".into(),
+                style_name: "Standard".into(),
+                arrowhead_size: 2.5,
+                landing_gap: 0.0,
+                dogleg_length: 2.5,
+                property_override_flags: 0,
+                path_type: 1,
+                line_color: 256,
+                leader_line_weight: -1,
+                enable_landing: true,
+                enable_dogleg: true,
+                enable_annotation_scale: false,
+                scale_factor: 1.0,
+                text_attachment_direction: 0,
+                text_bottom_attachment_type: 9,
+                text_top_attachment_type: 9,
+                text_location: Some([6.0, 0.0, 4.0]),
+                leader_vertices: vec![
+                    [0.0, 0.0, 0.0],
+                    [6.0, 0.0, 4.0],
+                    [10.0, 0.0, 0.0],
+                    [6.0, 0.0, 4.0],
+                ],
+                leader_root_lengths: vec![2, 2],
+            }))
+            .expect("native multileader");
+        app.tabs[0].scene.set_native_doc(Some(native));
+
+        let mut cmd = crate::modules::annotate::mleader_edit::MLeaderRemoveCommand::new();
+        let _ = crate::command::CadCommand::on_entity_pick(
+            &mut cmd,
+            Handle::new(handle.value()),
+            Vec3::ZERO,
+        );
+        let entity = app
+            .command_pick_entity(0, Handle::new(handle.value()))
+            .expect("bridged multileader");
+        crate::command::CadCommand::inject_picked_entity(&mut cmd, entity);
+        let result = crate::command::CadCommand::on_point(&mut cmd, Vec3::new(0.0, 0.0, 0.0));
+
+        let _ = app.apply_cmd_result(result);
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native multileader should still exist");
+        match &entity.data {
+            nm::EntityData::MultiLeader {
+                leader_vertices,
+                leader_root_lengths,
+                ..
+            } => {
+                assert_eq!(leader_vertices, &vec![[10.0, 0.0, 0.0], [6.0, 0.0, 4.0]]);
+                assert_eq!(leader_root_lengths, &vec![2]);
+            }
+            other => panic!("expected native multileader, got {other:?}"),
+        }
+        assert!(app.tabs[0].dirty, "mleaderremove should mark the tab dirty");
+    }
+
+    #[test]
+    fn prop_geom_commit_updates_native_dimension_when_compat_missing() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: String::new(),
+                style_name: "Standard".into(),
+                definition_point: [4.0, 5.0, 0.0],
+                text_midpoint: [2.0, 3.0, 0.0],
+                text_override: "<>".into(),
+                attachment_point: 0,
+                measurement: 12.5,
+                text_rotation: 15.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 25.0,
+                ext_line_rotation: 35.0,
+            }))
+            .expect("native dimension");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(Handle::new(handle.value()), true);
+        app.refresh_properties();
+
+        let _ = app.update(Message::PropGeomInput {
+            field: "text_x",
+            value: "8.5".into(),
+        });
+        let _ = app.update(Message::PropGeomCommit("text_x"));
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native dimension should still exist");
+        match &entity.data {
+            nm::EntityData::Dimension { text_midpoint, .. } => {
+                assert_eq!(*text_midpoint, [8.5, 3.0, 0.0]);
+            }
+            other => panic!("expected native dimension, got {other:?}"),
+        }
+        assert!(app.tabs[0].dirty, "native dimension geom edit should mark the tab dirty");
+    }
+
+    #[test]
+    fn prop_geom_commit_preserves_native_dimension_flip_flags() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: String::new(),
+                style_name: "Standard".into(),
+                definition_point: [4.0, 5.0, 0.0],
+                text_midpoint: [2.0, 3.0, 0.0],
+                text_override: "<>".into(),
+                attachment_point: 0,
+                measurement: 12.5,
+                text_rotation: 15.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: true,
+                flip_arrow2: true,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 25.0,
+                ext_line_rotation: 35.0,
+            }))
+            .expect("native dimension");
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(Handle::new(handle.value()), true);
+        app.refresh_properties();
+
+        let _ = app.update(Message::PropGeomInput {
+            field: "text_x",
+            value: "8.5".into(),
+        });
+        let _ = app.update(Message::PropGeomCommit("text_x"));
+
+        let entity = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native dimension should still exist");
+        match &entity.data {
+            nm::EntityData::Dimension {
+                text_midpoint,
+                flip_arrow1,
+                flip_arrow2,
+                ..
+            } => {
+                assert_eq!(*text_midpoint, [8.5, 3.0, 0.0]);
+                assert!(*flip_arrow1);
+                assert!(*flip_arrow2);
+            }
+            other => panic!("expected native dimension, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prop_geom_commit_rejects_unsupported_native_hatch() {
+        let mut app = H7CAD::new();
+        let mut native = nm::CadDocument::new();
+        let handle = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [2.0, 0.0, 0.0],
+                            [2.0, 2.0, 0.0],
+                            [0.0, 2.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("native hatch");
+        let before = native
+            .get_entity(handle)
+            .expect("native hatch should exist before edit")
+            .clone();
+
+        app.tabs[0].scene.set_native_doc(Some(native));
+        app.tabs[0]
+            .scene
+            .select_entity(Handle::new(handle.value()), true);
+        app.refresh_properties();
+
+        let _ = app.update(Message::PropGeomInput {
+            field: "pattern_scale",
+            value: "2.0".into(),
+        });
+        let _ = app.update(Message::PropGeomCommit("pattern_scale"));
+
+        let after = app.tabs[0]
+            .scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(handle))
+            .expect("native hatch should still exist after rejected edit");
+        assert_eq!(after, &before);
+        assert!(
+            app.command_line
+                .history
+                .last()
+                .map(|entry| entry.text.contains("not supported"))
+                .unwrap_or(false),
+            "unsupported native hatch edit should emit an explicit guardrail message"
+        );
+        assert!(
+            !app.tabs[0].dirty,
+            "unsupported native hatch edit should not mark the tab dirty"
+        );
     }
 }
 

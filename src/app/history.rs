@@ -13,6 +13,7 @@ impl H7CAD {
     pub(super) fn capture_history_snapshot(&self, i: usize, label: impl Into<String>) -> HistorySnapshot {
         HistorySnapshot {
             document: self.tabs[i].scene.document.clone(),
+            native_doc_clone: self.tabs[i].scene.native_doc().cloned(),
             current_layout: self.tabs[i].scene.current_layout.clone(),
             selected: self.tabs[i].scene.selected.iter().copied().collect(),
             dirty: self.tabs[i].dirty,
@@ -28,6 +29,7 @@ impl H7CAD {
 
     pub(super) fn restore_history_snapshot(&mut self, i: usize, snapshot: HistorySnapshot) {
         self.tabs[i].scene.document = snapshot.document;
+        self.tabs[i].scene.set_native_doc(snapshot.native_doc_clone);
         self.tabs[i].scene.current_layout = snapshot.current_layout;
         self.tabs[i].scene.selected = snapshot
             .selected
