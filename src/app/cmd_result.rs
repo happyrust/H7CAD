@@ -1257,20 +1257,18 @@ impl H7CAD {
                 let mut count = 0usize;
 
                 for handle in &handles {
-                    let mut compat_changed = false;
-                    let stretched = if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
-                        let changed = Self::stretch_compat_entity(entity, win_min, win_max, delta);
-                        compat_changed = changed;
-                        changed
-                    } else if let Some(entity) = self.tabs[i].scene.native_entity_mut(*handle) {
-                        Self::stretch_native_entity(entity, win_min, win_max, delta)
+                    let nh = nm::Handle::new(handle.value());
+                    let stretched = if let Some(store) = self.tabs[i].scene.native_store.as_mut() {
+                        if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                            Self::stretch_native_entity(entity, win_min, win_max, delta)
+                        } else {
+                            false
+                        }
                     } else {
                         false
                     };
                     if stretched {
-                        if compat_changed {
-                            self.sync_native_entity_from_compat(i, *handle);
-                        }
+                        self.sync_compat_from_native(i, *handle);
                         count += 1;
                     }
                 }
