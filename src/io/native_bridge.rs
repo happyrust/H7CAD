@@ -977,6 +977,7 @@ fn native_common_from_acadrust(entity: &ar::EntityType, data: nm::EntityData) ->
     native.owner_handle = nm::Handle::new(common.owner_handle.value());
     native.layer_name = common.layer.clone();
     native.linetype_name = common.linetype.clone();
+    native.linetype_scale = common.linetype_scale;
     native.color_index = color_index;
     native.true_color = true_color;
     native.lineweight = lineweight_to_native(&common.line_weight);
@@ -990,6 +991,7 @@ fn apply_common(common: &mut ar::EntityCommon, entity: &nm::Entity) {
     common.owner_handle = Handle::new(entity.owner_handle.value());
     common.layer = entity.layer_name.clone();
     common.linetype = entity.linetype_name.clone();
+    common.linetype_scale = entity.linetype_scale;
     common.color = if entity.true_color != 0 {
         Color::from_rgb(
             ((entity.true_color >> 16) & 0xFF) as u8,

@@ -116,6 +116,15 @@ impl CadStore for NativeStore {
         }
     }
 
+    fn set_entity_linetype_scale(&mut self, handle: nm::Handle, scale: f64) -> bool {
+        if let Some(entity) = self.doc.get_entity_mut(handle) {
+            entity.linetype_scale = scale;
+            true
+        } else {
+            false
+        }
+    }
+
     fn set_entity_invisible(&mut self, handle: nm::Handle, invisible: bool) -> bool {
         if let Some(entity) = self.doc.get_entity_mut(handle) {
             entity.invisible = invisible;

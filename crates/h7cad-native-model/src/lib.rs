@@ -224,7 +224,7 @@ impl VPortProperties {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CadDocument {
     pub header: DocumentHeader,
     pub classes: Vec<DxfClass>,
@@ -332,6 +332,7 @@ impl CadDocument {
     pub fn allocate_handle(&mut self) -> Handle {
         let handle = Handle::new(self.next_handle);
         self.next_handle += 1;
+        self.header.handseed = self.header.handseed.max(self.next_handle);
         handle
     }
 
@@ -362,6 +363,137 @@ impl CadDocument {
 
     pub fn insert_layout(&mut self, layout: Layout) {
         self.layouts.insert(layout.handle, layout);
+    }
+
+    pub fn layout_by_name(&self, name: &str) -> Option<&Layout> {
+        self.layouts
+            .values()
+            .find(|layout| layout.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn get_entity(&self, handle: Handle) -> Option<&Entity> {
+        self.entities
+            .iter()
+            .find(|entity| entity.handle == handle)
+            .or_else(|| {
+                self.block_records
+                    .values()
+                    .find_map(|br| br.entities.iter().find(|entity| entity.handle == handle))
+            })
+    }
+
+    pub fn get_entity_mut(&mut self, handle: Handle) -> Option<&mut Entity> {
+        if let Some(entity) = self
+            .entities
+            .iter_mut()
+            .find(|entity| entity.handle == handle)
+        {
+            return Some(entity);
+        }
+
+        self.block_records
+            .values_mut()
+            .find_map(|br| br.entities.iter_mut().find(|entity| entity.handle == handle))
+    }
+
+    pub fn add_entity(&mut self, mut entity: Entity) -> Result<Handle, String> {
+        if entity.owner_handle == Handle::NULL {
+            entity.owner_handle = self.model_space_handle();
+        }
+        self.finalize_entity_handles(&mut entity);
+        let handle = entity.handle;
+        self.store_entity(entity)?;
+        Ok(handle)
+    }
+
+    pub fn add_entity_to_layout(
+        &mut self,
+        mut entity: Entity,
+        layout_name: &str,
+    ) -> Result<Handle, String> {
+        let owner_handle = if layout_name.eq_ignore_ascii_case("Model") {
+            self.model_space_handle()
+        } else {
+            self.layout_by_name(layout_name)
+                .ok_or_else(|| format!("layout not found: {layout_name}"))?
+                .block_record_handle
+        };
+
+        entity.owner_handle = owner_handle;
+        self.finalize_entity_handles(&mut entity);
+        let handle = entity.handle;
+        self.store_entity(entity)?;
+        Ok(handle)
+    }
+
+    pub fn remove_entity(&mut self, handle: Handle) -> Option<Entity> {
+        if let Some(index) = self.entities.iter().position(|entity| entity.handle == handle) {
+            return Some(self.entities.remove(index));
+        }
+
+        for br in self.block_records.values_mut() {
+            if let Some(index) = br.entities.iter().position(|entity| entity.handle == handle) {
+                return Some(br.entities.remove(index));
+            }
+        }
+
+        None
+    }
+
+    fn finalize_entity_handles(&mut self, entity: &mut Entity) {
+        if entity.handle == Handle::NULL {
+            entity.handle = self.allocate_handle();
+        } else {
+            self.set_next_handle(entity.handle.value() + 1);
+        }
+
+        if let EntityData::Insert { attribs, .. } = &mut entity.data {
+            for attrib in attribs.iter_mut() {
+                if attrib.handle == Handle::NULL {
+                    attrib.handle = self.allocate_handle();
+                } else {
+                    self.set_next_handle(attrib.handle.value() + 1);
+                }
+                attrib.owner_handle = entity.handle;
+            }
+        }
+    }
+
+    fn store_entity(&mut self, entity: Entity) -> Result<(), String> {
+        let owner_handle = entity.owner_handle;
+        if owner_handle == Handle::NULL {
+            self.entities.push(entity);
+            return Ok(());
+        }
+
+        let owner_br_handle = self.block_record_by_any_handle(owner_handle).map(|br| br.handle);
+        let Some(owner_br_handle) = owner_br_handle else {
+            return Err(format!(
+                "owner handle {:X} does not resolve to a block record",
+                owner_handle.value()
+            ));
+        };
+
+        let is_layout_block = self
+            .block_records
+            .get(&owner_br_handle)
+            .and_then(|br| br.layout_handle)
+            .is_some();
+
+        if is_layout_block {
+            self.entities.push(entity);
+            return Ok(());
+        }
+
+        if let Some(block_record) = self.block_records.get_mut(&owner_br_handle) {
+            block_record.entities.push(entity);
+            Ok(())
+        } else {
+            Err(format!(
+                "block record {:X} disappeared while storing entity",
+                owner_br_handle.value()
+            ))
+        }
     }
 
     pub fn repair_ownership(&mut self) {
@@ -798,6 +930,8 @@ pub struct Entity {
     pub owner_handle: Handle,
     pub layer_name: String,
     pub linetype_name: String,
+    /// Linetype scale (code 48), 1.0 = default
+    pub linetype_scale: f64,
     pub color_index: i16,
     /// True color (code 420) as packed RGB, 0 = not set
     pub true_color: i32,
@@ -823,6 +957,7 @@ impl Entity {
             owner_handle: Handle::NULL,
             layer_name: "0".into(),
             linetype_name: String::new(),
+            linetype_scale: 1.0,
             color_index: 256, // BYLAYER
             true_color: 0,
             lineweight: -1, // ByLayer
@@ -865,6 +1000,11 @@ pub enum EntityData {
         value: String,
         rotation: f64,
         style_name: String,
+        width_factor: f64,
+        oblique_angle: f64,
+        horizontal_alignment: i16,
+        vertical_alignment: i16,
+        alignment_point: Option<[f64; 3]>,
     },
     Ellipse {
         center: [f64; 3],
@@ -885,9 +1025,12 @@ pub enum EntityData {
     },
     Face3D {
         corners: [[f64; 3]; 4],
+        invisible_edges: i16,
     },
     Solid {
         corners: [[f64; 3]; 4],
+        normal: [f64; 3],
+        thickness: f64,
     },
     Ray {
         origin: [f64; 3],
@@ -901,10 +1044,13 @@ pub enum EntityData {
         insertion: [f64; 3],
         height: f64,
         width: f64,
+        rectangle_height: Option<f64>,
         value: String,
         rotation: f64,
         style_name: String,
         attachment_point: i16,
+        line_spacing_factor: f64,
+        drawing_direction: i16,
     },
     Insert {
         block_name: String,
@@ -1000,6 +1146,13 @@ pub enum EntityData {
         insertion: [f64; 3],
         size: f64,
         shape_number: i16,
+        name: String,
+        rotation: f64,
+        relative_x_scale: f64,
+        oblique_angle: f64,
+        style_name: String,
+        normal: [f64; 3],
+        thickness: f64,
     },
     Solid3D {
         acis_data: String,
@@ -1038,6 +1191,8 @@ pub enum EntityData {
         text_location: Option<[f64; 3]>,
         /// Leader line vertices from ContextData (code 10,20,30 after LEADER_LINE marker)
         leader_vertices: Vec<[f64; 3]>,
+        /// Number of vertices for each leader root, in sequence
+        leader_root_lengths: Vec<usize>,
     },
     Table {
         num_rows: i32,
@@ -1334,5 +1489,102 @@ mod tests {
                 .get(&layout_entry_name(layout.handle)),
             Some(&layout.handle)
         );
+    }
+
+    #[test]
+    fn clone_snapshot_preserves_entities_and_handles() {
+        let mut doc = CadDocument::new();
+        let line_handle = doc
+            .add_entity(Entity::new(EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [5.0, 0.0, 0.0],
+            }))
+            .expect("line should be added");
+
+        let snapshot = doc.clone();
+        assert_eq!(snapshot.next_handle(), doc.next_handle());
+        assert_eq!(snapshot.get_entity(line_handle), doc.get_entity(line_handle));
+    }
+
+    #[test]
+    fn add_entity_assigns_handle_and_model_owner() {
+        let mut doc = CadDocument::new();
+        let handle = doc
+            .add_entity(Entity::new(EntityData::Circle {
+                center: [1.0, 2.0, 0.0],
+                radius: 3.0,
+            }))
+            .expect("circle should be added");
+
+        let entity = doc.get_entity(handle).expect("entity should be queryable");
+        assert_ne!(handle, Handle::NULL);
+        assert_eq!(entity.owner_handle, doc.model_space_handle());
+        assert!(doc.is_model_space_entity(entity));
+    }
+
+    #[test]
+    fn add_entity_to_layout_routes_to_layout_block() {
+        let mut doc = CadDocument::new();
+        let handle = doc
+            .add_entity_to_layout(
+                Entity::new(EntityData::Text {
+                    insertion: [0.0, 0.0, 0.0],
+                    height: 2.5,
+                    value: "Layout note".into(),
+                    rotation: 0.0,
+                    style_name: "Standard".into(),
+                    width_factor: 1.0,
+                    oblique_angle: 0.0,
+                    horizontal_alignment: 0,
+                    vertical_alignment: 0,
+                    alignment_point: None,
+                }),
+                "Layout1",
+            )
+            .expect("paper-space entity should be added");
+
+        let entity = doc.get_entity(handle).expect("entity should exist");
+        let layout = doc.layout_by_name("Layout1").expect("layout should exist");
+        assert_eq!(entity.owner_handle, layout.block_record_handle);
+        assert!(!doc.is_model_space_entity(entity));
+    }
+
+    #[test]
+    fn add_entity_with_block_owner_is_stored_inside_block_record() {
+        let mut doc = CadDocument::new();
+        let block_handle = doc.allocate_handle();
+        doc.insert_block_record(BlockRecord::new(block_handle, "MY_BLOCK"));
+
+        let mut entity = Entity::new(EntityData::Point {
+            position: [9.0, 9.0, 0.0],
+        });
+        entity.owner_handle = block_handle;
+
+        let handle = doc.add_entity(entity).expect("block-owned entity should be added");
+
+        assert!(doc.entities.iter().all(|entity| entity.handle != handle));
+        let block = doc
+            .block_record_by_handle(block_handle)
+            .expect("block record should exist");
+        assert_eq!(block.entities.len(), 1);
+        assert_eq!(block.entities[0].handle, handle);
+        assert_eq!(doc.get_entity(handle).expect("entity should be queryable").owner_handle, block_handle);
+    }
+
+    #[test]
+    fn remove_entity_erases_lookup_entry() {
+        let mut doc = CadDocument::new();
+        let handle = doc
+            .add_entity(Entity::new(EntityData::Arc {
+                center: [0.0, 0.0, 0.0],
+                radius: 2.0,
+                start_angle: 0.0,
+                end_angle: 90.0,
+            }))
+            .expect("arc should be added");
+
+        let removed = doc.remove_entity(handle).expect("entity should be removed");
+        assert_eq!(removed.handle, handle);
+        assert!(doc.get_entity(handle).is_none());
     }
 }

@@ -408,6 +408,9 @@ fn write_entity(w: &mut DxfWriter, entity: &Entity) {
     if !entity.linetype_name.is_empty() {
         w.pair_str(6, &entity.linetype_name);
     }
+    if (entity.linetype_scale - 1.0).abs() > 1e-12 {
+        w.pair_f64(48, entity.linetype_scale);
+    }
     if entity.lineweight != -1 {
         w.pair_i16(370, entity.lineweight);
     }
@@ -493,12 +496,32 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             value,
             rotation,
             style_name,
+            width_factor,
+            oblique_angle,
+            horizontal_alignment,
+            vertical_alignment,
+            alignment_point,
         } => {
             w.point3d(10, *insertion);
+            if let Some(point) = alignment_point {
+                w.point3d(11, *point);
+            }
             w.pair_f64(40, *height);
+            if (*width_factor - 1.0).abs() > f64::EPSILON {
+                w.pair_f64(41, *width_factor);
+            }
             w.pair_str(1, value);
             if *rotation != 0.0 {
                 w.pair_f64(50, *rotation);
+            }
+            if *oblique_angle != 0.0 {
+                w.pair_f64(51, *oblique_angle);
+            }
+            if *horizontal_alignment != 0 {
+                w.pair_i16(72, *horizontal_alignment);
+            }
+            if *vertical_alignment != 0 {
+                w.pair_i16(73, *vertical_alignment);
             }
             if !style_name.is_empty() {
                 w.pair_str(7, style_name);
@@ -508,16 +531,28 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             insertion,
             height,
             width,
+            rectangle_height,
             value,
             rotation,
             style_name,
             attachment_point,
+            line_spacing_factor,
+            drawing_direction,
         } => {
             w.point3d(10, *insertion);
             w.pair_f64(40, *height);
             w.pair_f64(41, *width);
+            if let Some(rect_h) = rectangle_height {
+                w.pair_f64(43, *rect_h);
+            }
+            if (*line_spacing_factor - 1.0).abs() > f64::EPSILON {
+                w.pair_f64(44, *line_spacing_factor);
+            }
             if *attachment_point != 0 {
                 w.pair_i16(71, *attachment_point);
+            }
+            if *drawing_direction != 5 {
+                w.pair_i16(72, *drawing_direction);
             }
             w.pair_str(1, value);
             if *rotation != 0.0 {
@@ -685,17 +720,33 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
                 w.point3d(11, *fp);
             }
         }
-        EntityData::Face3D { corners } => {
+        EntityData::Face3D {
+            corners,
+            invisible_edges,
+        } => {
             w.point3d(10, corners[0]);
             w.point3d(11, corners[1]);
             w.point3d(12, corners[2]);
             w.point3d(13, corners[3]);
+            if *invisible_edges != 0 {
+                w.pair_i16(70, *invisible_edges);
+            }
         }
-        EntityData::Solid { corners } => {
+        EntityData::Solid {
+            corners,
+            normal,
+            thickness,
+        } => {
             w.point3d(10, corners[0]);
             w.point3d(11, corners[1]);
             w.point3d(12, corners[2]);
             w.point3d(13, corners[3]);
+            if *thickness != 0.0 {
+                w.pair_f64(39, *thickness);
+            }
+            if *normal != [0.0, 0.0, 1.0] {
+                w.point3d(210, *normal);
+            }
         }
         EntityData::Ray { origin, direction } | EntityData::XLine { origin, direction } => {
             w.point3d(10, *origin);
@@ -812,10 +863,38 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             insertion,
             size,
             shape_number,
+            name,
+            rotation,
+            relative_x_scale,
+            oblique_angle,
+            style_name,
+            normal,
+            thickness,
         } => {
             w.point3d(10, *insertion);
             w.pair_f64(40, *size);
             w.pair_i16(2, *shape_number);
+            if !name.is_empty() {
+                w.pair_str(3, name);
+            }
+            if *thickness != 0.0 {
+                w.pair_f64(39, *thickness);
+            }
+            if (*relative_x_scale - 1.0).abs() > f64::EPSILON {
+                w.pair_f64(41, *relative_x_scale);
+            }
+            if *rotation != 0.0 {
+                w.pair_f64(50, *rotation);
+            }
+            if *oblique_angle != 0.0 {
+                w.pair_f64(51, *oblique_angle);
+            }
+            if *normal != [0.0, 0.0, 1.0] {
+                w.point3d(210, *normal);
+            }
+            if !style_name.is_empty() {
+                w.pair_str(7, style_name);
+            }
         }
         EntityData::Solid3D { acis_data } | EntityData::Region { acis_data } => {
             for line in acis_data.lines() {
@@ -842,6 +921,7 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             text_top_attachment_type,
             text_location,
             leader_vertices,
+            leader_root_lengths,
         } => {
             w.pair_i32(90, *property_override_flags as i32);
             w.pair_i16(170, *path_type);
@@ -872,13 +952,38 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
                 w.pair_str(301, "}");
             }
             if !leader_vertices.is_empty() {
-                w.pair_str(302, "LEADER_LINE{");
-                for v in leader_vertices {
-                    w.pair_f64(10, v[0]);
-                    w.pair_f64(20, v[1]);
-                    w.pair_f64(30, v[2]);
+                let mut offset = 0usize;
+                let lengths: Vec<usize> = if leader_root_lengths.is_empty() {
+                    vec![leader_vertices.len()]
+                } else {
+                    leader_root_lengths.clone()
+                };
+                for len in lengths {
+                    if len == 0 {
+                        continue;
+                    }
+                    let end = (offset + len).min(leader_vertices.len());
+                    if offset >= end {
+                        break;
+                    }
+                    w.pair_str(302, "LEADER_LINE{");
+                    for v in &leader_vertices[offset..end] {
+                        w.pair_f64(10, v[0]);
+                        w.pair_f64(20, v[1]);
+                        w.pair_f64(30, v[2]);
+                    }
+                    w.pair_str(303, "}");
+                    offset = end;
                 }
-                w.pair_str(303, "}");
+                if offset < leader_vertices.len() {
+                    w.pair_str(302, "LEADER_LINE{");
+                    for v in &leader_vertices[offset..] {
+                        w.pair_f64(10, v[0]);
+                        w.pair_f64(20, v[1]);
+                        w.pair_f64(30, v[2]);
+                    }
+                    w.pair_str(303, "}");
+                }
             }
         }
         EntityData::Table {

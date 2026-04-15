@@ -207,6 +207,9 @@ impl H7CAD {
                     } else {
                         props.linetype.clone()
                     };
+                    if let Some(scale) = props.linetype_scale {
+                        entity.linetype_scale = scale;
+                    }
                     changed = true;
                 }
             }

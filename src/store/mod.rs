@@ -38,6 +38,7 @@ pub trait CadStore {
     fn set_entity_color(&mut self, handle: nm::Handle, color_index: i16, true_color: i32) -> bool;
     fn set_entity_linetype(&mut self, handle: nm::Handle, linetype: &str) -> bool;
     fn set_entity_lineweight(&mut self, handle: nm::Handle, lineweight: i16) -> bool;
+    fn set_entity_linetype_scale(&mut self, handle: nm::Handle, scale: f64) -> bool;
     fn set_entity_invisible(&mut self, handle: nm::Handle, invisible: bool) -> bool;
     fn set_entity_transparency(&mut self, handle: nm::Handle, transparency: i32) -> bool;
 

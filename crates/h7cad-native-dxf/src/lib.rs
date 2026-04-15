@@ -705,6 +705,7 @@ fn read_entity(
             }
             8 => entity.layer_name = val.clone(),
             6 => entity.linetype_name = val.clone(),
+            48 => entity.linetype_scale = val.parse().unwrap_or(1.0),
             62 => entity.color_index = val.parse().unwrap_or(256),
             420 => entity.true_color = val.parse().unwrap_or(0),
             370 => entity.lineweight = val.parse().unwrap_or(-1),
@@ -2813,6 +2814,74 @@ mod tests {
                 assert!((end_angle - 90.0).abs() < 1e-6);
             }
             other => panic!("expected Arc, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_text_preserves_runtime_fields() {
+        let input = concat!(
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nTEXT\n",
+            "  5\nD1\n",
+            "  8\nAnno\n",
+            " 10\n1.0\n 20\n2.0\n 30\n0.0\n",
+            " 11\n3.0\n 21\n4.0\n 31\n0.0\n",
+            " 40\n2.5\n 41\n0.8\n 50\n15.0\n 51\n12.0\n",
+            " 72\n2\n 73\n3\n",
+            "  1\nAligned Text\n  7\nRomanS\n",
+            "  0\nENDSEC\n  0\nEOF\n",
+        );
+        let doc = read_dxf(input).unwrap();
+        match &doc.entities[0].data {
+            h7cad_native_model::EntityData::Text {
+                width_factor,
+                oblique_angle,
+                horizontal_alignment,
+                vertical_alignment,
+                alignment_point,
+                ..
+            } => {
+                assert!((*width_factor - 0.8).abs() < 1e-9);
+                assert!((*oblique_angle - 12.0).abs() < 1e-9);
+                assert_eq!(*horizontal_alignment, 2);
+                assert_eq!(*vertical_alignment, 3);
+                assert_eq!(*alignment_point, Some([3.0, 4.0, 0.0]));
+            }
+            other => panic!("expected Text, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn roundtrip_mtext_preserves_line_spacing_and_direction() {
+        use h7cad_native_model::*;
+        let mut doc = CadDocument::new();
+        doc.entities.push(Entity::new(EntityData::MText {
+            insertion: [5.0, 6.0, 0.0],
+            height: 2.5,
+            width: 80.0,
+            rectangle_height: Some(24.0),
+            value: "Line1\\PLine2".into(),
+            rotation: 30.0,
+            style_name: "Standard".into(),
+            attachment_point: 5,
+            line_spacing_factor: 1.35,
+            drawing_direction: 3,
+        }));
+
+        let output = write_dxf(&doc).unwrap();
+        let doc2 = read_dxf(&output).unwrap();
+        match &doc2.entities[0].data {
+            EntityData::MText {
+                rectangle_height,
+                line_spacing_factor,
+                drawing_direction,
+                ..
+            } => {
+                assert_eq!(*rectangle_height, Some(24.0));
+                assert!((*line_spacing_factor - 1.35).abs() < 1e-9);
+                assert_eq!(*drawing_direction, 3);
+            }
+            other => panic!("expected MText, got {:?}", other),
         }
     }
 
