@@ -1,0 +1,28 @@
+{
+  "featureId": "dwg-parser-resolver-preservation-contract",
+  "reviewedAt": "2026-04-13T13:08:03Z",
+  "commitId": "2d748b3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The resolver-preservation implementation is only evidenced by tests and current HEAD code already preserves handles, owners, order, and allocation state, but the attributed commit for this feature only added fixture helpers and did not introduce the resolver logic or parser-to-resolver provenance/accounting assertions required by the feature contract. This leaves the feature handoff anchored to a commit that does not actually contain the claimed implementation.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/src/resolver.rs",
+        "line": 4,
+        "severity": "blocking",
+        "description": "The reviewed feature is attributed to commit 2d748b3, but that commit does not modify resolver preservation logic at all; it only adds resolver fixture data in tests. The handoff claims this commit anchors the already-present implementation in resolver.rs/lib.rs, yet git show 2d748b3 -- crates/h7cad-native-dwg/src/resolver.rs crates/h7cad-native-dwg/src/lib.rs shows no changes there, so the feature lacks auditable commit provenance for the actual implementation being reviewed."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker followed the verification-first path for an already-present feature, but the skill still allowed success to be reported using a commit that touched only test fixtures rather than the claimed implementation files. The procedure needs a stricter requirement that the cited truthful commit provenance must actually cover the implementation surface being claimed, not just related evidence files.",
+      "evidence": "Worker transcript/handoff for session 34bb967c-ae90-458d-8048-0da01f035d78 cites commit 2d748b3 as the feature commit, while git show --stat 2d748b3 changes only crates/h7cad-native-dwg/tests/read_headers.rs and git show 2d748b3 -- crates/h7cad-native-dwg/src/resolver.rs crates/h7cad-native-dwg/src/lib.rs shows no implementation diff."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed both resolver-preservation sessions, the handoffs, transcript skeletons, skill guidance, architecture context, and the attributed commit diff. Current HEAD behavior appears correct, but the feature review fails because the successful handoff is anchored to commit 2d748b3, which does not contain the claimed resolver implementation and therefore does not provide auditable provenance for the feature."
+}

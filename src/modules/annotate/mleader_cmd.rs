@@ -6,7 +6,7 @@
 //   → commit single MultiLeader entity
 
 use acadrust::entities::MultiLeader;
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 

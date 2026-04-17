@@ -8,7 +8,7 @@
 // Creates a Table entity with uniform row height (0.5) and column width (2.0).
 
 use acadrust::entities::TableBuilder;
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 

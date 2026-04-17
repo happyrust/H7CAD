@@ -5,7 +5,7 @@
 // because we're in paper space.
 
 use acadrust::entities::Viewport;
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 
 use crate::command::{CadCommand, CmdResult};

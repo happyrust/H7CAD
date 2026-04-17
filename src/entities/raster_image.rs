@@ -18,9 +18,9 @@ use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property}
 ///   p2 = origin + U*W + V*H
 ///   p3 = origin + V*H
 fn image_corners(
-    origin: &acadrust::types::Vector3,
-    u: &acadrust::types::Vector3,
-    v: &acadrust::types::Vector3,
+    origin: &crate::types::Vector3,
+    u: &crate::types::Vector3,
+    v: &crate::types::Vector3,
     w: f64,
     h: f64,
 ) -> [[f32; 3]; 4] {

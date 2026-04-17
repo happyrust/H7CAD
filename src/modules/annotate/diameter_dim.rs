@@ -1,7 +1,7 @@
 // DIMDIAMETER command — diameter dimension for circles and arcs.
 
 use acadrust::entities::{Dimension, DimensionDiameter};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 

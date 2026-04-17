@@ -1,28 +1,21 @@
 {
   "featureId": "bridge-common-fields-and-document-counts",
-  "reviewedAt": "2026-04-14T00:00:00Z",
+  "reviewedAt": "2026-04-13T19:30:07Z",
   "commitId": "c77ab7d",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "fail",
+  "status": "pass",
   "codeReview": {
-    "summary": "The added regressions improve bridge coverage, but the feature does not actually satisfy its shared-field preservation goal for WIPEOUT: native polygon vertices are converted to world coordinates on compat->native roundtrip, so wipeout geometry is not preserved even though the new tests only count compat presence.",
-    "issues": [
-      {
-        "file": "src/io/native_bridge.rs",
-        "line": 741,
-        "severity": "blocking",
-        "description": "The Wipeout reverse bridge rebuilds native clip vertices from `wipeout.world_boundary_vertices()`, which yields world-space points after `native_entity_to_acadrust()` created the compat wipeout with insertion/u/v vectors. Native `EntityData::Wipeout.clip_vertices` stores local clip vertices, so a native->compat->native roundtrip mutates polygonal wipeout geometry (for example [[0,0],[4,0],[3,2],[0,3]] becomes [[0,0],[4,0],[12,6],[0,9]]). The feature's shared-field regression explicitly includes WIPEOUT as a representative family, but the test only asserts common fields and therefore misses this payload corruption."
-      }
-    ]
+    "summary": "The feature now satisfies its contract in the current post-fix repository state. The shared-field regression exercises representative supported families and the document-level count regression covers the prioritized entity set. The original WIPEOUT geometry gap that made the earlier count/common-field coverage insufficient is addressed by the follow-up fix in commit 310ed76, which adds payload-level WIPEOUT assertions and corrects reverse bridging to preserve local clip vertices.",
+    "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The dxf-bridge-worker skill says to prefer explicit field assertions rather than only counts, but this feature's shared-field test covered WIPEOUT only via common fields and the document-level test only counted compat exposure, allowing a geometry regression to slip through.",
-      "evidence": "Skill: .factory/skills/dxf-bridge-worker/SKILL.md step 4. Feature tests in src/io/native_bridge.rs:2380 and 2480 include WIPEOUT in representative/count coverage, but there is no WIPEOUT payload equality assertion despite the roundtrip using `world_boundary_vertices()` at src/io/native_bridge.rs:744."
+      "observation": "The dxf-bridge-worker skill still tells workers to trust the manifest command from services.yaml after verifying workspace layout, but bridge features in this mission repeatedly had to use `cargo test --bin H7CAD native_bridge -- --test-threads=16` because the contract text and older command forms referring to `--lib native_bridge` are stale for this workspace layout.",
+      "evidence": "Skill: D:/work/plant-code/cad/H7CAD/.factory/skills/dxf-bridge-worker/SKILL.md; services: D:/work/plant-code/cad/H7CAD/.factory/services.yaml defines `test_bridge`; transcript skeletons in C:/Users/Administrator/.factory/missions/987bf88e-9101-4702-b6df-71e03b19d518/worker-transcripts.jsonl show workers encountering and compensating for stale manifest assumptions."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Review failed: WIPEOUT geometry is still corrupted on native->compat->native roundtrip, so the feature does not fully deliver shared-field preservation across representative supported families."
+  "summary": "Reviewed the original feature commit c77ab7d together with the current src/io/native_bridge.rs state and the follow-up WIPEOUT fix commit 310ed76. No blocking or non-blocking code issues remain for this feature in the post-fix repository state; the requested scrutiny report was regenerated from current evidence rather than stale artifacts."
 }

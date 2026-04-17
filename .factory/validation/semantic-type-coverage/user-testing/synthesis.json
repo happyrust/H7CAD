@@ -1,0 +1,23 @@
+{
+  "milestone": "semantic-type-coverage",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-SEM-009",
+    "VAL-SEM-010",
+    "VAL-SEM-011",
+    "VAL-SEM-012",
+    "VAL-PROV-007",
+    "VAL-PROV-008"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

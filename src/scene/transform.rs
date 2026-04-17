@@ -1,4 +1,4 @@
-use acadrust::types::{Transform, Vector3};
+use crate::types::{Transform, Vector3};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -59,7 +59,3 @@ pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: Vec3, p2: Vec3) {
     *y = p1.y as f64 + my;
 }
 
-pub fn mirror_xy_line(line: &mut acadrust::entities::Line, p1: Vec3, p2: Vec3) {
-    reflect_xy_point(&mut line.start.x, &mut line.start.y, p1, p2);
-    reflect_xy_point(&mut line.end.x, &mut line.end.y, p1, p2);
-}

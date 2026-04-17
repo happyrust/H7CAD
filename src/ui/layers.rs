@@ -4,8 +4,8 @@ use crate::ui::properties::{color_picker_dropdown, LinetypeItem, LwItem, lw_opti
 use crate::app::Message;
 use acadrust::tables::layer::Layer as DocLayer;
 use acadrust::tables::Table;
-use acadrust::types::aci_table::aci_to_rgb;
-use acadrust::types::{Color as AcadColor, LineWeight};
+use crate::types::aci_table::aci_to_rgb;
+use crate::types::{Color as AcadColor, LineWeight};
 use acadrust::Handle;
 use iced::widget::{
     button, column, combo_box, container, mouse_area, row, scrollable, text, text_input,

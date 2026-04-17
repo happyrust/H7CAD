@@ -9,7 +9,7 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 use crate::scene::{cxf, transform};
 
-fn v3(v: &acadrust::types::Vector3) -> Vec3 {
+fn v3(v: &crate::types::Vector3) -> Vec3 {
     Vec3::new(v.x as f32, v.y as f32, v.z as f32)
 }
 

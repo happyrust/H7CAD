@@ -4,7 +4,7 @@
 use std::f64::consts::PI;
 
 use acadrust::entities::Point as PointEnt;
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 

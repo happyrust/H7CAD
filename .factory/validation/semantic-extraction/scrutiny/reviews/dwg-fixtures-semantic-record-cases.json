@@ -1,0 +1,15 @@
+{
+  "featureId": "dwg-fixtures-semantic-record-cases",
+  "reviewedAt": "2026-04-13T12:30:53Z",
+  "commitId": "be83c44",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature adds parser-only semantic fixture builders and focused regression tests in crates/h7cad-native-dwg/tests/read_headers.rs that cover the required reordered-equivalent payloads, embedded-zero records, same-size collisions, layout variants, and valid/invalid ownership graphs. I did not find blocking or non-blocking correctness issues in the reviewed commit.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, transcript skeleton, skill, architecture guidance, and commit be83c44. The implementation stays within the parser-only test surface, follows the dwg-fixture-worker procedure, and provides the expected semantic fixture corpus without introducing runtime DWG rollout changes."
+}

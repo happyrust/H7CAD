@@ -202,6 +202,7 @@ pub fn apply_transform(
 use crate::entities::common::{arr_to_v3, v3_to_arr};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::Ellipse {
     fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
         Some(self::to_truck(
@@ -214,6 +215,7 @@ impl TruckConvertible for acadrust::entities::Ellipse {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::Ellipse {
     fn grips(&self) -> Vec<GripDef> {
         self::grips(&v3_to_arr(&self.center), &v3_to_arr(&self.major_axis), self.minor_axis_ratio)
@@ -229,6 +231,7 @@ impl Grippable for acadrust::entities::Ellipse {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::Ellipse {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         properties(&v3_to_arr(&self.center), &v3_to_arr(&self.major_axis), self.minor_axis_ratio)
@@ -244,6 +247,7 @@ impl PropertyEditable for acadrust::entities::Ellipse {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::Ellipse {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut c = v3_to_arr(&self.center);

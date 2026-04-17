@@ -1,7 +1,7 @@
 use super::{H7CAD, Message};
 use crate::command::CmdResult;
 use acadrust::Handle;
-use acadrust::types::{Color as AcadColor, LineWeight};
+use crate::types::{Color as AcadColor, LineWeight};
 use h7cad_native_model as nm;
 use iced::Task;
 
@@ -371,6 +371,26 @@ impl H7CAD {
                     self.command_line.push_info(&p);
                 }
             }
+            CmdResult::CommitEntityNative(native_entity) => {
+                let label = self.history_label_from_active_cmd(i, "ENTITY");
+                self.push_undo_snapshot(i, label);
+                // Project native → acadrust, then route through existing commit_entity
+                // for layer/color/linetype defaults + scene mirroring.
+                // 未来 commit_entity 也可 native-first，但现在走 projection 路径最稳。
+                if let Some(compat) =
+                    crate::io::native_bridge::native_entity_to_acadrust(&native_entity)
+                {
+                    self.commit_entity(compat);
+                    self.tabs[i].dirty = true;
+                } else {
+                    self.command_line
+                        .push_error("Native entity could not be projected to compat layer.");
+                }
+                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+                if let Some(p) = prompt {
+                    self.command_line.push_info(&p);
+                }
+            }
             CmdResult::TransformSelected(handles, transform) => {
                 let label = self.history_label_from_active_cmd(i, "MOVE");
                 self.push_undo_snapshot(i, label);
@@ -424,6 +444,23 @@ impl H7CAD {
                 self.push_undo_snapshot(i, label);
                 self.commit_entity(entity);
                 self.tabs[i].dirty = true;
+                self.tabs[i].scene.clear_preview_wire();
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.restore_pre_cmd_tangent();
+            }
+            CmdResult::CommitAndExitNative(native_entity) => {
+                let label = self.history_label_from_active_cmd(i, "ENTITY");
+                self.push_undo_snapshot(i, label);
+                if let Some(compat) =
+                    crate::io::native_bridge::native_entity_to_acadrust(&native_entity)
+                {
+                    self.commit_entity(compat);
+                    self.tabs[i].dirty = true;
+                } else {
+                    self.command_line
+                        .push_error("Native entity could not be projected to compat layer.");
+                }
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -503,31 +540,19 @@ impl H7CAD {
                         if let Some(encoded) = layer.strip_prefix("__ATTEDIT__") {
                             let label = self.history_label_from_active_cmd(i, "ATTEDIT");
                             self.push_undo_snapshot(i, label);
-                            if self.tabs[i].scene.document.get_entity(handle).is_some() {
-                                crate::modules::home::modify::attedit::apply_attedit(
-                                    &mut self.tabs[i].scene.document,
-                                    handle,
-                                    encoded,
-                                );
-                                self.sync_native_entity_from_compat(i, handle);
-                                self.tabs[i].dirty = true;
-                                self.tabs[i].active_cmd = None;
-                                self.tabs[i].snap_result = None;
-                                self.command_line.push_output("ATTEDIT  Attribute values updated.");
-                                return Task::none();
-                            }
                             if let Some(native_doc) = self.tabs[i].scene.native_doc_mut() {
                                 crate::modules::home::modify::attedit::apply_attedit_native(
                                     native_doc,
                                     handle,
                                     encoded,
                                 );
-                                self.tabs[i].dirty = true;
-                                self.tabs[i].active_cmd = None;
-                                self.tabs[i].snap_result = None;
-                                self.command_line.push_output("ATTEDIT  Attribute values updated.");
-                                return Task::none();
                             }
+                            self.sync_compat_from_native(i, handle);
+                            self.tabs[i].dirty = true;
+                            self.tabs[i].active_cmd = None;
+                            self.tabs[i].snap_result = None;
+                            self.command_line.push_output("ATTEDIT  Attribute values updated.");
+                            return Task::none();
                         }
                     }
                 }
@@ -539,18 +564,6 @@ impl H7CAD {
                         if op.starts_with("__SPLINEDIT_") {
                             let label = self.history_label_from_active_cmd(i, "SPLINEDIT");
                             self.push_undo_snapshot(i, label);
-                            if self.tabs[i].scene.document.get_entity(handle).is_some() {
-                                crate::modules::home::modify::splinedit::apply_spline_op(
-                                    &mut self.tabs[i].scene.document,
-                                    handle,
-                                    &op,
-                                );
-                                self.sync_native_entity_from_compat(i, handle);
-                                self.tabs[i].dirty = true;
-                                let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
-                                if let Some(p) = prompt { self.command_line.push_info(&p); }
-                                return Task::none();
-                            }
                             if let Some(updated) = self
                                 .source_entity_for_geom(i, handle)
                                 .and_then(|entity| {
@@ -1814,8 +1827,8 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut xl = acadrust::entities::XLine::new(
-            acadrust::types::Vector3::zero(),
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            crate::types::Vector3::zero(),
+            crate::types::Vector3::new(1.0, 0.0, 0.0),
         );
         xl.common.layer = "__ATTEDIT__TAG\x01NEW".into();
 
@@ -1852,8 +1865,8 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut replacement = acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(5.0, 0.0, 0.0),
+            crate::types::Vector3::new(1.0, 0.0, 0.0),
+            crate::types::Vector3::new(5.0, 0.0, 0.0),
         );
         replacement.common.handle = Handle::NULL;
 
@@ -1894,8 +1907,8 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut replacement = acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(0.0, 1.0, 0.0),
-            acadrust::types::Vector3::new(4.0, 1.0, 0.0),
+            crate::types::Vector3::new(0.0, 1.0, 0.0),
+            crate::types::Vector3::new(4.0, 1.0, 0.0),
         );
         replacement.common.handle = Handle::NULL;
         let addition = acadrust::EntityType::Point(acadrust::entities::Point::new());
@@ -2399,8 +2412,8 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut marker = acadrust::entities::XLine::new(
-            acadrust::types::Vector3::zero(),
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            crate::types::Vector3::zero(),
+            crate::types::Vector3::new(1.0, 0.0, 0.0),
         );
         marker.common.layer = format!("__DIMSPACE__{},{}{},5", base.value(), other.value(), "");
 
@@ -2454,8 +2467,8 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut marker = acadrust::entities::XLine::new(
-            acadrust::types::Vector3::zero(),
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            crate::types::Vector3::zero(),
+            crate::types::Vector3::new(1.0, 0.0, 0.0),
         );
         marker.common.layer = format!(
             "__MLEADERALIGN__{};0.0000,0.0000;10.0000,0.0000",
@@ -2536,8 +2549,8 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut marker = acadrust::entities::XLine::new(
-            acadrust::types::Vector3::zero(),
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            crate::types::Vector3::zero(),
+            crate::types::Vector3::new(1.0, 0.0, 0.0),
         );
         marker.common.layer = format!(
             "__MLEADERCOLLECT__{},{};7.0000,9.0000",
@@ -2601,8 +2614,8 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut marker = acadrust::entities::XLine::new(
-            acadrust::types::Vector3::zero(),
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            crate::types::Vector3::zero(),
+            crate::types::Vector3::new(1.0, 0.0, 0.0),
         );
         marker.common.layer = "__SPLINEDIT_REVERSE__".into();
 
@@ -2749,7 +2762,7 @@ fn apply_mleader_collect(scene: &mut crate::scene::Scene, encoded: &str) {
     let pz = pos_parts[1];
 
     // Collect secondary multileaders in both compat and native forms.
-    let mut extra_roots: Vec<Vec<acadrust::types::Vector3>> = Vec::new();
+    let mut extra_roots: Vec<Vec<crate::types::Vector3>> = Vec::new();
     let mut extra_native_vertices: Vec<[f64; 3]> = Vec::new();
     let mut extra_native_root_lengths: Vec<usize> = Vec::new();
     for &h in &handles[1..] {
@@ -2794,7 +2807,7 @@ fn apply_mleader_collect(scene: &mut crate::scene::Scene, encoded: &str) {
                             root_slice
                                 .iter()
                                 .map(|point| {
-                                    acadrust::types::Vector3::new(point[0], point[1], point[2])
+                                    crate::types::Vector3::new(point[0], point[1], point[2])
                                 })
                                 .collect(),
                         );
@@ -2808,7 +2821,7 @@ fn apply_mleader_collect(scene: &mut crate::scene::Scene, encoded: &str) {
                             root_slice
                                 .iter()
                                 .map(|point| {
-                                    acadrust::types::Vector3::new(point[0], point[1], point[2])
+                                    crate::types::Vector3::new(point[0], point[1], point[2])
                                 })
                                 .collect(),
                         );

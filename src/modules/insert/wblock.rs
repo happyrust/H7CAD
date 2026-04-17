@@ -55,8 +55,8 @@ pub fn extract_block_to_doc(
                 continue;
             }
             let mut clone = entity.clone();
-            clone.common_mut().handle = acadrust::types::Handle::NULL;
-            clone.common_mut().owner_handle = acadrust::types::Handle::NULL;
+            clone.common_mut().handle = crate::types::Handle::NULL;
+            clone.common_mut().owner_handle = crate::types::Handle::NULL;
             let _ = out.add_entity(clone);
         }
     }
@@ -93,8 +93,8 @@ pub fn extract_entities_to_doc(
                 }
             }
             let mut clone = entity.clone();
-            clone.common_mut().handle = acadrust::types::Handle::NULL;
-            clone.common_mut().owner_handle = acadrust::types::Handle::NULL;
+            clone.common_mut().handle = crate::types::Handle::NULL;
+            clone.common_mut().owner_handle = crate::types::Handle::NULL;
             let _ = out.add_entity(clone);
         }
     }

@@ -7,7 +7,7 @@
 // Creates one linear dimension per detected endpoint pair on the selected objects.
 
 use acadrust::entities::{Dimension, DimensionLinear};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 

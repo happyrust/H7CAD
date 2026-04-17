@@ -7,29 +7,6 @@ use h7cad_native_model as nm;
 use std::path::Path;
 
 impl H7CAD {
-    pub(super) fn sync_native_entity_from_compat(&mut self, i: usize, handle: Handle) {
-        let Some(compat_entity) = self.tabs[i].scene.document.get_entity(handle).cloned() else {
-            return;
-        };
-        let Some(mut native_entity) = crate::io::native_bridge::acadrust_entity_to_native(&compat_entity) else {
-            return;
-        };
-        let Some(native_doc) = self.tabs[i].scene.native_doc_mut() else {
-            return;
-        };
-
-        let native_handle = nm::Handle::new(handle.value());
-        let existing_owner = native_doc
-            .get_entity(native_handle)
-            .map(|entity| entity.owner_handle)
-            .unwrap_or(native_entity.owner_handle);
-        let _ = native_doc.remove_entity(native_handle);
-        if native_entity.owner_handle == nm::Handle::NULL {
-            native_entity.owner_handle = existing_owner;
-        }
-        let _ = native_doc.add_entity(native_entity);
-    }
-
     pub(super) fn save_active_tab_to_path(&self, i: usize, path: &Path) -> Result<(), String> {
         use crate::store::CadStore;
         if let Some(store) = self.tabs[i].scene.native_store.as_ref() {
@@ -161,11 +138,11 @@ pub(super) fn ucs_rotated_z(origin: glam::Vec3, angle_z: f32) -> Ucs {
     let cos = angle_z.cos() as f64;
     let sin = angle_z.sin() as f64;
     let mut ucs = Ucs::new("*ACTIVE*");
-    ucs.origin = acadrust::types::Vector3::new(
+    ucs.origin = crate::types::Vector3::new(
         origin.x as f64, origin.y as f64, origin.z as f64,
     );
-    ucs.x_axis = acadrust::types::Vector3::new(cos, sin, 0.0);
-    ucs.y_axis = acadrust::types::Vector3::new(-sin, cos, 0.0);
+    ucs.x_axis = crate::types::Vector3::new(cos, sin, 0.0);
+    ucs.y_axis = crate::types::Vector3::new(-sin, cos, 0.0);
     ucs
 }
 

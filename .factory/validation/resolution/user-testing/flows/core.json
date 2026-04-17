@@ -1,0 +1,153 @@
+{
+  "surface": "DWG parser cargo surface",
+  "assertions": [
+    {
+      "id": "VAL-RESOLVE-001",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "read_dwg_returns_seeded_document_scaffold_for_supported_fixture passed, confirming seeded document scaffold with model/paper block records, layouts, and root dictionary layout links."
+        }
+      ]
+    },
+    {
+      "id": "VAL-RESOLVE-002",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "resolve_document_preserves_pending_layers_and_repairs_layout_links passed, confirming pending layers are preserved and layout ownership/link repair occurs during resolution."
+        }
+      ]
+    },
+    {
+      "id": "VAL-RESOLVE-003",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "resolver_preserves_handles_owners_order_and_advances_allocation_state passed, confirming resolved objects preserve handles/owners/order and handle allocation state advances deterministically."
+        }
+      ]
+    },
+    {
+      "id": "VAL-RESOLVE-004",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "read_dwg_produces_deterministic_resolved_object_summaries passed, confirming repeated parses yield stable object counts and identical resolved projections."
+        }
+      ]
+    },
+    {
+      "id": "VAL-RESOLVE-005",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "read_dwg_rejects_invalid_and_known_unsupported_versions_at_public_api_boundary passed, confirming public API fail-closed behavior for invalid magic and unsupported versions."
+        }
+      ]
+    },
+    {
+      "id": "VAL-RESOLVE-006",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "read_dwg_fails_closed_on_structural_corruption_after_version_recognition passed, confirming truncated directory and out-of-bounds section corruption are rejected with specific DWG errors."
+        }
+      ]
+    },
+    {
+      "id": "VAL-RESOLVE-007",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "Full read_headers suite passed 30/30 including repeated_pending_graph_fixture_parse_is_stable and resolver-specific coverage, giving end-to-end parser cargo-surface evidence for resolution milestone assertions."
+        }
+      ]
+    },
+    {
+      "id": "VAL-CROSS-001",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo check -p h7cad-native-dwg",
+          "exitCode": 0,
+          "observation": "Parser crate compile check completed successfully."
+        },
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "Targeted parser integration suite passed sequentially."
+        }
+      ]
+    },
+    {
+      "id": "VAL-CROSS-002",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo check -p h7cad-native-facade",
+          "exitCode": 0,
+          "observation": "Facade compile-surface check completed successfully; only a pre-existing non-blocking dead_code warning was emitted from h7cad-native-dxf::tokenizer::read_i64_le."
+        }
+      ]
+    },
+    {
+      "id": "VAL-CROSS-003",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "Sequential execution succeeded with deterministic pass results and no need for services or runtime activation, matching DWG parser cargo-surface guidance."
+        }
+      ]
+    },
+    {
+      "id": "VAL-CROSS-004",
+      "status": "pass",
+      "evidence": [
+        {
+          "command": "cargo check -p h7cad-native-dwg",
+          "exitCode": 0,
+          "observation": "Compile baseline passed before tests."
+        },
+        {
+          "command": "cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1",
+          "exitCode": 0,
+          "observation": "Named integration tests covering version sniffing, structural corruption rejection, seeded scaffold creation, layout repair, deterministic resolution, and pending-graph stability all passed."
+        },
+        {
+          "command": "cargo check -p h7cad-native-facade",
+          "exitCode": 0,
+          "observation": "Post-parser facade compile surface remained green."
+        }
+      ]
+    }
+  ],
+  "frictions": [
+    "PowerShell Tee-Object emitted noisy RemoteException formatting around successful cargo output on this Windows host; exit codes and saved logs remained authoritative as documented in user-testing guidance.",
+    "Evidence logs are UTF-16 encoded because Tee-Object on PowerShell preserved native console encoding."
+  ],
+  "blockers": [],
+  "toolsUsed": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Execute",
+    "TodoWrite"
+  ]
+}

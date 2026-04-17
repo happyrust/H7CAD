@@ -316,7 +316,7 @@ fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
     })?;
 
     // Offset each sample point along the local normal.
-    let offset_pts: Vec<acadrust::types::Vector3> = pts
+    let offset_pts: Vec<crate::types::Vector3> = pts
         .iter()
         .enumerate()
         .map(|(i, p)| {
@@ -335,7 +335,7 @@ fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
             let nx = -dy / len;  // left perpendicular
             let ny =  dx / len;
             let z = spl.control_points.first().map(|v| v.z).unwrap_or(0.0);
-            acadrust::types::Vector3::new(
+            crate::types::Vector3::new(
                 p[0] + sign * nx * dist,
                 p[1] + sign * ny * dist,
                 z,
@@ -346,7 +346,7 @@ fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
     let _ = ts_knot;
     // Build a new spline from the offset control points (treat sample pts as fit pts → ctrl pts).
     let degree = spl.degree.max(1) as usize;
-    let new_ctrl: Vec<acadrust::types::Vector3> = offset_pts;
+    let new_ctrl: Vec<crate::types::Vector3> = offset_pts;
     let n_ctrl = new_ctrl.len();
     let kv = truck_modeling::KnotVec::uniform_knot(degree, n_ctrl - 1);
     let mut new_spl = spl.clone();

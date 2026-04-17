@@ -108,12 +108,14 @@ pub fn apply_transform(insertion: &mut [f64; 3], t: &EntityTransform) {
 use crate::entities::common::{arr_to_v3, v3_to_arr};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::Shape {
     fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
         Some(self::to_truck(&v3_to_arr(&self.insertion_point), self.size))
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::Shape {
     fn grips(&self) -> Vec<GripDef> {
         self::grips(&v3_to_arr(&self.insertion_point))
@@ -125,6 +127,7 @@ impl Grippable for acadrust::entities::Shape {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::Shape {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         properties(
@@ -146,6 +149,7 @@ impl PropertyEditable for acadrust::entities::Shape {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::Shape {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut ins = v3_to_arr(&self.insertion_point);

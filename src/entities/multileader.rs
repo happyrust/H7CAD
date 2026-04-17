@@ -12,7 +12,7 @@ use crate::scene::wire_model::TangentGeom;
 
 fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckEntity> {
     let nan = [f32::NAN; 3];
-    let p3 = |v: &acadrust::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
+    let p3 = |v: &crate::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
 
     let arrow_size = ml.arrowhead_size as f32;
     let draw_arrow = arrow_size > 0.0;

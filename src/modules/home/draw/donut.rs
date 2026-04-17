@@ -100,7 +100,7 @@ impl CadCommand for DonutCommand {
 }
 
 fn make_donut(cx: f64, cy: f64, inner_r: f64, outer_r: f64) -> EntityType {
-    use acadrust::types::Vector2;
+    use crate::types::Vector2;
     let r_avg = (inner_r + outer_r) / 2.0;
     let width = outer_r - inner_r;
 

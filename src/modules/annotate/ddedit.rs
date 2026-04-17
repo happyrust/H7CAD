@@ -5,6 +5,7 @@
 //   2. Enter new text. Press Enter to commit, Escape to cancel.
 
 use acadrust::{EntityType, Handle};
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -91,6 +92,17 @@ pub fn entity_text(entity: &EntityType) -> Option<String> {
         EntityType::MText(t) => Some(t.value.clone()),
         EntityType::AttributeDefinition(a) => Some(a.default_value.clone()),
         EntityType::AttributeEntity(a)     => Some(a.get_value().to_string()),
+        _ => None,
+    }
+}
+
+pub fn native_entity_text(entity: &nm::Entity) -> Option<String> {
+    match &entity.data {
+        nm::EntityData::Text { value, .. } => Some(value.clone()),
+        nm::EntityData::MText { value, .. } => Some(value.clone()),
+        nm::EntityData::AttDef { default_value, .. } => Some(default_value.clone()),
+        nm::EntityData::Attrib { value, .. } => Some(value.clone()),
+        nm::EntityData::Dimension { text_override, .. } => Some(text_override.clone()),
         _ => None,
     }
 }

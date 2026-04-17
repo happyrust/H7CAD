@@ -6,7 +6,7 @@
 // MLEADERCOLLECT: select block-content multileaders → pick collection point
 
 use acadrust::entities::{LeaderLine, MultiLeader};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 

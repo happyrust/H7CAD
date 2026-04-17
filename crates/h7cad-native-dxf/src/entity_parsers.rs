@@ -330,6 +330,13 @@ pub(crate) fn parse_shape(codes: &[(i16, String)]) -> EntityData {
         insertion: [x, y, z],
         size,
         shape_number,
+        name: String::new(),
+        rotation: 0.0,
+        relative_x_scale: 1.0,
+        oblique_angle: 0.0,
+        style_name: String::new(),
+        normal: [0.0, 0.0, 1.0],
+        thickness: 0.0,
     }
 }
 
@@ -562,7 +569,10 @@ pub(crate) fn parse_3dface(codes: &[(i16, String)]) -> EntityData {
             _ => {}
         }
     }
-    EntityData::Face3D { corners }
+    EntityData::Face3D {
+        corners,
+        invisible_edges: 0,
+    }
 }
 
 pub(crate) fn parse_solid(codes: &[(i16, String)]) -> EntityData {
@@ -585,7 +595,11 @@ pub(crate) fn parse_solid(codes: &[(i16, String)]) -> EntityData {
             _ => {}
         }
     }
-    EntityData::Solid { corners }
+    EntityData::Solid {
+        corners,
+        normal: [0.0, 0.0, 1.0],
+        thickness: 0.0,
+    }
 }
 
 pub(crate) fn parse_ray_xline(codes: &[(i16, String)], is_ray: bool) -> EntityData {
@@ -620,10 +634,13 @@ pub(crate) fn parse_mtext(codes: &[(i16, String)]) -> EntityData {
     let (mut x, mut y, mut z) = (0.0, 0.0, 0.0);
     let mut height = 0.0;
     let mut width = 0.0;
+    let mut rectangle_height = None;
     let mut rotation = 0.0;
     let mut value = String::new();
     let mut style_name = String::new();
     let mut attachment_point: i16 = 0;
+    let mut line_spacing_factor = 1.0;
+    let mut drawing_direction: i16 = 5;
     for &(code, ref val) in codes {
         match code {
             10 => x = val.parse().unwrap_or(0.0),
@@ -631,8 +648,11 @@ pub(crate) fn parse_mtext(codes: &[(i16, String)]) -> EntityData {
             30 => z = val.parse().unwrap_or(0.0),
             40 => height = val.parse().unwrap_or(0.0),
             41 => width = val.parse().unwrap_or(0.0),
+            43 => rectangle_height = Some(val.parse().unwrap_or(0.0)),
+            44 => line_spacing_factor = val.parse().unwrap_or(1.0),
             50 => rotation = val.parse().unwrap_or(0.0),
             71 => attachment_point = val.parse().unwrap_or(0),
+            72 => drawing_direction = val.parse().unwrap_or(5),
             7 => style_name = val.clone(),
             1 | 3 => value.push_str(val),
             _ => {}
@@ -642,10 +662,13 @@ pub(crate) fn parse_mtext(codes: &[(i16, String)]) -> EntityData {
         insertion: [x, y, z],
         height,
         width,
+        rectangle_height,
         value,
         rotation,
         style_name,
         attachment_point,
+        line_spacing_factor,
+        drawing_direction,
     }
 }
 
@@ -971,17 +994,33 @@ pub(crate) fn parse_viewport(codes: &[(i16, String)]) -> EntityData {
 
 pub(crate) fn parse_text(codes: &[(i16, String)]) -> EntityData {
     let (mut x, mut y, mut z) = (0.0, 0.0, 0.0);
+    let (mut ax, mut ay, mut az) = (0.0, 0.0, 0.0);
     let mut height = 0.0;
     let mut rotation = 0.0;
     let mut value = String::new();
     let mut style_name = String::new();
+    let mut width_factor = 1.0;
+    let mut oblique_angle = 0.0;
+    let mut horizontal_alignment: i16 = 0;
+    let mut vertical_alignment: i16 = 0;
+    let mut has_alignment_point = false;
     for &(code, ref val) in codes {
         match code {
             10 => x = val.parse().unwrap_or(0.0),
             20 => y = val.parse().unwrap_or(0.0),
             30 => z = val.parse().unwrap_or(0.0),
+            11 => {
+                ax = val.parse().unwrap_or(0.0);
+                has_alignment_point = true;
+            }
+            21 => ay = val.parse().unwrap_or(0.0),
+            31 => az = val.parse().unwrap_or(0.0),
             40 => height = val.parse().unwrap_or(0.0),
+            41 => width_factor = val.parse().unwrap_or(1.0),
             50 => rotation = val.parse().unwrap_or(0.0),
+            51 => oblique_angle = val.parse().unwrap_or(0.0),
+            72 => horizontal_alignment = val.parse().unwrap_or(0),
+            73 => vertical_alignment = val.parse().unwrap_or(0),
             1 => value = val.clone(),
             7 => style_name = val.clone(),
             _ => {}
@@ -993,6 +1032,11 @@ pub(crate) fn parse_text(codes: &[(i16, String)]) -> EntityData {
         value,
         rotation,
         style_name,
+        width_factor,
+        oblique_angle,
+        horizontal_alignment,
+        vertical_alignment,
+        alignment_point: has_alignment_point.then_some([ax, ay, az]),
     }
 }
 
@@ -1048,23 +1092,33 @@ pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
     let mut text_top_attachment_type: i16 = 9;
     let mut text_location: Option<[f64; 3]> = None;
     let mut leader_vertices: Vec<[f64; 3]> = Vec::new();
+    let mut leader_root_lengths: Vec<usize> = Vec::new();
     let mut in_context_data = false;
     let mut in_leader_line = false;
     let mut ctx_x = 0.0f64;
     let mut ctx_y = 0.0f64;
     let mut lv_x = 0.0f64;
     let mut lv_y = 0.0f64;
+    let mut current_leader_len = 0usize;
     for &(code, ref val) in codes {
         if code == 300 && val.trim() == "CONTEXT_DATA{" {
             in_context_data = true;
             continue;
         }
         if code == 302 && val.trim() == "LEADER_LINE{" {
+            if in_leader_line && current_leader_len > 0 {
+                leader_root_lengths.push(current_leader_len);
+                current_leader_len = 0;
+            }
             in_leader_line = true;
             continue;
         }
         if code == 303 || code == 304 && val.trim().ends_with('}') {
             if in_leader_line {
+                if current_leader_len > 0 {
+                    leader_root_lengths.push(current_leader_len);
+                    current_leader_len = 0;
+                }
                 in_leader_line = false;
             } else {
                 in_context_data = false;
@@ -1077,6 +1131,7 @@ pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
                 30 => {
                     let z: f64 = val.parse().unwrap_or(0.0);
                     leader_vertices.push([lv_x, lv_y, z]);
+                    current_leader_len += 1;
                 }
                 _ => {}
             }
@@ -1135,5 +1190,286 @@ pub(crate) fn parse_multileader(codes: &[(i16, String)]) -> EntityData {
         text_top_attachment_type,
         text_location,
         leader_vertices,
+        leader_root_lengths,
+    }
+}
+
+pub(crate) fn parse_helix(codes: &[(i16, String)]) -> EntityData {
+    let (mut ax, mut ay, mut az) = (0.0, 0.0, 0.0);
+    let (mut sx, mut sy, mut sz) = (0.0, 0.0, 0.0);
+    let (mut vx, mut vy, mut vz) = (0.0, 0.0, 1.0);
+    let mut radius = 0.0;
+    let mut turns = 0.0;
+    let mut turn_height = 0.0;
+    let mut handedness: i16 = 0;
+    let mut is_ccw = true;
+    for &(code, ref val) in codes {
+        match code {
+            10 => ax = val.parse().unwrap_or(0.0),
+            20 => ay = val.parse().unwrap_or(0.0),
+            30 => az = val.parse().unwrap_or(0.0),
+            11 => sx = val.parse().unwrap_or(0.0),
+            21 => sy = val.parse().unwrap_or(0.0),
+            31 => sz = val.parse().unwrap_or(0.0),
+            12 => vx = val.parse().unwrap_or(0.0),
+            22 => vy = val.parse().unwrap_or(0.0),
+            32 => vz = val.parse().unwrap_or(1.0),
+            40 => radius = val.parse().unwrap_or(0.0),
+            41 => turns = val.parse().unwrap_or(0.0),
+            42 => turn_height = val.parse().unwrap_or(0.0),
+            280 => handedness = val.parse().unwrap_or(0),
+            290 => is_ccw = val.trim() == "1",
+            _ => {}
+        }
+    }
+    EntityData::Helix {
+        axis_base_point: [ax, ay, az],
+        start_point: [sx, sy, sz],
+        axis_vector: [vx, vy, vz],
+        radius,
+        turns,
+        turn_height,
+        handedness,
+        is_ccw,
+    }
+}
+
+pub(crate) fn parse_arc_dimension(codes: &[(i16, String)]) -> EntityData {
+    let mut block_name = String::new();
+    let mut style_name = String::new();
+    let mut def = [0.0; 3];
+    let mut mid = [0.0; 3];
+    let mut text_override = String::new();
+    let mut first = [0.0; 3];
+    let mut second = [0.0; 3];
+    let mut center = [0.0; 3];
+    let mut leader_length = 0.0;
+    let mut measurement = 0.0;
+    for &(code, ref val) in codes {
+        match code {
+            2 => block_name = val.clone(),
+            3 => style_name = val.clone(),
+            1 => text_override = val.clone(),
+            10 => def[0] = val.parse().unwrap_or(0.0),
+            20 => def[1] = val.parse().unwrap_or(0.0),
+            30 => def[2] = val.parse().unwrap_or(0.0),
+            11 => mid[0] = val.parse().unwrap_or(0.0),
+            21 => mid[1] = val.parse().unwrap_or(0.0),
+            31 => mid[2] = val.parse().unwrap_or(0.0),
+            13 => first[0] = val.parse().unwrap_or(0.0),
+            23 => first[1] = val.parse().unwrap_or(0.0),
+            33 => first[2] = val.parse().unwrap_or(0.0),
+            14 => second[0] = val.parse().unwrap_or(0.0),
+            24 => second[1] = val.parse().unwrap_or(0.0),
+            34 => second[2] = val.parse().unwrap_or(0.0),
+            15 => center[0] = val.parse().unwrap_or(0.0),
+            25 => center[1] = val.parse().unwrap_or(0.0),
+            35 => center[2] = val.parse().unwrap_or(0.0),
+            40 => leader_length = val.parse().unwrap_or(0.0),
+            42 => measurement = val.parse().unwrap_or(0.0),
+            _ => {}
+        }
+    }
+    EntityData::ArcDimension {
+        block_name,
+        style_name,
+        definition_point: def,
+        text_midpoint: mid,
+        text_override,
+        first_point: first,
+        second_point: second,
+        arc_center: center,
+        leader_length,
+        measurement,
+    }
+}
+
+pub(crate) fn parse_large_radial_dimension(codes: &[(i16, String)]) -> EntityData {
+    let mut block_name = String::new();
+    let mut style_name = String::new();
+    let mut def = [0.0; 3];
+    let mut mid = [0.0; 3];
+    let mut text_override = String::new();
+    let mut chord = [0.0; 3];
+    let mut leader_length = 0.0;
+    let mut jog_angle = 0.0;
+    let mut measurement = 0.0;
+    for &(code, ref val) in codes {
+        match code {
+            2 => block_name = val.clone(),
+            3 => style_name = val.clone(),
+            1 => text_override = val.clone(),
+            10 => def[0] = val.parse().unwrap_or(0.0),
+            20 => def[1] = val.parse().unwrap_or(0.0),
+            30 => def[2] = val.parse().unwrap_or(0.0),
+            11 => mid[0] = val.parse().unwrap_or(0.0),
+            21 => mid[1] = val.parse().unwrap_or(0.0),
+            31 => mid[2] = val.parse().unwrap_or(0.0),
+            15 => chord[0] = val.parse().unwrap_or(0.0),
+            25 => chord[1] = val.parse().unwrap_or(0.0),
+            35 => chord[2] = val.parse().unwrap_or(0.0),
+            40 => leader_length = val.parse().unwrap_or(0.0),
+            50 => jog_angle = val.parse().unwrap_or(0.0),
+            42 => measurement = val.parse().unwrap_or(0.0),
+            _ => {}
+        }
+    }
+    EntityData::LargeRadialDimension {
+        block_name,
+        style_name,
+        definition_point: def,
+        text_midpoint: mid,
+        text_override,
+        chord_point: chord,
+        leader_length,
+        jog_angle,
+        measurement,
+    }
+}
+
+pub(crate) fn parse_surface(codes: &[(i16, String)], surface_kind: &str) -> EntityData {
+    let mut u_isolines = 0;
+    let mut v_isolines = 0;
+    let mut acis_lines: Vec<String> = Vec::new();
+    for &(code, ref val) in codes {
+        match code {
+            70 => u_isolines = val.parse().unwrap_or(0),
+            71 => v_isolines = val.parse().unwrap_or(0),
+            1 | 3 => acis_lines.push(val.clone()),
+            _ => {}
+        }
+    }
+    EntityData::Surface {
+        surface_kind: surface_kind.to_string(),
+        u_isolines,
+        v_isolines,
+        acis_data: acis_lines.join("\n"),
+    }
+}
+
+pub(crate) fn parse_light(codes: &[(i16, String)]) -> EntityData {
+    let mut name = String::new();
+    let mut light_type: i16 = 2;
+    let mut position = [0.0; 3];
+    let mut target = [0.0; 3];
+    let mut intensity = 1.0;
+    let mut is_on = true;
+    let mut color: i16 = 7;
+    let mut hotspot_angle = 0.0;
+    let mut falloff_angle = 0.0;
+    for &(code, ref val) in codes {
+        match code {
+            1 => name = val.clone(),
+            70 => light_type = val.parse().unwrap_or(2),
+            10 => position[0] = val.parse().unwrap_or(0.0),
+            20 => position[1] = val.parse().unwrap_or(0.0),
+            30 => position[2] = val.parse().unwrap_or(0.0),
+            11 => target[0] = val.parse().unwrap_or(0.0),
+            21 => target[1] = val.parse().unwrap_or(0.0),
+            31 => target[2] = val.parse().unwrap_or(0.0),
+            40 => intensity = val.parse().unwrap_or(1.0),
+            290 => is_on = val.trim() == "1",
+            63 => color = val.parse().unwrap_or(7),
+            50 => hotspot_angle = val.parse().unwrap_or(0.0),
+            51 => falloff_angle = val.parse().unwrap_or(0.0),
+            _ => {}
+        }
+    }
+    EntityData::Light {
+        name,
+        light_type,
+        position,
+        target,
+        intensity,
+        is_on,
+        color,
+        hotspot_angle,
+        falloff_angle,
+    }
+}
+
+pub(crate) fn parse_camera(codes: &[(i16, String)]) -> EntityData {
+    let mut position = [0.0; 3];
+    let mut target = [0.0; 3];
+    let mut lens_length = 50.0;
+    for &(code, ref val) in codes {
+        match code {
+            10 => position[0] = val.parse().unwrap_or(0.0),
+            20 => position[1] = val.parse().unwrap_or(0.0),
+            30 => position[2] = val.parse().unwrap_or(0.0),
+            11 => target[0] = val.parse().unwrap_or(0.0),
+            21 => target[1] = val.parse().unwrap_or(0.0),
+            31 => target[2] = val.parse().unwrap_or(0.0),
+            40 => lens_length = val.parse().unwrap_or(50.0),
+            _ => {}
+        }
+    }
+    EntityData::Camera {
+        position,
+        target,
+        lens_length,
+    }
+}
+
+pub(crate) fn parse_section(codes: &[(i16, String)]) -> EntityData {
+    let mut name = String::new();
+    let mut state = 0;
+    let mut vertices: Vec<[f64; 3]> = Vec::new();
+    let mut cur = [0.0; 3];
+    let mut have_x = false;
+    let mut have_y = false;
+    let mut vertical = [0.0, 0.0, 1.0];
+    for &(code, ref val) in codes {
+        match code {
+            1 => name = val.clone(),
+            70 => state = val.parse().unwrap_or(0),
+            11 => {
+                cur[0] = val.parse().unwrap_or(0.0);
+                have_x = true;
+                have_y = false;
+            }
+            21 => {
+                cur[1] = val.parse().unwrap_or(0.0);
+                have_y = have_x;
+            }
+            31 => {
+                cur[2] = val.parse().unwrap_or(0.0);
+                if have_y {
+                    vertices.push(cur);
+                }
+                have_x = false;
+                have_y = false;
+            }
+            40 => vertical[0] = val.parse().unwrap_or(0.0),
+            41 => vertical[1] = val.parse().unwrap_or(0.0),
+            42 => vertical[2] = val.parse().unwrap_or(1.0),
+            _ => {}
+        }
+    }
+    EntityData::Section {
+        name,
+        state,
+        vertices,
+        vertical_direction: vertical,
+    }
+}
+
+pub(crate) fn parse_proxy_entity(codes: &[(i16, String)]) -> EntityData {
+    let mut class_id: i32 = 0;
+    let mut application_class_id: i32 = 0;
+    let mut raw_codes: Vec<(i16, String)> = Vec::new();
+    for &(code, ref val) in codes {
+        match code {
+            90 if class_id == 0 => class_id = val.parse().unwrap_or(0),
+            91 if application_class_id == 0 => application_class_id = val.parse().unwrap_or(0),
+            // Skip fields already handled by the common entity header.
+            5 | 100 | 330 | 8 | 6 | 48 | 62 | 420 | 370 | 60 | 440 | 39 | 210 | 220 | 230 => {}
+            _ => raw_codes.push((code, val.clone())),
+        }
+    }
+    EntityData::ProxyEntity {
+        class_id,
+        application_class_id,
+        raw_codes,
     }
 }

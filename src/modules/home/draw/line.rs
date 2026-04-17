@@ -2,12 +2,11 @@
 //
 // Command:  LINE — H7CAD behaviour:
 //   1. First click  → stores start point, prompts for next point
-//   2. Each further click → immediately commits an acadrust::Line entity
+//   2. Each further click → immediately commits an nm::Entity Line
 //      (start→end) to the document; end becomes the new start point
 //   3. Enter / Escape → ends the command
 
-use acadrust::types::Vector3;
-use acadrust::{EntityType, Line};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -53,12 +52,12 @@ impl CadCommand for LineCommand {
 
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         if let Some(last) = self.last {
-            let line = Line::from_points(
-                Vector3::new(last.x as f64, last.y as f64, last.z as f64),
-                Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64),
-            );
+            let entity = nm::Entity::new(nm::EntityData::Line {
+                start: [last.x as f64, last.y as f64, last.z as f64],
+                end: [pt.x as f64, pt.y as f64, pt.z as f64],
+            });
             self.last = Some(pt);
-            CmdResult::CommitEntity(EntityType::Line(line))
+            CmdResult::CommitEntityNative(entity)
         } else {
             self.last = Some(pt);
             CmdResult::NeedPoint

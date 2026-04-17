@@ -1,5 +1,7 @@
+mod bit_reader;
 mod error;
 mod file_header;
+mod known_section;
 mod object_reader;
 mod pending;
 mod reader;
@@ -10,8 +12,10 @@ mod version;
 use h7cad_native_model::CadDocument;
 use h7cad_native_model::Handle;
 
+pub use bit_reader::BitReader;
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
+pub use known_section::KnownSection;
 pub use object_reader::{
     dispatch_entity_record, dispatch_object, dispatch_object_record, dispatch_table_record,
     record_index, record_payload_size, summarize_object, DispatchTarget, ParsedRecordSummary,
@@ -558,18 +562,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_section_map_ac1018_extracts_descriptors() {
+    fn parse_section_map_extracts_descriptors() {
         let entries = [(0x20_u32, 0x40_u32), (0x60_u32, 0x10_u32)];
-        let bytes = fixture_ac1018(entries.len() as u32, &entries, &[]);
+        let bytes = fixture_ac1015(entries.len() as u32, &entries, &[]);
         let header = DwgFileHeader::parse(&bytes).unwrap();
         let sections = SectionMap::parse(&bytes, &header).unwrap();
 
-        assert_eq!(sections.version, DwgVersion::Ac1018);
+        assert_eq!(sections.version, DwgVersion::Ac1015);
         assert_eq!(sections.descriptors.len(), 2);
         assert_eq!(
             sections.descriptors[0],
             SectionDescriptor {
                 index: 0,
+                record_number: 0,
                 offset: 0x20,
                 size: 0x40
             }
@@ -578,6 +583,7 @@ mod tests {
             sections.descriptors[1],
             SectionDescriptor {
                 index: 1,
+                record_number: 1,
                 offset: 0x60,
                 size: 0x10
             }
@@ -594,7 +600,7 @@ mod tests {
 
     #[test]
     fn build_pending_document_keeps_section_metadata() {
-        let entries = [(0x21_u32, 0x20_u32)];
+        let entries = [(0x40_u32, 0x20_u32)];
         let bytes = fixture_ac1015(1, &entries, &[&vec![1; 0x20]]);
         let header = DwgFileHeader::parse(&bytes).unwrap();
         let sections = SectionMap::parse(&bytes, &header).unwrap();
@@ -608,7 +614,7 @@ mod tests {
             pending.sections,
             vec![PendingSection {
                 index: 0,
-                offset: 0x21,
+                offset: 0x40,
                 size: 0x20,
                 record_count: 1,
                 payload: vec![1; 0x20],
@@ -780,25 +786,32 @@ mod tests {
         entries: &[(u32, u32)],
         payloads: &[&[u8]],
     ) -> Vec<u8> {
-        fixture_with_layout(DwgVersion::Ac1015, 0x15, section_count, entries, payloads)
+        fixture_with_layout(DwgVersion::Ac1015, section_count, entries, payloads)
     }
 
+    /// Legacy alias. Historic tests called `fixture_ac1018`, but the
+    /// synthetic byte layout never matched real AC1018 structure. All
+    /// such fixtures are now routed through the AC1015 layout so they
+    /// keep exercising the section-map + pending-graph code paths.
     fn fixture_ac1018(
         section_count: u32,
         entries: &[(u32, u32)],
         payloads: &[&[u8]],
     ) -> Vec<u8> {
-        fixture_with_layout(DwgVersion::Ac1018, 0x19, section_count, entries, payloads)
+        fixture_with_layout(DwgVersion::Ac1015, section_count, entries, payloads)
     }
 
     fn fixture_with_layout(
         version: DwgVersion,
-        section_count_offset: usize,
         section_count: u32,
         entries: &[(u32, u32)],
         payloads: &[&[u8]],
     ) -> Vec<u8> {
-        let directory_end = section_count_offset + 4 + entries.len() * 8;
+        let section_count_offset = crate::file_header::section_count_offset(version)
+            .expect("fixture version must be supported by file header decoder");
+        // AC1015 section locator records are 9 bytes each.
+        let record_size = 9usize;
+        let directory_end = section_count_offset + 4 + entries.len() * record_size;
         let max_end = entries
             .iter()
             .map(|(offset, size)| *offset as usize + *size as usize)
@@ -811,10 +824,11 @@ mod tests {
             .copy_from_slice(&section_count.to_le_bytes());
 
         let mut cursor = section_count_offset + 4;
-        for (offset, size) in entries {
-            bytes[cursor..cursor + 4].copy_from_slice(&offset.to_le_bytes());
-            bytes[cursor + 4..cursor + 8].copy_from_slice(&size.to_le_bytes());
-            cursor += 8;
+        for (index, (offset, size)) in entries.iter().enumerate() {
+            bytes[cursor] = index as u8;
+            bytes[cursor + 1..cursor + 5].copy_from_slice(&offset.to_le_bytes());
+            bytes[cursor + 5..cursor + 9].copy_from_slice(&size.to_le_bytes());
+            cursor += record_size;
         }
 
         for ((offset, size), payload) in entries.iter().zip(payloads.iter()) {

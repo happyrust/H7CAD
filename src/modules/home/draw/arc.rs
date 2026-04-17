@@ -12,8 +12,7 @@
 //   ARC_CSA — Center, Start, Angle
 //   ARC_CSL — Center, Start, Length of chord
 
-use acadrust::types::Vector3;
-use acadrust::{Arc as CadArc, EntityType};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
@@ -92,13 +91,12 @@ fn arc_preview(center: Vec3, radius: f32, start_angle: f32, end_angle: f32) -> W
     WireModel::solid("rubber_band".into(), pts, WireModel::CYAN, false)
 }
 
-fn make_arc(center: Vec3, radius: f32, start_angle: f32, end_angle: f32) -> EntityType {
-    EntityType::Arc(CadArc {
-        center: Vector3::new(center.x as f64, center.y as f64, center.z as f64),
+fn make_arc(center: Vec3, radius: f32, start_angle: f32, end_angle: f32) -> nm::Entity {
+    nm::Entity::new(nm::EntityData::Arc {
+        center: [center.x as f64, center.y as f64, center.z as f64],
         radius: radius as f64,
         start_angle: start_angle.to_degrees() as f64,
         end_angle: end_angle.to_degrees() as f64,
-        ..Default::default()
     })
 }
 
@@ -269,7 +267,7 @@ impl CadCommand for ArcCommand {
                 } else {
                     make_arc(self.c, self.r, self.sa, ea)
                 };
-                CmdResult::CommitAndExit(e)
+                CmdResult::CommitAndExitNative(e)
             }
         }
     }
@@ -345,7 +343,7 @@ impl CadCommand for Arc3PCommand {
                 } else {
                     (a3, a1)
                 };
-                CmdResult::CommitAndExit(make_arc(center, radius, sa, ea))
+                CmdResult::CommitAndExitNative(make_arc(center, radius, sa, ea))
             }
         }
     }
@@ -442,7 +440,7 @@ impl CadCommand for ArcSCECommand {
                 } else {
                     make_arc(self.c, self.r, self.sa, ea)
                 };
-                CmdResult::CommitAndExit(e)
+                CmdResult::CommitAndExitNative(e)
             }
         }
     }
@@ -536,7 +534,7 @@ impl CadCommand for ArcSCACommand {
                 } else {
                     make_arc(self.c, self.r, self.sa, ea)
                 };
-                CmdResult::CommitAndExit(e)
+                CmdResult::CommitAndExitNative(e)
             }
         }
     }
@@ -551,7 +549,7 @@ impl CadCommand for ArcSCACommand {
             let span: f32 = text.trim().replace(',', ".").parse().ok()?;
             // Negative span = CW; positive = CCW.
             let ea = self.sa + span.to_radians();
-            return Some(CmdResult::CommitAndExit(make_arc(
+            return Some(CmdResult::CommitAndExitNative(make_arc(
                 self.c, self.r, self.sa, ea,
             )));
         }
@@ -634,7 +632,7 @@ impl CadCommand for ArcSCLCommand {
             _ => {
                 let chord = self.s.distance(pt);
                 let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                CmdResult::CommitAndExit(make_arc(self.c, self.r, self.sa, ea))
+                CmdResult::CommitAndExitNative(make_arc(self.c, self.r, self.sa, ea))
             }
         }
     }
@@ -649,7 +647,7 @@ impl CadCommand for ArcSCLCommand {
             let chord: f32 = text.trim().replace(',', ".").parse().ok()?;
             if chord > 0.0 {
                 let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                return Some(CmdResult::CommitAndExit(make_arc(
+                return Some(CmdResult::CommitAndExitNative(make_arc(
                     self.c, self.r, self.sa, ea,
                 )));
             }
@@ -715,7 +713,7 @@ impl CadCommand for ArcSEACommand {
                 Some((center, radius)) => {
                     let sa = angle_xy(center, self.s);
                     let ea = angle_xy(center, self.e);
-                    CmdResult::CommitAndExit(make_arc(center, radius, sa, ea))
+                    CmdResult::CommitAndExitNative(make_arc(center, radius, sa, ea))
                 }
                 None => CmdResult::Cancel,
             },
@@ -790,7 +788,7 @@ impl CadCommand for ArcSERCommand {
                 Some((center, radius)) => {
                     let sa = angle_xy(center, self.s);
                     let ea = angle_xy(center, self.e);
-                    CmdResult::CommitAndExit(make_arc(center, radius, sa, ea))
+                    CmdResult::CommitAndExitNative(make_arc(center, radius, sa, ea))
                 }
                 None => CmdResult::Cancel,
             },
@@ -816,7 +814,7 @@ impl CadCommand for ArcSERCommand {
                 let center = mid - perp * d;
                 let sa = angle_xy(center, self.s);
                 let ea = angle_xy(center, self.e);
-                return Some(CmdResult::CommitAndExit(make_arc(center, r, sa, ea)));
+                return Some(CmdResult::CommitAndExitNative(make_arc(center, r, sa, ea)));
             }
         }
         None
@@ -884,7 +882,7 @@ impl CadCommand for ArcSEDCommand {
                 Some((center, radius)) => {
                     let sa = angle_xy(center, self.s);
                     let ea = angle_xy(center, self.e);
-                    CmdResult::CommitAndExit(make_arc(center, radius, sa, ea))
+                    CmdResult::CommitAndExitNative(make_arc(center, radius, sa, ea))
                 }
                 None => CmdResult::Cancel,
             },
@@ -972,7 +970,7 @@ impl CadCommand for ArcCSACommand {
                 } else {
                     make_arc(self.c, self.r, self.sa, ea)
                 };
-                CmdResult::CommitAndExit(e)
+                CmdResult::CommitAndExitNative(e)
             }
         }
     }
@@ -986,7 +984,7 @@ impl CadCommand for ArcCSACommand {
         if self.step == 2 {
             let span: f32 = text.trim().replace(',', ".").parse().ok()?;
             let ea = self.sa + span.to_radians();
-            return Some(CmdResult::CommitAndExit(make_arc(
+            return Some(CmdResult::CommitAndExitNative(make_arc(
                 self.c, self.r, self.sa, ea,
             )));
         }
@@ -1068,7 +1066,7 @@ impl CadCommand for ArcCSLCommand {
             _ => {
                 let chord = self.s.distance(pt);
                 let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                CmdResult::CommitAndExit(make_arc(self.c, self.r, self.sa, ea))
+                CmdResult::CommitAndExitNative(make_arc(self.c, self.r, self.sa, ea))
             }
         }
     }
@@ -1083,7 +1081,7 @@ impl CadCommand for ArcCSLCommand {
             let chord: f32 = text.trim().replace(',', ".").parse().ok()?;
             if chord > 0.0 {
                 let ea = end_angle_from_chord_len(self.sa, chord, self.r);
-                return Some(CmdResult::CommitAndExit(make_arc(
+                return Some(CmdResult::CommitAndExitNative(make_arc(
                     self.c, self.r, self.sa, ea,
                 )));
             }

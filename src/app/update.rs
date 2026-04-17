@@ -5,7 +5,7 @@ use crate::scene::grip::{find_hit_grip, GripEdit};
 use crate::scene::object::GripApply;
 use crate::modules::ModuleEvent;
 use crate::ui::PropertiesPanel;
-use acadrust::types::Color as AcadColor;
+use crate::types::Color as AcadColor;
 use acadrust::{EntityType as AcadEntityType, Handle};
 use h7cad_native_model as nm;
 use iced::time::Instant;
@@ -564,7 +564,10 @@ impl H7CAD {
                 match event {
                     ModuleEvent::Command(cmd) => return self.dispatch_command(&cmd),
                     ModuleEvent::OpenFileDialog => {
-                        self.command_line.push_info("Open DWG/DXF: not yet implemented.");
+                        return Task::perform(
+                            crate::io::pick_and_open(),
+                            Message::FileOpened,
+                        );
                     }
                     ModuleEvent::ClearModels => {
                         let i = self.active_tab;

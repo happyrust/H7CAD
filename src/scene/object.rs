@@ -1,6 +1,6 @@
 // Shared value types used by the dispatch and grip systems.
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use crate::types::{Color as AcadColor, LineWeight};
 use glam::Vec3;
 
 /// The kind of value held by a property row.

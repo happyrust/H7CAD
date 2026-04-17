@@ -10,7 +10,7 @@
 //   Finds intersection, backs off dist1 along line 1 and dist2 along line 2.
 
 use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 

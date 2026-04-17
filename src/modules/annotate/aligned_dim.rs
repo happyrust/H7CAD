@@ -1,7 +1,7 @@
 // DIMALIGNED command — aligned dimension (measures true distance between two points).
 
 use acadrust::entities::{Dimension, DimensionAligned};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 

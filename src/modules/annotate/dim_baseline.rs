@@ -7,7 +7,7 @@
 // Constructed from commands.rs after finding the last placed linear/aligned dimension.
 
 use acadrust::entities::{Dimension, DimensionLinear};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 

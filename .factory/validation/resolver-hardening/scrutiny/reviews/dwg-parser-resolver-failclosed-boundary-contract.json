@@ -1,0 +1,28 @@
+{
+  "featureId": "dwg-parser-resolver-failclosed-boundary-contract",
+  "reviewedAt": "2026-04-13T00:00:00Z",
+  "commitId": "2d748b3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The verification-first audit is not fully supported by the cited commit. Commit 2d748b3 only added resolver ownership fixtures in tests, while the feature handoff also claims existing parser and facade behavior in crates/h7cad-native-dwg/src/lib.rs and crates/h7cad-native-facade/src/lib.rs. The current code appears to satisfy the public fail-closed boundary contract, but the reviewed feature lacks auditable implementation provenance tying those runtime behaviors to this feature commit.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/src/lib.rs",
+        "line": 210,
+        "severity": "blocking",
+        "description": "The feature handoff attributes parser fail-closed behavior in build_pending_document() and public read_dwg() to commit 2d748b3, but git show 2d748b3 -- crates/h7cad-native-dwg crates/h7cad-native-facade shows that commit only added test fixtures in tests/read_headers.rs. This leaves the reviewed feature without truthful code provenance for the parser/facade boundary behavior it claims to verify."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The dwg-parser-worker skill permits verification-first attribution via git log -1 -- <paths>, but this feature still cited a commit that did not actually touch the claimed implementation files. The skill should require workers to verify that the chosen existing commit covers all behavior they cite in the handoff, or otherwise return to the orchestrator for provenance clarification.",
+      "evidence": ".factory/skills/dwg-parser-worker/SKILL.md step 8 allows existing commit attribution; handoff for workerSessionId 5334fcca-c9c3-4a32-9f35-a2978efa8e1e cites commit 2d748b3 for crates/h7cad-native-dwg/src/lib.rs and crates/h7cad-native-facade/src/lib.rs, but git show 2d748b3 -- crates/h7cad-native-dwg crates/h7cad-native-facade only changes crates/h7cad-native-dwg/tests/read_headers.rs."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature transcript skeleton, handoff, commit diff, parser/facade code, and mission guidance. Current code appears to fail closed for impossible semantic references and keeps facade DWG loading unavailable, but the cited feature commit is not auditable provenance for the implementation surfaces claimed in the handoff, so the review fails on commit attribution correctness."
+}

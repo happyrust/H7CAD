@@ -121,12 +121,14 @@ pub fn apply_transform(center: &mut [f64; 3], radius: &mut f64, t: &EntityTransf
 use crate::entities::common::v3_to_arr;
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::Circle {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
         Some(self::to_truck(&v3_to_arr(&self.center), self.radius))
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::Circle {
     fn grips(&self) -> Vec<GripDef> {
         self::grips(&v3_to_arr(&self.center), self.radius)
@@ -140,6 +142,7 @@ impl Grippable for acadrust::entities::Circle {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::Circle {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         properties(&v3_to_arr(&self.center), self.radius)
@@ -153,6 +156,7 @@ impl PropertyEditable for acadrust::entities::Circle {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::Circle {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut c = v3_to_arr(&self.center);

@@ -10,7 +10,7 @@
 use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
 use truck_modeling::base::{BoundedCurve, Cut};
 use crate::modules::home::modify::spline_ops::{bspline_to_spline, spline_to_bspline};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 

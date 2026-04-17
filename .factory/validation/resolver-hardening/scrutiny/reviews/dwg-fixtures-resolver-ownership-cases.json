@@ -1,0 +1,15 @@
+{
+  "featureId": "dwg-fixtures-resolver-ownership-cases",
+  "reviewedAt": "2026-04-13T13:08:30Z",
+  "commitId": "2d748b3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature adds parser-only resolver fixture helpers and a focused regression in crates/h7cad-native-dwg/tests/read_headers.rs covering layer tables, layout/block pairs, model-space versus paper-space ownership, block-owned entities, and invalid semantic references while explicitly tagging parser-emitted handles for later resolver assertions. The implementation matches the feature description and expected behavior, and I did not find correctness issues in the reviewed commit.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, transcript skeleton, worker skill, architecture guidance, and commit 2d748b3. The change stays within the parser-only fixture surface, follows the documented dwg-fixture-worker procedure, and provides the expected resolver-hardening ownership fixtures without widening runtime scope."
+}

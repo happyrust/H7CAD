@@ -6,7 +6,7 @@
 //   S <value>  → set scale factor then continue picking
 
 use acadrust::entities::MLine;
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 

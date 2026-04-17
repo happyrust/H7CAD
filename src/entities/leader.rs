@@ -14,7 +14,7 @@ use crate::scene::wire_model::TangentGeom;
 fn to_truck(leader: &Leader) -> TruckEntity {
     let verts = &leader.vertices;
     let nan = [f32::NAN; 3];
-    let p3 = |v: &acadrust::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
+    let p3 = |v: &crate::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
 
     let mut points: Vec<[f32; 3]> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
@@ -106,7 +106,7 @@ fn apply_grip(leader: &mut Leader, grip_id: usize, apply: GripApply) {
             }
         }
     } else if let GripApply::Translate(d) = apply {
-        leader.translate(acadrust::types::Vector3::new(
+        leader.translate(crate::types::Vector3::new(
             d.x as f64,
             d.y as f64,
             d.z as f64,

@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use crate::types::{Color as AcadColor, LineWeight};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, svg, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 

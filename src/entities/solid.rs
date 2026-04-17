@@ -121,12 +121,14 @@ fn write_back(s: &mut acadrust::entities::Solid, c: &[[f64; 3]; 4]) {
     s.fourth_corner = arr_to_v3(&c[3]);
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::Solid {
     fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
         Some(self::to_truck(&ar_corners(self)))
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::Solid {
     fn grips(&self) -> Vec<GripDef> {
         self::grips(&ar_corners(self))
@@ -138,6 +140,7 @@ impl Grippable for acadrust::entities::Solid {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::Solid {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         properties(&ar_corners(self), self.thickness)
@@ -151,6 +154,7 @@ impl PropertyEditable for acadrust::entities::Solid {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::Solid {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut c = ar_corners(self);

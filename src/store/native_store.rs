@@ -15,6 +15,7 @@ impl NativeStore {
         Self { doc }
     }
 
+    #[allow(dead_code)]
     pub fn into_inner(self) -> nm::CadDocument {
         self.doc
     }

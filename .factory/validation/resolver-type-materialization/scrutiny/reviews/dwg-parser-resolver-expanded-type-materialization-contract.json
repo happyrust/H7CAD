@@ -1,0 +1,34 @@
+{
+  "featureId": "dwg-parser-resolver-expanded-type-materialization-contract",
+  "reviewedAt": "2026-04-14T04:29:15Z",
+  "commitId": "b696134",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The resolver commit preserves some parser-supplied block/layout ownership and keeps facade DWG loading disabled, but it does not materialize the newly supported text/reference families onto outward-facing native-model surfaces. All parsed entities are flattened into EntityData::Point, so resolved outputs lose the TEXT/MTEXT/INSERT distinctions and their type-specific relationships that this feature and VAL-HARDEN-012/013 require.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/src/resolver.rs",
+        "line": 156,
+        "severity": "blocking",
+        "description": "semantic_entity() converts every parsed entity into EntityData::Point regardless of semantic_identity. As a result, resolved outputs cannot preserve newly supported TEXT vs MTEXT vs INSERT family distinctions after resolution, violating the feature contract and VAL-HARDEN-012."
+      },
+      {
+        "file": "crates/h7cad-native-dwg/src/resolver.rs",
+        "line": 156,
+        "severity": "blocking",
+        "description": "Because INSERT entities are materialized as generic points with only owner/layer copied through, type-specific reference relationships are dropped on outward-facing resolved surfaces. CadDocument::resolve_insert_block() depends on EntityData::Insert.block_name, but semantic_entity() never sets it, so VAL-HARDEN-013's required reference/text/table relationship survival is not actually implemented."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The dwg-parser-worker skill tells workers to read .factory/library/architecture.md for parser guidance, but the checked-in architecture doc is DXF-native migration guidance and explicitly says the DWG parser/runtime rollout is out of scope. That mismatch can mislead DWG parser workers and reviewers about intended component boundaries.",
+      "evidence": "D:/work/plant-code/cad/H7CAD/.factory/skills/dwg-parser-worker/SKILL.md step 1 requires reading .factory/library/architecture.md; D:/work/plant-code/cad/H7CAD/.factory/library/architecture.md starts with 'High-level architecture for the DXF native migration mission' and lists changing the DWG parser/runtime rollout as out of scope."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: commit b696134 adds resolver-side block/layout insertion and preserves some ownership/layer state, but it does not materialize expanded text/reference entity families onto outward-facing resolved native-model surfaces. Existing tests mostly assert handle ownership and absence from ObjectData::Unknown; they do not prove TEXT/MTEXT/INSERT remain distinguishable or that INSERT target-link semantics survive resolution."
+}

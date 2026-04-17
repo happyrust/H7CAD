@@ -1,0 +1,22 @@
+{
+  "featureId": "dwg-parser-pending-layer-entity-semantics-contract",
+  "reviewedAt": "2026-04-13T12:30:59Z",
+  "commitId": "bc4eba8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature materially improves parser-built PendingDocument layer/entity provenance and adds focused regressions, but commit bc4eba8 still left a blocking correctness gap: entity layer relationships were only preserved when encoded inline as L<name>, not when expressed via layer handles/references, so the outward parser-facing layer provenance contract was not fully met by this feature commit.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/src/lib.rs",
+        "line": 405,
+        "severity": "blocking",
+        "description": "semantic_entity() in commit bc4eba8 did not accept the layer handle map and only derived layer_name from inline L<name> fragments, defaulting to an empty string otherwise. Entities whose DWG semantic record referenced a layer by handle/reference therefore lost their outward-facing layer provenance on PendingDocument.entities, violating the feature requirement that parsed layer references become parser-visible provenance rather than needing resolver-only/manual reconstruction."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed mission docs, transcript skeleton, handoff, skill file, and commit bc4eba8 for dwg-parser-pending-layer-entity-semantics-contract. Result: fail, because the feature commit exposed parsed layers and owner provenance but still dropped handle/reference-based entity layer provenance until a later follow-up fix."
+}

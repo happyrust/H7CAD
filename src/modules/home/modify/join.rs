@@ -7,7 +7,7 @@
 //
 // Workflow: select objects then press Enter to join.
 
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 

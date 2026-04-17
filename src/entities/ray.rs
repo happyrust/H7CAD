@@ -172,12 +172,14 @@ pub fn xline_to_truck(origin: &[f64; 3], direction: &[f64; 3]) -> TruckEntity {
 use crate::entities::common::{arr_to_v3, v3_to_arr};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::Ray {
     fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
         Some(ray_to_truck(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction)))
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::Ray {
     fn grips(&self) -> Vec<GripDef> {
         ray_grips(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction))
@@ -191,6 +193,7 @@ impl Grippable for acadrust::entities::Ray {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::Ray {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         ray_properties(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction), "ray")
@@ -204,6 +207,7 @@ impl PropertyEditable for acadrust::entities::Ray {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::Ray {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut o = v3_to_arr(&self.base_point);
@@ -216,12 +220,14 @@ impl Transformable for acadrust::entities::Ray {
 
 // ── XLine trait impls ───────────────────────────────────────────────────
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::XLine {
     fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
         Some(xline_to_truck(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction)))
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::XLine {
     fn grips(&self) -> Vec<GripDef> {
         ray_grips(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction))
@@ -235,6 +241,7 @@ impl Grippable for acadrust::entities::XLine {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::XLine {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         ray_properties(&v3_to_arr(&self.base_point), &v3_to_arr(&self.direction), "xl")
@@ -248,6 +255,7 @@ impl PropertyEditable for acadrust::entities::XLine {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::XLine {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut o = v3_to_arr(&self.base_point);

@@ -1,6 +1,6 @@
 // Dispatch entry points for entity editing.
 
-use acadrust::types::{Color as AcadColor, LineWeight, Transparency};
+use crate::types::{Color as AcadColor, LineWeight, Transparency};
 use acadrust::{EntityType, Handle};
 use h7cad_native_model as nm;
 use glam::Vec3;

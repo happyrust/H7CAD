@@ -9,6 +9,7 @@ use crate::scene::hatch_model::HatchModel;
 use crate::scene::wire_model::WireModel;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 // ── Transform ─────────────────────────────────────────────────────────────
 
@@ -49,8 +50,15 @@ pub enum CmdResult {
     Preview(WireModel),
     /// Commit an acadrust entity to the document; keep the command active.
     CommitEntity(EntityType),
+    /// Commit a native entity to the document; keep the command active.
+    /// Native-first 路径（B5b）：host 把 `nm::Entity` 写入 `native_store`，
+    /// 然后通过 `native_bridge::native_entity_to_acadrust` 投影到 compat 层。
+    CommitEntityNative(nm::Entity),
     /// Commit an acadrust entity to the document and end the command.
     CommitAndExit(EntityType),
+    /// Commit a native entity to the document and end the command.
+    /// Native-first 对等 `CommitAndExit`（B5b）。
+    CommitAndExitNative(nm::Entity),
     /// Create a block definition from existing entities and insert one reference.
     CreateBlock {
         handles: Vec<Handle>,

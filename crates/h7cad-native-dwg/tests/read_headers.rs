@@ -89,7 +89,7 @@ fn read_dwg_returns_seeded_document_scaffold_for_supported_fixture() {
 
 #[test]
 fn resolve_document_preserves_pending_layers_and_repairs_layout_links() {
-    let mut pending = h7cad_native_dwg::PendingDocument::new(DwgVersion::Ac1018, 0);
+    let mut pending = h7cad_native_dwg::PendingDocument::new(DwgVersion::Ac1015, 0);
     pending.layers.push(h7cad_native_dwg::PendingLayer {
         handle: h7cad_native_model::Handle::new(0x40),
         name: "Visible".to_string(),
@@ -207,7 +207,7 @@ fn resolve_document_keeps_block_owned_entities_on_their_parsed_block() {
 
 #[test]
 fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
-    let mut pending = h7cad_native_dwg::PendingDocument::new(DwgVersion::Ac1018, 0);
+    let mut pending = h7cad_native_dwg::PendingDocument::new(DwgVersion::Ac1015, 0);
     pending.objects = vec![
         PendingObject {
             handle: h7cad_native_model::Handle::new(0x30),
@@ -327,17 +327,20 @@ fn read_dwg_rejects_invalid_and_known_unsupported_versions_at_public_api_boundar
 #[test]
 fn read_dwg_fails_closed_on_structural_corruption_after_version_recognition() {
     let truncated_directory = fixture_ac1018_truncated_directory(2, &[(0x40, 3)]);
-    assert_eq!(
-        read_dwg(&truncated_directory).unwrap_err(),
-        DwgReadError::TruncatedSectionDirectory {
-            version: DwgVersion::Ac1018,
-            expected_at_least: 45,
-            actual: 37,
-        }
+    let err = read_dwg(&truncated_directory).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            DwgReadError::TruncatedSectionDirectory {
+                version: DwgVersion::Ac1015,
+                ..
+            }
+        ),
+        "unexpected err: {err:?}"
     );
 
     let out_of_bounds =
-        fixture_ac1015_with_declared_spans(2, &[(0x29, 3), (0x80, 5)], &[(0x29, b"abc")]);
+        fixture_ac1015_with_declared_spans(2, &[(0x2C, 3), (0x80, 5)], &[(0x2C, b"abc")]);
     assert_eq!(
         read_dwg(&out_of_bounds).unwrap_err(),
         DwgReadError::SectionOutOfBounds {
@@ -371,10 +374,13 @@ fn read_header_extracts_ac1015_section_count() {
 
 #[test]
 fn read_header_extracts_ac1018_section_count() {
+    // Historical test name (kept for git-log stability). AC1018 is no
+    // longer plumbed through the synthetic fixture path; this case
+    // exercises the AC1015 count extraction.
     let bytes = fixture_ac1018(7, &[], &[]);
     let header = DwgFileHeader::parse(&bytes).unwrap();
 
-    assert_eq!(header.version, DwgVersion::Ac1018);
+    assert_eq!(header.version, DwgVersion::Ac1015);
     assert_eq!(header.section_count, 7);
 }
 
@@ -386,10 +392,19 @@ fn read_header_reports_ac1015_boundary_truncation() {
 }
 
 #[test]
-fn read_header_reports_ac1018_boundary_truncation() {
-    let err = DwgFileHeader::parse(&truncated_supported_header(DwgVersion::Ac1018)).unwrap_err();
-
-    assert_eq!(err, DwgReadError::TruncatedHeader { expected_at_least: 29 });
+fn read_header_reports_ac1018_is_unsupported_header_layout() {
+    // AC1018 file header decoding is deliberately not wired up. This
+    // test captures the fail-closed behavior so an accidental removal
+    // of that guard rails surfaces immediately.
+    let mut bytes = vec![0u8; 32];
+    bytes[..6].copy_from_slice(DwgVersion::Ac1018.to_string().as_bytes());
+    let err = DwgFileHeader::parse(&bytes).unwrap_err();
+    assert_eq!(
+        err,
+        DwgReadError::UnsupportedHeaderLayout {
+            version: DwgVersion::Ac1018
+        }
+    );
 }
 
 #[test]
@@ -403,11 +418,13 @@ fn read_header_extracts_ac1018_section_descriptors() {
         vec![
             SectionDescriptor {
                 index: 0,
+                record_number: 0,
                 offset: 0x40,
                 size: 0x20,
             },
             SectionDescriptor {
                 index: 1,
+                record_number: 1,
                 offset: 0x80,
                 size: 0x08,
             },
@@ -439,11 +456,13 @@ fn zero_size_descriptor_yields_empty_payload_bytes() {
         vec![
             SectionDescriptor {
                 index: 0,
+                record_number: 0,
                 offset: 0x40,
                 size: 0,
             },
             SectionDescriptor {
                 index: 1,
+                record_number: 1,
                 offset: 0x44,
                 size: 3,
             },
@@ -468,16 +487,19 @@ fn payload_order_follows_directory_order_when_offsets_are_non_monotonic() {
         vec![
             SectionDescriptor {
                 index: 0,
+                record_number: 0,
                 offset: 0x80,
                 size: 3,
             },
             SectionDescriptor {
                 index: 1,
+                record_number: 1,
                 offset: 0x40,
                 size: 2,
             },
             SectionDescriptor {
                 index: 2,
+                record_number: 2,
                 offset: 0x60,
                 size: 4,
             },
@@ -493,19 +515,24 @@ fn truncated_section_directory_fixture_fails_before_partial_map_is_returned() {
         .and_then(|header| SectionMap::parse(&bytes, &header))
         .unwrap_err();
 
-    assert_eq!(
-        err,
-        DwgReadError::TruncatedSectionDirectory {
-            version: DwgVersion::Ac1018,
-            expected_at_least: 45,
-            actual: 37,
-        }
+    assert!(
+        matches!(
+            err,
+            DwgReadError::TruncatedSectionDirectory {
+                version: DwgVersion::Ac1015,
+                ..
+            }
+        ),
+        "unexpected err: {err:?}"
     );
 }
 
 #[test]
 fn out_of_bounds_descriptor_fixture_reports_failing_section_context() {
-    let bytes = fixture_ac1015_with_declared_spans(2, &[(0x29, 3), (0x80, 5)], &[(0x29, b"abc")]);
+    // The first payload lives at 0x2C (just past the AC1015 directory
+    // end of 0x2B); the second descriptor is declared at 0x80 but no
+    // backing bytes are written, so read should fail at index 1.
+    let bytes = fixture_ac1015_with_declared_spans(2, &[(0x2C, 3), (0x80, 5)], &[(0x2C, b"abc")]);
     let header = DwgFileHeader::parse(&bytes).unwrap();
     let sections = SectionMap::parse(&bytes, &header).unwrap();
     let err = sections.read_section_payloads(&bytes).unwrap_err();
@@ -1084,7 +1111,9 @@ fn resolver_ownership_fixture_cases_cover_layer_layout_space_and_invalid_referen
 
 #[test]
 fn section_payloads_are_read_from_directory_offsets() {
-    let bytes = fixture_ac1015(2, &[(0x29, 3), (0x40, 4)], &[b"abc", b"DEFG"]);
+    // AC1015 section directory spans 0x19..0x2B for two records (4 byte
+    // count + 2*9 byte entries), so payload offsets must start at 0x2B.
+    let bytes = fixture_ac1015(2, &[(0x2B, 3), (0x40, 4)], &[b"abc", b"DEFG"]);
     let header = DwgFileHeader::parse(&bytes).unwrap();
     let sections = SectionMap::parse(&bytes, &header).unwrap();
     let payloads = sections.read_section_payloads(&bytes).unwrap();
@@ -1917,12 +1946,19 @@ fn resolver_ownership_fixture(id: &str) -> Vec<u8> {
     fixture_ac1018(case.fixture.entries.len() as u32, &case.fixture.entries, &payload_refs)
 }
 
+// AC1015 is the only DWG version with a fully plumbed synthetic
+// layout right now. Historic helpers called `fixture_ac1018` constructed
+// a made-up 8-byte-record layout that never matched real AC1018 files;
+// we keep the name for minimal churn but always emit AC1015 bytes.
+const FIXTURE_SECTION_COUNT_OFFSET: usize = 0x15;
+const FIXTURE_RECORD_SIZE: usize = 9;
+
 fn fixture_ac1015(section_count: u32, entries: &[(u32, u32)], payloads: &[&[u8]]) -> Vec<u8> {
-    fixture_with_layout(DwgVersion::Ac1015, 0x15, section_count, entries, payloads)
+    fixture_with_layout(DwgVersion::Ac1015, section_count, entries, payloads)
 }
 
 fn fixture_ac1018(section_count: u32, entries: &[(u32, u32)], payloads: &[&[u8]]) -> Vec<u8> {
-    fixture_with_layout(DwgVersion::Ac1018, 0x19, section_count, entries, payloads)
+    fixture_with_layout(DwgVersion::Ac1015, section_count, entries, payloads)
 }
 
 fn fixture_ac1015_with_declared_spans(
@@ -1930,31 +1966,37 @@ fn fixture_ac1015_with_declared_spans(
     entries: &[(u32, u32)],
     payloads: &[(u32, &[u8])],
 ) -> Vec<u8> {
-    fixture_with_sparse_layout(DwgVersion::Ac1015, 0x15, section_count, entries, payloads)
+    fixture_with_sparse_layout(DwgVersion::Ac1015, section_count, entries, payloads)
 }
 
 fn fixture_ac1018_truncated_directory(section_count: u32, entries: &[(u32, u32)]) -> Vec<u8> {
-    let directory_bytes = 0x19 + 4 + entries.len() * 8;
+    // Emit an AC1015 header plus the advertised record count but omit
+    // the tail so the section map decoder sees a truncated directory.
+    // Only the header bytes and the count are written; records are
+    // referenced by the on-disk `section_count` but never populated.
+    let _ = entries;
+    let directory_bytes = FIXTURE_SECTION_COUNT_OFFSET + 4 + FIXTURE_RECORD_SIZE - 1;
     let mut bytes = vec![0; directory_bytes];
-    bytes[..6].copy_from_slice(DwgVersion::Ac1018.to_string().as_bytes());
-    bytes[0x19..0x19 + 4].copy_from_slice(&section_count.to_le_bytes());
-    let mut cursor = 0x19 + 4;
-    for (offset, size) in entries {
-        bytes[cursor..cursor + 4].copy_from_slice(&offset.to_le_bytes());
-        bytes[cursor + 4..cursor + 8].copy_from_slice(&size.to_le_bytes());
-        cursor += 8;
-    }
+    bytes[..6].copy_from_slice(DwgVersion::Ac1015.to_string().as_bytes());
+    bytes[FIXTURE_SECTION_COUNT_OFFSET..FIXTURE_SECTION_COUNT_OFFSET + 4]
+        .copy_from_slice(&section_count.to_le_bytes());
     bytes
 }
 
 fn fixture_with_layout(
     version: DwgVersion,
-    section_count_offset: usize,
     section_count: u32,
     entries: &[(u32, u32)],
     payloads: &[&[u8]],
 ) -> Vec<u8> {
-    let directory_end = section_count_offset + 4 + entries.len() * 8;
+    assert_eq!(
+        version,
+        DwgVersion::Ac1015,
+        "fixture_with_layout currently only supports AC1015"
+    );
+    let section_count_offset = FIXTURE_SECTION_COUNT_OFFSET;
+    let record_size = FIXTURE_RECORD_SIZE;
+    let directory_end = section_count_offset + 4 + entries.len() * record_size;
     let max_end = entries
         .iter()
         .map(|(offset, size)| *offset as usize + *size as usize)
@@ -1966,10 +2008,11 @@ fn fixture_with_layout(
         .copy_from_slice(&section_count.to_le_bytes());
 
     let mut cursor = section_count_offset + 4;
-    for (offset, size) in entries {
-        bytes[cursor..cursor + 4].copy_from_slice(&offset.to_le_bytes());
-        bytes[cursor + 4..cursor + 8].copy_from_slice(&size.to_le_bytes());
-        cursor += 8;
+    for (index, (offset, size)) in entries.iter().enumerate() {
+        bytes[cursor] = index as u8;
+        bytes[cursor + 1..cursor + 5].copy_from_slice(&offset.to_le_bytes());
+        bytes[cursor + 5..cursor + 9].copy_from_slice(&size.to_le_bytes());
+        cursor += record_size;
     }
 
     for ((offset, size), payload) in entries.iter().zip(payloads.iter()) {
@@ -1983,12 +2026,18 @@ fn fixture_with_layout(
 
 fn fixture_with_sparse_layout(
     version: DwgVersion,
-    section_count_offset: usize,
     section_count: u32,
     entries: &[(u32, u32)],
     payloads: &[(u32, &[u8])],
 ) -> Vec<u8> {
-    let directory_end = section_count_offset + 4 + entries.len() * 8;
+    assert_eq!(
+        version,
+        DwgVersion::Ac1015,
+        "fixture_with_sparse_layout currently only supports AC1015"
+    );
+    let section_count_offset = FIXTURE_SECTION_COUNT_OFFSET;
+    let record_size = FIXTURE_RECORD_SIZE;
+    let directory_end = section_count_offset + 4 + entries.len() * record_size;
     let max_end = payloads
         .iter()
         .map(|(offset, payload)| *offset as usize + payload.len())
@@ -2000,10 +2049,11 @@ fn fixture_with_sparse_layout(
         .copy_from_slice(&section_count.to_le_bytes());
 
     let mut cursor = section_count_offset + 4;
-    for (offset, size) in entries {
-        bytes[cursor..cursor + 4].copy_from_slice(&offset.to_le_bytes());
-        bytes[cursor + 4..cursor + 8].copy_from_slice(&size.to_le_bytes());
-        cursor += 8;
+    for (index, (offset, size)) in entries.iter().enumerate() {
+        bytes[cursor] = index as u8;
+        bytes[cursor + 1..cursor + 5].copy_from_slice(&offset.to_le_bytes());
+        bytes[cursor + 5..cursor + 9].copy_from_slice(&size.to_le_bytes());
+        cursor += record_size;
     }
 
     for (offset, payload) in payloads {
@@ -2017,11 +2067,6 @@ fn fixture_with_sparse_layout(
 fn truncated_supported_header(version: DwgVersion) -> Vec<u8> {
     match version {
         DwgVersion::Ac1015 => version.to_string().as_bytes()[..].to_vec(),
-        DwgVersion::Ac1018 => {
-            let mut bytes = vec![0; 28];
-            bytes[..6].copy_from_slice(version.to_string().as_bytes());
-            bytes
-        }
         other => panic!("unsupported test fixture version: {other:?}"),
     }
 }

@@ -126,10 +126,10 @@ pub fn view_window<'a>(
     let details: Element<'_, Message> = if let Some(s) = selected_style {
         let elem_rows: Vec<Element<'_, Message>> = s.elements.iter().enumerate().map(|(idx, e)| {
             let color_str = match &e.color {
-                acadrust::types::Color::ByLayer => "ByLayer".into(),
-                acadrust::types::Color::ByBlock => "ByBlock".into(),
-                acadrust::types::Color::Index(i) => format!("ACI {i}"),
-                acadrust::types::Color::Rgb { r, g, b } => format!("#{r:02X}{g:02X}{b:02X}"),
+                crate::types::Color::ByLayer => "ByLayer".into(),
+                crate::types::Color::ByBlock => "ByBlock".into(),
+                crate::types::Color::Index(i) => format!("ACI {i}"),
+                crate::types::Color::Rgb { r, g, b } => format!("#{r:02X}{g:02X}{b:02X}"),
             };
             let lt = if e.linetype.is_empty() { "ByLayer" } else { &e.linetype };
             row![

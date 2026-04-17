@@ -5,7 +5,7 @@
 //   WIPEOUT P:         polygonal wipeout (pick corners, Enter to close)
 
 use acadrust::entities::Wipeout;
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 
@@ -160,7 +160,7 @@ fn make_rect_wipeout(p1: Vec3, p2: Vec3) -> EntityType {
 }
 
 fn make_poly_wipeout(pts: &[Vec3]) -> EntityType {
-    use acadrust::types::Vector2;
+    use crate::types::Vector2;
     let z = pts[0].y as f64;
     let verts: Vec<Vector2> = pts.iter()
         .map(|p| Vector2::new(p.x as f64, p.z as f64))

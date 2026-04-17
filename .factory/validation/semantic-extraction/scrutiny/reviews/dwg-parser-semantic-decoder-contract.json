@@ -1,0 +1,34 @@
+{
+  "featureId": "dwg-parser-semantic-decoder-contract",
+  "reviewedAt": "2026-04-13T12:32:11Z",
+  "commitId": "e0287b9b7b13c6ddc81688f896bca2d2e1327f11",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature correctly moved the parser off delimiter-only classification for records beginning at byte 0 and added explicit semantic decode failures, but it still drops leading bytes before the first semantic prefix and still fails to preserve handle/reference-based layer provenance on outward semantic links. Those gaps violate the feature contract because semantic-path decoding is not content-faithful for padded payloads and same-size/content-derived identity is still incomplete for layer references.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/src/lib.rs",
+        "line": 198,
+        "severity": "blocking",
+        "description": "decode_semantic_section_records slices the payload from the first semantic prefix, silently discarding any leading bytes once contains_semantic_record_prefix() matches anywhere in the payload. For structurally valid padded/prefixed payloads this changes the decoded record bytes and payload_size instead of preserving the actual semantic record boundary/content. The added regression only asserts the truncated sizes 27/31 for the synthetic prefixed fixture, so the feature still does not implement content-faithful semantic boundary decoding required by the contract."
+      },
+      {
+        "file": "crates/h7cad-native-dwg/src/lib.rs",
+        "line": 419,
+        "severity": "blocking",
+        "description": "Handle-based layer provenance is only applied to PendingEntity.layer_name via layer_by_handle, but semantic_link() recomputes the outward link using semantic_layer_name_from_fields(), which only succeeds when the same record also contains both LAYER and matching H fields. A record like ENT:LINE:EA1:OA0:LR99 therefore yields layer_handle:99|owner:A0 without the resolved layer name, so outward parser summaries still fail to preserve full content-derived layer provenance for handle/reference-based relationships."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker followed the dwg-parser-worker procedure and produced an isolated feature commit plus focused cargo verification; I did not find a skill/procedure mismatch for this feature.",
+      "evidence": ".factory/skills/dwg-parser-worker/SKILL.md steps 2-9 align with the transcript skeleton and handoff for session 331ded90-fe54-483a-b727-7979a1a5cf7a."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature handoff, transcript skeleton, commit e0287b9b7b13c6ddc81688f896bca2d2e1327f11, and mission/shared-state docs. I found two blocking correctness issues: semantic decoding still trims prefixed bytes before the first semantic marker, and outward semantic summaries still lose resolved layer names for handle-based layer references."
+}

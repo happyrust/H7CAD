@@ -1,0 +1,34 @@
+{
+  "featureId": "dwg-parser-resolver-semantic-materialization-contract",
+  "reviewedAt": "2026-04-13T00:00:00Z",
+  "commitId": "2d748b3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The reviewed commit only adds synthetic fixture coverage in `tests/read_headers.rs`. The current resolver implementation still emits every pending object as `ObjectData::Unknown` and does not materialize parsed layouts, blocks, or entity placement onto outward-facing `CadDocument` surfaces, so the feature contract is not satisfied end-to-end.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/src/resolver.rs",
+        "line": 17,
+        "severity": "blocking",
+        "description": "`resolve_document` maps every pending object to `ObjectData::Unknown` using summary strings and never populates `CadDocument` block records, layouts, or entities from parser semantics. This leaves resolved outputs without decoded semantic categories, parsed layout/block associations, or entity placement, which directly contradicts the feature's expected outward-facing materialization contract."
+      },
+      {
+        "file": "crates/h7cad-native-dwg/tests/read_headers.rs",
+        "line": 91,
+        "severity": "blocking",
+        "description": "The only resolver assertion for this feature path verifies pending-layer preservation plus reserved scaffold repair; it does not assert parsed layer-table consistency beyond insertion, parsed layout/block association, paper-space vs model-space placement, or block-owned entity attachment on resolved `CadDocument` surfaces. Because the worker reverted its attempted additions, the committed coverage cannot catch the missing outward semantic materialization."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `dwg-parser-worker` skill's verification-first guidance allowed this session to return success based on existing broad test-name filters even though the feature's specific outward-facing resolver behaviors were unimplemented. The transcript shows the worker discovered real resolver gaps, attempted targeted tests, then reverted them and fell back to indirect coverage.",
+      "evidence": "worker-transcripts.jsonl session `da6a513c-66df-489e-a906-fb20a9def58d` shows multiple red tests around `resolve_document_materializes_layout_block_and_entity_semantics`, `resolve_document_places_paper_space_entities_in_paper_space_outputs`, and `resolve_document_keeps_block_owned_entities_on_their_parsed_block`, followed by a revert and success handoff citing only existing `resolve_document`/`layout`/`layer`/`entity` filters; see `.factory/skills/dwg-parser-worker/SKILL.md` Work Procedure step 2."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed. Commit `2d748b3` only adds resolver ownership fixtures; `crates/h7cad-native-dwg/src/resolver.rs` still resolves parser output into generic unknown objects and does not materialize parsed layouts, blocks, or entity ownership/placement onto outward-facing `CadDocument` surfaces. Existing committed tests also stop short of asserting those resolver-hardening requirements, so the feature remains incomplete."
+}

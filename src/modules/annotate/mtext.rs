@@ -1,4 +1,4 @@
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, MText};
 
 use crate::command::{CadCommand, CmdResult};

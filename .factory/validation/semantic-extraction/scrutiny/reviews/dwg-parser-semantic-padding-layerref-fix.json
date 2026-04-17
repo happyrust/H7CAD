@@ -1,0 +1,22 @@
+{
+  "featureId": "dwg-parser-semantic-padding-layerref-fix",
+  "reviewedAt": "2026-04-13T12:40:00Z",
+  "commitId": "127b5be2445cba883f033f869d2771d69fea4b23",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature correctly adds explicit regressions and broadens semantic decoding to handle prefixed payloads, but the outward parser summary regression does not prove preserved layer provenance because the summary drops the resolved layer name for handle-based references.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/tests/read_headers.rs",
+        "line": 792,
+        "severity": "blocking",
+        "description": "The new handle-based provenance regression only asserts `summary.semantic_link == \"layer_handle:99|owner:A0\"`, so it does not verify the expected behavior that outward parser-facing summaries preserve handle/reference-based layer provenance in addition to the layer-name provenance. With the current assertion, `semantic_link()` may omit `layer:LayerRef` entirely and still pass, which leaves the feature requirement unfulfilled on the outward summary surface."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the worker transcript skeleton, handoff, skill, mission guidance, and commit diff for `dwg-parser-semantic-padding-layerref-fix`. Found one blocking gap: the added outward-summary regression only checks `layer_handle` plus owner provenance and therefore fails to prove that parser summaries preserve the resolved layer-name provenance alongside handle/reference-based provenance as the feature requires."
+}

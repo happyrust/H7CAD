@@ -5,7 +5,7 @@
 // Minimum arc length = `arc_length` parameter.
 
 use acadrust::entities::LwPolyline;
-use acadrust::types::Vector2;
+use crate::types::Vector2;
 use acadrust::{EntityType, entities::LwVertex};
 use glam::Vec3;
 

@@ -11,7 +11,7 @@
 use std::f64::consts::TAU;
 
 use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Ray as RayEnt, Spline as SplineEnt, XLine as XLineEnt};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 use truck_modeling::base::{BoundedCurve, Cut, ParametricCurve};
@@ -887,9 +887,9 @@ fn extend_spline(spl: &SplineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityTy
     new_spl.common.handle = Handle::NULL;
     new_spl.fit_points.clear();
     if extend_end {
-        new_spl.control_points.push(acadrust::types::Vector3::new(hit_x, hit_y, z));
+        new_spl.control_points.push(crate::types::Vector3::new(hit_x, hit_y, z));
     } else {
-        new_spl.control_points.insert(0, acadrust::types::Vector3::new(hit_x, hit_y, z));
+        new_spl.control_points.insert(0, crate::types::Vector3::new(hit_x, hit_y, z));
     }
     // Rebuild knots (uniform) for the extended control polygon.
     let degree = new_spl.degree as usize;

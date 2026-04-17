@@ -5,7 +5,7 @@
 //  XLINE — infinite construction line: same two-click pattern, yields XLine.
 
 use acadrust::entities::{Ray as RayEnt, XLine as XLineEnt};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 
 use crate::command::{CadCommand, CmdResult};

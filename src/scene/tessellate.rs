@@ -14,11 +14,12 @@
 // by the legacy geometry() path so nothing regresses.
 
 use acadrust::entities::{Dimension, Leader, MultiLeader, MultiLeaderPathType, Text};
-use acadrust::types::{Color as AcadColor, Vector3};
+use crate::types::{Color as AcadColor, Vector3};
 use acadrust::{CadDocument, EntityType, Handle};
+use h7cad_native_model as nm;
 use glam::Vec3;
 
-use crate::scene::acad_to_truck::{convert, TruckObject};
+use crate::scene::acad_to_truck::{convert, convert_native, TruckObject};
 use crate::scene::mesh_model::MeshModel;
 use crate::scene::truck_tess::{
     self, tessellate_edge, tessellate_solid, tessellate_vertex, tessellate_wire, TruckTessResult,
@@ -208,6 +209,127 @@ pub fn tessellate(
     }
 }
 
+pub fn tessellate_native(
+    document: &nm::CadDocument,
+    handle: nm::Handle,
+    entity: &nm::Entity,
+    selected: bool,
+    entity_color: [f32; 4],
+    pattern_length: f32,
+    pattern: [f32; 8],
+    line_weight_px: f32,
+) -> WireModel {
+    let color = if selected {
+        WireModel::SELECTED
+    } else {
+        entity_color
+    };
+    let name = handle.value().to_string();
+
+    if let Some(te) = convert_native(entity, document) {
+        return truck_wire_from_entity(
+            name,
+            color,
+            selected,
+            pattern_length,
+            pattern,
+            line_weight_px,
+            te,
+            native_entity_z(entity),
+            vec![],
+        );
+    }
+
+    WireModel::solid(name, vec![], color, selected)
+}
+
+pub fn tessellate_native_dimension(
+    native_document: &nm::CadDocument,
+    handle: nm::Handle,
+    entity: &nm::Entity,
+    selected: bool,
+    entity_color: [f32; 4],
+    line_weight_px: f32,
+) -> Option<Vec<WireModel>> {
+    let points = native_dimension_geometry(entity)?;
+    let color = if selected {
+        WireModel::SELECTED
+    } else {
+        entity_color
+    };
+    let name = handle.value().to_string();
+    let key_vertices = points
+        .iter()
+        .copied()
+        .filter(|p| !(p[0].is_nan() || p[1].is_nan() || p[2].is_nan()))
+        .collect();
+
+    let mut wires = vec![WireModel {
+        name: name.clone(),
+        points,
+        color,
+        selected,
+        aci: 0,
+        pattern_length: 0.0,
+        pattern: [0.0; 8],
+        line_weight_px,
+        snap_pts: vec![],
+        tangent_geoms: vec![],
+        key_vertices,
+    }];
+
+    if let Some(mut wire) = native_dimension_text_wire(
+        native_document,
+        handle,
+        entity,
+        selected,
+        entity_color,
+        line_weight_px,
+    ) {
+        wire.name = name;
+        wires.push(wire);
+    }
+
+    Some(wires)
+}
+
+pub fn tessellate_native_multileader(
+    native_document: &nm::CadDocument,
+    handle: nm::Handle,
+    entity: &nm::Entity,
+    selected: bool,
+    entity_color: [f32; 4],
+    line_weight_px: f32,
+) -> Option<Vec<WireModel>> {
+    let name = handle.value().to_string();
+    let main_wire = tessellate_native(
+        native_document,
+        handle,
+        entity,
+        selected,
+        entity_color,
+        0.0,
+        [0.0; 8],
+        line_weight_px,
+    );
+    if main_wire.points.is_empty() {
+        return None;
+    }
+    let mut wires = vec![main_wire];
+    if let Some(mut wire) = native_multileader_text_wire(
+        native_document,
+        handle,
+        entity,
+        selected,
+        entity_color,
+        line_weight_px,
+    ) {
+        wire.name = name;
+        wires.push(wire);
+    }
+    Some(wires)
+}
+
 pub fn tessellate_dimension(
     document: &CadDocument,
     handle: Handle,
@@ -259,6 +381,328 @@ pub fn tessellate_dimension(
     }
 
     wires
+}
+
+fn native_dimension_text_wire(
+    document: &nm::CadDocument,
+    handle: nm::Handle,
+    entity: &nm::Entity,
+    selected: bool,
+    entity_color: [f32; 4],
+    line_weight_px: f32,
+) -> Option<WireModel> {
+    let value = native_dimension_text_value(entity)?;
+    let position = native_dimension_text_position(entity)?;
+    let (style_name, rotation_deg) = match &entity.data {
+        nm::EntityData::Dimension {
+            style_name,
+            text_rotation,
+            ..
+        } => (style_name.as_str(), *text_rotation),
+        _ => return None,
+    };
+    let dim_style = document
+        .dim_styles
+        .get(style_name)
+        .or_else(|| document.dim_styles.get("Standard"))
+        .or_else(|| document.dim_styles.values().next());
+    let text_height = dim_style
+        .map(|style| style.dimtxt)
+        .filter(|height| *height > 0.0)
+        .unwrap_or_else(|| native_dimension_text_height(entity));
+    let text_style_name = dim_style
+        .map(|style| style.dimtxsty_name.as_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(style_name);
+
+    let truck = crate::entities::text::to_truck_native(
+        &[position.x as f64, position.y as f64, position.z as f64],
+        text_height,
+        &value,
+        rotation_deg,
+        text_style_name,
+        1.0,
+        0.0,
+        0,
+        0,
+        None,
+        document,
+    );
+    Some(truck_wire_from_entity(
+        handle.value().to_string(),
+        if selected {
+            WireModel::SELECTED
+        } else {
+            entity_color
+        },
+        selected,
+        0.0,
+        [0.0; 8],
+        line_weight_px,
+        truck,
+        position.z,
+        vec![],
+    ))
+}
+
+fn native_dimension_geometry(entity: &nm::Entity) -> Option<Vec<[f32; 3]>> {
+    let nm::EntityData::Dimension {
+        dim_type,
+        definition_point,
+        first_point,
+        second_point,
+        angle_vertex,
+        dimension_arc,
+        flip_arrow1,
+        flip_arrow2,
+        ..
+    } = &entity.data
+    else {
+        return None;
+    };
+
+    let mut points = Vec::new();
+    match dim_type & 0x0F {
+        0 => {
+            let first = native_vec3(*first_point);
+            let second = native_vec3(*second_point);
+            let def = native_vec3(*definition_point);
+            let axis = Vec3::new(
+                angle_to_cos(*match_linear_rotation(entity)),
+                angle_to_sin(*match_linear_rotation(entity)),
+                0.0,
+            );
+            append_linear_dimension(
+                &mut points,
+                first,
+                second,
+                def,
+                normalized_or(axis, Vec3::X),
+                *flip_arrow1,
+                *flip_arrow2,
+            );
+        }
+        1 => {
+            let first = native_vec3(*first_point);
+            let second = native_vec3(*second_point);
+            let def = native_vec3(*definition_point);
+            let axis = normalized_or(second - first, Vec3::X);
+            append_linear_dimension(
+                &mut points,
+                first,
+                second,
+                def,
+                axis,
+                *flip_arrow1,
+                *flip_arrow2,
+            );
+        }
+        2 => {
+            append_angular_dimension(
+                &mut points,
+                native_vec3(*angle_vertex),
+                native_vec3(*first_point),
+                native_vec3(*second_point),
+                native_vec3(*dimension_arc),
+                *flip_arrow1,
+                *flip_arrow2,
+            );
+        }
+        3 => {
+            let p1 = native_vec3(*angle_vertex);
+            let p2 = native_vec3(*definition_point);
+            add_segment(&mut points, p1, p2);
+            append_arrow(
+                &mut points,
+                p1,
+                normalized_or(if *flip_arrow1 { p1 - p2 } else { p2 - p1 }, Vec3::X),
+                0.12,
+            );
+            append_arrow(
+                &mut points,
+                p2,
+                normalized_or(if *flip_arrow2 { p2 - p1 } else { p1 - p2 }, Vec3::X),
+                0.12,
+            );
+        }
+        4 => {
+            let center = native_vec3(*angle_vertex);
+            let point = native_vec3(*definition_point);
+            let text = native_dimension_text_position(entity).unwrap_or((center + point) * 0.5);
+            add_segment(&mut points, center, point);
+            add_segment(&mut points, point, text);
+            append_arrow(
+                &mut points,
+                point,
+                normalized_or(if *flip_arrow1 { point - center } else { center - point }, Vec3::X),
+                0.12,
+            );
+        }
+        5 => {
+            append_angular_dimension(
+                &mut points,
+                native_vec3(*angle_vertex),
+                native_vec3(*first_point),
+                native_vec3(*second_point),
+                native_vec3(*definition_point),
+                *flip_arrow1,
+                *flip_arrow2,
+            );
+        }
+        6 => {
+            add_segment(
+                &mut points,
+                native_vec3(*first_point),
+                native_vec3(*definition_point),
+            );
+            add_segment(
+                &mut points,
+                native_vec3(*definition_point),
+                native_vec3(*second_point),
+            );
+        }
+        _ => return None,
+    }
+    Some(points)
+}
+
+fn native_dimension_text_value(entity: &nm::Entity) -> Option<String> {
+    let nm::EntityData::Dimension {
+        dim_type,
+        text_override,
+        measurement,
+        ..
+    } = &entity.data
+    else {
+        return None;
+    };
+    let trimmed = text_override.trim();
+    if trimmed.is_empty() {
+        return Some(native_dimension_measurement_text(*dim_type, *measurement));
+    }
+    if trimmed.contains("<>") {
+        return Some(trimmed.replace("<>", &native_dimension_measurement_text(*dim_type, *measurement)));
+    }
+    Some(trimmed.to_string())
+}
+
+fn native_dimension_text_position(entity: &nm::Entity) -> Option<Vec3> {
+    let nm::EntityData::Dimension {
+        dim_type,
+        text_midpoint,
+        first_point,
+        second_point,
+        angle_vertex,
+        definition_point,
+        dimension_arc,
+        ..
+    } = &entity.data
+    else {
+        return None;
+    };
+    let pos = native_vec3(*text_midpoint);
+    if pos.length_squared() > 1e-8 {
+        return Some(pos);
+    }
+    Some(match dim_type & 0x0F {
+        0 | 1 => (native_vec3(*first_point) + native_vec3(*second_point)) * 0.5,
+        4 => (native_vec3(*angle_vertex) + native_vec3(*definition_point)) * 0.5,
+        3 => (native_vec3(*angle_vertex) + native_vec3(*definition_point)) * 0.5,
+        2 => native_vec3(*dimension_arc),
+        5 => native_vec3(*definition_point),
+        6 => native_vec3(*second_point),
+        _ => Vec3::ZERO,
+    })
+}
+
+fn native_dimension_text_height(entity: &nm::Entity) -> f64 {
+    let nm::EntityData::Dimension { measurement, .. } = &entity.data else {
+        return 0.25;
+    };
+    let scale = (measurement.abs() * 0.12).clamp(0.25, 2.0);
+    if scale.is_finite() { scale } else { 0.25 }
+}
+
+fn native_dimension_measurement_text(dim_type: i16, measurement: f64) -> String {
+    match dim_type & 0x0F {
+        4 => format!("R{measurement:.4}"),
+        3 => format!("Ø{measurement:.4}"),
+        2 | 5 => format!("{measurement:.2}°"),
+        _ => format!("{measurement:.4}"),
+    }
+}
+
+fn match_linear_rotation(entity: &nm::Entity) -> &f64 {
+    match &entity.data {
+        nm::EntityData::Dimension { rotation, .. } => rotation,
+        _ => &0.0,
+    }
+}
+
+fn native_vec3(point: [f64; 3]) -> Vec3 {
+    Vec3::new(point[0] as f32, point[1] as f32, point[2] as f32)
+}
+
+fn angle_to_cos(angle_deg: f64) -> f32 {
+    angle_deg.to_radians().cos() as f32
+}
+
+fn angle_to_sin(angle_deg: f64) -> f32 {
+    angle_deg.to_radians().sin() as f32
+}
+
+fn native_multileader_text_wire(
+    document: &nm::CadDocument,
+    handle: nm::Handle,
+    entity: &nm::Entity,
+    selected: bool,
+    entity_color: [f32; 4],
+    line_weight_px: f32,
+) -> Option<WireModel> {
+    let nm::EntityData::MultiLeader {
+        content_type,
+        text_label,
+        style_name,
+        text_location,
+        arrowhead_size,
+        ..
+    } = &entity.data
+    else {
+        return None;
+    };
+    if *content_type != 1 || text_label.trim().is_empty() {
+        return None;
+    }
+    let position = *text_location.as_ref()?;
+    let text_height = document.header.textsize.max((*arrowhead_size).max(0.01));
+    let truck = crate::entities::mtext::to_truck_native(
+        &position,
+        text_height,
+        0.0,
+        None,
+        text_label,
+        0.0,
+        style_name,
+        1,
+        1.0,
+        1,
+        document,
+    );
+    Some(truck_wire_from_entity(
+        handle.value().to_string(),
+        if selected {
+            WireModel::SELECTED
+        } else {
+            entity_color
+        },
+        selected,
+        0.0,
+        [0.0; 8],
+        line_weight_px,
+        truck,
+        position[2] as f32,
+        vec![],
+    ))
 }
 
 /// Kept for backwards compatibility — geometry now lives in entities/leader.rs.
@@ -371,7 +815,7 @@ fn tessellate_multileader(
     let name = handle.value().to_string();
     let nan = [f32::NAN; 3];
 
-    let to_f32 = |v: &acadrust::types::Vector3| -> [f32; 3] {
+    let to_f32 = |v: &crate::types::Vector3| -> [f32; 3] {
         [v.x as f32, v.y as f32, v.z as f32]
     };
 
@@ -519,6 +963,343 @@ fn entity_z(entity: &EntityType) -> f32 {
     }
 }
 
+fn native_entity_z(entity: &nm::Entity) -> f32 {
+    match &entity.data {
+        nm::EntityData::Text { insertion, .. } => insertion[2] as f32,
+        nm::EntityData::MText { insertion, .. } => insertion[2] as f32,
+        _ => 0.0,
+    }
+}
+
+fn truck_wire_from_entity(
+    name: String,
+    color: [f32; 4],
+    selected: bool,
+    pattern_length: f32,
+    pattern: [f32; 8],
+    line_weight_px: f32,
+    te: crate::scene::acad_to_truck::TruckEntity,
+    text_elev: f32,
+    volume_fallback: Vec<[f32; 3]>,
+) -> WireModel {
+    match te.object {
+        TruckObject::Text(strokes_2d) => {
+            let mut points: Vec<[f32; 3]> = Vec::new();
+            for (i, stroke) in strokes_2d.iter().enumerate() {
+                if stroke.len() < 2 {
+                    continue;
+                }
+                if i > 0 && !points.is_empty() {
+                    points.push([f32::NAN, f32::NAN, f32::NAN]);
+                }
+                for &[x, y] in stroke {
+                    points.push([x, y, text_elev]);
+                }
+            }
+            WireModel {
+                name,
+                points,
+                color,
+                selected,
+                pattern_length: 0.0,
+                pattern: [0.0; 8],
+                line_weight_px,
+                snap_pts: te.snap_pts,
+                tangent_geoms: te.tangent_geoms,
+                aci: 0,
+                key_vertices: te.key_vertices,
+            }
+        }
+        TruckObject::Point(v) => match tessellate_vertex(&v) {
+            TruckTessResult::Point([x, y, z]) => {
+                let s = 0.1_f32;
+                WireModel {
+                    name,
+                    points: vec![[x - s, y, z], [x + s, y, z], [x, y - s, z], [x, y + s, z]],
+                    color,
+                    selected,
+                    pattern_length: 0.0,
+                    pattern: [0.0; 8],
+                    line_weight_px: 1.0,
+                    snap_pts: te.snap_pts,
+                    tangent_geoms: te.tangent_geoms,
+                    aci: 0,
+                    key_vertices: te.key_vertices,
+                }
+            }
+            _ => WireModel::solid(name, vec![], color, selected),
+        },
+        TruckObject::Curve(e) => match tessellate_edge(&e) {
+            TruckTessResult::Lines(points) => WireModel {
+                name,
+                points,
+                color,
+                selected,
+                pattern_length,
+                pattern,
+                line_weight_px,
+                snap_pts: te.snap_pts,
+                tangent_geoms: te.tangent_geoms,
+                aci: 0,
+                key_vertices: te.key_vertices,
+            },
+            _ => WireModel::solid(name, vec![], color, selected),
+        },
+        TruckObject::Contour(w) => match tessellate_wire(&w) {
+            TruckTessResult::Lines(points) => WireModel {
+                name,
+                points,
+                color,
+                selected,
+                pattern_length,
+                pattern,
+                line_weight_px,
+                snap_pts: te.snap_pts,
+                tangent_geoms: te.tangent_geoms,
+                aci: 0,
+                key_vertices: te.key_vertices,
+            },
+            _ => WireModel::solid(name, vec![], color, selected),
+        },
+        TruckObject::Lines(points) => WireModel {
+            name,
+            points,
+            color,
+            selected,
+            pattern_length: 0.0,
+            pattern: [0.0; 8],
+            line_weight_px,
+            snap_pts: te.snap_pts,
+            tangent_geoms: te.tangent_geoms,
+            aci: 0,
+            key_vertices: te.key_vertices,
+        },
+        TruckObject::Volume(_) => WireModel::solid(name, volume_fallback, color, selected),
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    use crate::scene::render::render_style_native;
+
+    #[test]
+    fn tessellate_native_line_produces_visible_wire() {
+        let mut doc = nm::CadDocument::new();
+        let handle = doc
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [3.0, 4.0, 0.0],
+            }))
+            .expect("line should be added");
+        let entity = doc.get_entity(handle).expect("line should exist");
+        let (color, pattern_length, pattern, line_weight_px, _aci) =
+            render_style_native(&doc, entity);
+
+        let wire = tessellate_native(
+            &doc,
+            handle,
+            entity,
+            false,
+            color,
+            pattern_length,
+            pattern,
+            line_weight_px,
+        );
+        assert!(wire.points.len() >= 2);
+        assert_eq!(wire.key_vertices.len(), 2);
+    }
+
+    #[test]
+    fn tessellate_native_multileader_produces_visible_wires() {
+        let mut native_doc = nm::CadDocument::new();
+        let handle = native_doc
+            .add_entity(nm::Entity::new(nm::EntityData::MultiLeader {
+                content_type: 1,
+                text_label: "TAG".into(),
+                style_name: "Standard".into(),
+                arrowhead_size: 2.5,
+                landing_gap: 0.0,
+                dogleg_length: 2.5,
+                property_override_flags: 0,
+                path_type: 1,
+                line_color: 256,
+                leader_line_weight: -1,
+                enable_landing: true,
+                enable_dogleg: true,
+                enable_annotation_scale: false,
+                scale_factor: 1.0,
+                text_attachment_direction: 0,
+                text_bottom_attachment_type: 9,
+                text_top_attachment_type: 9,
+                text_location: Some([6.0, 0.0, 4.0]),
+                leader_vertices: vec![
+                    [0.0, 0.0, 0.0],
+                    [2.0, 0.0, 1.0],
+                    [6.0, 0.0, 4.0],
+                    [10.0, 0.0, 0.0],
+                    [6.0, 0.0, 4.0],
+                ],
+                leader_root_lengths: vec![3, 2],
+            }))
+            .expect("multileader should be added");
+        let entity = native_doc.get_entity(handle).expect("multileader should exist");
+        let (color, _pattern_length, _pattern, line_weight_px, _aci) =
+            crate::scene::render::render_style_native(&native_doc, entity);
+
+        let wires = tessellate_native_multileader(
+            &native_doc,
+            handle,
+            entity,
+            false,
+            color,
+            line_weight_px,
+        )
+        .expect("native multileader should tessellate");
+
+        assert!(!wires.is_empty());
+        assert!(wires.iter().any(|wire| !wire.points.is_empty()));
+    }
+
+    #[test]
+    fn tessellate_native_dimension_uses_native_dimstyle_text_height() {
+        let mut native_doc = nm::CadDocument::new();
+        let mut dim_style = nm::DimStyleProperties::new("TallDims");
+        dim_style.dimtxt = 5.0;
+        dim_style.dimtxsty_name = "Standard".into();
+        native_doc.dim_styles.insert(dim_style.name.clone(), dim_style);
+
+        let handle = native_doc
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: "*D1".into(),
+                style_name: "TallDims".into(),
+                definition_point: [5.0, 2.0, 0.0],
+                text_midpoint: [2.5, 2.0, 0.0],
+                text_override: "".into(),
+                attachment_point: 0,
+                measurement: 10.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("dimension should be added");
+        let entity = native_doc.get_entity(handle).expect("dimension should exist");
+        let (color, _pattern_length, _pattern, line_weight_px, _aci) =
+            render_style_native(&native_doc, entity);
+
+        let wires = tessellate_native_dimension(
+            &native_doc,
+            handle,
+            entity,
+            false,
+            color,
+            line_weight_px,
+        )
+        .expect("dimension should tessellate");
+
+        let text_wire = wires.last().expect("dimension should include text wire");
+        let ys: Vec<f32> = text_wire
+            .points
+            .iter()
+            .filter(|point| point.iter().all(|v| !v.is_nan()))
+            .map(|point| point[1])
+            .collect();
+        let min_y = ys.iter().copied().fold(f32::INFINITY, f32::min);
+        let max_y = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            (max_y - min_y) > 3.0,
+            "native dimtxt should produce taller text than the legacy fallback"
+        );
+    }
+
+    #[test]
+    fn tessellate_native_dimension_honors_flip_arrow_flags() {
+        let mut native_doc = nm::CadDocument::new();
+        let no_flip = native_doc
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: "*D1".into(),
+                style_name: "Standard".into(),
+                definition_point: [0.0, 2.0, 0.0],
+                text_midpoint: [5.0, 2.0, 0.0],
+                text_override: "".into(),
+                attachment_point: 0,
+                measurement: 10.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: true,
+                flip_arrow2: true,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("dimension should be added");
+        let flipped = native_doc
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 0,
+                block_name: "*D2".into(),
+                style_name: "Standard".into(),
+                definition_point: [0.0, 2.0, 0.0],
+                text_midpoint: [5.0, 2.0, 0.0],
+                text_override: "".into(),
+                attachment_point: 0,
+                measurement: 10.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: true,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("flipped dimension should be added");
+        let (color, _pattern_length, _pattern, line_weight_px, _aci) =
+            render_style_native(&native_doc, native_doc.get_entity(no_flip).expect("no_flip"));
+
+        let first_arrow_wings = |handle: nm::Handle| -> Vec<f32> {
+            let entity = native_doc.get_entity(handle).expect("dimension should exist");
+            let wires = tessellate_native_dimension(
+                &native_doc,
+                handle,
+                entity,
+                false,
+                color,
+                line_weight_px,
+            )
+            .expect("dimension should tessellate");
+            wires[0]
+                .points
+                .iter()
+                .filter(|point| point.iter().all(|v| !v.is_nan()))
+                .filter(|point| (point[1] - 2.0).abs() < 0.001 && point[0].abs() > 0.001 && point[0].abs() < 1.0)
+                .map(|point| point[0])
+                .collect()
+        };
+
+        let no_flip_wings = first_arrow_wings(no_flip);
+        let flipped_wings = first_arrow_wings(flipped);
+        assert!(no_flip_wings.iter().all(|x| *x < 0.0));
+        assert!(flipped_wings.iter().all(|x| *x > 0.0));
+    }
+}
+
 // ── Legacy geometry (Viewport, Hatch outline, unrecognised) ───────────────
 
 type Geometry = (
@@ -639,14 +1420,22 @@ fn dimension_geometry(dim: &Dimension) -> Vec<[f32; 3]> {
             let second = vec3(d.second_point);
             let def = vec3(d.definition_point);
             let axis = normalized_or(second - first, Vec3::X);
-            append_linear_dimension(&mut points, first, second, def, axis);
+            append_linear_dimension(&mut points, first, second, def, axis, false, false);
         }
         Dimension::Linear(d) => {
             let first = vec3(d.first_point);
             let second = vec3(d.second_point);
             let def = vec3(d.definition_point);
             let axis = Vec3::new(d.rotation.cos() as f32, d.rotation.sin() as f32, 0.0);
-            append_linear_dimension(&mut points, first, second, def, normalized_or(axis, Vec3::X));
+            append_linear_dimension(
+                &mut points,
+                first,
+                second,
+                def,
+                normalized_or(axis, Vec3::X),
+                false,
+                false,
+            );
         }
         Dimension::Radius(d) => {
             let center = vec3(d.angle_vertex);
@@ -670,6 +1459,8 @@ fn dimension_geometry(dim: &Dimension) -> Vec<[f32; 3]> {
                 vec3(d.first_point),
                 vec3(d.second_point),
                 vec3(d.dimension_arc),
+                false,
+                false,
             );
         }
         Dimension::Angular3Pt(d) => {
@@ -679,6 +1470,8 @@ fn dimension_geometry(dim: &Dimension) -> Vec<[f32; 3]> {
                 vec3(d.first_point),
                 vec3(d.second_point),
                 vec3(d.definition_point),
+                false,
+                false,
             );
         }
         Dimension::Ordinate(d) => {
@@ -695,6 +1488,8 @@ fn append_linear_dimension(
     second: Vec3,
     def: Vec3,
     axis: Vec3,
+    flip_arrow1: bool,
+    flip_arrow2: bool,
 ) {
     let perp = Vec3::new(-axis.y, axis.x, 0.0);
     let offset = (def - first).dot(perp);
@@ -703,8 +1498,18 @@ fn append_linear_dimension(
     add_segment(points, first, d1);
     add_segment(points, second, d2);
     add_segment(points, d1, d2);
-    append_arrow(points, d1, normalized_or(d2 - d1, axis), 0.12);
-    append_arrow(points, d2, normalized_or(d1 - d2, -axis), 0.12);
+    append_arrow(
+        points,
+        d1,
+        normalized_or(if flip_arrow1 { d1 - d2 } else { d2 - d1 }, axis),
+        0.12,
+    );
+    append_arrow(
+        points,
+        d2,
+        normalized_or(if flip_arrow2 { d2 - d1 } else { d1 - d2 }, -axis),
+        0.12,
+    );
 }
 
 fn append_angular_dimension(
@@ -713,6 +1518,8 @@ fn append_angular_dimension(
     first: Vec3,
     second: Vec3,
     arc_point: Vec3,
+    flip_arrow1: bool,
+    flip_arrow2: bool,
 ) {
     add_segment(points, vertex, first);
     add_segment(points, vertex, second);
@@ -746,14 +1553,28 @@ fn append_angular_dimension(
         append_arrow(
             points,
             arc_pts[0],
-            normalized_or(arc_pts[1] - arc_pts[0], Vec3::X),
+            normalized_or(
+                if flip_arrow1 {
+                    arc_pts[0] - arc_pts[1]
+                } else {
+                    arc_pts[1] - arc_pts[0]
+                },
+                Vec3::X,
+            ),
             0.1,
         );
         let n = arc_pts.len();
         append_arrow(
             points,
             arc_pts[n - 1],
-            normalized_or(arc_pts[n - 2] - arc_pts[n - 1], Vec3::X),
+            normalized_or(
+                if flip_arrow2 {
+                    arc_pts[n - 1] - arc_pts[n - 2]
+                } else {
+                    arc_pts[n - 2] - arc_pts[n - 1]
+                },
+                Vec3::X,
+            ),
             0.1,
         );
     }

@@ -211,7 +211,7 @@ fn viewport_view_label(vp: &Viewport) -> String {
 }
 
 fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
-    use acadrust::types::Vector3;
+    use crate::types::Vector3;
 
     // Boolean / toggle fields handled first (value = "toggle" or "true"/"false").
     match field {

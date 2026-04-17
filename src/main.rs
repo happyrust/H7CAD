@@ -8,6 +8,7 @@ mod patterns;
 mod scene;
 mod snap;
 mod store;
+mod types;
 mod ui;
 
 fn main() -> iced::Result {

@@ -1,0 +1,168 @@
+{
+  "surface": "DXF native cargo surface",
+  "overallStatus": "pass",
+  "assertionsTested": [
+    "VAL-BRIDGE-001",
+    "VAL-BRIDGE-002",
+    "VAL-BRIDGE-003",
+    "VAL-BRIDGE-004",
+    "VAL-BRIDGE-005",
+    "VAL-BRIDGE-006",
+    "VAL-BRIDGE-007",
+    "VAL-BRIDGE-008",
+    "VAL-BRIDGE-009",
+    "VAL-BRIDGE-010"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-BRIDGE-001",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::ellipse_entity_bridge_roundtrips_geometry passed (exit 0)",
+        "Covers ellipse center, major axis, ratio, and parameter range round-trip in src/io/native_bridge.rs"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-002",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::polyline_family_bridge_roundtrips_preserve_family_and_vertex_fields passed (exit 0)",
+        "cargo test filter io::native_bridge::tests::document_bridge_exposes_polyline_families_and_hatch_on_compat_side passed via native_bridge subset (exit 0)",
+        "Covers POLYLINE/POLYLINE2D/POLYLINE3D/PolygonMesh/PolyfaceMesh family type, closure, vertex fields, widths, bulges, and compat visibility"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-003",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::hatch_bridge_roundtrips_preserve_metadata_and_boundary_structure passed (exit 0)",
+        "Covers pattern name, solid-fill flag, boundary path count, path kind, and per-path edge counts"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-004",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::annotation_bridge_roundtrips_leader_mline_and_tolerance_payloads passed (exit 0)",
+        "Covers leader vertices, multiline style/scale, and tolerance text/insertion payloads"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-005",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::image_and_wipeout_bridge_survive_document_roundtrip_with_geometry passed (exit 0)",
+        "cargo test filter io::native_bridge::tests::wipeout_bridge_preserves_local_clip_vertices_on_roundtrip passed via native_bridge subset (exit 0)",
+        "Covers document-level presence and insertion/clip geometry for IMAGE and WIPEOUT"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-006",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::direct_geometry_bridge_roundtrips_payload_fields passed (exit 0)",
+        "cargo test filter io::native_bridge::tests::direct_geometry_bridge_preserves_scrutiny_payload_fidelity passed via native_bridge subset (exit 0)",
+        "Covers Face3D, Solid, Ray, XLine, and Shape payload preservation"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-007",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::bridge_roundtrips_preserve_common_fields_for_representative_families passed (exit 0)",
+        "Covers shared fields including handle, owner, layer, linetype, true-color, lineweight, invisibility, transparency, thickness, and extrusion across representative bridge families"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-008",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::document_bridge_keeps_prioritized_entity_counts_visible_on_compat_side passed (exit 0)",
+        "Covers compat-side visibility/counts for prioritized entities including ellipse, polyline families, hatch, leader, mline, image, wipeout, and tolerance"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-009",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::payload_bridge_roundtrips_text_opaque_and_acis_entities passed (exit 0)",
+        "Covers ATTDEF, ATTRIB, PdfUnderlay, and Unknown payload equality across bridge round-trip"
+      ]
+    },
+    {
+      "id": "VAL-BRIDGE-010",
+      "status": "pass",
+      "evidence": [
+        "cargo test filter io::native_bridge::tests::payload_bridge_roundtrips_text_opaque_and_acis_entities passed (exit 0)",
+        "Covers Solid3D and Region ACIS multi-line payload preservation across bridge round-trip"
+      ]
+    }
+  ],
+  "commandsRun": [
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" ellipse_entity_bridge_roundtrips_geometry -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" polyline_family_bridge_roundtrips_preserve_family_and_vertex_fields -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" hatch_bridge_roundtrips_preserve_metadata_and_boundary_structure -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" annotation_bridge_roundtrips_leader_mline_and_tolerance_payloads -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" image_and_wipeout_bridge_survive_document_roundtrip_with_geometry -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" direct_geometry_bridge_roundtrips_payload_fields -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" bridge_roundtrips_preserve_common_fields_for_representative_families -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" document_bridge_keeps_prioritized_entity_counts_visible_on_compat_side -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" payload_bridge_roundtrips_text_opaque_and_acis_entities -- --exact",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" --bin H7CAD -- --list",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" io::native_bridge::tests:: -- --list",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" io::native_bridge::tests:: -- --test-threads=1",
+      "exitCode": 0
+    },
+    {
+      "command": "cargo test --manifest-path \"D:/work/plant-code/cad/H7CAD/Cargo.toml\" io::native_bridge::tests::ellipse_entity_bridge_roundtrips_geometry io::native_bridge::tests::polyline_family_bridge_roundtrips_preserve_family_and_vertex_fields io::native_bridge::tests::hatch_bridge_roundtrips_preserve_metadata_and_boundary_structure io::native_bridge::tests::annotation_bridge_roundtrips_leader_mline_and_tolerance_payloads io::native_bridge::tests::image_and_wipeout_bridge_survive_document_roundtrip_with_geometry io::native_bridge::tests::direct_geometry_bridge_roundtrips_payload_fields io::native_bridge::tests::bridge_roundtrips_preserve_common_fields_for_representative_families io::native_bridge::tests::document_bridge_keeps_prioritized_entity_counts_visible_on_compat_side io::native_bridge::tests::payload_bridge_roundtrips_text_opaque_and_acis_entities -- --exact",
+      "exitCode": 1,
+      "note": "cargo accepts only one TESTNAME argument; used listing plus grouped module run instead"
+    }
+  ],
+  "blockers": [],
+  "frictions": [
+    "Running cargo test with bare test-name filters matched no tests until fully qualified names were discovered via cargo test -- --list.",
+    "cargo test accepts only one TESTNAME positional filter, so grouped validation used module-level execution instead of a single multi-name command."
+  ],
+  "toolsUsed": [
+    "Read",
+    "Grep",
+    "ace-tool___search_context",
+    "Execute"
+  ],
+  "reportVersion": 1
+}

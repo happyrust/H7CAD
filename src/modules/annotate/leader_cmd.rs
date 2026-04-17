@@ -7,7 +7,7 @@
 //   → commit Leader  [+ MText | + Insert]
 
 use acadrust::entities::{Insert, Leader, LeaderCreationType, MText};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 

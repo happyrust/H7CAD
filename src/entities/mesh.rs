@@ -9,7 +9,7 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 
 // ── Face3D ────────────────────────────────────────────────────────────────────
 
-fn v3(v: &acadrust::types::Vector3) -> [f32; 3] {
+fn v3(v: &crate::types::Vector3) -> [f32; 3] {
     [v.x as f32, v.y as f32, v.z as f32]
 }
 

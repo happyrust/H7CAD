@@ -1,40 +1,21 @@
 {
   "featureId": "bridge-ellipse-and-direct-geometry",
-  "reviewedAt": "2026-04-14T00:00:00Z",
+  "reviewedAt": "2026-04-13T19:30:14Z",
   "commitId": "b28edc9",
   "transcriptSkeletonReviewed": true,
   "diffReviewed": true,
-  "status": "fail",
+  "status": "pass",
   "codeReview": {
-    "summary": "The feature adds bridge mappings and basic roundtrip tests for ellipse and direct geometry entities, but the new mappings drop multiple payload fields that exist in acadrust for these entities, so native->compat->native conversion is not fidelity-preserving for supported direct-map geometry.",
-    "issues": [
-      {
-        "file": "src/io/native_bridge.rs",
-        "line": 239,
-        "severity": "blocking",
-        "description": "nm::EntityData::Solid is bridged into acadrust::Solid::new(...) without copying normal or thickness, and the reverse mapping at lines 641-649 also reconstructs only corners. acadrust::Solid exposes both fields, so any compat-side save/edit path loses them during bridge roundtrip even though this feature claims payload preservation for SOLID."
-      },
-      {
-        "file": "src/io/native_bridge.rs",
-        "line": 229,
-        "severity": "blocking",
-        "description": "Face3D roundtrips only corner coordinates. acadrust::Face3D has invisible_edges, but h7cad-native-model::EntityData::Face3D cannot represent or preserve that flag set, so compat->native->compat conversion drops observable Face3D payload. The new test only uses default-visible edges and misses this regression."
-      },
-      {
-        "file": "src/io/native_bridge.rs",
-        "line": 259,
-        "severity": "blocking",
-        "description": "Shape mapping preserves only insertion, size, and shape_number, but acadrust::Shape also carries shape_name, rotation, relative_x_scale, oblique_angle, normal, thickness, style_name, and style_handle. Converting any non-default compat SHAPE through acadrust_entity_to_native drops those fields permanently, contradicting the feature's expected payload preservation for direct-map geometry entities."
-      }
-    ]
+    "summary": "Current post-fix repository state satisfies the ellipse/direct-geometry bridge scope: ellipse roundtrips preserve geometry, and follow-up fixes now preserve compat-visible Solid, Face3D, and Shape payload fields that were previously missing.",
+    "issues": []
   },
   "sharedStateObservations": [
     {
       "area": "skills",
-      "observation": "The bridge worker skill still tells workers to run cargo test --lib native_bridge, but this workspace has no library target; the reviewed transcript shows the worker had to discover and switch to cargo test --bin H7CAD native_bridge -- --test-threads=16 after a failure.",
-      "evidence": ".factory/skills/dxf-bridge-worker/SKILL.md step 8 vs transcript skeleton for session dad57c03-bd23-4afd-82c5-13b6235f737b showing cargo test --lib native_bridge -- --list failed with no library targets found in package H7CAD."
+      "observation": "The worker originally had to deviate from a stale bridge-test command (`cargo test --lib native_bridge`) before later mission updates corrected the canonical command to `cargo test --bin H7CAD native_bridge -- --test-threads=16`.",
+      "evidence": "Transcript skeleton for session dad57c03-bd23-4afd-82c5-13b6235f737b shows `cargo test --lib native_bridge -- --list` failed with `no library targets found`; current `.factory/skills/dxf-bridge-worker/SKILL.md` and `.factory/services.yaml` now use `cargo test --bin H7CAD native_bridge -- --test-threads=16`."
     }
   ],
   "addressesFailureFrom": null,
-  "summary": "Review failed: ellipse basics are covered, but direct geometry support is incomplete because Solid, Face3D, and Shape do not preserve the full observable payloads available on the compat side. Report saved for scrutiny triage."
+  "summary": "Pass on current post-fix state: the original ellipse/direct-geometry bridge feature plus later targeted fixes cover the previously reported direct-geometry fidelity gaps, and no remaining feature-scoped blocking issues were found."
 }

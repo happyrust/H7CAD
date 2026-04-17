@@ -1,7 +1,7 @@
 //! Bridge between h7cad-native-model and acadrust type systems.
 
 use acadrust::entities as ar;
-use acadrust::types::{Color, Handle, LineWeight, Vector2, Vector3};
+use crate::types::{Color, Handle, LineWeight, Vector2, Vector3};
 use h7cad_native_model as nm;
 
 fn normalize_face3d_invisible_edges(bits: u8) -> i16 {
@@ -550,6 +550,45 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             apply_common(&mut viewport.common, entity);
             Some(ar::EntityType::Viewport(viewport))
         }
+        nm::EntityData::Table {
+            num_rows,
+            num_cols,
+            insertion,
+            horizontal_direction,
+            version,
+            value_flag,
+        } => {
+            let mut table = ar::Table::new(v3(insertion), *num_rows as usize, *num_cols as usize);
+            table.horizontal_direction = v3(horizontal_direction);
+            table.data_version = *version;
+            table.value_flags = *value_flag;
+            apply_common(&mut table.common, entity);
+            Some(ar::EntityType::Table(table))
+        }
+        nm::EntityData::Mesh {
+            vertices,
+            face_indices,
+            ..
+        } => {
+            let mut mesh = ar::Mesh::new();
+            for v in vertices {
+                mesh.add_vertex(v3(v));
+            }
+            let mut i = 0;
+            while i < face_indices.len() {
+                let n = face_indices[i] as usize;
+                if i + 1 + n <= face_indices.len() {
+                    let verts: Vec<usize> =
+                        face_indices[i + 1..i + 1 + n].iter().map(|&v| v as usize).collect();
+                    mesh.add_face(ar::MeshFace::new(verts));
+                    i += 1 + n;
+                } else {
+                    break;
+                }
+            }
+            apply_common(&mut mesh.common, entity);
+            Some(ar::EntityType::Mesh(mesh))
+        }
         _ => None,
     }
 }
@@ -827,19 +866,17 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 acis_data: region.acis_data.sat_data.clone(),
             },
         )),
-        ar::EntityType::Underlay(underlay) if underlay.underlay_type == ar::UnderlayType::Pdf => {
-            Some(native_common_from_acadrust(
-                entity,
-                nm::EntityData::PdfUnderlay {
-                    insertion: [
-                        underlay.insertion_point.x,
-                        underlay.insertion_point.y,
-                        underlay.insertion_point.z,
-                    ],
-                    scale: [underlay.x_scale, underlay.y_scale, underlay.z_scale],
-                },
-            ))
-        }
+        ar::EntityType::Underlay(underlay) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::PdfUnderlay {
+                insertion: [
+                    underlay.insertion_point.x,
+                    underlay.insertion_point.y,
+                    underlay.insertion_point.z,
+                ],
+                scale: [underlay.x_scale, underlay.y_scale, underlay.z_scale],
+            },
+        )),
         ar::EntityType::Unknown(unknown) => Some(native_common_from_acadrust(
             entity,
             nm::EntityData::Unknown {
@@ -964,6 +1001,43 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 height: viewport.height,
             },
         )),
+        ar::EntityType::Table(table) => Some(native_common_from_acadrust(
+            entity,
+            nm::EntityData::Table {
+                num_rows: table.row_count() as i32,
+                num_cols: table.column_count() as i32,
+                insertion: [
+                    table.insertion_point.x,
+                    table.insertion_point.y,
+                    table.insertion_point.z,
+                ],
+                horizontal_direction: [
+                    table.horizontal_direction.x,
+                    table.horizontal_direction.y,
+                    table.horizontal_direction.z,
+                ],
+                version: table.data_version,
+                value_flag: table.value_flags,
+            },
+        )),
+        ar::EntityType::Mesh(mesh) => {
+            let mut face_indices: Vec<i32> = Vec::new();
+            for face in &mesh.faces {
+                face_indices.push(face.vertices.len() as i32);
+                for &v in &face.vertices {
+                    face_indices.push(v as i32);
+                }
+            }
+            Some(native_common_from_acadrust(
+                entity,
+                nm::EntityData::Mesh {
+                    vertex_count: mesh.vertex_count() as i32,
+                    face_count: mesh.face_count() as i32,
+                    vertices: mesh.vertices.iter().map(|v| [v.x, v.y, v.z]).collect(),
+                    face_indices,
+                },
+            ))
+        }
         _ => None,
     }
 }
@@ -983,6 +1057,7 @@ fn native_common_from_acadrust(entity: &ar::EntityType, data: nm::EntityData) ->
     native.lineweight = lineweight_to_native(&common.line_weight);
     native.invisible = common.invisible;
     native.transparency = i32::from(transparency);
+    native.xdata = xdata_from_acadrust(&common.extended_data);
     native
 }
 
@@ -1004,6 +1079,117 @@ fn apply_common(common: &mut ar::EntityCommon, entity: &nm::Entity) {
     common.line_weight = native_lineweight(entity.lineweight);
     common.invisible = entity.invisible;
     common.transparency = native_transparency(entity.transparency);
+    common.extended_data = xdata_to_acadrust(&entity.xdata);
+}
+
+// ── XData bridge ────────────────────────────────────────────────────────
+//
+// `nm::Entity.xdata` 的存储格式：`Vec<(app_name, Vec<(group_code, value_str)>)>`。
+// `ar::EntityCommon.extended_data` 是按应用名分组的 `ExtendedDataRecord` 列表，每个
+// record 内的 value 是 `XDataValue` 枚举。下面两个函数做往返投影，
+// 覆盖 DXF 1000-1071 的主流 group code。未识别的 group code 走 `String` 兜底。
+
+fn xdata_to_acadrust(xdata: &[(String, Vec<(i16, String)>)]) -> acadrust::xdata::ExtendedData {
+    use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+    let mut out = acadrust::xdata::ExtendedData::new();
+    for (app, entries) in xdata {
+        let mut rec = ExtendedDataRecord::new(app.as_str());
+        for (code, value) in entries {
+            let v = match *code {
+                1000 => XDataValue::String(value.clone()),
+                1002 => XDataValue::ControlString(value.clone()),
+                1003 => XDataValue::LayerName(value.clone()),
+                1004 => {
+                    let bytes = hex_to_bytes(value).unwrap_or_default();
+                    XDataValue::BinaryData(bytes)
+                }
+                1005 => {
+                    let h = u64::from_str_radix(value.trim_start_matches("0x"), 16).unwrap_or(0);
+                    XDataValue::Handle(Handle::new(h))
+                }
+                1010 | 1011 | 1012 | 1013 => {
+                    let pt = parse_point3(value);
+                    match *code {
+                        1010 => XDataValue::Point3D(pt),
+                        1011 => XDataValue::Position3D(pt),
+                        1012 => XDataValue::Displacement3D(pt),
+                        _ => XDataValue::Direction3D(pt),
+                    }
+                }
+                1040 => XDataValue::Real(value.parse().unwrap_or(0.0)),
+                1041 => XDataValue::Distance(value.parse().unwrap_or(0.0)),
+                1042 => XDataValue::ScaleFactor(value.parse().unwrap_or(1.0)),
+                1070 => XDataValue::Integer16(value.parse().unwrap_or(0)),
+                1071 => XDataValue::Integer32(value.parse().unwrap_or(0)),
+                _ => XDataValue::String(value.clone()),
+            };
+            rec.add_value(v);
+        }
+        out.add_record(rec);
+    }
+    out
+}
+
+fn xdata_from_acadrust(ext: &acadrust::xdata::ExtendedData) -> Vec<(String, Vec<(i16, String)>)> {
+    use acadrust::xdata::XDataValue;
+    ext.records()
+        .iter()
+        .map(|rec| {
+            let entries: Vec<(i16, String)> = rec
+                .values
+                .iter()
+                .map(|v| match v {
+                    XDataValue::String(s) => (1000, s.clone()),
+                    XDataValue::ControlString(s) => (1002, s.clone()),
+                    XDataValue::LayerName(s) => (1003, s.clone()),
+                    XDataValue::BinaryData(b) => (1004, bytes_to_hex(b)),
+                    XDataValue::Handle(h) => (1005, format!("{:X}", h.value())),
+                    XDataValue::Point3D(p) => (1010, format_point3(p)),
+                    XDataValue::Position3D(p) => (1011, format_point3(p)),
+                    XDataValue::Displacement3D(p) => (1012, format_point3(p)),
+                    XDataValue::Direction3D(p) => (1013, format_point3(p)),
+                    XDataValue::Real(r) => (1040, r.to_string()),
+                    XDataValue::Distance(r) => (1041, r.to_string()),
+                    XDataValue::ScaleFactor(r) => (1042, r.to_string()),
+                    XDataValue::Integer16(i) => (1070, i.to_string()),
+                    XDataValue::Integer32(i) => (1071, i.to_string()),
+                })
+                .collect();
+            (rec.application_name.clone(), entries)
+        })
+        .collect()
+}
+
+fn format_point3(p: &Vector3) -> String {
+    format!("{},{},{}", p.x, p.y, p.z)
+}
+
+fn parse_point3(s: &str) -> Vector3 {
+    let parts: Vec<f64> = s.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    Vector3::new(
+        parts.first().copied().unwrap_or(0.0),
+        parts.get(1).copied().unwrap_or(0.0),
+        parts.get(2).copied().unwrap_or(0.0),
+    )
+}
+
+fn bytes_to_hex(b: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(b.len() * 2);
+    for byte in b {
+        let _ = write!(out, "{:02X}", byte);
+    }
+    out
+}
+
+fn hex_to_bytes(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
 }
 
 fn native_dimension_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> {
@@ -1083,7 +1269,12 @@ fn native_dimension_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> {
             dim.base.definition_point = v3(definition_point);
             ar::Dimension::Ordinate(dim)
         }
-        _ => return None,
+        _ => {
+            let mut dim = ar::DimensionLinear::new(v3(first_point), v3(second_point));
+            dim.definition_point = v3(definition_point);
+            dim.base.definition_point = v3(definition_point);
+            ar::Dimension::Linear(dim)
+        }
     };
 
     let base = dimension.base_mut();
@@ -1549,13 +1740,13 @@ fn lineweight_to_native(value: &LineWeight) -> i16 {
     }
 }
 
-fn native_transparency(value: i32) -> acadrust::types::Transparency {
+fn native_transparency(value: i32) -> crate::types::Transparency {
     if value == 0 {
-        acadrust::types::Transparency::OPAQUE
+        crate::types::Transparency::OPAQUE
     } else if (value >> 24) == 0 {
-        acadrust::types::Transparency::new(value.clamp(0, 255) as u8)
+        crate::types::Transparency::new(value.clamp(0, 255) as u8)
     } else {
-        acadrust::types::Transparency::from_alpha_value(value as u32)
+        crate::types::Transparency::from_alpha_value(value as u32)
     }
 }
 

@@ -1,0 +1,58 @@
+{
+  "milestone": "resolver-type-materialization",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-dwg -- --test-threads=1",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-dwg",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "cargo check -p h7cad-native-facade",
+      "exitCode": 0
+    },
+    "runtimeBoundary": {
+      "passed": true,
+      "command": "cargo test -p h7cad-native-facade dwg_runtime_load_is_unavailable -- --test-threads=1",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1,
+    "failedFeatures": [
+      "dwg-parser-resolver-expanded-type-materialization-contract"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "dwg-parser-resolver-expanded-type-materialization-contract",
+      "severity": "blocking",
+      "description": "crates/h7cad-native-dwg/src/resolver.rs semantic_entity() converts every parsed entity into EntityData::Point, so resolved outputs lose outward TEXT vs MTEXT vs INSERT distinctions required by VAL-HARDEN-012."
+    },
+    {
+      "featureId": "dwg-parser-resolver-expanded-type-materialization-contract",
+      "severity": "blocking",
+      "description": "INSERT entities are materialized without reference/link data, so outward-facing resolved surfaces do not preserve type-specific relationships required by VAL-HARDEN-013."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update the dwg-parser-worker skill so it does not direct workers to .factory/library/architecture.md as authoritative DWG parser guidance unless that file is replaced with DWG-specific architecture notes.",
+      "evidence": "The review for dwg-parser-resolver-expanded-type-materialization-contract found .factory/skills/dwg-parser-worker/SKILL.md instructs workers to read .factory/library/architecture.md, but the current architecture doc describes the DXF native migration mission and explicitly says DWG parser/runtime rollout is out of scope.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

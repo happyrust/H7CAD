@@ -10,8 +10,9 @@ mod update;
 
 use document::DocumentTab;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use crate::types::{Color as AcadColor, LineWeight};
 use acadrust::CadDocument;
+use h7cad_native_model as nm;
 use crate::modules::ModuleEvent;
 use crate::scene::CubeRegion;
 use crate::snap::Snapper;
@@ -171,7 +172,7 @@ pub enum DsField {
 pub enum Message {
     Tick(Instant),
     OpenFile,
-    FileOpened(Result<(String, PathBuf, CadDocument), String>),
+    FileOpened(Result<(String, PathBuf, CadDocument, Option<nm::CadDocument>), String>),
     SaveFile,
     SaveAs,
     PickedSavePath(Option<PathBuf>),

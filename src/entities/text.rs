@@ -1,9 +1,10 @@
 use acadrust::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
-use crate::entities::text_support::{resolve_text_style, text_local_bounds};
+use crate::entities::text_support::{resolve_text_style, resolve_text_style_native, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::cxf;
@@ -116,6 +117,118 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
     }
 }
 
+fn native_text_halign_str(code: i16) -> &'static str {
+    match code {
+        1 => "Center",
+        2 => "Right",
+        3 => "Aligned",
+        4 => "Middle",
+        5 => "Fit",
+        _ => "Left",
+    }
+}
+
+fn native_text_valign_str(code: i16) -> &'static str {
+    match code {
+        1 => "Bottom",
+        2 => "Middle",
+        3 => "Top",
+        _ => "Baseline",
+    }
+}
+
+fn native_text_halign_from_str(value: &str) -> i16 {
+    match value {
+        "Center" => 1,
+        "Right" => 2,
+        "Aligned" => 3,
+        "Middle" => 4,
+        "Fit" => 5,
+        _ => 0,
+    }
+}
+
+fn native_text_valign_from_str(value: &str) -> i16 {
+    match value {
+        "Bottom" => 1,
+        "Middle" => 2,
+        "Top" => 3,
+        _ => 0,
+    }
+}
+
+pub fn to_truck_native(
+    insertion: &[f64; 3],
+    height: f64,
+    value: &str,
+    rotation_deg: f64,
+    style_name: &str,
+    width_factor_value: f64,
+    oblique_angle_deg: f64,
+    horizontal_alignment: i16,
+    vertical_alignment: i16,
+    alignment_point: Option<[f64; 3]>,
+    document: &nm::CadDocument,
+) -> TruckEntity {
+    let snap_pt = Vec3::new(insertion[0] as f32, insertion[1] as f32, insertion[2] as f32);
+    let resolved_style = resolve_text_style_native(style_name, document);
+    let font_name = resolved_style.font_name;
+    let width_factor = ((if width_factor_value > 0.0 {
+        width_factor_value as f32
+    } else {
+        1.0
+    }) * resolved_style.width_factor.max(0.01))
+    .clamp(0.01, 100.0);
+    let oblique_angle = oblique_angle_deg as f32 + resolved_style.oblique_angle;
+    let rot = rotation_deg.to_radians() as f32;
+    let anchor = alignment_point
+        .map(|point| [point[0] as f32, point[1] as f32])
+        .unwrap_or([insertion[0] as f32, insertion[1] as f32]);
+    let bounds = text_local_bounds(
+        &font_name,
+        value,
+        height as f32,
+        width_factor,
+        oblique_angle,
+    );
+    let (anchor_local_x, anchor_local_y) = if let Some(([min_x, min_y], [max_x, max_y])) = bounds {
+        let ax = match horizontal_alignment {
+            1 | 4 => (min_x + max_x) * 0.5,
+            2 | 3 | 5 => max_x,
+            _ => min_x,
+        };
+        let ay = match vertical_alignment {
+            1 => min_y,
+            2 => (min_y + max_y) * 0.5,
+            3 => max_y,
+            _ => 0.0,
+        };
+        (ax, ay)
+    } else {
+        (0.0, 0.0)
+    };
+    let (cos_r, sin_r) = (rot.cos(), rot.sin());
+    let origin = [
+        anchor[0] - (anchor_local_x * cos_r - anchor_local_y * sin_r),
+        anchor[1] - (anchor_local_x * sin_r + anchor_local_y * cos_r),
+    ];
+    let strokes_2d = cxf::tessellate_text_ex(
+        origin,
+        height as f32,
+        rot,
+        width_factor,
+        oblique_angle,
+        &font_name,
+        value,
+    );
+    TruckEntity {
+        object: TruckObject::Text(strokes_2d),
+        snap_pts: vec![(snap_pt, SnapHint::Insertion)],
+        tangent_geoms: vec![],
+        key_vertices: vec![],
+    }
+}
+
 fn grips(t: &Text) -> Vec<GripDef> {
     let p = Vec3::new(
         t.insertion_point.x as f32,
@@ -123,6 +236,14 @@ fn grips(t: &Text) -> Vec<GripDef> {
         t.insertion_point.z as f32,
     );
     vec![square_grip(0, p)]
+}
+
+pub fn grips_native(insertion: &[f64; 3]) -> Vec<GripDef> {
+    vec![square_grip(0, Vec3::new(
+        insertion[0] as f32,
+        insertion[1] as f32,
+        insertion[2] as f32,
+    ))]
 }
 
 fn properties(t: &Text, text_style_names: &[String]) -> PropSection {
@@ -183,6 +304,71 @@ fn properties(t: &Text, text_style_names: &[String]) -> PropSection {
     }
 }
 
+pub fn properties_native(
+    insertion: &[f64; 3],
+    height: f64,
+    value: &str,
+    rotation_deg: f64,
+    style_name: &str,
+    width_factor: f64,
+    oblique_angle: f64,
+    horizontal_alignment: i16,
+    vertical_alignment: i16,
+    text_style_names: &[String],
+) -> PropSection {
+    PropSection {
+        title: "Geometry".into(),
+        props: vec![
+            edit("Insert X", "ins_x", insertion[0]),
+            edit("Insert Y", "ins_y", insertion[1]),
+            edit("Insert Z", "ins_z", insertion[2]),
+            edit("Height", "height", height),
+            edit("Rotation", "rotation", rotation_deg),
+            edit("Width Factor", "width_factor", width_factor),
+            edit("Oblique Angle", "oblique_angle", oblique_angle),
+            Property {
+                label: "H-Align".into(),
+                field: "h_align",
+                value: PropValue::Choice {
+                    selected: native_text_halign_str(horizontal_alignment).to_string(),
+                    options: ["Left", "Center", "Right", "Aligned", "Middle", "Fit"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                },
+            },
+            Property {
+                label: "V-Align".into(),
+                field: "v_align",
+                value: PropValue::Choice {
+                    selected: native_text_valign_str(vertical_alignment).to_string(),
+                    options: ["Baseline", "Bottom", "Middle", "Top"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                },
+            },
+            Property {
+                label: "Content".into(),
+                field: "content",
+                value: PropValue::EditText(value.to_string()),
+            },
+            Property {
+                label: "Style".into(),
+                field: "style",
+                value: PropValue::Choice {
+                    selected: if style_name.trim().is_empty() {
+                        "Standard".into()
+                    } else {
+                        style_name.to_string()
+                    },
+                    options: text_style_names.to_vec(),
+                },
+            },
+        ],
+    }
+}
+
 fn apply_geom_prop(t: &mut Text, field: &str, value: &str) {
     match field {
         "content" => {
@@ -234,6 +420,53 @@ fn apply_geom_prop(t: &mut Text, field: &str, value: &str) {
     }
 }
 
+pub fn apply_geom_prop_native(
+    insertion: &mut [f64; 3],
+    height: &mut f64,
+    value_text: &mut String,
+    rotation_deg: &mut f64,
+    style_name: &mut String,
+    width_factor: &mut f64,
+    oblique_angle: &mut f64,
+    horizontal_alignment: &mut i16,
+    vertical_alignment: &mut i16,
+    field: &str,
+    value: &str,
+) {
+    match field {
+        "content" => {
+            *value_text = value.to_string();
+            return;
+        }
+        "style" => {
+            *style_name = value.to_string();
+            return;
+        }
+        "h_align" => {
+            *horizontal_alignment = native_text_halign_from_str(value);
+            return;
+        }
+        "v_align" => {
+            *vertical_alignment = native_text_valign_from_str(value);
+            return;
+        }
+        _ => {}
+    }
+    let Some(v) = parse_f64(value) else {
+        return;
+    };
+    match field {
+        "ins_x" => insertion[0] = v,
+        "ins_y" => insertion[1] = v,
+        "ins_z" => insertion[2] = v,
+        "height" if v > 0.0 => *height = v,
+        "rotation" => *rotation_deg = v,
+        "width_factor" if v > 0.0 => *width_factor = v,
+        "oblique_angle" => *oblique_angle = v,
+        _ => {}
+    }
+}
+
 fn apply_grip(t: &mut Text, _grip_id: usize, apply: GripApply) {
     match apply {
         GripApply::Absolute(p) => {
@@ -245,6 +478,21 @@ fn apply_grip(t: &mut Text, _grip_id: usize, apply: GripApply) {
             t.insertion_point.x += d.x as f64;
             t.insertion_point.y += d.y as f64;
             t.insertion_point.z += d.z as f64;
+        }
+    }
+}
+
+pub fn apply_grip_native(insertion: &mut [f64; 3], _grip_id: usize, apply: GripApply) {
+    match apply {
+        GripApply::Absolute(p) => {
+            insertion[0] = p.x as f64;
+            insertion[1] = p.y as f64;
+            insertion[2] = p.z as f64;
+        }
+        GripApply::Translate(d) => {
+            insertion[0] += d.x as f64;
+            insertion[1] += d.y as f64;
+            insertion[2] += d.z as f64;
         }
     }
 }
@@ -266,6 +514,26 @@ fn apply_transform(t: &mut Text, tr: &EntityTransform) {
         entity.rotation = 2.0 * line_angle - entity.rotation;
         entity.oblique_angle = -entity.oblique_angle;
     });
+}
+
+pub fn apply_transform_native(
+    insertion: &mut [f64; 3],
+    rotation_deg: &mut f64,
+    tr: &EntityTransform,
+) {
+    crate::entities::common::transform_pt(insertion, tr);
+    match tr {
+        EntityTransform::Rotate { angle_rad, .. } => {
+            *rotation_deg += (*angle_rad as f64).to_degrees();
+        }
+        EntityTransform::Mirror { p1, p2 } => {
+            let dx = (p2.x - p1.x) as f64;
+            let dy = (p2.y - p1.y) as f64;
+            let line_angle_deg = dy.atan2(dx).to_degrees();
+            *rotation_deg = 2.0 * line_angle_deg - *rotation_deg;
+        }
+        _ => {}
+    }
 }
 
 impl TruckConvertible for Text {

@@ -95,16 +95,6 @@ pub fn transform_pt(pt: &mut [f64; 3], t: &EntityTransform) {
     }
 }
 
-pub fn transform_angle(angle: &mut f64, t: &EntityTransform) {
-    match t {
-        EntityTransform::Rotate { angle_rad, .. } => *angle += *angle_rad as f64,
-        EntityTransform::Mirror { p1, p2 } => {
-            let mirror_angle = ((p2.y - p1.y) as f64).atan2((p2.x - p1.x) as f64);
-            *angle = 2.0 * mirror_angle - *angle;
-        }
-        _ => {}
-    }
-}
 
 #[inline]
 pub fn distance_3d(a: &[f64; 3], b: &[f64; 3]) -> f64 {
@@ -120,13 +110,13 @@ pub fn pt_to_vec3(p: &[f64; 3]) -> Vec3 {
 }
 
 #[inline]
-pub fn v3_to_arr(v: &acadrust::types::Vector3) -> [f64; 3] {
+pub fn v3_to_arr(v: &crate::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
 #[inline]
-pub fn arr_to_v3(a: &[f64; 3]) -> acadrust::types::Vector3 {
-    acadrust::types::Vector3::new(a[0], a[1], a[2])
+pub fn arr_to_v3(a: &[f64; 3]) -> crate::types::Vector3 {
+    crate::types::Vector3::new(a[0], a[1], a[2])
 }
 
 pub fn mirror_dir(dir: &mut [f64; 3], p1: Vec3, p2: Vec3) {

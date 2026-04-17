@@ -21,7 +21,7 @@ use acadrust::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Dimension, Line as LineEnt, LwPolyline, MLine,
 };
 use acadrust::entities::{Polyline, Polyline2D};
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
 
 use crate::command::{CadCommand, CmdResult};
@@ -299,8 +299,8 @@ fn explode_mline(ml: &MLine) -> Vec<EntityType> {
 
     // Helper: build a Line from two Vector3 positions.
     let make_line = |common: &acadrust::entities::EntityCommon,
-                     s: &acadrust::types::Vector3,
-                     e: &acadrust::types::Vector3| -> EntityType {
+                     s: &crate::types::Vector3,
+                     e: &crate::types::Vector3| -> EntityType {
         let mut c = common.clone();
         c.handle = Handle::NULL;
         EntityType::Line(LineEnt { common: c, start: s.clone(), end: e.clone(), ..LineEnt::new() })

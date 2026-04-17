@@ -2,7 +2,7 @@
 // populate them with geometry from the referenced DWG/DXF files.
 
 use acadrust::entities::{Block, BlockEnd};
-use acadrust::types::{Handle, Vector3};
+use crate::types::{Handle, Vector3};
 use acadrust::{CadDocument, EntityType};
 use std::path::{Path, PathBuf};
 

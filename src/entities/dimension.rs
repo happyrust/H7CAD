@@ -102,9 +102,9 @@ fn properties(dim: &Dimension) -> PropSection {
 }
 
 fn linear_like_props(
-    first: acadrust::types::Vector3,
-    second: acadrust::types::Vector3,
-    definition: acadrust::types::Vector3,
+    first: crate::types::Vector3,
+    second: crate::types::Vector3,
+    definition: crate::types::Vector3,
 ) -> Vec<crate::scene::object::Property> {
     vec![
         edit("First X", "first_x", first.x),
@@ -120,8 +120,8 @@ fn linear_like_props(
 }
 
 fn radius_like_props(
-    center: acadrust::types::Vector3,
-    point: acadrust::types::Vector3,
+    center: crate::types::Vector3,
+    point: crate::types::Vector3,
 ) -> Vec<crate::scene::object::Property> {
     vec![
         edit("Center X", "center_x", center.x),
@@ -134,10 +134,10 @@ fn radius_like_props(
 }
 
 fn angular_props(
-    vertex: acadrust::types::Vector3,
-    first: acadrust::types::Vector3,
-    second: acadrust::types::Vector3,
-    definition: acadrust::types::Vector3,
+    vertex: crate::types::Vector3,
+    first: crate::types::Vector3,
+    second: crate::types::Vector3,
+    definition: crate::types::Vector3,
 ) -> Vec<crate::scene::object::Property> {
     vec![
         edit("Vertex X", "vertex_x", vertex.x),
@@ -238,9 +238,9 @@ fn apply_linear_fields_linear(d: &mut DimensionLinear, field: &str, value: &str)
 }
 
 fn apply_linear_common(
-    first: &mut acadrust::types::Vector3,
-    second: &mut acadrust::types::Vector3,
-    definition: &mut acadrust::types::Vector3,
+    first: &mut crate::types::Vector3,
+    second: &mut crate::types::Vector3,
+    definition: &mut crate::types::Vector3,
     field: &str,
     value: &str,
 ) {
@@ -291,8 +291,8 @@ fn apply_diameter_fields(d: &mut DimensionDiameter, field: &str, value: &str) {
 }
 
 fn apply_radius_common(
-    center: &mut acadrust::types::Vector3,
-    point: &mut acadrust::types::Vector3,
+    center: &mut crate::types::Vector3,
+    point: &mut crate::types::Vector3,
     field: &str,
     value: &str,
 ) {
@@ -354,10 +354,10 @@ fn apply_angular3_fields(d: &mut DimensionAngular3Pt, field: &str, value: &str) 
 }
 
 fn apply_angular_common(
-    vertex: &mut acadrust::types::Vector3,
-    first: &mut acadrust::types::Vector3,
-    second: &mut acadrust::types::Vector3,
-    definition: &mut acadrust::types::Vector3,
+    vertex: &mut crate::types::Vector3,
+    first: &mut crate::types::Vector3,
+    second: &mut crate::types::Vector3,
+    definition: &mut crate::types::Vector3,
     field: &str,
     value: &str,
 ) {
@@ -437,7 +437,7 @@ fn apply_ordinate_fields(d: &mut DimensionOrdinate, field: &str, value: &str) {
 
 fn apply_transform(dim: &mut Dimension, t: &EntityTransform) {
     match t {
-        EntityTransform::Translate(d) => dim.translate(acadrust::types::Vector3::new(
+        EntityTransform::Translate(d) => dim.translate(crate::types::Vector3::new(
             d.x as f64,
             d.y as f64,
             d.z as f64,
@@ -457,7 +457,7 @@ fn apply_transform(dim: &mut Dimension, t: &EntityTransform) {
 
 fn transform_dimension_points<F>(dim: &mut Dimension, mut f: F)
 where
-    F: FnMut(&mut acadrust::types::Vector3),
+    F: FnMut(&mut crate::types::Vector3),
 {
     f(&mut dim.base_mut().text_middle_point);
     f(&mut dim.base_mut().insertion_point);
@@ -501,7 +501,7 @@ where
     }
 }
 
-fn rotate_point(p: &mut acadrust::types::Vector3, center: Vec3, angle_rad: f32) {
+fn rotate_point(p: &mut crate::types::Vector3, center: Vec3, angle_rad: f32) {
     let dx = p.x as f32 - center.x;
     let dy = p.y as f32 - center.y;
     let (s, c) = angle_rad.sin_cos();
@@ -509,13 +509,13 @@ fn rotate_point(p: &mut acadrust::types::Vector3, center: Vec3, angle_rad: f32) 
     p.y = (center.y + dx * s + dy * c) as f64;
 }
 
-fn scale_point(p: &mut acadrust::types::Vector3, center: Vec3, factor: f32) {
+fn scale_point(p: &mut crate::types::Vector3, center: Vec3, factor: f32) {
     p.x = (center.x + (p.x as f32 - center.x) * factor) as f64;
     p.y = (center.y + (p.y as f32 - center.y) * factor) as f64;
     p.z = (center.z + (p.z as f32 - center.z) * factor) as f64;
 }
 
-fn mirror_point(p: &mut acadrust::types::Vector3, p1: Vec3, p2: Vec3) {
+fn mirror_point(p: &mut crate::types::Vector3, p1: Vec3, p2: Vec3) {
     crate::scene::transform::reflect_xy_point(&mut p.x, &mut p.y, p1, p2);
 }
 
@@ -537,23 +537,23 @@ impl Transformable for Dimension {
 
 // ── Grippable ─────────────────────────────────────────────────────────────────
 
-fn v3(v: &acadrust::types::Vector3) -> Vec3 {
+fn v3(v: &crate::types::Vector3) -> Vec3 {
     Vec3::new(v.x as f32, v.y as f32, v.z as f32)
 }
 
-fn set_v3(target: &mut acadrust::types::Vector3, p: Vec3) {
+fn set_v3(target: &mut crate::types::Vector3, p: Vec3) {
     target.x = p.x as f64;
     target.y = p.y as f64;
     target.z = p.z as f64;
 }
 
-fn translate_v3(target: &mut acadrust::types::Vector3, d: Vec3) {
+fn translate_v3(target: &mut crate::types::Vector3, d: Vec3) {
     target.x += d.x as f64;
     target.y += d.y as f64;
     target.z += d.z as f64;
 }
 
-fn apply_to_v3(target: &mut acadrust::types::Vector3, apply: &GripApply) {
+fn apply_to_v3(target: &mut crate::types::Vector3, apply: &GripApply) {
     match apply {
         GripApply::Absolute(p) => set_v3(target, *p),
         GripApply::Translate(d) => translate_v3(target, *d),

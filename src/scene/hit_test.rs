@@ -4,8 +4,6 @@
 //! to 2-D pixel coordinates, then compared against the cursor or selection box.
 //! This matches the visual result the user sees.
 
-use std::collections::HashMap;
-
 use acadrust::Handle;
 use glam::{Mat4, Vec3};
 use iced::{Point, Rectangle};
@@ -212,34 +210,35 @@ fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
 }
 
 // ── Hatch hit-testing ─────────────────────────────────────────────────────
+//
+// Only the `*_entries` (slice-based) variants are called from the active
+// code path. The earlier HashMap-keyed versions were kept during the
+// native-first migration as a fallback but no longer have callers.
 
-/// Return the Handle of the first hatch whose screen-space boundary polygon
-/// contains `cursor`.
-pub fn click_hit_hatch(
+pub fn click_hit_hatch_entries(
     cursor: Point,
-    hatches: &HashMap<Handle, HatchModel>,
+    hatches: &[(Handle, HatchModel)],
     view_proj: Mat4,
     bounds: Rectangle,
 ) -> Option<Handle> {
-    for (&handle, hatch) in hatches {
+    for (handle, hatch) in hatches {
         let screen: Vec<Point> = hatch
             .boundary
             .iter()
             .map(|&[x, y]| world_to_screen(Vec3::new(x, y, 0.0), view_proj, bounds))
             .collect();
         if screen.len() >= 3 && point_in_polygon(cursor, &screen) {
-            return Some(handle);
+            return Some(*handle);
         }
     }
     None
 }
 
-/// Return Handles of hatches selected by a completed rectangular selection box.
-pub fn box_hit_hatch(
+pub fn box_hit_hatch_entries(
     corner_a: Point,
     corner_b: Point,
     crossing: bool,
-    hatches: &HashMap<Handle, HatchModel>,
+    hatches: &[(Handle, HatchModel)],
     view_proj: Mat4,
     bounds: Rectangle,
 ) -> Vec<Handle> {
@@ -256,7 +255,7 @@ pub fn box_hit_hatch(
 
     hatches
         .iter()
-        .filter_map(|(&handle, hatch)| {
+        .filter_map(|(handle, hatch)| {
             if hatch.boundary.is_empty() {
                 return None;
             }
@@ -271,7 +270,7 @@ pub fn box_hit_hatch(
                 screen.iter().all(|&sp| inside(sp))
             };
             if hit {
-                Some(handle)
+                Some(*handle)
             } else {
                 None
             }
@@ -279,11 +278,10 @@ pub fn box_hit_hatch(
         .collect()
 }
 
-/// Return Handles of hatches selected by a freehand polygon lasso.
-pub fn poly_hit_hatch(
+pub fn poly_hit_hatch_entries(
     poly: &[Point],
     crossing: bool,
-    hatches: &HashMap<Handle, HatchModel>,
+    hatches: &[(Handle, HatchModel)],
     view_proj: Mat4,
     bounds: Rectangle,
 ) -> Vec<Handle> {
@@ -293,7 +291,7 @@ pub fn poly_hit_hatch(
 
     hatches
         .iter()
-        .filter_map(|(&handle, hatch)| {
+        .filter_map(|(handle, hatch)| {
             if hatch.boundary.is_empty() {
                 return None;
             }
@@ -311,7 +309,7 @@ pub fn poly_hit_hatch(
                 screen.iter().all(|&sp| point_in_polygon(sp, poly))
             };
             if hit {
-                Some(handle)
+                Some(*handle)
             } else {
                 None
             }
@@ -336,4 +334,34 @@ fn dist_point_to_segment(p: Point, a: Point, b: Point) -> f32 {
     let dx = p.x - cx;
     let dy = p.y - cy;
     (dx * dx + dy * dy).sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit_square() -> HatchModel {
+        HatchModel {
+            boundary: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            pattern: crate::scene::hatch_model::HatchPattern::Solid,
+            name: "SOLID".into(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            angle_offset: 0.0,
+            scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn click_hit_hatch_entries_returns_matching_handle() {
+        let entries = vec![(Handle::new(42), unit_square())];
+        let cursor = Point::new(75.0, 25.0);
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        let hit = click_hit_hatch_entries(cursor, &entries, Mat4::IDENTITY, bounds);
+        assert_eq!(hit, Some(Handle::new(42)));
+    }
 }

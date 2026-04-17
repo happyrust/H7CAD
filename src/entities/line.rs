@@ -100,6 +100,7 @@ pub fn apply_transform(start: &mut [f64; 3], end: &mut [f64; 3], t: &EntityTrans
 
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::Line {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
         let s = [self.start.x, self.start.y, self.start.z];
@@ -108,6 +109,7 @@ impl TruckConvertible for acadrust::entities::Line {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::Line {
     fn grips(&self) -> Vec<GripDef> {
         let s = [self.start.x, self.start.y, self.start.z];
@@ -124,6 +126,7 @@ impl Grippable for acadrust::entities::Line {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::Line {
     fn geometry_properties(&self, _text_style_names: &[String]) -> PropSection {
         let s = [self.start.x, self.start.y, self.start.z];
@@ -140,6 +143,7 @@ impl PropertyEditable for acadrust::entities::Line {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::Line {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut s = [self.start.x, self.start.y, self.start.z];

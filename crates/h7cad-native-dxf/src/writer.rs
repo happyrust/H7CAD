@@ -592,9 +592,7 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             }
             if *has_attribs {
                 w.pair_str(0, "SEQEND");
-                if entity.handle != Handle::NULL {
-                    w.pair_handle(5, entity.handle);
-                }
+                w.pair_str(8, &entity.layer_name);
             }
         }
         EntityData::Hatch {
@@ -608,6 +606,10 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             for path in boundary_paths {
                 w.pair_i32(92, path.flags);
                 if path.flags & 2 != 0 {
+                    for edge in &path.edges {
+                        write_hatch_edge(w, edge);
+                    }
+                } else if !path.edges.is_empty() {
                     w.pair_i32(93, path.edges.len() as i32);
                     for edge in &path.edges {
                         write_hatch_edge(w, edge);
@@ -781,6 +783,12 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
                 w.pair_str(0, "VERTEX");
                 w.pair_str(8, &entity.layer_name);
                 w.point3d(10, v.position);
+                if v.start_width != 0.0 {
+                    w.pair_f64(40, v.start_width);
+                }
+                if v.end_width != 0.0 {
+                    w.pair_f64(41, v.end_width);
+                }
                 if v.bulge != 0.0 {
                     w.pair_f64(42, v.bulge);
                 }
@@ -1029,6 +1037,142 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             w.pair_f64(42, scale[1]);
             w.pair_f64(43, scale[2]);
         }
+        EntityData::Helix {
+            axis_base_point,
+            start_point,
+            axis_vector,
+            radius,
+            turns,
+            turn_height,
+            handedness,
+            is_ccw,
+        } => {
+            w.point3d(10, *axis_base_point);
+            w.point3d(11, *start_point);
+            w.point3d(12, *axis_vector);
+            w.pair_f64(40, *radius);
+            w.pair_f64(41, *turns);
+            w.pair_f64(42, *turn_height);
+            w.pair_i16(280, *handedness);
+            w.pair_i16(290, if *is_ccw { 1 } else { 0 });
+        }
+        EntityData::ArcDimension {
+            block_name,
+            style_name,
+            definition_point,
+            text_midpoint,
+            text_override,
+            first_point,
+            second_point,
+            arc_center,
+            leader_length,
+            measurement,
+        } => {
+            w.pair_str(2, block_name);
+            w.pair_str(3, style_name);
+            w.point3d(10, *definition_point);
+            w.point3d(11, *text_midpoint);
+            w.pair_str(1, text_override);
+            w.point3d(13, *first_point);
+            w.point3d(14, *second_point);
+            w.point3d(15, *arc_center);
+            if *leader_length != 0.0 {
+                w.pair_f64(40, *leader_length);
+            }
+            w.pair_f64(42, *measurement);
+        }
+        EntityData::LargeRadialDimension {
+            block_name,
+            style_name,
+            definition_point,
+            text_midpoint,
+            text_override,
+            chord_point,
+            leader_length,
+            jog_angle,
+            measurement,
+        } => {
+            w.pair_str(2, block_name);
+            w.pair_str(3, style_name);
+            w.point3d(10, *definition_point);
+            w.point3d(11, *text_midpoint);
+            w.pair_str(1, text_override);
+            w.point3d(15, *chord_point);
+            w.pair_f64(40, *leader_length);
+            w.pair_f64(50, *jog_angle);
+            w.pair_f64(42, *measurement);
+        }
+        EntityData::Surface {
+            u_isolines,
+            v_isolines,
+            acis_data,
+            ..
+        } => {
+            w.pair_i32(70, *u_isolines);
+            w.pair_i32(71, *v_isolines);
+            for line in acis_data.lines() {
+                w.pair_str(1, line);
+            }
+        }
+        EntityData::Light {
+            name,
+            light_type,
+            position,
+            target,
+            intensity,
+            is_on,
+            color,
+            hotspot_angle,
+            falloff_angle,
+        } => {
+            w.pair_str(1, name);
+            w.pair_i16(70, *light_type);
+            w.point3d(10, *position);
+            w.point3d(11, *target);
+            w.pair_f64(40, *intensity);
+            w.pair_i16(290, if *is_on { 1 } else { 0 });
+            w.pair_i16(63, *color);
+            if *hotspot_angle != 0.0 {
+                w.pair_f64(50, *hotspot_angle);
+            }
+            if *falloff_angle != 0.0 {
+                w.pair_f64(51, *falloff_angle);
+            }
+        }
+        EntityData::Camera {
+            position,
+            target,
+            lens_length,
+        } => {
+            w.point3d(10, *position);
+            w.point3d(11, *target);
+            w.pair_f64(40, *lens_length);
+        }
+        EntityData::Section {
+            name,
+            state,
+            vertices,
+            vertical_direction,
+        } => {
+            w.pair_str(1, name);
+            w.pair_i32(70, *state);
+            w.pair_i32(90, vertices.len() as i32);
+            for v in vertices {
+                w.point3d(11, *v);
+            }
+            w.point3d(40, *vertical_direction);
+        }
+        EntityData::ProxyEntity {
+            class_id,
+            application_class_id,
+            raw_codes,
+        } => {
+            w.pair_i32(90, *class_id);
+            w.pair_i32(91, *application_class_id);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
         EntityData::Unknown { .. } => {
             // Cannot faithfully rewrite unknown entities
         }
@@ -1073,12 +1217,16 @@ fn write_hatch_edge(w: &mut DxfWriter, edge: &HatchEdge) {
             w.pair_i16(73, if *is_ccw { 1 } else { 0 });
         }
         HatchEdge::Polyline { closed, vertices } => {
-            w.pair_i16(72, 0);
+            let has_bulge = vertices.iter().any(|v| v[2] != 0.0);
+            w.pair_i16(72, if has_bulge { 1 } else { 0 });
             w.pair_i16(73, if *closed { 1 } else { 0 });
             w.pair_i32(93, vertices.len() as i32);
             for v in vertices {
                 w.pair_f64(10, v[0]);
                 w.pair_f64(20, v[1]);
+                if has_bulge {
+                    w.pair_f64(42, v[2]);
+                }
             }
         }
     }
@@ -1268,6 +1416,120 @@ fn write_object(w: &mut DxfWriter, obj: &CadObject) {
             w.pair_str(1, page_name);
             w.pair_str(2, printer_name);
             w.pair_str(4, paper_size);
+        }
+        ObjectData::Field {
+            evaluator_id,
+            field_code,
+        } => {
+            w.pair_str(0, "FIELD");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(1, evaluator_id);
+            w.pair_str(2, field_code);
+        }
+        ObjectData::IdBuffer { entity_handles } => {
+            w.pair_str(0, "IDBUFFER");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            for h in entity_handles {
+                w.pair_handle(330, *h);
+            }
+        }
+        ObjectData::LayerFilter {
+            name,
+            layer_handles,
+        } => {
+            w.pair_str(0, "LAYER_FILTER");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(1, name);
+            for h in layer_handles {
+                w.pair_handle(8, *h);
+            }
+        }
+        ObjectData::LightList {
+            count,
+            light_handles,
+        } => {
+            w.pair_str(0, "LIGHTLIST");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_i32(90, *count);
+            for h in light_handles {
+                w.pair_handle(5, *h);
+            }
+        }
+        ObjectData::SunStudy {
+            name,
+            description,
+            output_type,
+        } => {
+            w.pair_str(0, "SUNSTUDY");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(1, name);
+            w.pair_str(2, description);
+            w.pair_i16(70, *output_type);
+        }
+        ObjectData::DataTable {
+            flags,
+            column_count,
+            row_count,
+            name,
+        } => {
+            w.pair_str(0, "DATATABLE");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_i16(70, *flags);
+            w.pair_i32(90, *column_count);
+            w.pair_i32(91, *row_count);
+            w.pair_str(1, name);
+        }
+        ObjectData::WipeoutVariables { frame_mode } => {
+            w.pair_str(0, "WIPEOUTVARIABLES");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_i16(70, *frame_mode);
+        }
+        ObjectData::GeoData {
+            coordinate_type,
+            reference_point,
+            design_point,
+        } => {
+            w.pair_str(0, "GEODATA");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_i16(70, *coordinate_type);
+            w.point3d(10, *reference_point);
+            w.point3d(11, *design_point);
+        }
+        ObjectData::RenderEnvironment {
+            name,
+            fog_enabled,
+            fog_density_near,
+            fog_density_far,
+        } => {
+            w.pair_str(0, "RENDERENVIRONMENT");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(1, name);
+            w.pair_i16(290, if *fog_enabled { 1 } else { 0 });
+            w.pair_f64(40, *fog_density_near);
+            w.pair_f64(41, *fog_density_far);
+        }
+        ObjectData::ProxyObject {
+            class_id,
+            application_class_id,
+            raw_codes,
+        } => {
+            w.pair_str(0, "ACAD_PROXY_OBJECT");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_i32(90, *class_id);
+            w.pair_i32(91, *application_class_id);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
         }
         ObjectData::Unknown { object_type } => {
             w.pair_str(0, object_type);

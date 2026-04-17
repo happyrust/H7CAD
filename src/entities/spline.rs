@@ -68,8 +68,6 @@ pub fn properties(degree: i32, control_points: &[[f64; 3]], fit_points: &[[f64; 
     }
 }
 
-pub fn apply_geom_prop(_control_points: &mut [[f64; 3]], _field: &str, _value: &str) {}
-
 pub fn apply_grip(control_points: &mut [[f64; 3]], grip_id: usize, apply: GripApply) {
     if let Some(cp) = control_points.get_mut(grip_id) {
         match apply {
@@ -105,6 +103,7 @@ pub fn apply_transform(
 use crate::entities::common::{arr_to_v3, v3_to_arr};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::Spline {
     fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
         let cps: Vec<[f64; 3]> = self.control_points.iter().map(|p| v3_to_arr(p)).collect();
@@ -112,6 +111,7 @@ impl TruckConvertible for acadrust::entities::Spline {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::Spline {
     fn grips(&self) -> Vec<GripDef> {
         let cps: Vec<[f64; 3]> = self.control_points.iter().map(|p| v3_to_arr(p)).collect();
@@ -126,6 +126,7 @@ impl Grippable for acadrust::entities::Spline {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::Spline {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         let cps: Vec<[f64; 3]> = self.control_points.iter().map(|p| v3_to_arr(p)).collect();
@@ -135,6 +136,7 @@ impl PropertyEditable for acadrust::entities::Spline {
     fn apply_geom_prop(&mut self, _field: &str, _value: &str) {}
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::Spline {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut cps: Vec<[f64; 3]> = self.control_points.iter().map(|p| v3_to_arr(p)).collect();

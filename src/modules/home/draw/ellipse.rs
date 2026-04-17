@@ -5,8 +5,7 @@
 //   ELLIPSE_AXIS — Axis, End     (axis endpoint 1 → endpoint 2 → minor distance)
 //   ELLIPSE_ARC  — Ellipse Arc   (shape as above, then start/end parametric angles)
 
-use acadrust::types::Vector3;
-use acadrust::{Ellipse, EntityType};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
@@ -83,15 +82,14 @@ fn param_angle(center: Vec3, major_dir: Vec3, v: Vec3, pt: Vec3, ratio: f32) -> 
 }
 
 /// Build the final Ellipse entity.
-fn make_ellipse(center: Vec3, major: Vec3, ratio: f32, t_start: f32, t_end: f32) -> Ellipse {
-    Ellipse {
-        center: Vector3::new(center.x as f64, center.y as f64, center.z as f64),
-        major_axis: Vector3::new(major.x as f64, major.y as f64, major.z as f64),
-        minor_axis_ratio: ratio as f64,
-        start_parameter: t_start as f64,
-        end_parameter: t_end as f64,
-        ..Default::default()
-    }
+fn make_ellipse(center: Vec3, major: Vec3, ratio: f32, t_start: f32, t_end: f32) -> nm::Entity {
+    nm::Entity::new(nm::EntityData::Ellipse {
+        center: [center.x as f64, center.y as f64, center.z as f64],
+        major_axis: [major.x as f64, major.y as f64, major.z as f64],
+        ratio: ratio as f64,
+        start_param: t_start as f64,
+        end_param: t_end as f64,
+    })
 }
 
 // ── 1. Center mode ────────────────────────────────────────────────────────
@@ -148,9 +146,9 @@ impl CadCommand for EllipseCommand {
             CtrStep::MinorRatio { center, major } => {
                 let (center, major) = (*center, *major);
                 let ratio = minor_ratio(center, major, pt);
-                CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
+                CmdResult::CommitAndExitNative(make_ellipse(
                     center, major, ratio, 0.0, TAU,
-                )))
+                ))
             }
         }
     }
@@ -164,9 +162,9 @@ impl CadCommand for EllipseCommand {
             let r_minor = parse_f32(text)?;
             if r_minor > 0.0 {
                 let ratio = (r_minor / major.length()).clamp(1e-6, 1.0);
-                return Some(CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
+                return Some(CmdResult::CommitAndExitNative(make_ellipse(
                     *center, *major, ratio, 0.0, TAU,
-                ))));
+                )));
             }
         }
         None
@@ -236,9 +234,9 @@ impl CadCommand for EllipseAxisCommand {
             AxisStep::MinorRatio { center, major } => {
                 let (center, major) = (*center, *major);
                 let ratio = minor_ratio(center, major, pt);
-                CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
+                CmdResult::CommitAndExitNative(make_ellipse(
                     center, major, ratio, 0.0, TAU,
-                )))
+                ))
             }
         }
     }
@@ -252,9 +250,9 @@ impl CadCommand for EllipseAxisCommand {
             let r_minor = parse_f32(text)?;
             if r_minor > 0.0 {
                 let ratio = (r_minor / major.length()).clamp(1e-6, 1.0);
-                return Some(CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
+                return Some(CmdResult::CommitAndExitNative(make_ellipse(
                     *center, *major, ratio, 0.0, TAU,
-                ))));
+                )));
             }
         }
         None
@@ -389,7 +387,7 @@ impl CadCommand for EllipseArcCommand {
                 } else {
                     make_ellipse(center, major, ratio, t_start, t_end)
                 };
-                CmdResult::CommitAndExit(EntityType::Ellipse(entity))
+                CmdResult::CommitAndExitNative(entity)
             }
         }
     }
@@ -437,9 +435,9 @@ impl CadCommand for EllipseArcCommand {
             } => {
                 // Typed degrees: positive = CCW, negative = CW.
                 let t_end = val.to_radians();
-                return Some(CmdResult::CommitAndExit(EntityType::Ellipse(make_ellipse(
+                return Some(CmdResult::CommitAndExitNative(make_ellipse(
                     *center, *major, *ratio, *t_start, t_end,
-                ))));
+                )));
             }
             _ => {}
         }

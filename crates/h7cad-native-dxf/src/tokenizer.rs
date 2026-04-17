@@ -300,15 +300,6 @@ impl<'a> BinaryDxfTokenizer<'a> {
         Some(i32::from_le_bytes(bytes))
     }
 
-    fn read_i64_le(&mut self) -> Option<i64> {
-        if self.remaining() < 8 {
-            return None;
-        }
-        let bytes: [u8; 8] = self.data[self.pos..self.pos + 8].try_into().ok()?;
-        self.pos += 8;
-        Some(i64::from_le_bytes(bytes))
-    }
-
     fn read_f64_le(&mut self) -> Option<f64> {
         if self.remaining() < 8 {
             return None;
@@ -376,32 +367,39 @@ impl<'a> Iterator for BinaryDxfTokenizer<'a> {
     type Item = Result<DxfToken, DxfParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining() == 0 {
-            return None;
-        }
-
-        let code_result = self.read_group_code()?;
-        let code = match code_result {
-            Ok(c) => c,
-            Err(e) => return Some(Err(e)),
-        };
-
-        let gc = match GroupCode::new(code) {
-            Ok(gc) => gc,
-            Err(e) => return Some(Err(e)),
-        };
-
-        let value = match self.read_value_for_code(code) {
-            Some(v) => v,
-            None => {
-                return Some(Err(DxfParseError::UnexpectedEndOfInput {
-                    expected: "value for group code",
-                    line: self.pos,
-                }))
+        loop {
+            if self.remaining() == 0 {
+                return None;
             }
-        };
 
-        Some(Ok(DxfToken::new(gc, value)))
+            let code_result = self.read_group_code()?;
+            let code = match code_result {
+                Ok(c) => c,
+                Err(e) => return Some(Err(e)),
+            };
+
+            if code < 0 {
+                self.read_null_terminated_string();
+                continue;
+            }
+
+            let gc = match GroupCode::new(code) {
+                Ok(gc) => gc,
+                Err(e) => return Some(Err(e)),
+            };
+
+            let value = match self.read_value_for_code(code) {
+                Some(v) => v,
+                None => {
+                    return Some(Err(DxfParseError::UnexpectedEndOfInput {
+                        expected: "value for group code",
+                        line: self.pos,
+                    }))
+                }
+            };
+
+            return Some(Ok(DxfToken::new(gc, value)));
+        }
     }
 }
 

@@ -709,38 +709,24 @@ impl H7CAD {
                         let mut changed = 0usize;
                         self.push_undo_snapshot(i, "ATTEDIT");
                         for sh in &selected_handles {
-                            let mut compat_updated = false;
-                            let mut compat_present = false;
-                            if let Some(acadrust::EntityType::Insert(ins)) =
-                                self.tabs[i].scene.document.get_entity_mut(*sh)
-                            {
-                                compat_present = true;
-                                for attr in &mut ins.attributes {
-                                    if attr.tag.to_uppercase() == tag_up {
-                                        attr.set_value(new_val);
-                                        changed += 1;
-                                        compat_updated = true;
-                                    }
-                                }
-                            }
-                            if compat_present {
-                                if compat_updated {
-                                    self.sync_native_entity_from_compat(i, *sh);
-                                }
-                            } else if let Some(entity) = self.tabs[i].scene.native_entity_mut(*sh) {
-                                if let nm::EntityData::Insert { attribs, .. } = &mut entity.data {
-                                    for attrib in attribs {
-                                        if let nm::EntityData::Attrib { tag, value, .. } =
-                                            &mut attrib.data
-                                        {
-                                            if tag.to_uppercase() == tag_up {
-                                                *value = new_val.to_string();
-                                                changed += 1;
+                            let nh = nm::Handle::new(sh.value());
+                            if let Some(store) = self.tabs[i].scene.native_store.as_mut() {
+                                if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                                    if let nm::EntityData::Insert { attribs, .. } = &mut entity.data {
+                                        for attrib in attribs {
+                                            if let nm::EntityData::Attrib { tag, value, .. } =
+                                                &mut attrib.data
+                                            {
+                                                if tag.to_uppercase() == tag_up {
+                                                    *value = new_val.to_string();
+                                                    changed += 1;
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                            self.sync_compat_from_native(i, *sh);
                         }
                         if changed > 0 {
                             self.tabs[i].dirty = true;
@@ -2377,7 +2363,7 @@ impl H7CAD {
                         // Create new viewports.
                         for (cx, cz, w, h) in &rects {
                             let mut vp = acadrust::entities::Viewport::new();
-                            vp.center = acadrust::types::Vector3::new(*cx, 0.0, *cz);
+                            vp.center = crate::types::Vector3::new(*cx, 0.0, *cz);
                             vp.width  = *w;
                             vp.height = *h;
                             vp.id     = 2; // commit_entity will assign unique IDs
@@ -2655,7 +2641,7 @@ impl H7CAD {
                         let color_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
                         if let Ok(idx) = color_str.parse::<i16>() {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(&layer_name) {
-                                l.color = acadrust::types::Color::from_index(idx);
+                                l.color = crate::types::Color::from_index(idx);
                                 self.push_undo_snapshot(i, "LAYER COLOR");
                                 self.tabs[i].dirty = true;
                                 self.command_line.push_output(&format!("LAYER: '{}' color set to ACI {}.", layer_name, idx));
@@ -2686,7 +2672,7 @@ impl H7CAD {
             // ── UCS management ───────────────────────────────────────────
             cmd if cmd == "UCS" || cmd.starts_with("UCS ") => {
                 use acadrust::tables::Ucs;
-                use acadrust::types::Vector3;
+                use crate::types::Vector3;
                 use super::helpers::{ucs_to_wcs, ucs_z_axis, ucs_rotated_z};
                 let parts: Vec<&str> = cmd.splitn(4, ' ').collect();
                 let sub = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
@@ -3476,14 +3462,14 @@ impl H7CAD {
                         self.command_line.push_error("CHPROP: no entities selected.");
                     } else {
                         // Validate value early to give clear errors
-                        let color_val: Option<acadrust::types::Color> = if prop == "COLOR" {
-                            value.parse::<i16>().ok().map(acadrust::types::Color::from_index)
+                        let color_val: Option<crate::types::Color> = if prop == "COLOR" {
+                            value.parse::<i16>().ok().map(crate::types::Color::from_index)
                         } else { None };
                         let ltscale_val: Option<f64> = if prop == "LTSCALE" {
                             value.parse().ok()
                         } else { None };
-                        let transparency_val: Option<acadrust::types::Transparency> = if prop == "TRANSPARENCY" {
-                            value.parse::<f64>().ok().map(acadrust::types::Transparency::from_percent)
+                        let transparency_val: Option<crate::types::Transparency> = if prop == "TRANSPARENCY" {
+                            value.parse::<f64>().ok().map(crate::types::Transparency::from_percent)
                         } else { None };
 
                         if (prop == "COLOR" && color_val.is_none())
@@ -3813,7 +3799,6 @@ impl H7CAD {
             // XDATA CLEAR            — remove all xdata from selected entities
             // XDATA CLEAR <app>      — remove xdata for a specific application
             cmd if cmd == "XDATA" || cmd.starts_with("XDATA ") => {
-                use acadrust::xdata::{ExtendedDataRecord, XDataValue};
                 let rest = cmd.trim_start_matches("XDATA").trim();
                 let parts: Vec<&str> = rest.splitn(3, char::is_whitespace).collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
@@ -3827,61 +3812,60 @@ impl H7CAD {
                 } else {
                     match sub.as_str() {
                         "LIST" | "" => {
+                            // 读取走 native_store（真源）。DXF/DWG 读入时 xdata 已通过
+                            // native_bridge 双向投影填入 nm::Entity.xdata。
+                            let store = self.tabs[i].scene.native_store.as_ref();
                             for sh in &selected_handles {
-                                if let Some(entity) = self.tabs[i].scene.document.get_entity(*sh) {
-                                    let xd = &entity.common().extended_data;
-                                    if xd.is_empty() {
-                                        self.command_line.push_output(&format!("  {:x}: no xdata.", sh.value()));
-                                    } else {
-                                        for rec in xd.records() {
-                                            self.command_line.push_output(&format!(
-                                                "  {:x} [{}]: {} value(s)", sh.value(), rec.application_name, rec.values.len()
-                                            ));
-                                            for v in &rec.values {
-                                                self.command_line.push_output(&format!("    {:?}", v));
-                                            }
+                                let nh = nm::Handle::new(sh.value());
+                                let xdata = store
+                                    .and_then(|s| s.inner().get_entity(nh))
+                                    .map(|e| e.xdata.as_slice())
+                                    .unwrap_or(&[]);
+                                if xdata.is_empty() {
+                                    self.command_line.push_output(&format!("  {:x}: no xdata.", sh.value()));
+                                } else {
+                                    for (app, entries) in xdata {
+                                        self.command_line.push_output(&format!(
+                                            "  {:x} [{}]: {} value(s)", sh.value(), app, entries.len()
+                                        ));
+                                        for (code, val) in entries {
+                                            self.command_line.push_output(&format!("    {code}: {val}"));
                                         }
                                     }
                                 }
                             }
                         }
                         "SET" => {
-                            let app = parts.get(1).copied().unwrap_or("H7CAD");
-                            let val = parts.get(2).copied().unwrap_or("");
-                            self.push_undo_snapshot(i, "XDATA SET");
-                            for sh in &selected_handles {
-                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*sh) {
-                                    let mut rec = ExtendedDataRecord::new(app);
-                                    rec.add_value(XDataValue::String(val.to_string()));
-                                    entity.common_mut().extended_data.add_record(rec);
+                            let app = parts.get(1).copied().unwrap_or("H7CAD").to_string();
+                            let val = parts.get(2).copied().unwrap_or("").to_string();
+                            let summary = self.apply_store_edit(i, "XDATA SET", |store, nh| {
+                                if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                                    entity.xdata.push((app.clone(), vec![(1000, val.clone())]));
                                 }
+                            });
+                            if summary.changed {
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(&format!(
+                                    "XDATA: set [{app}] = \"{val}\" on {} entity/entities.",
+                                    selected_handles.len()
+                                ));
                             }
-                            self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!(
-                                "XDATA: set [{app}] = \"{val}\" on {} entity/entities.", selected_handles.len()
-                            ));
                         }
                         "CLEAR" => {
-                            let app_filter = parts.get(1).copied();
-                            self.push_undo_snapshot(i, "XDATA CLEAR");
-                            for sh in &selected_handles {
-                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*sh) {
-                                    let xd = &mut entity.common_mut().extended_data;
-                                    if let Some(app) = app_filter {
-                                        // Rebuild without the matching app.
-                                        let kept: Vec<_> = xd.records().iter()
-                                            .filter(|r| r.application_name != app)
-                                            .cloned()
-                                            .collect();
-                                        xd.clear();
-                                        for r in kept { xd.add_record(r); }
+                            let app_filter = parts.get(1).copied().map(|s| s.to_string());
+                            let summary = self.apply_store_edit(i, "XDATA CLEAR", |store, nh| {
+                                if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                                    if let Some(app) = app_filter.as_ref() {
+                                        entity.xdata.retain(|(a, _)| a != app);
                                     } else {
-                                        xd.clear();
+                                        entity.xdata.clear();
                                     }
                                 }
+                            });
+                            if summary.changed {
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output("XDATA: cleared.");
                             }
-                            self.tabs[i].dirty = true;
-                            self.command_line.push_output("XDATA: cleared.");
                         }
                         _ => {
                             self.command_line.push_info("Usage: XDATA LIST | SET <app> <value> | CLEAR [app]");

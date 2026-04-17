@@ -7,6 +7,7 @@
 //            After all attributes are processed, commit via ReplaceMany.
 
 use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -132,27 +133,49 @@ fn make_attedit_sentinel(
         .collect::<Vec<_>>()
         .join("\x02");
     let mut xl = acadrust::entities::XLine::new(
-        acadrust::types::Vector3::zero(),
-        acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+        crate::types::Vector3::zero(),
+        crate::types::Vector3::new(1.0, 0.0, 0.0),
     );
     xl.common.layer = format!("__ATTEDIT__{}", encoded);
     EntityType::XLine(xl)
 }
 
-/// Apply edited attribute values to an INSERT entity in the document.
-/// Called from `cmd_result.rs` when the sentinel is detected.
-pub fn apply_attedit(
-    doc: &mut acadrust::CadDocument,
+pub fn native_insert_attrs(entity: &nm::Entity) -> Option<Vec<(String, String)>> {
+    let nm::EntityData::Insert { attribs, .. } = &entity.data else {
+        return None;
+    };
+    Some(
+        attribs
+            .iter()
+            .filter_map(|attrib| match &attrib.data {
+                nm::EntityData::Attrib { tag, value, .. } => Some((tag.clone(), value.clone())),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
+pub fn apply_attedit_native(
+    doc: &mut nm::CadDocument,
     handle: acadrust::Handle,
     encoded: &str,
 ) {
-    let Some(EntityType::Insert(ins)) = doc.get_entity_mut(handle) else { return; };
+    let Some(entity) = doc.get_entity_mut(nm::Handle::new(handle.value())) else {
+        return;
+    };
+    let nm::EntityData::Insert { attribs, .. } = &mut entity.data else {
+        return;
+    };
     for pair in encoded.split('\x02') {
         let mut parts = pair.splitn(2, '\x01');
         let Some(tag) = parts.next() else { continue; };
         let Some(val) = parts.next() else { continue; };
-        if let Some(attrib) = ins.attributes.iter_mut().find(|a| a.tag == tag) {
-            attrib.set_value(val);
+        if let Some(attrib) = attribs.iter_mut().find(|attrib| {
+            matches!(&attrib.data, nm::EntityData::Attrib { tag: attrib_tag, .. } if attrib_tag == tag)
+        }) {
+            if let nm::EntityData::Attrib { value, .. } = &mut attrib.data {
+                *value = val.to_string();
+            }
         }
     }
 }

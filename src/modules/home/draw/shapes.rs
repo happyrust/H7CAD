@@ -11,7 +11,7 @@
 //   POLY_E — Edge (pick two endpoints of one edge)
 
 use acadrust::entities::LwVertex;
-use acadrust::types::Vector2;
+use crate::types::Vector2;
 use acadrust::{EntityType, LwPolyline};
 
 use crate::command::{CadCommand, CmdResult};

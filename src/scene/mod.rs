@@ -39,7 +39,7 @@ use crate::store::NativeStore;
 use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid};
 use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
 use acadrust::objects::ObjectType;
-use acadrust::types::Vector2;
+use crate::types::Vector2;
 use acadrust::{CadDocument, EntityType, Handle, TableEntry};
 use h7cad_native_model as nm;
 use glam;
@@ -1763,7 +1763,7 @@ impl Scene {
     /// Returns the RGBA color for the given layer name.
     pub fn layer_color(&self, layer: &str) -> [f32; 4] {
         let layer_entry = self.document.layers.get(layer);
-        let color = layer_entry.map(|l| &l.color).unwrap_or(&acadrust::types::Color::WHITE);
+        let color = layer_entry.map(|l| &l.color).unwrap_or(&crate::types::Color::WHITE);
         let [r, g, b, _] = crate::scene::tessellate::aci_to_rgba(color);
         [r, g, b, 1.0]
     }
@@ -1815,7 +1815,7 @@ impl Scene {
 
         let mut block = Block::new(
             name,
-            acadrust::types::Vector3::ZERO,
+            crate::types::Vector3::ZERO,
         );
         block.common.handle = block_handle;
         block.common.owner_handle = br_handle;
@@ -1844,7 +1844,7 @@ impl Scene {
 
         let insert = DxfInsert::new(
             name,
-            acadrust::types::Vector3::new(base.x as f64, base.y as f64, base.z as f64),
+            crate::types::Vector3::new(base.x as f64, base.y as f64, base.z as f64),
         );
         Ok(self.add_entity(EntityType::Insert(insert)))
     }
@@ -2887,13 +2887,13 @@ impl Scene {
     /// Save the current camera state into a new named view entry.
     /// Returns the view; caller must push it into document.views.
     pub fn current_as_named_view(&self, name: &str) -> acadrust::tables::View {
-        use acadrust::types::Vector3;
+        use crate::types::Vector3;
         let cam = self.camera.borrow();
         let eye_dir = cam.rotation * glam::Vec3::Z;
         let height = cam.ortho_size() * 2.0;
         let width = height; // caller can adjust; rough square
         acadrust::tables::View {
-            handle: acadrust::types::Handle::NULL,
+            handle: crate::types::Handle::NULL,
             name: name.to_string(),
             center: Vector3 {
                 x: cam.target.x as f64,
@@ -3212,11 +3212,11 @@ mod tests {
         let mut viewport = Viewport::new();
         viewport.id = 2;
         viewport.status.is_on = true;
-        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.center = crate::types::Vector3::new(50.0, 50.0, 0.0);
         viewport.width = 100.0;
         viewport.height = 100.0;
-        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_target = crate::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = crate::types::Vector3::new(0.0, 0.0, 1.0);
         viewport.view_height = 100.0;
         let viewport_handle = scene.add_entity(EntityType::Viewport(viewport));
 
@@ -3246,11 +3246,11 @@ mod tests {
         let mut viewport = Viewport::new();
         viewport.id = 2;
         viewport.status.is_on = true;
-        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.center = crate::types::Vector3::new(50.0, 50.0, 0.0);
         viewport.width = 100.0;
         viewport.height = 100.0;
-        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_target = crate::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = crate::types::Vector3::new(0.0, 0.0, 1.0);
         viewport.view_height = 100.0;
         let viewport_handle = scene.add_entity(EntityType::Viewport(viewport));
 
@@ -3290,11 +3290,11 @@ mod tests {
         let mut viewport = Viewport::new();
         viewport.id = 2;
         viewport.status.is_on = true;
-        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.center = crate::types::Vector3::new(50.0, 50.0, 0.0);
         viewport.width = 100.0;
         viewport.height = 100.0;
-        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_target = crate::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = crate::types::Vector3::new(0.0, 0.0, 1.0);
         viewport.view_height = 100.0;
         let _vp_handle = scene.add_entity(EntityType::Viewport(viewport));
 
@@ -3343,22 +3343,22 @@ mod tests {
         let mut vp1 = Viewport::new();
         vp1.id = 2;
         vp1.status.is_on = true;
-        vp1.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        vp1.center = crate::types::Vector3::new(50.0, 50.0, 0.0);
         vp1.width = 100.0;
         vp1.height = 100.0;
-        vp1.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        vp1.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        vp1.view_target = crate::types::Vector3::new(0.0, 0.0, 0.0);
+        vp1.view_direction = crate::types::Vector3::new(0.0, 0.0, 1.0);
         vp1.view_height = 100.0;
         let vp1_handle = scene.add_entity(EntityType::Viewport(vp1));
 
         let mut vp2 = Viewport::new();
         vp2.id = 3;
         vp2.status.is_on = true;
-        vp2.center = acadrust::types::Vector3::new(200.0, 200.0, 0.0);
+        vp2.center = crate::types::Vector3::new(200.0, 200.0, 0.0);
         vp2.width = 100.0;
         vp2.height = 100.0;
-        vp2.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        vp2.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        vp2.view_target = crate::types::Vector3::new(0.0, 0.0, 0.0);
+        vp2.view_direction = crate::types::Vector3::new(0.0, 0.0, 1.0);
         vp2.view_height = 100.0;
         let _vp2_handle = scene.add_entity(EntityType::Viewport(vp2));
 
@@ -3397,11 +3397,11 @@ mod tests {
         let mut viewport = Viewport::new();
         viewport.id = 2;
         viewport.status.is_on = true;
-        viewport.center = acadrust::types::Vector3::new(50.0, 50.0, 0.0);
+        viewport.center = crate::types::Vector3::new(50.0, 50.0, 0.0);
         viewport.width = 100.0;
         viewport.height = 100.0;
-        viewport.view_target = acadrust::types::Vector3::new(0.0, 0.0, 0.0);
-        viewport.view_direction = acadrust::types::Vector3::new(0.0, 0.0, 1.0);
+        viewport.view_target = crate::types::Vector3::new(0.0, 0.0, 0.0);
+        viewport.view_direction = crate::types::Vector3::new(0.0, 0.0, 1.0);
         viewport.view_height = 100.0;
         let _vp_handle = scene.add_entity(EntityType::Viewport(viewport));
 
@@ -3799,8 +3799,8 @@ mod tests {
         let mut scene = scene_with_native(nm::CadDocument::new());
 
         let handle = scene.add_entity(EntityType::Line(acadrust::entities::Line::from_points(
-            acadrust::types::Vector3::new(0.0, 0.0, 0.0),
-            acadrust::types::Vector3::new(5.0, 0.0, 0.0),
+            crate::types::Vector3::new(0.0, 0.0, 0.0),
+            crate::types::Vector3::new(5.0, 0.0, 0.0),
         )));
 
         let native_entity = scene

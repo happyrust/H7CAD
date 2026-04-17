@@ -8,8 +8,7 @@
 //   CIRCLE_TTR — Tan, Tan, Radius (two tangent objects + radius)
 //   CIRCLE_TTT — Tan, Tan, Tan    (inscribed circle tangent to three objects)
 
-use acadrust::types::Vector3;
-use acadrust::{Circle, EntityType};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult, TangentObject};
 use crate::modules::home::defaults;
@@ -76,11 +75,10 @@ fn circle_wire(center: Vec3, radius: f32) -> WireModel {
     WireModel::solid("rubber_band".into(), pts, WireModel::CYAN, false)
 }
 
-fn make_circle(center: Vec3, radius: f64) -> EntityType {
-    EntityType::Circle(Circle {
-        center: Vector3::new(center.x as f64, center.y as f64, center.z as f64),
+fn make_circle(center: Vec3, radius: f64) -> nm::Entity {
+    nm::Entity::new(nm::EntityData::Circle {
+        center: [center.x as f64, center.y as f64, center.z as f64],
         radius,
-        ..Default::default()
     })
 }
 
@@ -151,7 +149,7 @@ impl CadCommand for CircleCommand {
             StepCR::Radius(c) => {
                 let r = c.distance(pt);
                 defaults::set_circle_radius(r);
-                CmdResult::CommitAndExit(make_circle(*c, r as f64))
+                CmdResult::CommitAndExitNative(make_circle(*c, r as f64))
             }
         }
     }
@@ -159,7 +157,7 @@ impl CadCommand for CircleCommand {
         if let StepCR::Radius(c) = &self.step {
             let c = *c;
             let r = self.default_r;
-            return CmdResult::CommitAndExit(make_circle(c, r as f64));
+            return CmdResult::CommitAndExitNative(make_circle(c, r as f64));
         }
         CmdResult::Cancel
     }
@@ -178,7 +176,7 @@ impl CadCommand for CircleCommand {
             let r: f32 = text.trim().replace(',', ".").parse().ok()?;
             if r > 0.0 {
                 defaults::set_circle_radius(r);
-                return Some(CmdResult::CommitAndExit(make_circle(*c, r as f64)));
+                return Some(CmdResult::CommitAndExitNative(make_circle(*c, r as f64)));
             }
         }
         None
@@ -223,7 +221,7 @@ impl CadCommand for CircleCDCommand {
             StepCR::Radius(c) => {
                 let d = c.distance(pt) * 2.0;
                 defaults::set_circle_diam(d);
-                CmdResult::CommitAndExit(make_circle(*c, (d / 2.0) as f64))
+                CmdResult::CommitAndExitNative(make_circle(*c, (d / 2.0) as f64))
             }
         }
     }
@@ -231,7 +229,7 @@ impl CadCommand for CircleCDCommand {
         if let StepCR::Radius(c) = &self.step {
             let c = *c;
             let d = self.default_d;
-            return CmdResult::CommitAndExit(make_circle(c, (d / 2.0) as f64));
+            return CmdResult::CommitAndExitNative(make_circle(c, (d / 2.0) as f64));
         }
         CmdResult::Cancel
     }
@@ -251,7 +249,7 @@ impl CadCommand for CircleCDCommand {
             let d: f32 = text.trim().replace(',', ".").parse().ok()?;
             if d > 0.0 {
                 defaults::set_circle_diam(d);
-                return Some(CmdResult::CommitAndExit(make_circle(*c, (d / 2.0) as f64)));
+                return Some(CmdResult::CommitAndExitNative(make_circle(*c, (d / 2.0) as f64)));
             }
         }
         None
@@ -290,7 +288,7 @@ impl CadCommand for Circle2PCommand {
             Some(p1) => {
                 let center = (p1 + pt) * 0.5;
                 let radius = p1.distance(pt) as f64 / 2.0;
-                CmdResult::CommitAndExit(make_circle(center, radius))
+                CmdResult::CommitAndExitNative(make_circle(center, radius))
             }
         }
     }
@@ -338,7 +336,7 @@ impl CadCommand for Circle3PCommand {
         }
         let (a, b, c) = (self.pts[0], self.pts[1], self.pts[2]);
         match circumcircle(a, b, c) {
-            Some((center, radius)) => CmdResult::CommitAndExit(make_circle(center, radius as f64)),
+            Some((center, radius)) => CmdResult::CommitAndExitNative(make_circle(center, radius as f64)),
             None => {
                 self.pts.pop();
                 CmdResult::NeedPoint
@@ -825,7 +823,7 @@ impl CadCommand for CircleTTRCommand {
             let hint = (*hit1 + *hit2) * 0.5;
             let candidates = ttr_candidates(*obj1, *obj2, r);
             if let Some(center) = best_of(&candidates, hint) {
-                Some(CmdResult::CommitAndExit(make_circle(center, r as f64)))
+                Some(CmdResult::CommitAndExitNative(make_circle(center, r as f64)))
             } else {
                 Some(CmdResult::Cancel)
             }
@@ -891,7 +889,7 @@ impl CadCommand for CircleTTTCommand {
         let hint = self.hits.iter().fold(Vec3::ZERO, |a, &b| a + b) / 3.0;
         let candidates = ttt_candidates(self.objs[0], self.objs[1], self.objs[2]);
         match best_circle_of(&candidates, hint) {
-            Some((center, r)) => CmdResult::CommitAndExit(make_circle(center, r as f64)),
+            Some((center, r)) => CmdResult::CommitAndExitNative(make_circle(center, r as f64)),
             None => {
                 self.objs.pop();
                 self.hits.pop();

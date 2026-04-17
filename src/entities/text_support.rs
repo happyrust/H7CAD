@@ -1,4 +1,5 @@
 use acadrust::CadDocument;
+use h7cad_native_model::CadDocument as NativeCadDocument;
 
 use crate::scene::cxf;
 
@@ -30,6 +31,45 @@ pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedT
             }
         } else if !style.true_type_font.trim().is_empty() {
             style.true_type_font.trim().to_string()
+        } else if !style.name.trim().is_empty() {
+            style.name.trim().to_string()
+        } else {
+            "Standard".to_string()
+        }
+    } else if style_name.trim().is_empty() {
+        "Standard".to_string()
+    } else {
+        style_name.trim().to_string()
+    };
+
+    ResolvedTextStyle {
+        font_name,
+        width_factor: style.map(|s| s.width_factor as f32).unwrap_or(1.0),
+        oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
+    }
+}
+
+pub fn resolve_text_style_native(
+    style_name: &str,
+    document: &NativeCadDocument,
+) -> ResolvedTextStyle {
+    let style = document.text_styles.values().find(|entry| {
+        entry.name.eq_ignore_ascii_case(style_name)
+            || (style_name.trim().is_empty() && entry.name.eq_ignore_ascii_case("Standard"))
+    });
+
+    let font_name = if let Some(style) = style {
+        if !style.font_name.trim().is_empty() {
+            let file = style.font_name.trim();
+            let basename = file.rsplit(['/', '\\']).next().unwrap_or(file);
+            let stem = basename.split('.').next().unwrap_or(basename).trim();
+            if !stem.is_empty() {
+                stem.to_string()
+            } else if !style.name.trim().is_empty() {
+                style.name.trim().to_string()
+            } else {
+                "Standard".to_string()
+            }
         } else if !style.name.trim().is_empty() {
             style.name.trim().to_string()
         } else {

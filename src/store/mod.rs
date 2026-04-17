@@ -11,6 +11,7 @@ use std::path::Path;
 /// During the migration period both `NativeStore` (wrapping `nm::CadDocument`)
 /// and legacy compat paths coexist.  All new consumer code should depend on
 /// `CadStore` rather than reaching into concrete document types directly.
+#[allow(dead_code)]
 pub trait CadStore {
     // ── Entity CRUD ──────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ pub trait CadStore {
 }
 
 /// Opaque undo snapshot.  Internally holds a cloned native document.
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct StoreSnapshot {
     pub(crate) doc: nm::CadDocument,

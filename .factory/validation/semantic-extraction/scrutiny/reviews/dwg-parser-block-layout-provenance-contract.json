@@ -1,0 +1,22 @@
+{
+  "featureId": "dwg-parser-block-layout-provenance-contract",
+  "reviewedAt": "2026-04-13T12:31:51.743702+00:00",
+  "commitId": "1b75be5",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature successfully exposed semantic identity/link fields on parser summaries, but the new provenance contract is still incomplete because the block/layout regression only exercises parser-facing tuples and never proves that outward summaries themselves distinguish layout and block records. A blocking gap remains against the feature's requirement that outward summaries carry the semantic identity fields needed to distinguish same-kind block/layout records.",
+    "issues": [
+      {
+        "file": "crates/h7cad-native-dwg/tests/read_headers.rs",
+        "line": 841,
+        "severity": "blocking",
+        "description": "The new block/layout regression validates `pending_provenance_projection()` instead of the actual outward summary surface (`summarize_object()` / `ParsedRecordSummary`). Because this helper re-labels objects with hard-coded `target` strings and only copies summary fields afterwards, the feature still lacks coverage that outward summaries themselves distinguish layout vs block records on parser-facing output, which is required by the feature's expected behavior."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed the feature metadata, worker handoff/transcript, commit `1b75be5`, and the relevant parser files. Found one blocking issue: the added block/layout test stops at a custom provenance projection helper instead of asserting the outward summary seam directly, so the feature does not yet prove that parser-facing summaries distinguish block/layout identities as required."
+}

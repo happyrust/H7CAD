@@ -1,0 +1,27 @@
+{
+  "milestone": "bridge-entities",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-BRIDGE-001",
+    "VAL-BRIDGE-002",
+    "VAL-BRIDGE-003",
+    "VAL-BRIDGE-004",
+    "VAL-BRIDGE-005",
+    "VAL-BRIDGE-006",
+    "VAL-BRIDGE-007",
+    "VAL-BRIDGE-008",
+    "VAL-BRIDGE-009",
+    "VAL-BRIDGE-010"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [],
+  "previousRound": null
+}

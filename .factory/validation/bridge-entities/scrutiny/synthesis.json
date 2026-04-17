@@ -1,7 +1,7 @@
 {
   "milestone": "bridge-entities",
-  "round": 1,
-  "status": "fail",
+  "round": 3,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -15,76 +15,45 @@
     },
     "lint": {
       "passed": true,
-      "command": "cargo check",
+      "command": "cargo check -p h7cad-native-dxf -p h7cad-native-model -p h7cad-native-facade",
       "exitCode": 0
     }
   },
   "reviewsSummary": {
     "total": 4,
-    "passed": 0,
-    "failed": 4,
-    "failedFeatures": [
-      "bridge-ellipse-and-direct-geometry",
-      "bridge-polyline-and-hatch",
-      "bridge-annotations-images-and-payload-entities",
-      "bridge-common-fields-and-document-counts"
-    ]
+    "passed": 4,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "bridge-ellipse-and-direct-geometry",
-      "severity": "blocking",
-      "description": "SOLID bridge drops compat-visible `normal` and `thickness`, so payload fidelity is not preserved through native/compat/native roundtrip."
-    },
-    {
-      "featureId": "bridge-ellipse-and-direct-geometry",
-      "severity": "blocking",
-      "description": "Face3D bridge cannot preserve compat `invisible_edges`, and coverage misses this observable payload regression."
-    },
-    {
-      "featureId": "bridge-ellipse-and-direct-geometry",
-      "severity": "blocking",
-      "description": "SHAPE bridge only preserves insertion, size, and shape number while dropping other compat-visible payload fields such as name, rotation/scaling, normal, thickness, and style metadata."
-    },
-    {
-      "featureId": "bridge-polyline-and-hatch",
-      "severity": "blocking",
-      "description": "PolygonMesh and PolyfaceMesh bridge-back collapses mesh dimensions/face records into flat vertex lists, so family semantics are not preserved."
-    },
-    {
-      "featureId": "bridge-polyline-and-hatch",
-      "severity": "blocking",
-      "description": "HATCH bridge-back panics on spline boundary edges instead of preserving or safely accounting for valid compat hatch content."
-    },
-    {
-      "featureId": "bridge-annotations-images-and-payload-entities",
-      "severity": "blocking",
-      "description": "Recorded feature commit `11579d20f655a7713823cf86ca37770006efc7f3` only updates `.factory/services.yaml` and does not contain the claimed bridge implementation/tests, so the feature lacks attributable completed-change evidence."
-    },
-    {
-      "featureId": "bridge-common-fields-and-document-counts",
-      "severity": "blocking",
-      "description": "WIPEOUT reverse bridge rebuilds local clip vertices from world-space boundary vertices, corrupting wipeout geometry on native/compat/native roundtrip."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
-      "suggestion": "Update the `dxf-bridge-worker` skill to use the working bridge test command `cargo test --bin H7CAD native_bridge -- --test-threads=16` instead of `cargo test --lib native_bridge`, and note that workers should verify stale manifest commands before using them.",
-      "evidence": "All four review reports flagged the stale bridge test command as a repeated issue; the worker transcripts had to deviate because the root package has no library target.",
+      "suggestion": "Update the dxf-bridge-worker skill to prefer the working bridge test command cargo test --bin H7CAD native_bridge -- --test-threads=16 and to verify manifest commands when a package lacks the referenced target.",
+      "evidence": "Bridge-entities scrutiny round 1 and the follow-up fixes both relied on a stale cargo test --lib native_bridge command; the repository manifest now exposes the correct \test_bridge command in .factory/services.yaml.",
       "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Clarify dxf-bridge-worker guidance for attribution-repair follow-ups when assigned files are already clean at HEAD, so workers know whether to return without a commit, create an empty attribution artifact elsewhere, or escalate immediately.",
+      "evidence": "The bridge-annotations-images-payload-attribution-repair follow-up could not create a feature commit because the assigned bridge file already matched HEAD, but the current skill text still says workers should still create a feature commit when assigned files were already dirty.",
+      "isSystemic": false
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Update `.factory/services.yaml` with the working bridge test command.",
-      "reason": "already applied in the repository state reviewed by scrutiny"
+      "observation": "The dxf-bridge-worker skill still tells workers to trust the manifest command from services.yaml after verifying workspace layout, but bridge features in this mission repeatedly had to use `cargo test --bin H7CAD native_bridge -- --test-threads=16` because the contract text and older command forms referring to `--lib native_bridge` are stale for this workspace layout.",
+      "reason": "ambiguous or already covered elsewhere"
     },
     {
-      "observation": "Add AGENTS guidance to require payload-level assertions for WIPEOUT-like entities.",
-      "reason": "ambiguous; the existing AGENTS and skill guidance already require field-level assertions, and the concrete gap is reviewer/feature execution rather than missing mission guidance"
+      "observation": "Update .factory/services.yaml with the working bridge test command.",
+      "reason": "already applied in repository state validated during current scrutiny round"
+    },
+    {
+      "observation": "Add extra AGENTS guidance for payload-level assertions.",
+      "reason": "already covered by existing field-level assertion guidance; no new mission-policy gap established by current reviews"
     }
   ],
-  "previousRound": null
+  "previousRound": "round-2: same file path before round 3 overwrite"
 }

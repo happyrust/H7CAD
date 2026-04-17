@@ -3,7 +3,7 @@
 // Command:  SPLINE (SPL)
 //   Click to add control points.  Enter (≥2 pts) → commits EntityType::Spline.
 
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::{EntityType, Spline};
 
 use crate::command::{CadCommand, CmdResult};

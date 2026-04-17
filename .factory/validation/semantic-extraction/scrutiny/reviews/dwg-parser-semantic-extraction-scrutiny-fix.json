@@ -1,0 +1,26 @@
+{
+  "featureId": "dwg-parser-semantic-extraction-scrutiny-fix",
+  "reviewedAt": "2026-04-13T00:00:00Z",
+  "commitId": "f07337e98fa1fa251a5f9694d15cc7a13aefb3af",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the fix commit, handoff, and transcript skeleton against the prior blocking findings. The implementation closes the identified gaps: semantic graph projections now preserve handle identity, semantic decode errors carry the real section index, semantic decoding activates when records are prefixed/padded before the first semantic token, and parser-facing entity summaries preserve owner plus layer provenance including handle/reference-based layer relationships.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker followed the DWG parser worker's verification-first option appropriately because the feature was already present in the shared worktree, but startup guidance still lacks a Windows-safe way to run `.factory/init.sh`. Both the handoff and transcript show failed attempts through `python3` and PowerShell before proceeding without it.",
+      "evidence": "Handoff for session 3082e695-6be1-46f9-9f1e-345ea8417af8 marks `followedProcedure` false only for init-script execution and verification-first audit; `.factory/skills/dwg-parser-worker/SKILL.md` requires initialization but does not document a Windows invocation for `.factory/init.sh`."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The semantic token conventions used by parser-facing provenance extraction are still only encoded in source/tests rather than shared library guidance. Future workers would have to rediscover that prefixed semantic detection scans for `TBL:/ENT:/OBJ:` anywhere in the payload and that entity provenance combines `LR<hex>`, `L<name>`, and `O<hex>` fragments into outward links.",
+      "evidence": "`crates/h7cad-native-dwg/src/lib.rs:188-197,405-491` implements semantic prefix scanning and owner/layer link assembly, while `.factory/library/architecture.md` describes semantic provenance goals but not the current token conventions or activation rules."
+    }
+  ],
+  "addressesFailureFrom": "D:/work/plant-code/cad/H7CAD/.factory/validation/semantic-extraction/scrutiny/synthesis.json",
+  "summary": "Reviewed feature `dwg-parser-semantic-extraction-scrutiny-fix` against the prior semantic-decoder and pending-layer/entity blocking findings. Commit `f07337e98fa1fa251a5f9694d15cc7a13aefb3af` resolves those issues, and I found no remaining blocking or non-blocking code defects in the reviewed feature scope."
+}

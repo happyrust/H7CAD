@@ -8,7 +8,7 @@
 //   - spline_pts_wire     : world-space wire points for WireModel preview
 
 use acadrust::entities::Spline;
-use acadrust::types::Vector3;
+use crate::types::Vector3;
 use acadrust::Handle;
 use truck_modeling::{BSplineCurve, KnotVec, Point3};
 use truck_modeling::base::{BoundedCurve, ParametricCurve};

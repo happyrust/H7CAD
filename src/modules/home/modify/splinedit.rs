@@ -126,8 +126,8 @@ impl SplineOp {
         //
         // Simpler: encode op in the sentinel entity's layer field.
         let mut sentinel = acadrust::entities::XLine::new(
-            acadrust::types::Vector3::zero(),
-            acadrust::types::Vector3::new(1.0, 0.0, 0.0),
+            crate::types::Vector3::zero(),
+            crate::types::Vector3::new(1.0, 0.0, 0.0),
         );
         sentinel.common.layer = match self {
             SplineOp::Close   => "__SPLINEDIT_CLOSE__".to_string(),
@@ -138,17 +138,15 @@ impl SplineOp {
     }
 }
 
-/// Apply a spline operation (CLOSE/OPEN/REVERSE) to a spline entity.
-/// Called from `cmd_result.rs` when the ReplaceEntity sentinel is detected.
-pub fn apply_spline_op(doc: &mut acadrust::CadDocument, handle: acadrust::Handle, op: &str) {
-
-    let Some(EntityType::Spline(spline)) = doc.get_entity_mut(handle) else { return; };
+pub fn apply_spline_op_entity(entity: &EntityType, op: &str) -> Option<EntityType> {
+    let EntityType::Spline(source) = entity else { return None; };
+    let mut spline = source.clone();
     match op {
         "__SPLINEDIT_CLOSE__" => {
             if spline.control_points.len() >= 2 {
                 let first = spline.control_points[0];
                 spline.control_points.push(first);
-                // Regenerate clamped knots.
+                spline.flags.closed = true;
                 spline.knots = acadrust::entities::Spline::generate_clamped_knots(
                     spline.degree as usize,
                     spline.control_points.len(),
@@ -166,6 +164,7 @@ pub fn apply_spline_op(doc: &mut acadrust::CadDocument, handle: acadrust::Handle
                     && (first.z - last.z).abs() < 1e-9
                 {
                     spline.control_points.pop();
+                    spline.flags.closed = false;
                     spline.knots = acadrust::entities::Spline::generate_clamped_knots(
                         spline.degree as usize,
                         spline.control_points.len(),
@@ -184,4 +183,6 @@ pub fn apply_spline_op(doc: &mut acadrust::CadDocument, handle: acadrust::Handle
         }
         _ => {}
     }
+    Some(EntityType::Spline(spline))
 }
+

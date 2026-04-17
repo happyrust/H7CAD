@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use crate::types::{Color as AcadColor, LineWeight};
 use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{button, column, container, row, scrollable, svg, text, tooltip};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};

@@ -63,7 +63,7 @@ impl CadCommand for DimTeditCommand {
             let h = *handle;
             if let Some(mut ent) = entity.take() {
                 if let EntityType::Dimension(ref mut d) = ent {
-                    let new_pt = acadrust::types::Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64);
+                    let new_pt = crate::types::Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64);
                     d.base_mut().text_middle_point = new_pt;
                     d.base_mut().insertion_point = new_pt;
                 }

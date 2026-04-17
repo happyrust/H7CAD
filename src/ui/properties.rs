@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use acadrust::types::{Color as AcadColor, LineWeight};
+use crate::types::{Color as AcadColor, LineWeight};
 use acadrust::Handle;
 use iced::widget::{button, column, combo_box, container, row, scrollable, text, text_input};
 use iced::{Background, Border, Color, Element, Length, Padding, Theme};
@@ -842,7 +842,7 @@ pub fn acad_color_display(c: AcadColor) -> (Color, &'static str) {
             "ByBlock",
         ),
         AcadColor::Index(i) => {
-            let (r, g, b) = acadrust::types::aci_table::aci_to_rgb(i).unwrap_or((200, 200, 200));
+            let (r, g, b) = crate::types::aci_table::aci_to_rgb(i).unwrap_or((200, 200, 200));
             (
                 Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0),
                 aci_label(i),

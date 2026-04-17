@@ -1212,6 +1212,118 @@ pub enum EntityData {
         insertion: [f64; 3],
         scale: [f64; 3],
     },
+    Helix {
+        /// code 10/20/30
+        axis_base_point: [f64; 3],
+        /// code 11/21/31
+        start_point: [f64; 3],
+        /// code 12/22/32
+        axis_vector: [f64; 3],
+        /// code 40
+        radius: f64,
+        /// code 41
+        turns: f64,
+        /// code 42
+        turn_height: f64,
+        /// code 280 — 0=cylindrical, 1=conical
+        handedness: i16,
+        /// code 290 — true=CCW
+        is_ccw: bool,
+    },
+    ArcDimension {
+        /// Shared dimension fields (reuse same semantics as Dimension)
+        block_name: String,
+        style_name: String,
+        definition_point: [f64; 3],
+        text_midpoint: [f64; 3],
+        text_override: String,
+        /// code 13/23/33 — First extension definition point
+        first_point: [f64; 3],
+        /// code 14/24/34 — Second extension definition point
+        second_point: [f64; 3],
+        /// code 15/25/35 — Arc center
+        arc_center: [f64; 3],
+        /// code 40 — Leader length (if any)
+        leader_length: f64,
+        measurement: f64,
+    },
+    LargeRadialDimension {
+        block_name: String,
+        style_name: String,
+        definition_point: [f64; 3],
+        text_midpoint: [f64; 3],
+        text_override: String,
+        /// code 15/25/35 — chord override point
+        chord_point: [f64; 3],
+        /// code 40 — Leader length
+        leader_length: f64,
+        /// code 50 — Jog angle (radians)
+        jog_angle: f64,
+        measurement: f64,
+    },
+    /// Generic NURBS / procedural surface.
+    /// `surface_kind` is the original DXF type name
+    /// (EXTRUDEDSURFACE / LOFTEDSURFACE / REVOLVEDSURFACE / SWEPTSURFACE /
+    ///  PLANESURFACE / NURBSURFACE).
+    /// ACIS payload is stored as raw text so bridge/writer can round-trip it.
+    Surface {
+        surface_kind: String,
+        /// code 70 — U iso-line count
+        u_isolines: i32,
+        /// code 71 — V iso-line count
+        v_isolines: i32,
+        acis_data: String,
+    },
+    Light {
+        /// code 1
+        name: String,
+        /// code 70 — Light type: 1=Distant, 2=Point, 3=Spot
+        light_type: i16,
+        /// code 10/20/30
+        position: [f64; 3],
+        /// code 11/21/31 — Target (spot/distant)
+        target: [f64; 3],
+        /// code 40 — Intensity
+        intensity: f64,
+        /// code 290 — Status
+        is_on: bool,
+        /// code 63 — Color (shadow color)
+        color: i16,
+        /// code 50 — Hotspot angle (spot)
+        hotspot_angle: f64,
+        /// code 51 — Falloff angle (spot)
+        falloff_angle: f64,
+    },
+    /// AutoCAD Camera (view helper entity).
+    Camera {
+        /// code 10/20/30
+        position: [f64; 3],
+        /// code 11/21/31
+        target: [f64; 3],
+        /// code 40 — Lens length
+        lens_length: f64,
+    },
+    /// Section plane entity (SECTION / SECTIONOBJECT).
+    Section {
+        /// code 1 — Section name
+        name: String,
+        /// code 70 — State
+        state: i32,
+        /// code 10/20/30 per vertex — Section plane vertices
+        vertices: Vec<[f64; 3]>,
+        /// code 40/41/42 — vertical direction (normal)
+        vertical_direction: [f64; 3],
+    },
+    /// ACAD_PROXY_ENTITY — preserves raw DXF codes so the entity can
+    /// be written back unchanged even though we don't understand it.
+    ProxyEntity {
+        /// code 90 — Proxy entity class id
+        class_id: i32,
+        /// code 91 — Application entity class id
+        application_class_id: i32,
+        /// Raw (code, value) tuples captured verbatim
+        raw_codes: Vec<(i16, String)>,
+    },
     /// Placeholder for entity types not yet fully parsed
     Unknown {
         entity_type: String,
@@ -1253,6 +1365,14 @@ impl EntityData {
             Self::Mesh { .. } => "MESH".into(),
             Self::PdfUnderlay { .. } => "PDFUNDERLAY".into(),
             Self::MultiLeader { .. } => "MULTILEADER".into(),
+            Self::Helix { .. } => "HELIX".into(),
+            Self::ArcDimension { .. } => "ARC_DIMENSION".into(),
+            Self::LargeRadialDimension { .. } => "LARGE_RADIAL_DIMENSION".into(),
+            Self::Surface { surface_kind, .. } => surface_kind.clone(),
+            Self::Light { .. } => "LIGHT".into(),
+            Self::Camera { .. } => "CAMERA".into(),
+            Self::Section { .. } => "SECTION".into(),
+            Self::ProxyEntity { .. } => "ACAD_PROXY_ENTITY".into(),
             Self::Unknown { entity_type } => entity_type.clone(),
         }
     }
@@ -1394,6 +1514,85 @@ pub enum ObjectData {
         page_name: String,
         printer_name: String,
         paper_size: String,
+    },
+    /// FIELD — parametric text/property field.
+    Field {
+        /// code 1 — Evaluator id (e.g. "AcDbFormattedTable", "AcVar")
+        evaluator_id: String,
+        /// code 2 — Field code string
+        field_code: String,
+    },
+    /// IDBUFFER — ordered list of entity handles.
+    IdBuffer {
+        entity_handles: Vec<Handle>,
+    },
+    /// LAYER_FILTER — list of layer handles matching a saved filter.
+    LayerFilter {
+        /// code 1 — Filter name
+        name: String,
+        /// code 8 — Layer handles referenced by this filter
+        layer_handles: Vec<Handle>,
+    },
+    /// LIGHTLIST — aggregated list of lights.
+    LightList {
+        /// code 90 — Light count
+        count: i32,
+        light_handles: Vec<Handle>,
+    },
+    /// SUNSTUDY — sun study analysis block.
+    SunStudy {
+        /// code 1 — Sun setup name
+        name: String,
+        /// code 2 — Description
+        description: String,
+        /// code 70 — Output type (0=frames, 1=single, 2=range)
+        output_type: i16,
+    },
+    /// DATATABLE — user-defined key/value tabular data.
+    DataTable {
+        /// code 70 — Flags
+        flags: i16,
+        /// code 90 — Column count
+        column_count: i32,
+        /// code 91 — Row count
+        row_count: i32,
+        /// code 1 — Table name
+        name: String,
+    },
+    /// WIPEOUTVARIABLES — global wipeout frame draw mode.
+    WipeoutVariables {
+        /// code 70 — Frame setting (0=off, 1=on, 2=on+print)
+        frame_mode: i16,
+    },
+    /// GEODATA — drawing geodata (coordinate system, reference point).
+    GeoData {
+        /// code 70 — Coordinate type
+        coordinate_type: i16,
+        /// code 10/20/30 — Reference point (world coords)
+        reference_point: [f64; 3],
+        /// code 11/21/31 — Reference point (local design coords)
+        design_point: [f64; 3],
+    },
+    /// RENDERENVIRONMENT — background / fog render settings.
+    RenderEnvironment {
+        /// code 1 — Environment name
+        name: String,
+        /// code 290 — Fog enabled
+        fog_enabled: bool,
+        /// code 40 — Fog density near
+        fog_density_near: f64,
+        /// code 41 — Fog density far
+        fog_density_far: f64,
+    },
+    /// ACAD_PROXY_OBJECT — preserves raw DXF codes so the object can
+    /// be written back unchanged.
+    ProxyObject {
+        /// code 90 — Proxy object class id
+        class_id: i32,
+        /// code 91 — Application object class id
+        application_class_id: i32,
+        /// Raw (code, value) tuples captured verbatim
+        raw_codes: Vec<(i16, String)>,
     },
     Unknown {
         object_type: String,

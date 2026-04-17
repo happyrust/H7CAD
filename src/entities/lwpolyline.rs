@@ -174,6 +174,7 @@ fn write_back_verts(dst: &mut Vec<acadrust::entities::LwVertex>, src: &[NmLwVert
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl TruckConvertible for acadrust::entities::LwPolyline {
     fn to_truck(&self, _doc: &acadrust::CadDocument) -> Option<TruckEntity> {
         let verts = ar_to_nm(&self.vertices);
@@ -181,6 +182,7 @@ impl TruckConvertible for acadrust::entities::LwPolyline {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Grippable for acadrust::entities::LwPolyline {
     fn grips(&self) -> Vec<GripDef> {
         let verts = ar_to_nm(&self.vertices);
@@ -193,6 +195,7 @@ impl Grippable for acadrust::entities::LwPolyline {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl PropertyEditable for acadrust::entities::LwPolyline {
     fn geometry_properties(&self, _: &[String]) -> PropSection {
         let verts = ar_to_nm(&self.vertices);
@@ -203,6 +206,7 @@ impl PropertyEditable for acadrust::entities::LwPolyline {
     }
 }
 
+#[cfg(feature = "acadrust-compat")]
 impl Transformable for acadrust::entities::LwPolyline {
     fn apply_transform(&mut self, t: &EntityTransform) {
         let mut verts = ar_to_nm(&self.vertices);
