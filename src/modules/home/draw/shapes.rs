@@ -10,9 +10,7 @@
 //   POLY_C — Circumscribed about circle (edges tangent to circle)
 //   POLY_E — Edge (pick two endpoints of one edge)
 
-use acadrust::entities::LwVertex;
-use crate::types::Vector2;
-use acadrust::{EntityType, LwPolyline};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::IconKind;
@@ -56,14 +54,13 @@ pub const ICON: IconKind = ICON_RECT;
 
 // ── Shared geometry helpers ────────────────────────────────────────────────
 
-fn make_pline(xy_pairs: &[[f64; 2]]) -> EntityType {
-    EntityType::LwPolyline(LwPolyline {
+fn make_pline(xy_pairs: &[[f64; 2]]) -> nm::Entity {
+    nm::Entity::new(nm::EntityData::LwPolyline {
         vertices: xy_pairs
             .iter()
-            .map(|&[x, y]| LwVertex::new(Vector2::new(x, y)))
+            .map(|&[x, y]| nm::LwVertex { x, y, bulge: 0.0 })
             .collect(),
-        is_closed: true,
-        ..Default::default()
+        closed: true,
     })
 }
 
@@ -145,7 +142,7 @@ impl CadCommand for RectCommand {
                 self.a = Some(pt);
                 CmdResult::NeedPoint
             }
-            Some(a) => CmdResult::CommitAndExit(make_pline(&[
+            Some(a) => CmdResult::CommitAndExitNative(make_pline(&[
                 [a.x as f64, a.y as f64],
                 [pt.x as f64, a.y as f64],
                 [pt.x as f64, pt.y as f64],
@@ -221,7 +218,7 @@ impl CadCommand for RectRotCommand {
                 let h = (pt - b).dot(perp); // signed height
                 let c = b + perp * h;
                 let d = a + perp * h;
-                CmdResult::CommitAndExit(make_pline(&[
+                CmdResult::CommitAndExitNative(make_pline(&[
                     [a.x as f64, a.y as f64],
                     [b.x as f64, b.y as f64],
                     [c.x as f64, c.y as f64],
@@ -294,7 +291,7 @@ impl CadCommand for RectCenCommand {
                 let hh = (pt.y - c.y).abs() as f64;
                 let cx = c.x as f64;
                 let cy = c.y as f64;
-                CmdResult::CommitAndExit(make_pline(&[
+                CmdResult::CommitAndExitNative(make_pline(&[
                     [cx - hw, cy - hh],
                     [cx + hw, cy - hh],
                     [cx + hw, cy + hh],
@@ -388,7 +385,7 @@ impl CadCommand for PolyCommand {
             _ => {
                 let r = self.center.distance(pt);
                 let sa = angle_xy(self.center, pt);
-                CmdResult::CommitAndExit(make_pline(&poly_verts_xy(self.center, r, self.sides, sa)))
+                CmdResult::CommitAndExitNative(make_pline(&poly_verts_xy(self.center, r, self.sides, sa)))
             }
         }
     }
@@ -483,7 +480,7 @@ impl CadCommand for PolyCCommand {
                 // offset by half a sector (π/N) from that direction.
                 let edge_angle = angle_xy(self.center, pt);
                 let sa = edge_angle + PI / self.sides as f32;
-                CmdResult::CommitAndExit(make_pline(&poly_verts_xy(
+                CmdResult::CommitAndExitNative(make_pline(&poly_verts_xy(
                     self.center,
                     vr,
                     self.sides,
@@ -582,7 +579,7 @@ impl CadCommand for PolyECommand {
             }
             _ => {
                 if let Some((center, vr, sa)) = edge_poly_params(self.a, pt, self.sides) {
-                    CmdResult::CommitAndExit(make_pline(&poly_verts_xy(center, vr, self.sides, sa)))
+                    CmdResult::CommitAndExitNative(make_pline(&poly_verts_xy(center, vr, self.sides, sa)))
                 } else {
                     CmdResult::Cancel
                 }

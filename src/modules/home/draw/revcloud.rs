@@ -4,9 +4,7 @@
 // Each segment of the polygon is subdivided into arc bumps (bulge = 0.5).
 // Minimum arc length = `arc_length` parameter.
 
-use acadrust::entities::LwPolyline;
-use crate::types::Vector2;
-use acadrust::{EntityType, entities::LwVertex};
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -60,8 +58,8 @@ impl CadCommand for RevCloudCommand {
         if self.points.len() < 3 {
             return CmdResult::Cancel;
         }
-        let entity = make_revcloud(&self.points, self.arc_length);
-        CmdResult::CommitAndExit(entity)
+        let entity = make_revcloud_native(&self.points, self.arc_length);
+        CmdResult::CommitAndExitNative(entity)
     }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
@@ -86,12 +84,11 @@ impl CadCommand for RevCloudCommand {
     }
 }
 
-fn make_revcloud(pts: &[Vec3], arc_len: f64) -> EntityType {
+fn make_revcloud_native(pts: &[Vec3], arc_len: f64) -> nm::Entity {
     let n = pts.len();
-    let mut vertices: Vec<LwVertex> = Vec::new();
+    let mut vertices: Vec<nm::LwVertex> = Vec::new();
 
-    // For each edge, subdivide into arc bumps (bulge ≈ 0.5)
-    let bump_bulge = 0.5f64; // tan(included_angle/4) ≈ 0.5 → ~53° arc
+    let bump_bulge = 0.5f64;
 
     for i in 0..n {
         let p0 = pts[i];
@@ -99,22 +96,19 @@ fn make_revcloud(pts: &[Vec3], arc_len: f64) -> EntityType {
         let seg_len = ((p1.x - p0.x).powi(2) + (p1.z - p0.z).powi(2)).sqrt() as f64;
         if seg_len < 1e-6 { continue; }
 
-        // How many full arcs fit?
         let num_arcs = ((seg_len / arc_len).round() as usize).max(1);
         let step_x = (p1.x - p0.x) as f64 / num_arcs as f64;
         let step_z = (p1.z - p0.z) as f64 / num_arcs as f64;
 
         for j in 0..num_arcs {
             let x = p0.x as f64 + step_x * j as f64;
-            let y = p0.z as f64 + step_z * j as f64; // DXF Y
-            let mut v = LwVertex::new(Vector2::new(x, y));
-            v.bulge = bump_bulge;
-            vertices.push(v);
+            let y = p0.z as f64 + step_z * j as f64;
+            vertices.push(nm::LwVertex { x, y, bulge: bump_bulge });
         }
     }
 
-    let mut p = LwPolyline::new();
-    p.is_closed = true;
-    p.vertices = vertices;
-    EntityType::LwPolyline(p)
+    nm::Entity::new(nm::EntityData::LwPolyline {
+        vertices,
+        closed: true,
+    })
 }

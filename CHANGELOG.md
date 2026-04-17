@@ -2,6 +2,28 @@
 
 ## [未发布]
 
+### 2026-04-17：C3a REVCLOUD / SHAPES 命令 native-first（LwPolyline 纯 xy+bulge）
+
+开启 C3 系列 — home/draw 模块创建命令 native-first。首批选择**只使用 xy+bulge**
+的 LwPolyline 命令（native `LwVertex { x, y, bulge }` 完整对等）：
+
+- **REVCLOUD** (`revcloud.rs`)：`make_revcloud` → `make_revcloud_native` 返回
+  `nm::Entity::new(nm::EntityData::LwPolyline { vertices, closed: true })`；
+  1 个 `CommitAndExit` → `CommitAndExitNative`
+- **SHAPES** (`shapes.rs`, 含 RECT/RECT_ROT/RECT_CEN/POLY/POLY_C/POLY_E 6 个
+  子命令)：`make_pline` 返回类型 `EntityType` → `nm::Entity`；6 个
+  `CommitAndExit(make_pline(..))` → `CommitAndExitNative(make_pline(..))`
+- 移除 `use acadrust::entities::LwVertex` / `use acadrust::{EntityType,
+  LwPolyline, entities::LwVertex}` / `use crate::types::Vector2`
+- 度量：`revcloud.rs` 的 `acadrust::` 2 → 0，`shapes.rs` 的 2 → 0；主 crate 零
+  warning 保持
+
+**延后说明**：`donut.rs` 和 `polyline.rs` 使用 `LwPolyline.constant_width`
+和 `LwVertex.start_width/end_width`，native `EntityData::LwPolyline { vertices,
+closed }` 和 `LwVertex { x, y, bulge }` 无这些字段 — 强行迁移会丢失线宽特性
+（尤其 DONUT 的填充效果依赖 width 字段）。列为 D 系列 "扩展 native 模型字段"
+的待办，迁移前先扩充 native 模型。
+
 ### 2026-04-17：C2g-2 LEADER 命令 native-first（annotate 创建命令收官）
 
 复用 C2g-1 新增的 `CommitManyAndExitNative` 变体，把 `leader_cmd.rs` 从
