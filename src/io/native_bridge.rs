@@ -374,19 +374,22 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::RasterImage(e))
         }
-        nm::EntityData::Wipeout { clip_vertices } => {
+        nm::EntityData::Wipeout {
+            clip_vertices,
+            elevation,
+        } => {
             let mut e = if clip_vertices.len() >= 3 {
                 ar::Wipeout::polygonal(
                     &clip_vertices
                         .iter()
                         .map(|vertex| Vector2::new(vertex[0], vertex[1]))
                         .collect::<Vec<_>>(),
-                    0.0,
+                    *elevation,
                 )
             } else if clip_vertices.len() == 2 {
                 ar::Wipeout::from_corners(
-                    Vector3::new(clip_vertices[0][0], clip_vertices[0][1], 0.0),
-                    Vector3::new(clip_vertices[1][0], clip_vertices[1][1], 0.0),
+                    Vector3::new(clip_vertices[0][0], clip_vertices[0][1], *elevation),
+                    Vector3::new(clip_vertices[1][0], clip_vertices[1][1], *elevation),
                 )
             } else {
                 ar::Wipeout::new()
@@ -846,6 +849,7 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                     .iter()
                     .map(|vertex| [vertex.x, vertex.y])
                     .collect(),
+                elevation: wipeout.insertion_point.z,
             },
         )),
         ar::EntityType::Tolerance(tolerance) => Some(native_common_from_acadrust(
@@ -2888,6 +2892,7 @@ mod tests {
             representative_entity_with_common_fields(
                 nm::EntityData::Wipeout {
                     clip_vertices: vec![[0.0, 0.0], [4.0, 0.0], [3.0, 2.0], [0.0, 3.0]],
+                    elevation: 0.0,
                 },
                 0x98,
                 0x198,
@@ -2987,6 +2992,7 @@ mod tests {
             },
             nm::EntityData::Wipeout {
                 clip_vertices: vec![[0.0, 0.0], [4.0, 0.0], [3.0, 2.0], [0.0, 3.0]],
+                elevation: 0.0,
             },
             nm::EntityData::Tolerance {
                 text: "{\\Fgdt;p}%%v0.25%%vA^JB".into(),
@@ -3052,6 +3058,7 @@ mod tests {
         };
         let wipeout_data = nm::EntityData::Wipeout {
             clip_vertices: vec![[0.0, 0.0], [1.0, 0.0], [0.75, 2.0 / 3.0], [0.0, 1.0]],
+            elevation: 0.0,
         };
         native
             .add_entity(nm::Entity::new(image_data.clone()))
@@ -3113,6 +3120,7 @@ mod tests {
         let native_entity = representative_entity_with_common_fields(
             nm::EntityData::Wipeout {
                 clip_vertices: local_clip_vertices.clone(),
+                elevation: 0.0,
             },
             0x99,
             0x199,
@@ -3152,6 +3160,7 @@ mod tests {
             roundtrip.data,
             nm::EntityData::Wipeout {
                 clip_vertices: local_clip_vertices,
+                elevation: 0.0,
             }
         );
     }

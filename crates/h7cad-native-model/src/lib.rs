@@ -1140,6 +1140,9 @@ pub enum EntityData {
     },
     Wipeout {
         clip_vertices: Vec<[f64; 2]>,
+        /// DXF Z of the wipeout's insertion point (code 30). Native-model
+        /// addition (D2 series) — previously dropped by bridge.
+        elevation: f64,
     },
     Tolerance {
         text: String,

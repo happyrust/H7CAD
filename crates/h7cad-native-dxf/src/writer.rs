@@ -858,7 +858,14 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             w.pair_f64(13, image_size[0]);
             w.pair_f64(23, image_size[1]);
         }
-        EntityData::Wipeout { clip_vertices } => {
+        EntityData::Wipeout {
+            clip_vertices,
+            elevation,
+        } => {
+            // Write insertion point (codes 10/20/30) — x/y zero, z = elevation.
+            w.pair_f64(10, 0.0);
+            w.pair_f64(20, 0.0);
+            w.pair_f64(30, *elevation);
             w.pair_i32(91, clip_vertices.len() as i32);
             for v in clip_vertices {
                 w.pair_f64(14, v[0]);

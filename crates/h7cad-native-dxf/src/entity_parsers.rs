@@ -277,6 +277,8 @@ pub(crate) fn parse_wipeout(codes: &[(i16, String)]) -> EntityData {
     let mut vertices: Vec<[f64; 2]> = Vec::new();
     let (mut x, mut y) = (0.0, 0.0);
     let mut has_vertex = false;
+    // Code 30 = insertion point Z (elevation).
+    let mut elevation = 0.0;
     for &(code, ref val) in codes {
         match code {
             14 => {
@@ -288,6 +290,7 @@ pub(crate) fn parse_wipeout(codes: &[(i16, String)]) -> EntityData {
                 has_vertex = true;
             }
             24 => y = val.parse().unwrap_or(0.0),
+            30 => elevation = val.parse().unwrap_or(0.0),
             _ => {}
         }
     }
@@ -296,6 +299,7 @@ pub(crate) fn parse_wipeout(codes: &[(i16, String)]) -> EntityData {
     }
     EntityData::Wipeout {
         clip_vertices: vertices,
+        elevation,
     }
 }
 

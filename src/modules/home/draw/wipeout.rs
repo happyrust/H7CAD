@@ -143,12 +143,12 @@ impl CadCommand for WipeoutCommand {
 }
 
 fn make_rect_wipeout_native(p1: Vec3, p2: Vec3) -> nm::Entity {
-    // Y-up world: X→DXF X, Z→DXF Y. Native Wipeout stores 2D clip vertices
-    // only; elevation (DXF Z = world Y) is not preserved by EntityData::Wipeout.
+    // Y-up world: X→DXF X, Z→DXF Y, Y→DXF Z (elevation).
     let min_x = p1.x.min(p2.x) as f64;
     let max_x = p1.x.max(p2.x) as f64;
     let min_y = p1.z.min(p2.z) as f64;
     let max_y = p1.z.max(p2.z) as f64;
+    let elevation = p1.y as f64;
     nm::Entity::new(nm::EntityData::Wipeout {
         clip_vertices: vec![
             [min_x, min_y],
@@ -156,6 +156,7 @@ fn make_rect_wipeout_native(p1: Vec3, p2: Vec3) -> nm::Entity {
             [max_x, max_y],
             [min_x, max_y],
         ],
+        elevation,
     })
 }
 
@@ -164,5 +165,9 @@ fn make_poly_wipeout_native(pts: &[Vec3]) -> nm::Entity {
         .iter()
         .map(|p| [p.x as f64, p.z as f64])
         .collect();
-    nm::Entity::new(nm::EntityData::Wipeout { clip_vertices })
+    let elevation = pts.first().map(|p| p.y as f64).unwrap_or(0.0);
+    nm::Entity::new(nm::EntityData::Wipeout {
+        clip_vertices,
+        elevation,
+    })
 }

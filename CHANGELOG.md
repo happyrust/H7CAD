@@ -2,6 +2,26 @@
 
 ## [未发布]
 
+### 2026-04-17：D2 扩展 native EntityData::Wipeout.elevation 字段
+
+修复 C3b WIPEOUT 迁移遗留的 DXF Z / elevation 丢失（世界 Y 轴）。
+
+- `crates/h7cad-native-model/src/lib.rs`：`EntityData::Wipeout` 追加 `elevation: f64`
+- `src/io/native_bridge.rs`：
+  - `native_wipeout_to_acadrust`：polygonal / from_corners 使用 `elevation`
+    作为 `insertion_point.z`（之前硬编码为 0）
+  - `acad_wipeout_to_native`：从 `wipeout.insertion_point.z` 读回 elevation
+  - 5 处测试 fixture 显式设 `elevation: 0.0`
+- `crates/h7cad-native-dxf/src/entity_parsers.rs`：`parse_wipeout` 解码 code 30
+  → elevation
+- `crates/h7cad-native-dxf/src/writer.rs`：Wipeout 写入时增加 code 10/20/30
+  insertion point triple，Z = elevation
+- `src/modules/home/draw/wipeout.rs`：
+  - `make_rect_wipeout_native`：`elevation = p1.y as f64`（世界 Y）
+  - `make_poly_wipeout_native`：`elevation = pts.first().y`（与原命令语义一致）
+- 测试：workspace `cargo check` 零 warning；`native_bridge` 22 个测试全绿
+- 效果：WIPEOUT 矩形 / 多边形模式在 native 存储 / DXF 中保留 elevation
+
 ### 2026-04-17：D1 扩展 native EntityData::MLine.closed 字段
 
 修复 C3b MLINE 迁移遗留的字段损失（MLineFlags::CLOSED 被丢弃）。
