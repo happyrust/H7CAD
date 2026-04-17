@@ -2,6 +2,23 @@
 
 ## [未发布]
 
+### 2026-04-17：C2f TABLE 命令 native-first
+
+沿用 C2a-C2e 模式，把 `src/modules/annotate/table_cmd.rs` 的 TABLE 命令从
+`acadrust::entities::TableBuilder` 构造切到 `nm::EntityData::Table`。
+
+- `TableCommand::on_point`：`TableBuilder::new(rows, cols).at(ins).row_height(..)
+  .column_width(..).build()` + `CmdResult::CommitAndExit(EntityType::Table(..))` →
+  `nm::Entity::new(nm::EntityData::Table { num_rows, num_cols, insertion,
+  horizontal_direction, version, value_flag })` + `CmdResult::CommitAndExitNative(entity)`
+- 移除 `use acadrust::entities::TableBuilder` / `use acadrust::EntityType` /
+  `use crate::types::Vector3`
+- `ROW_HEIGHT=0.5` / `COL_WIDTH=2.0` 常量**保留用于预览线框**，但不再传入实体
+  构造；native 路径下 bridge 走 `acadrust::Table::new(..)`，每行/列走
+  `TableRow/Column::new()` 默认 `0.25 / 2.5`。已有行为差异，bridge 层需要扩展
+  `EntityData::Table` 增加 `row_height/column_width` 字段才能保真（记为 TODO）
+- 度量：`table_cmd.rs` 中 `acadrust::` 引用 3 → 0；主 crate 零 warning 保持
+
 ### 2026-04-17：C2e MLEADER 命令 native-first
 
 沿用 C2a-C2d 模式，把 `src/modules/annotate/mleader_cmd.rs` 的 MLEADER 命令从

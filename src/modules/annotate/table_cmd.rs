@@ -7,9 +7,7 @@
 //
 // Creates a Table entity with uniform row height (0.5) and column width (2.0).
 
-use acadrust::entities::TableBuilder;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -107,13 +105,15 @@ impl CadCommand for TableCommand {
 
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         if let Step::Insertion { cols, rows } = self.step {
-            let ins = Vector3::new(pt.x as f64, pt.z as f64, pt.y as f64);
-            let table = TableBuilder::new(rows, cols)
-                .at(ins)
-                .row_height(ROW_HEIGHT)
-                .column_width(COL_WIDTH)
-                .build();
-            CmdResult::CommitAndExit(EntityType::Table(table))
+            let entity = nm::Entity::new(nm::EntityData::Table {
+                num_rows: rows as i32,
+                num_cols: cols as i32,
+                insertion: [pt.x as f64, pt.z as f64, pt.y as f64],
+                horizontal_direction: [1.0, 0.0, 0.0],
+                version: 0,
+                value_flag: 0,
+            });
+            CmdResult::CommitAndExitNative(entity)
         } else {
             CmdResult::NeedPoint
         }
