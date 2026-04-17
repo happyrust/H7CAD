@@ -59,6 +59,11 @@ pub enum CmdResult {
     /// Commit a native entity to the document and end the command.
     /// Native-first 对等 `CommitAndExit`（B5b）。
     CommitAndExitNative(nm::Entity),
+    /// Commit multiple native entities to the document and end the command.
+    /// Native-first 对等 `ReplaceMany(vec![], additions)`（C2g-1）：
+    /// 仅新增、不替换；每个 entity 都走 `native_entity_to_acadrust` 投影后
+    /// 调用 `commit_entity`，共享 layer/color/linetype 默认值逻辑。
+    CommitManyAndExitNative(Vec<nm::Entity>),
     /// Create a block definition from existing entities and insert one reference.
     CreateBlock {
         handles: Vec<Handle>,
