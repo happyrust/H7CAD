@@ -3467,6 +3467,175 @@ impl H7CAD {
                 }
             }
 
+            // ── ATTMAN: read-only report of all block AttributeDefinitions ─
+            // Usage:
+            //   ATTMAN             — list every block with AttDefs
+            //   ATTMAN <blockname> — list AttDefs of a single block
+            // Read-only: no mutation, no undo snapshot, no dirty flag.
+            cmd if cmd == "ATTMAN" || cmd.starts_with("ATTMAN ") => {
+                let filter_name = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim().to_string())
+                    .filter(|s| !s.is_empty());
+
+                // Build a mapping: block name → Vec<&AttributeDefinition>.
+                let doc = &self.tabs[i].scene.document;
+                let mut per_block: Vec<(String, Vec<&acadrust::entities::AttributeDefinition>)> =
+                    Vec::new();
+
+                for br in doc.block_records.iter() {
+                    if let Some(ref name) = filter_name {
+                        if br.name != *name {
+                            continue;
+                        }
+                    }
+                    // System blocks (*Model_Space etc.) never have user attdefs.
+                    if br.name.starts_with('*') {
+                        continue;
+                    }
+                    let attdefs: Vec<&acadrust::entities::AttributeDefinition> = br
+                        .entity_handles
+                        .iter()
+                        .filter_map(|&h| {
+                            if let Some(acadrust::EntityType::AttributeDefinition(ad)) =
+                                doc.get_entity(h)
+                            {
+                                Some(ad)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if !attdefs.is_empty() || filter_name.is_some() {
+                        per_block.push((br.name.clone(), attdefs));
+                    }
+                }
+
+                if let Some(ref name) = filter_name {
+                    if per_block.is_empty() {
+                        self.command_line
+                            .push_error(&format!("ATTMAN: block \"{}\" not found.", name));
+                        return Task::none();
+                    }
+                }
+
+                if per_block.is_empty() {
+                    self.command_line
+                        .push_output("ATTMAN: no blocks with attribute definitions.");
+                } else {
+                    let total_defs: usize = per_block.iter().map(|(_, v)| v.len()).sum();
+                    let total_blocks = per_block.len();
+                    self.command_line.push_output(&format!(
+                        "ATTMAN: {} attribute def(s) across {} block(s):",
+                        total_defs, total_blocks
+                    ));
+                    for (block_name, defs) in per_block {
+                        self.command_line
+                            .push_info(&format!("  Block \"{}\" ({} attdef):", block_name, defs.len()));
+                        if defs.is_empty() {
+                            self.command_line.push_info("    (no AttributeDefinition entities)");
+                            continue;
+                        }
+                        for ad in defs {
+                            let mut flag_tokens: Vec<&str> = Vec::new();
+                            if ad.flags.invisible { flag_tokens.push("INV"); }
+                            if ad.flags.constant  { flag_tokens.push("CONST"); }
+                            if ad.flags.verify    { flag_tokens.push("VERIFY"); }
+                            if ad.flags.preset    { flag_tokens.push("PRESET"); }
+                            let flag_str = if flag_tokens.is_empty() {
+                                "-".to_string()
+                            } else {
+                                flag_tokens.join(",")
+                            };
+                            self.command_line.push_info(&format!(
+                                "    {}  prompt=\"{}\"  default=\"{}\"  flags=[{}]",
+                                ad.tag, ad.prompt, ad.default_value, flag_str
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // ── VPJOIN: merge two edge-adjacent paper-space viewports ─────
+            // Requires exactly two Viewport entities in the current selection
+            // that share an entire vertical or horizontal edge.  The merged
+            // viewport keeps the first's handle (by selection order) and
+            // grows to the union bounding rect; the second viewport is
+            // erased.  Model space selections are rejected.
+            "VPJOIN" => {
+                use crate::modules::view::vports_join::{join_rects, JoinRect};
+
+                if self.tabs[i].scene.current_layout == "Model" {
+                    self.command_line.push_error(
+                        "VPJOIN: switch to a paper space layout first.",
+                    );
+                    return Task::none();
+                }
+
+                // Collect selected Viewport handles + their rects.
+                let selected: Vec<(acadrust::Handle, JoinRect)> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter_map(|(h, e)| {
+                        if let acadrust::EntityType::Viewport(vp) = e {
+                            // Skip the "overall" viewport (id == 1) — that's
+                            // the paper-space window itself, never a user vp.
+                            if vp.id <= 1 {
+                                return None;
+                            }
+                            Some((
+                                h,
+                                JoinRect::new(vp.center.x, vp.center.z, vp.width, vp.height),
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if selected.len() != 2 {
+                    self.command_line.push_error(&format!(
+                        "VPJOIN: select exactly 2 viewports (got {}).",
+                        selected.len()
+                    ));
+                    return Task::none();
+                }
+
+                let (h_keep, rect_keep) = selected[0];
+                let (h_drop, rect_drop) = selected[1];
+
+                let Some(merged) = join_rects(rect_keep, rect_drop) else {
+                    self.command_line.push_error(
+                        "VPJOIN: viewports must share an entire vertical or horizontal edge.",
+                    );
+                    return Task::none();
+                };
+
+                self.push_undo_snapshot(i, "VPJOIN");
+
+                // Update the kept viewport's geometry.
+                if let Some(acadrust::EntityType::Viewport(vp)) =
+                    self.tabs[i].scene.document.get_entity_mut(h_keep)
+                {
+                    vp.center = crate::types::Vector3::new(merged.cx, vp.center.y, merged.cy);
+                    vp.width = merged.w;
+                    vp.height = merged.h;
+                }
+
+                // Erase the other viewport.
+                self.tabs[i].scene.erase_entities(&[h_drop]);
+
+                // Refit camera for the merged viewport to use the new bounds.
+                self.tabs[i].scene.auto_fit_viewport(h_keep);
+
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(&format!(
+                    "VPJOIN: merged 2 viewports into one ({:.2} × {:.2}).",
+                    merged.w, merged.h
+                ));
+            }
+
             // ── ALIASEDIT: manage user-defined command aliases ─────────────
             // Usage:
             //   ALIASEDIT LIST              — show all aliases

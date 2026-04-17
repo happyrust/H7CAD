@@ -22,7 +22,7 @@ mod view_iso;
 mod view_right;
 mod view_top;
 mod vports_config;
-mod vports_join;
+pub(crate) mod vports_join;
 mod vports_named;
 mod vports_restore;
 mod wireframe;

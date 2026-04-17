@@ -2,6 +2,89 @@
 
 ## [未发布]
 
+### 2026-04-17：Insert Tab ATTMAN 命令接入 — block AttributeDefinition 只读清单
+
+ROADMAP Insert Tab / Attributes Group 里 Medium 复杂度命令 **ATTMAN**
+从 ribbon stub 升级为 read-only 清单报告。AutoCAD 的 ATTMAN 原义是
+dialog 编辑 block 的 AttDef，H7CAD 先用 CLI 列出形式落地（dialog
+版本可以作为未来 UI 增强）。是 `ATTSYNC` 的对偶视图 — ATTSYNC 修改
+INSERT，ATTMAN 查看 block 定义本身。
+
+**实现** (`src/app/commands.rs`)：
+
+- `ATTMAN` / `ATTMAN <blockname>`：
+  - 无参：遍历 `document.block_records`（跳过系统 block，名字以 `*`
+    开头的 `*Model_Space` 等），对每个 block 的 `entity_handles` 过滤出
+    `EntityType::AttributeDefinition`
+  - 有参：只列指定 block（block 不存在时 push_error）
+  - 每条 attdef 输出：`  tag  prompt="..."  default="..."  flags=[INV,CONST,VERIFY,PRESET]`
+    —— `AttributeFlags` 的 4 个 bool 字段 `invisible / constant / verify / preset`
+    分别映射到短名 flag token；全清时显示 `[-]`
+  - 汇总行：`"ATTMAN: N attribute def(s) across M block(s):"`
+  - read-only：无 mutation、无 undo snapshot、无 dirty flag
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（2.24s）
+- 主 crate 测试 **128/129**（与上一轮一致，无回归；pre-existing 失败
+  依然是 `prop_geom_commit_rejects_unsupported_native_hatch`）
+
+**ROADMAP 进度**：Insert Tab / Attributes 的 Medium `ATTMAN` 交付。
+combined 今日：View Tab 5 + Insert Tab 8 + Manage Tab 2 = **15 个**
+ROADMAP 命令后端落地。
+
+### 2026-04-17：View Tab VPJOIN 命令接入 — 合并相邻 paper-space viewport
+
+ROADMAP View Tab / Model Viewports Group 里 Medium 复杂度命令 **VPJOIN**
+从 ribbon stub 升级为完整命令。用户在 paper-space 布局里选择两个边完全
+重合的 viewport，VPJOIN 会把它们合并成一个覆盖联合矩形的 viewport。
+
+**算法核心** (`src/modules/view/vports_join.rs`)：
+
+- `pub struct JoinRect { cx, cy, w, h }` — paper-space 轴对齐矩形
+  （cx = Viewport.center.x, cy = Viewport.center.z，Y-up XZ 约定）
+- `pub fn join_rects(a, b) -> Option<JoinRect>` — 纯逻辑 merge：
+  - **水平相邻**：`x_max(a) ≈ x_min(b)` 或反过来，且两个 rect 的
+    `[y_min, y_max]` 必须完全一致
+  - **垂直相邻**：`y_max(a) ≈ y_min(b)` 或反过来，且 `[x_min, x_max]`
+    必须一致
+  - 满足则 merged = union bounding rect；否则返回 None
+  - 所有等值比较用 `JOIN_EPS = 1e-6` 容差
+- 7 个纯单测覆盖：水平 / 垂直相邻 / 交换律 / 间隙 / 重叠 / 错位边 /
+  epsilon 容差
+
+**Dispatch** (`src/app/commands.rs`)：
+
+- `VPJOIN` case：
+  - 拒绝 Model 布局（push_error "switch to paper space first"）
+  - 从 `selected_entities()` 筛 `Viewport` 且 `vp.id > 1`（跳过 paper-
+    space overall viewport）
+  - 必须正好 2 个，否则友好报错（打印实际数量）
+  - 调 `join_rects`，None 时告知用户"must share an entire edge"
+  - `push_undo_snapshot("VPJOIN")` → 改第一个 viewport 的 center/w/h
+    成 merged 值 → `erase_entities(&[h_drop])` 删第二个 → 对保留的
+    viewport 调 `auto_fit_viewport` 让相机重新 fit
+  - 汇报 `"merged 2 viewports into one (W × H)"`
+
+**决策**：
+
+- 选第一个 selected viewport 作为 dominant（保留 handle），和 MOVE/
+  COPY 等 AutoCAD 命令的 "first selection = primary" 约定一致
+- 拒绝 overlap / offset / gap 而不是尝试最小 bounding rect — 否则
+  语义会偏离 AutoCAD（它是严格要求边重合）
+- JoinRect 是独立结构，不依赖 acadrust，单测完全脱离 document
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（4.32s）
+- 主 crate 测试 **128/129**（新增 7 个 vports_join 单测全绿；上一轮
+  121/122；唯一失败 `prop_geom_commit_rejects_unsupported_native_hatch`
+  依然 pre-existing）
+
+**ROADMAP 进度**：View Tab / Model Viewports 里 Medium `VPJOIN` 交付。
+combined 今日：View Tab 5 + Insert Tab 7 + Manage Tab 2 = **14 个**
+ROADMAP 命令后端落地。
+
 ### 2026-04-17：Manage Tab ALIASEDIT 命令接入 — 运行时命令别名管理
 
 ROADMAP Manage Tab / Customization 里 Medium 复杂度命令 **ALIASEDIT**
