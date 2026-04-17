@@ -2,6 +2,54 @@
 
 ## [未发布]
 
+### 2026-04-17：M3-B brick 2b — ObjectStreamCursor 按 handle 切对象字节范围
+
+激活 brick 2a 的 `read_modular_short`，新增 `ObjectStreamCursor`，把
+`PendingDocument.handle_offsets` 里的 handle → file-offset 映射变成
+**handle → `&[u8]` 对象切片**。AC1015 真实样本首 20 条低 handle **20/20**
+成功切出合法 slice。
+
+**新增模块** (`crates/h7cad-native-dwg/src/object_stream.rs`)：
+
+- `ObjectStreamCursor<'a> { file, offsets }`：借用原始 DWG 字节 + 已解码
+  handle map，零拷贝
+- `object_size_at(offset: i64) -> Option<(header_bytes, body_size)>`：
+  读 MS header，返回消耗的字节数和 body 字节数
+  - offset <= 0 或 >= file.len()：None（handle map 尾部的 purged/GC 条目）
+  - body_size > `MAX_OBJECT_BODY_BYTES` (16 MiB)：None（损坏保护）
+  - MS 截断：None
+- `object_slice_by_handle(handle) -> Option<&'a [u8]>`：
+  binary_search 找 entry → `object_size_at` → 切 `[MS 头 + body]`（不含尾 CRC）
+  - 尾切片越文件边界：None
+  - handle 不存在：None
+- 单测 8 个：`object_size_at` 正常 / 零与负 offset / 越界 offset / 截断 MS；
+  `object_slice_by_handle` round-trip / 未知 handle / body 越界 / 巨大 body
+  被拒
+
+**接入** (`crates/h7cad-native-dwg/src/lib.rs`)：
+
+- `mod object_stream;` + `pub use object_stream::ObjectStreamCursor;`
+- 去掉 brick 2a 在 `read_modular_short` 上的 `#[allow(dead_code)]`（生产代码
+  路径激活）
+
+**集成测试** (`tests/real_samples.rs`)：
+
+- `real_ac1015_object_stream_cursor_slices_first_objects`：用真实
+  `sample_AC1015.dwg` 跑完整 `build_pending_document` → `ObjectStreamCursor::
+  new(&bytes, &pending.handle_offsets)` → 对前 20 条低 handle 做 slice 探测
+  - 断言：每个 slice.len() >= 2（至少 MS 头）
+  - 断言：slice 不越文件边界
+  - 断言：前 20 条至少 10 条（≥ 一半）成功 —— 实际 20/20 全通，保留 50%
+    floor 防止后续样本变动或 handle 表排序改变时单点失败
+  - 打印："AC1015 object_stream: resolved 20 / 20 low-handle slices
+    (total map entries = 1047)"
+
+- 测试：`cargo test -p h7cad-native-dwg -- --test-threads=1` 全绿
+  （53 unit + 53 read_headers + 9 real_samples；unit 从 45 增至 53 = 新增
+  8 object_stream 单测）
+- `cargo check --workspace --all-targets` 无新增 warning
+- **brick 2 系列收官**：brick 3（类路由对象解码器）可以开始消费 slice 了
+
 ### 2026-04-17：M3-B brick 2a — modular.rs 抽公共模块 + 新增 ModularShort 解码
 
 为 brick 2b（`ObjectStreamCursor`）准备基座：object stream 里的每个对象都以

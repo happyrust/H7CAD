@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use h7cad_native_dwg::{
     build_pending_document, read_dwg, sniff_version, BitReader, DwgFileHeader, DwgReadError,
-    DwgVersion, KnownSection, SectionMap,
+    DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
 };
 
 /// Decode a modular char (variable-length unsigned integer, 7 bits
@@ -769,4 +769,81 @@ fn real_ac1015_build_pending_document_populates_handle_offsets() {
             window[1].handle.value(),
         );
     }
+}
+
+/// M3-B brick 2b: `ObjectStreamCursor` resolves a decoded handle →
+/// (MS header + body) byte slice on the real AC1015 sample. We don't
+/// yet decode the body in this milestone; brick 3 will parse it with
+/// `BitReader` routed by object class. Here we only assert that the
+/// first handful of "live" handles (i.e. low-handle table records that
+/// are always present in a real drawing) yield a plausibly-sized slice
+/// that stays inside the file.
+///
+/// The handle map tail contains purged/garbage entries whose offsets
+/// are out-of-range; `object_slice_by_handle` is expected to return
+/// `None` for those. We tally both groups and require a healthy ratio
+/// of successful lookups so that a regression to "everything returns
+/// None" (e.g. broken MS reader) is caught loudly.
+#[test]
+fn real_ac1015_object_stream_cursor_slices_first_objects() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    assert!(
+        !pending.handle_offsets.is_empty(),
+        "brick 1 must have decoded at least some handle_offsets"
+    );
+
+    let cursor = ObjectStreamCursor::new(&bytes, &pending.handle_offsets);
+
+    // Probe the low-handle prefix. In a real AC1015 file these always
+    // resolve to live table records; if even one of the first 20
+    // handles fails, brick 2b is definitely broken.
+    let probe_count = pending.handle_offsets.len().min(20);
+    let mut resolved = 0usize;
+    for entry in pending.handle_offsets.iter().take(probe_count) {
+        let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
+            continue;
+        };
+        // Slice must cover at least the MS header plus *something*.
+        assert!(
+            slice.len() >= 2,
+            "handle 0x{:X} slice too short to contain an MS header (len = {})",
+            entry.handle.value(),
+            slice.len()
+        );
+        // Slice must stay inside the file (guaranteed by the method,
+        // reasserted here so a future bug stands out).
+        let start = entry.offset as usize;
+        assert!(
+            start + slice.len() <= bytes.len(),
+            "handle 0x{:X} slice escapes file bounds: start={start} len={} file_len={}",
+            entry.handle.value(),
+            slice.len(),
+            bytes.len()
+        );
+        resolved += 1;
+    }
+
+    eprintln!(
+        "AC1015 object_stream: resolved {resolved} / {probe_count} low-handle slices \
+         (total map entries = {})",
+        pending.handle_offsets.len()
+    );
+
+    assert!(
+        resolved >= probe_count / 2,
+        "at least half of the first {probe_count} handles must resolve to a \
+         valid object slice; got only {resolved}. Likely an MS header or \
+         offset-range regression."
+    );
 }

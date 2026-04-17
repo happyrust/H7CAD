@@ -5,6 +5,7 @@ mod handle_map;
 mod known_section;
 mod modular;
 mod object_reader;
+mod object_stream;
 mod pending;
 mod reader;
 mod resolver;
@@ -23,6 +24,7 @@ pub use object_reader::{
     dispatch_entity_record, dispatch_object, dispatch_object_record, dispatch_table_record,
     record_index, record_payload_size, summarize_object, DispatchTarget, ParsedRecordSummary,
 };
+pub use object_stream::ObjectStreamCursor;
 pub use pending::{
     PendingDocument, PendingEntity, PendingLayer, PendingObject, PendingObjectKind, PendingSection,
 };

@@ -64,10 +64,6 @@ pub(crate) fn read_signed_modular_char(bytes: &[u8], cursor: &mut usize) -> Opti
 /// Returns `None` on truncation or if the accumulated shift would
 /// exceed 60 bits (we cap at 4 chunks worth of payload; real AC1015
 /// object sizes never approach that scale).
-///
-/// Currently only exercised by the in-module tests; the production
-/// call site lands in M3-B brick 2b (`object_stream::ObjectStreamCursor`).
-#[allow(dead_code)]
 pub(crate) fn read_modular_short(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
     let mut value: u64 = 0;
     let mut shift = 0u32;
