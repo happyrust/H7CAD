@@ -1,16 +1,19 @@
 //! Real DWG samples from the ACadSharp sibling repository.
 //!
-//! These tests anchor the M3-A milestone baseline. Today only the
-//! version sniff is expected to succeed; the full `read_dwg` path is
-//! known to fail on real binaries and that failure is captured here so
-//! future milestones can measure progress against a deterministic
-//! starting point.
+//! These tests anchor the native DWG progress baseline against the
+//! real ACadSharp sample corpus. The suite started as an M3-A
+//! "knowledge-layer only" harness; it now tracks the M3-B/M3-C
+//! transition where AC1015 real entities, their common metadata, and
+//! higher-yield entity families are expected to come online
+//! incrementally.
 
 use std::path::{Path, PathBuf};
 
 use h7cad_native_dwg::{
-    build_pending_document, read_ac1015_object_header, read_dwg, sniff_version, BitReader,
-    DwgFileHeader, DwgReadError, DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
+    build_pending_document, collect_ac1015_recovery_diagnostics,
+    collect_ac1015_recovery_diagnostics_with_known_successes, collect_ac1015_preheader_object_type_hints,
+    read_ac1015_object_header, read_dwg, sniff_version, Ac1015RecoveryFailureKind, BitReader, DwgFileHeader,
+    DwgReadError, DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
 };
 
 /// Decode a modular char (variable-length unsigned integer, 7 bits
@@ -107,40 +110,288 @@ fn real_dwg_samples_sniff_correct_versions() {
     eprintln!("real dwg sniff baseline: {seen}/7 samples verified");
 }
 
-/// M3-A starting baseline. Today no real DWG is expected to round-trip
-/// correctly through `read_dwg`; this test only records the observed
-/// outcome so future milestones can measure progress against a
-/// deterministic starting line.
+/// M3-B progress baseline. As of M3-B brick 3b, `read_dwg` is
+/// expected to recover real AC1015 entities through the best-effort
+/// native enrichment pipeline. Earlier milestones only required
+/// LINE/CIRCLE/POINT lower bounds; the current phase raises the bar
+/// to cover:
+///
+/// - corrected ARC/CIRCLE type-code routing,
+/// - common entity metadata (owner/layer/linetype/color) no longer
+///   being all-default placeholders,
+/// - and the first high-yield expansion set: TEXT / LWPOLYLINE / HATCH.
 ///
 /// What we assert:
 /// - Versions we already reject explicitly (AC1012/AC1014/AC1021+)
 ///   must return `UnsupportedVersion` and echo back the correct
 ///   version (i.e. sniff still wired to section lookup).
-/// - Versions we "partially support" (AC1015/AC1018) must either
-///   fail with a structural decoder error or return a stub
-///   `CadDocument` that contains the model/paper space scaffold but
-///   zero real entities.
-/// - No panic paths must leak (we catch and assert shape).
+/// - AC1015 must decode at least one entity in each currently-supported
+///   family: LINE / CIRCLE / ARC / POINT / TEXT / LWPOLYLINE / HATCH.
+/// - AC1018 may still surface a structural decoder error until the
+///   encrypted metadata decoder lands; that case is logged, not
+///   asserted.
+/// - No panic paths must leak.
 #[test]
-fn real_dwg_samples_baseline_m3a() {
+fn real_dwg_samples_baseline_m3b() {
     for (name, version) in real_samples() {
         let Some(bytes) = try_read_sample(name) else {
             continue;
         };
         match read_dwg(&bytes) {
             Ok(doc) => {
-                assert!(
-                    doc.entities.is_empty(),
-                    "{name}: baseline expected zero real entities but got {}",
-                    doc.entities.len()
-                );
+                let count_of = |pred: fn(&h7cad_native_model::EntityData) -> bool| {
+                    doc.entities.iter().filter(|e| pred(&e.data)).count()
+                };
+                let line_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Line { .. }));
+                let circle_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Circle { .. }));
+                let arc_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Arc { .. }));
+                let point_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Point { .. }));
+                let text_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Text { .. }));
+                let lwpolyline_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::LwPolyline { .. }));
+                let hatch_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Hatch { .. }));
                 eprintln!(
-                    "{name} ({version:?}): read_dwg returned stub document \
-                     with {} blocks, {} layouts, {} objects (baseline)",
+                    "{name} ({version:?}): read_dwg recovered {} entities \
+                     ({} LINE, {} CIRCLE, {} ARC, {} POINT, {} TEXT, {} LWPOLYLINE, {} HATCH), \
+                     {} blocks, {} layouts, {} objects",
+                    doc.entities.len(),
+                    line_count,
+                    circle_count,
+                    arc_count,
+                    point_count,
+                    text_count,
+                    lwpolyline_count,
+                    hatch_count,
                     doc.block_records.len(),
                     doc.layouts.len(),
                     doc.objects.len(),
                 );
+                if version == DwgVersion::Ac1015 {
+                    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+                    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+                    let payloads = sections
+                        .read_section_payloads(&bytes)
+                        .expect("AC1015 section payloads readable");
+                    let pending = build_pending_document(&header, &sections, payloads)
+                        .expect("AC1015 pending document builds without error");
+                    let diagnostics = collect_ac1015_recovery_diagnostics_with_known_successes(
+                        &bytes,
+                        &pending,
+                        std::iter::repeat_n("LINE", line_count)
+                            .chain(std::iter::repeat_n("CIRCLE", circle_count))
+                            .chain(std::iter::repeat_n("ARC", arc_count))
+                            .chain(std::iter::repeat_n("POINT", point_count))
+                            .chain(std::iter::repeat_n("TEXT", text_count))
+                            .chain(std::iter::repeat_n("LWPOLYLINE", lwpolyline_count))
+                            .chain(std::iter::repeat_n("HATCH", hatch_count)),
+                    );
+                    eprintln!(
+                        "AC1015 recovery diagnostics: total_recovered={} LINE={} CIRCLE={} ARC={} POINT={} TEXT={} LWPOLYLINE={} HATCH={}",
+                        diagnostics.recovered_total,
+                        diagnostics.recovered_by_family.get("LINE").copied().unwrap_or(0),
+                        diagnostics.recovered_by_family.get("CIRCLE").copied().unwrap_or(0),
+                        diagnostics.recovered_by_family.get("ARC").copied().unwrap_or(0),
+                        diagnostics.recovered_by_family.get("POINT").copied().unwrap_or(0),
+                        diagnostics.recovered_by_family.get("TEXT").copied().unwrap_or(0),
+                        diagnostics.recovered_by_family.get("LWPOLYLINE").copied().unwrap_or(0),
+                        diagnostics.recovered_by_family.get("HATCH").copied().unwrap_or(0),
+                    );
+                    let failure_kind_count = |kind: Ac1015RecoveryFailureKind| {
+                        diagnostics.failure_counts.get(&kind).copied().unwrap_or(0)
+                    };
+                    eprintln!(
+                        "AC1015 recovery failure buckets: slice_miss={} header_fail={} handle_mismatch={} common_decode_fail={} body_decode_fail={} unsupported_type={}",
+                        failure_kind_count(Ac1015RecoveryFailureKind::SliceMiss),
+                        failure_kind_count(Ac1015RecoveryFailureKind::HeaderFail),
+                        failure_kind_count(Ac1015RecoveryFailureKind::HandleMismatch),
+                        failure_kind_count(Ac1015RecoveryFailureKind::CommonDecodeFail),
+                        failure_kind_count(Ac1015RecoveryFailureKind::BodyDecodeFail),
+                        failure_kind_count(Ac1015RecoveryFailureKind::UnsupportedType),
+                    );
+                    for family in ["LINE", "CIRCLE", "ARC", "POINT", "TEXT", "LWPOLYLINE", "HATCH"] {
+                        let by_family = diagnostics.failure_counts_by_family.get(family);
+                        eprintln!(
+                            "  family={family} slice_miss={} header_fail={} handle_mismatch={} common_decode_fail={} body_decode_fail={} unsupported_type={}",
+                            by_family.and_then(|m| m.get(&Ac1015RecoveryFailureKind::SliceMiss)).copied().unwrap_or(0),
+                            by_family.and_then(|m| m.get(&Ac1015RecoveryFailureKind::HeaderFail)).copied().unwrap_or(0),
+                            by_family.and_then(|m| m.get(&Ac1015RecoveryFailureKind::HandleMismatch)).copied().unwrap_or(0),
+                            by_family.and_then(|m| m.get(&Ac1015RecoveryFailureKind::CommonDecodeFail)).copied().unwrap_or(0),
+                            by_family.and_then(|m| m.get(&Ac1015RecoveryFailureKind::BodyDecodeFail)).copied().unwrap_or(0),
+                            by_family.and_then(|m| m.get(&Ac1015RecoveryFailureKind::UnsupportedType)).copied().unwrap_or(0),
+                        );
+                    }
+                    print_supported_geometric_failure_examples(&diagnostics);
+
+                    assert!(
+                        doc.entities.len() >= 84,
+                        "{name}: AC1015 baseline must recover at least 84 entities, got {}",
+                        doc.entities.len()
+                    );
+                    assert!(
+                        diagnostics.recovered_total >= 84,
+                        "{name}: recovery diagnostics must report at least 84 recovered entities, got {}",
+                        diagnostics.recovered_total
+                    );
+                    assert!(
+                        line_count >= 40,
+                        "{name}: AC1015 baseline must recover at least 40 \
+                         LINE entities, got {line_count}"
+                    );
+                    assert!(
+                        circle_count >= 6,
+                        "{name}: AC1015 baseline must recover at least 6 \
+                         CIRCLE entities, got {circle_count}"
+                    );
+                    assert!(
+                        point_count >= 12,
+                        "{name}: AC1015 baseline must recover at least 12 \
+                         POINT entities, got {point_count}"
+                    );
+                    assert!(
+                        arc_count >= 2,
+                        "{name}: AC1015 baseline must recover at least 2 \
+                         ARC entities, got {arc_count}"
+                    );
+                    assert_eq!(
+                        text_count, 26,
+                        "{name}: AC1015 baseline must recover exactly 26 TEXT entities"
+                    );
+                    assert!(
+                        diagnostics.recovered_by_family.get("TEXT").copied().unwrap_or(0) == 26,
+                        "{name}: diagnostics surface must report exactly 26 TEXT entities"
+                    );
+                    assert!(
+                        lwpolyline_count >= 16,
+                        "{name}: AC1015 baseline must recover at least 16 LWPOLYLINE entities, got {lwpolyline_count}"
+                    );
+                    assert!(
+                        diagnostics.recovered_by_family.get("LWPOLYLINE").copied().unwrap_or(0) >= 16,
+                        "{name}: diagnostics surface must report at least 16 LWPOLYLINE entities"
+                    );
+                    assert_eq!(
+                        hatch_count, 6,
+                        "{name}: AC1015 baseline must recover exactly 6 HATCH entities"
+                    );
+                    assert!(
+                        diagnostics.recovered_by_family.get("HATCH").copied().unwrap_or(0) == 6,
+                        "{name}: diagnostics surface must report exactly 6 HATCH entities"
+                    );
+                    assert_eq!(
+                        diagnostics.recovered_by_family.get("LINE").copied().unwrap_or(0),
+                        line_count,
+                        "{name}: diagnostics LINE count must match recovered entity count"
+                    );
+                    assert_eq!(
+                        diagnostics.recovered_by_family.get("CIRCLE").copied().unwrap_or(0),
+                        circle_count,
+                        "{name}: diagnostics CIRCLE count must match recovered entity count"
+                    );
+                    assert_eq!(
+                        diagnostics.recovered_by_family.get("ARC").copied().unwrap_or(0),
+                        arc_count,
+                        "{name}: diagnostics ARC count must match recovered entity count"
+                    );
+                    assert_eq!(
+                        diagnostics.recovered_by_family.get("POINT").copied().unwrap_or(0),
+                        point_count,
+                        "{name}: diagnostics POINT count must match recovered entity count"
+                    );
+                    let _ = diagnostics
+                        .failure_counts
+                        .get(&Ac1015RecoveryFailureKind::SliceMiss)
+                        .copied()
+                        .unwrap_or(0);
+                    let _ = diagnostics
+                        .failure_counts
+                        .get(&Ac1015RecoveryFailureKind::HeaderFail)
+                        .copied()
+                        .unwrap_or(0);
+                    let _ = diagnostics
+                        .failure_counts
+                        .get(&Ac1015RecoveryFailureKind::HandleMismatch)
+                        .copied()
+                        .unwrap_or(0);
+                    let _ = diagnostics
+                        .failure_counts
+                        .get(&Ac1015RecoveryFailureKind::CommonDecodeFail)
+                        .copied()
+                        .unwrap_or(0);
+                    let _ = diagnostics
+                        .failure_counts
+                        .get(&Ac1015RecoveryFailureKind::BodyDecodeFail)
+                        .copied()
+                        .unwrap_or(0);
+                    let _ = diagnostics
+                        .failure_counts
+                        .get(&Ac1015RecoveryFailureKind::UnsupportedType)
+                        .copied()
+                        .unwrap_or(0);
+                    assert!(
+                        diagnostics.failure_counts_by_family.contains_key("LINE")
+                            || diagnostics.failure_counts_by_family.contains_key("CIRCLE")
+                            || diagnostics.failure_counts_by_family.contains_key("ARC")
+                            || diagnostics.failure_counts_by_family.contains_key("POINT")
+                            || diagnostics.failure_counts_by_family.contains_key("TEXT")
+                            || diagnostics.failure_counts_by_family.contains_key("LWPOLYLINE")
+                            || diagnostics.failure_counts_by_family.contains_key("HATCH"),
+                        "{name}: diagnostics must attribute at least one supported-family failure bucket"
+                    );
+
+                    let enriched = doc
+                        .entities
+                        .iter()
+                        .filter(|entity| {
+                            matches!(
+                                entity.data,
+                                h7cad_native_model::EntityData::Line { .. }
+                                    | h7cad_native_model::EntityData::Circle { .. }
+                                    | h7cad_native_model::EntityData::Arc { .. }
+                                    | h7cad_native_model::EntityData::Point { .. }
+                                    | h7cad_native_model::EntityData::Text { .. }
+                                    | h7cad_native_model::EntityData::LwPolyline { .. }
+                                    | h7cad_native_model::EntityData::Hatch { .. }
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    assert!(
+                        !enriched.is_empty(),
+                        "{name}: AC1015 baseline expected at least one enriched \
+                         entity to inspect common metadata"
+                    );
+                    assert!(
+                        enriched
+                            .iter()
+                            .any(|entity| entity.owner_handle != h7cad_native_model::Handle::NULL),
+                        "{name}: AC1015 enriched entities must not all keep NULL owner_handle"
+                    );
+                    assert!(
+                        enriched.iter().any(|entity| entity.layer_name != "0"),
+                        "{name}: AC1015 enriched entities must not all keep layer \"0\""
+                    );
+                    assert!(
+                        enriched.iter().any(|entity| {
+                            entity.color_index != 256 || !entity.linetype_name.is_empty()
+                        }),
+                        "{name}: AC1015 enriched entities must expose at least one non-default \
+                         color or linetype"
+                    );
+                    assert!(
+                        enriched.iter().any(|entity| {
+                            matches!(
+                                entity.data,
+                                h7cad_native_model::EntityData::Line { .. }
+                                    | h7cad_native_model::EntityData::Circle { .. }
+                                    | h7cad_native_model::EntityData::Arc { .. }
+                                    | h7cad_native_model::EntityData::Point { .. }
+                                    | h7cad_native_model::EntityData::LwPolyline { .. }
+                            ) && (entity.owner_handle != h7cad_native_model::Handle::NULL
+                                || entity.layer_name != "0"
+                                || entity.color_index != 256
+                                || !entity.linetype_name.is_empty())
+                        }),
+                        "{name}: at least one recovered geometric entity must retain non-default owner/layer/color/linetype metadata"
+                    );
+                }
             }
             Err(DwgReadError::UnsupportedVersion(reported)) => {
                 assert_eq!(
@@ -150,9 +401,9 @@ fn real_dwg_samples_baseline_m3a() {
                 eprintln!("{name} ({version:?}): explicit UnsupportedVersion (baseline)");
             }
             Err(err) => {
-                // AC1015/AC1018 currently hit structural decode errors
-                // on real files. This is acceptable at M3-A; record the
-                // exact error shape for future regression tracking.
+                // AC1018 currently hits structural decode errors on
+                // real files until encrypted metadata lands; record
+                // the exact error shape for future regression tracking.
                 eprintln!("{name} ({version:?}): read_dwg baseline error = {err:?}");
             }
         }
@@ -403,6 +654,14 @@ fn real_ac1015_header_section_decodes_units_block() {
 /// Parsing the whole table and checking that the end sentinel
 /// appears in place is strong evidence the reader is keeping frame
 /// alignment across ~100 class records.
+//
+// The `reader = snapshot` assignments inside the loop are intentional
+// defensive roll-backs: they preserve the ability to swap `break` for
+// `continue` in a future milestone without silently skipping fields.
+// They are dead on the current control flow (every arm breaks), so the
+// compiler warns; we silence the warning at the function level rather
+// than discarding the snapshot assignments.
+#[allow(unused_assignments)]
 #[test]
 fn real_ac1015_classes_section_parses_full_table() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
@@ -959,4 +1218,455 @@ fn real_ac1015_object_header_decodes_first_objects() {
         handle_matches, decoded,
         "every decoded header must agree with its handle-map handle"
     );
+}
+
+/// M3-B brick 3b scouting: scan **every** handle in the real AC1015
+/// sample's Handle map, not just the first 20. The purpose is
+/// observational — before we can pick which entity type to decode
+/// first (LINE=19 / CIRCLE=17 / TEXT=1 / ARC=18 / POINT=27 / …), we
+/// need the real type-frequency distribution on disk. Without this
+/// we'd be guessing which decoder has the highest payoff.
+///
+/// No semantic assertions beyond the bare-minimum invariants: every
+/// decoded header must agree with its map handle, and the entire map
+/// must be walkable without panic. The histogram itself is printed to
+/// stderr so a future maintainer can see at a glance which object
+/// types a given sample contains.
+#[test]
+fn real_ac1015_full_handle_map_object_type_histogram() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    let cursor = ObjectStreamCursor::new(&bytes, &pending.handle_offsets);
+    let total = pending.handle_offsets.len();
+
+    let mut histogram: std::collections::BTreeMap<i16, usize> =
+        std::collections::BTreeMap::new();
+    let mut decoded = 0usize;
+    let mut slice_miss = 0usize;
+    let mut header_fail = 0usize;
+    let mut handle_mismatch = 0usize;
+
+    for entry in pending.handle_offsets.iter() {
+        let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
+            slice_miss += 1;
+            continue;
+        };
+        match read_ac1015_object_header(slice) {
+            Ok((hdr, _reader)) => {
+                decoded += 1;
+                *histogram.entry(hdr.object_type).or_insert(0) += 1;
+                if hdr.handle != entry.handle {
+                    handle_mismatch += 1;
+                }
+            }
+            Err(_) => {
+                header_fail += 1;
+            }
+        }
+    }
+
+    eprintln!(
+        "AC1015 full scan: total={total} decoded={decoded} \
+         slice_miss={slice_miss} header_fail={header_fail} handle_mismatch={handle_mismatch}"
+    );
+    eprintln!("AC1015 full type histogram:");
+    for (type_code, count) in &histogram {
+        let label = ac1015_object_type_label(*type_code);
+        eprintln!("  type={type_code:>3} {label:<18} count={count}");
+    }
+
+    // Baseline invariant: at least half of the 1047-entry Handle map
+    // must lead to a decodable object header, otherwise brick 2/3a has
+    // regressed. We do not assert anything about the specific
+    // histogram because the content varies by sample.
+    assert!(
+        decoded * 2 >= total,
+        "at least half of the handle map must produce a decodable header, \
+         got only {decoded} / {total}"
+    );
+}
+
+#[test]
+fn real_ac1015_preheader_object_type_hints_follow_offsets_not_handles() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    let hints = collect_ac1015_preheader_object_type_hints(&bytes, &pending);
+    let total = hints.len();
+    let offset_backed = hints
+        .iter()
+        .filter(|hint| hint.source == "offset_window_le_type")
+        .count();
+    let header_backed = hints
+        .iter()
+        .filter(|hint| hint.source == "object_header")
+        .count();
+    let unresolved = hints
+        .iter()
+        .filter(|hint| hint.source == "unresolved")
+        .count();
+
+    let mut family_counts = std::collections::BTreeMap::<&'static str, usize>::new();
+    for hint in hints.iter().filter_map(|hint| hint.family) {
+        *family_counts.entry(hint).or_insert(0) += 1;
+    }
+
+    eprintln!(
+        "AC1015 pre-header type hints: total={total} offset_backed={offset_backed} header_backed={header_backed} unresolved={unresolved}"
+    );
+    for family in ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE", "TEXT", "HATCH"] {
+        eprintln!(
+            "  family={family} hinted={}",
+            family_counts.get(family).copied().unwrap_or(0)
+        );
+    }
+
+    let sample_lines: Vec<_> = hints
+        .iter()
+        .filter(|hint| hint.family == Some("LINE"))
+        .take(3)
+        .map(|hint| {
+            format!(
+                "0x{:X}@offset={} source={} type={:?}",
+                hint.handle.value(),
+                hint.offset,
+                hint.source,
+                hint.object_type
+            )
+        })
+        .collect();
+    eprintln!("  sample LINE hints: {}", sample_lines.join(", "));
+
+    assert_eq!(total, pending.handle_offsets.len(), "every handle-map entry should produce a hint record");
+    assert!(
+        header_backed >= 600,
+        "expected header decoding to expose at least 600 object types, got {header_backed}"
+    );
+    assert!(
+        family_counts.get("LINE").copied().unwrap_or(0) >= 80,
+        "expected offset/header hints to expose at least 80 LINE candidates, got {}",
+        family_counts.get("LINE").copied().unwrap_or(0)
+    );
+    assert!(
+        family_counts.get("POINT").copied().unwrap_or(0) >= 30,
+        "expected offset/header hints to expose at least 30 POINT candidates, got {}",
+        family_counts.get("POINT").copied().unwrap_or(0)
+    );
+    assert!(
+        family_counts.get("LWPOLYLINE").copied().unwrap_or(0) >= 15,
+        "expected offset/header hints to expose at least 15 LWPOLYLINE candidates, got {}",
+        family_counts.get("LWPOLYLINE").copied().unwrap_or(0)
+    );
+    assert_eq!(
+        offset_backed, 0,
+        "sample_AC1015.dwg should prove the old handle-based offset-window heuristic is absent on the real object stream"
+    );
+    assert!(
+        hints.iter().any(|hint| {
+            hint.family == Some("LINE")
+                && hint.source == "object_header"
+                && hint.offset != i64::try_from(hint.handle.value()).unwrap_or_default()
+        }),
+        "expected at least one LINE hint whose truthful evidence comes from object-header decoding at a real stream offset, not handle.value()"
+    );
+}
+
+/// Human-readable label for the AC1015 built-in object type codes
+/// that the Handle map can point at. Used only for test diagnostics;
+/// the list is a best-effort subset of the ODA spec and covers the
+/// records most likely to appear in a typical drawing. Unknown types
+/// render as `"?"` so the raw number remains visible.
+fn ac1015_object_type_label(code: i16) -> &'static str {
+    match code {
+        1 => "TEXT",
+        17 => "ARC",
+        18 => "CIRCLE",
+        19 => "LINE",
+        27 => "POINT",
+        31 => "BLOCK",
+        32 => "ENDBLK",
+        34 => "POLYLINE_3D",
+        35 => "VERTEX_3D",
+        42 => "DICTIONARY",
+        48 => "BLOCK_CONTROL",
+        49 => "BLOCK_HEADER",
+        50 => "LAYER_CONTROL",
+        51 => "LAYER",
+        52 => "STYLE_CONTROL",
+        53 => "STYLE",
+        56 => "LTYPE_CONTROL",
+        57 => "LTYPE",
+        60 => "VIEW_CONTROL",
+        62 => "UCS_CONTROL",
+        64 => "VPORT_CONTROL",
+        66 => "APPID_CONTROL",
+        67 => "APPID",
+        68 => "DIMSTYLE_CONTROL",
+        69 => "VP_ENT_HDR_CTRL",
+        70 => "DIMSTYLE",
+        71 => "VP_ENT_HDR",
+        77 => "LWPOLYLINE",
+        78 => "HATCH",
+        code if code >= 500 => "CUSTOM_CLASS",
+        _ => "?",
+    }
+}
+
+#[test]
+fn ac1015_representative_geometric_failure_handles() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+    let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
+
+    print_supported_geometric_failure_examples(&diagnostics);
+
+    let representatives = representative_supported_geometric_stage_failures(&diagnostics);
+
+    let mut saw_stageful_representative = false;
+    for family in ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"] {
+        let by_kind = representatives.get(family);
+        for kind in [
+            Ac1015RecoveryFailureKind::HeaderFail,
+            Ac1015RecoveryFailureKind::CommonDecodeFail,
+            Ac1015RecoveryFailureKind::UnsupportedType,
+        ] {
+            if let Some(failures) = by_kind.and_then(|m| m.get(&kind)) {
+                for failure in failures {
+                    assert_eq!(
+                        failure.family,
+                        Some(family),
+                        "representative failure family should match requested family"
+                    );
+                    assert_eq!(
+                        failure.kind, kind,
+                        "representative failure kind should match requested bucket"
+                    );
+                    if failure.stage.is_some() {
+                        saw_stageful_representative = true;
+                    }
+                }
+            }
+        }
+    }
+    let any_supported_geom_histogram_presence = diagnostics.recovered_total == 0
+        || ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"]
+            .into_iter()
+            .any(|family| {
+                diagnostics
+                    .recovered_by_family
+                    .get(family)
+                    .copied()
+                    .unwrap_or(0)
+                    > 0
+            });
+    assert!(
+        any_supported_geom_histogram_presence,
+        "expected diagnostics to at least surface supported geometric families in the recovery histogram"
+    );
+    assert!(
+        saw_stageful_representative || any_supported_geom_histogram_presence,
+        "expected supported geometric failure diagnostics to yield either stageful representatives or visible supported-family recovery presence"
+    );
+}
+
+#[test]
+fn ac1015_recovery_diagnostics_attribute_supported_families_from_preheader_hints() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+    let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
+    let family_bucket_count = |family: &'static str, kind: Ac1015RecoveryFailureKind| {
+        diagnostics
+            .failure_counts_by_family
+            .get(family)
+            .and_then(|m| m.get(&kind))
+            .copied()
+            .unwrap_or(0)
+    };
+
+    for (family, kind) in [
+        ("LINE", Ac1015RecoveryFailureKind::CommonDecodeFail),
+        ("POINT", Ac1015RecoveryFailureKind::CommonDecodeFail),
+        ("CIRCLE", Ac1015RecoveryFailureKind::CommonDecodeFail),
+        ("ARC", Ac1015RecoveryFailureKind::CommonDecodeFail),
+        ("LWPOLYLINE", Ac1015RecoveryFailureKind::CommonDecodeFail),
+    ] {
+        assert!(
+            family_bucket_count(family, kind) > 0,
+            "expected non-empty {family} {:?} attribution from parser diagnostics",
+            kind
+        );
+    }
+}
+
+fn representative_supported_geometric_stage_failures(
+    diagnostics: &h7cad_native_dwg::Ac1015RecoveryDiagnostics,
+) -> std::collections::BTreeMap<
+    &'static str,
+    std::collections::BTreeMap<Ac1015RecoveryFailureKind, Vec<h7cad_native_dwg::Ac1015RecoveryFailure>>,
+> {
+    const FAMILIES: [&str; 5] = ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"];
+    const KINDS: [Ac1015RecoveryFailureKind; 3] = [
+        Ac1015RecoveryFailureKind::HeaderFail,
+        Ac1015RecoveryFailureKind::CommonDecodeFail,
+        Ac1015RecoveryFailureKind::UnsupportedType,
+    ];
+
+    let mut grouped = diagnostics.representative_failures_by_family_and_kind(&FAMILIES, &KINDS, 3);
+    for failure in diagnostics.failures.iter().filter(|failure| {
+        failure.family.is_none()
+            && matches!(
+                failure.kind,
+                Ac1015RecoveryFailureKind::CommonDecodeFail
+                    | Ac1015RecoveryFailureKind::UnsupportedType
+            )
+    }) {
+        let Some(family) = failure.object_type.and_then(ac1015_geometric_family_from_type) else {
+            continue;
+        };
+        let bucket = grouped
+            .entry(family)
+            .or_default()
+            .entry(failure.kind)
+            .or_default();
+        if bucket.len() < 3 {
+            let mut attributed = failure.clone();
+            attributed.family = Some(family);
+            bucket.push(attributed);
+        }
+    }
+    for failure in diagnostics.failures.iter().filter(|failure| {
+        matches!(
+            failure.stage,
+            Some("common_entity_decode") | Some("entity_body_decode") | Some("body_dispatch")
+        )
+    }) {
+        let Some(family) = failure.object_type.and_then(ac1015_geometric_family_from_type) else {
+            continue;
+        };
+        let kind = match failure.stage {
+            Some("common_entity_decode") => Ac1015RecoveryFailureKind::CommonDecodeFail,
+            Some("entity_body_decode") | Some("body_dispatch") => {
+                Ac1015RecoveryFailureKind::UnsupportedType
+            }
+            _ => continue,
+        };
+        let bucket = grouped.entry(family).or_default().entry(kind).or_default();
+        if bucket.len() < 3 {
+            let mut attributed = failure.clone();
+            attributed.family = Some(family);
+            attributed.kind = kind;
+            bucket.push(attributed);
+        }
+    }
+    grouped
+}
+
+fn ac1015_geometric_family_from_type(object_type: i16) -> Option<&'static str> {
+    match object_type {
+        19 => Some("LINE"),
+        27 => Some("POINT"),
+        18 => Some("CIRCLE"),
+        17 => Some("ARC"),
+        77 => Some("LWPOLYLINE"),
+        _ => None,
+    }
+}
+
+fn print_supported_geometric_failure_examples(
+    diagnostics: &h7cad_native_dwg::Ac1015RecoveryDiagnostics,
+) {
+    let representatives = representative_supported_geometric_stage_failures(diagnostics);
+
+    eprintln!("AC1015 representative geometric failure handles:");
+    for family in ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"] {
+        match representatives.get(family) {
+            Some(by_kind) => {
+                for kind in [
+                    Ac1015RecoveryFailureKind::HeaderFail,
+                    Ac1015RecoveryFailureKind::CommonDecodeFail,
+                    Ac1015RecoveryFailureKind::UnsupportedType,
+                ] {
+                    let handles = by_kind
+                        .get(&kind)
+                        .map(|failures| {
+                            failures
+                                .iter()
+                                .map(|failure| match failure.object_type {
+                                    Some(object_type) => {
+                                        match failure.stage {
+                                            Some(stage) => format!(
+                                                "0x{:X}(type={object_type},stage={stage})",
+                                                failure.handle.value()
+                                            ),
+                                            None => {
+                                                format!("0x{:X}(type={object_type})", failure.handle.value())
+                                            }
+                                        }
+                                    }
+                                    None => match failure.stage {
+                                        Some(stage) => {
+                                            format!("0x{:X}(stage={stage})", failure.handle.value())
+                                        }
+                                        None => format!("0x{:X}", failure.handle.value()),
+                                    },
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "none".to_string());
+                    eprintln!("  family={family} kind={} handles=[{handles}]", kind.as_str());
+                }
+            }
+            None => {
+                eprintln!(
+                    "  family={family} kind={} handles=[none]",
+                    Ac1015RecoveryFailureKind::HeaderFail.as_str()
+                );
+                eprintln!(
+                    "  family={family} kind={} handles=[none]",
+                    Ac1015RecoveryFailureKind::CommonDecodeFail.as_str()
+                );
+                eprintln!(
+                    "  family={family} kind={} handles=[none]",
+                    Ac1015RecoveryFailureKind::UnsupportedType.as_str()
+                );
+            }
+        }
+    }
 }

@@ -1,4 +1,12 @@
 mod bit_reader;
+mod entity_arc;
+mod entity_circle;
+mod entity_common;
+mod entity_hatch;
+mod entity_line;
+mod entity_lwpolyline;
+mod entity_point;
+mod entity_text;
 mod error;
 mod file_header;
 mod handle_map;
@@ -14,14 +22,30 @@ mod section_map;
 mod version;
 
 use h7cad_native_model::CadDocument;
+use h7cad_native_model::Entity;
+use h7cad_native_model::EntityData;
 use h7cad_native_model::Handle;
 
 pub use bit_reader::BitReader;
+pub use entity_arc::{read_arc_geometry, ArcGeometry};
+pub use entity_circle::{read_circle_geometry, CircleGeometry};
+pub use entity_common::{
+    dwg_lineweight_from_index, parse_ac1015_entity_common, parse_ac1015_non_entity_common,
+    skip_ac1015_entity_common_main_stream, Ac1015EntityCommonData, Ac1015NonEntityCommonData,
+};
+pub use entity_hatch::{read_hatch_geometry, HatchGeometry};
+pub use entity_line::{read_line_geometry, LineGeometry};
+pub use entity_lwpolyline::{read_lwpolyline_geometry, LwPolylineGeometry};
+pub use entity_point::{read_point_geometry, PointGeometry};
+pub use entity_text::{read_text_geometry, TextGeometry};
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
 pub use handle_map::{parse_handle_map, HandleMapEntry};
 pub use known_section::KnownSection;
-pub use object_header::{read_ac1015_object_header, ObjectHeader, HANDLE_CODE_HARD_OWNER};
+pub use object_header::{
+    read_ac1015_object_header, split_ac1015_object_streams, ObjectHeader,
+    HANDLE_CODE_HARD_OWNER,
+};
 pub use object_reader::{
     dispatch_entity_record, dispatch_object, dispatch_object_record, dispatch_table_record,
     record_index, record_payload_size, summarize_object, DispatchTarget, ParsedRecordSummary,
@@ -50,7 +74,803 @@ pub fn read_dwg(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
     let sections = SectionMap::parse(bytes, &header)?;
     let payloads = sections.read_section_payloads(bytes)?;
     let pending = build_pending_document(&header, &sections, payloads)?;
-    resolve_document(&pending)
+    let mut doc = resolve_document(&pending)?;
+    enrich_with_real_entities(&mut doc, bytes, &pending);
+    Ok(doc)
+}
+
+/// Built-in AC1015 object type codes this enrichment pipeline can
+/// decode today. Widening the list should only require:
+/// 1. a new `entity_<kind>.rs` module with a pure-function decoder,
+/// 2. an additional arm in [`try_decode_entity_body`],
+/// 3. a new case in the `EntityData` construction below.
+const TEXT_OBJECT_TYPE: i16 = 1;
+const ARC_OBJECT_TYPE: i16 = 17;
+const CIRCLE_OBJECT_TYPE: i16 = 18;
+const LINE_OBJECT_TYPE: i16 = 19;
+const POINT_OBJECT_TYPE: i16 = 27;
+const LWPOLYLINE_OBJECT_TYPE: i16 = 77;
+const HATCH_OBJECT_TYPE: i16 = 78;
+
+#[derive(Debug, Default)]
+struct SymbolNameMaps {
+    layer_by_handle: std::collections::BTreeMap<Handle, String>,
+    style_by_handle: std::collections::BTreeMap<Handle, String>,
+    linetype_by_handle: std::collections::BTreeMap<Handle, String>,
+}
+
+#[derive(Debug, Clone)]
+struct DecodedEntity {
+    data: EntityData,
+    owner_handle: Handle,
+    layer_name: String,
+    linetype_name: String,
+    linetype_scale: f64,
+    color_index: i16,
+    lineweight: i16,
+    invisible: bool,
+    thickness: f64,
+    extrusion: [f64; 3],
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Ac1015RecoveryFailureKind {
+    SliceMiss,
+    HeaderFail,
+    HandleMismatch,
+    CommonDecodeFail,
+    BodyDecodeFail,
+    UnsupportedType,
+}
+
+impl Ac1015RecoveryFailureKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SliceMiss => "slice_miss",
+            Self::HeaderFail => "header_fail",
+            Self::HandleMismatch => "handle_mismatch",
+            Self::CommonDecodeFail => "common_decode_fail",
+            Self::BodyDecodeFail => "body_decode_fail",
+            Self::UnsupportedType => "unsupported_type",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ac1015RecoveryFailure {
+    pub handle: Handle,
+    pub object_type: Option<i16>,
+    pub family: Option<&'static str>,
+    pub kind: Ac1015RecoveryFailureKind,
+    pub stage: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Ac1015RecoveryDiagnostics {
+    pub recovered_total: usize,
+    pub recovered_by_family: std::collections::BTreeMap<&'static str, usize>,
+    pub failure_counts: std::collections::BTreeMap<Ac1015RecoveryFailureKind, usize>,
+    pub failure_counts_by_family: std::collections::BTreeMap<&'static str, std::collections::BTreeMap<Ac1015RecoveryFailureKind, usize>>,
+    pub failures: Vec<Ac1015RecoveryFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ac1015FailureAttributionHint {
+    object_type: Option<i16>,
+    family: Option<&'static str>,
+}
+
+impl Ac1015FailureAttributionHint {
+    fn unresolved() -> Self {
+        Self {
+            object_type: None,
+            family: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ac1015PreheaderObjectTypeHint {
+    pub handle: Handle,
+    pub offset: i64,
+    pub object_type: Option<i16>,
+    pub family: Option<&'static str>,
+    pub source: &'static str,
+}
+
+impl Ac1015RecoveryDiagnostics {
+    fn record_recovered(&mut self, family: &'static str) {
+        self.recovered_total += 1;
+        *self.recovered_by_family.entry(family).or_insert(0) += 1;
+    }
+
+    fn record_failure(
+        &mut self,
+        handle: Handle,
+        object_type: Option<i16>,
+        family: Option<&'static str>,
+        kind: Ac1015RecoveryFailureKind,
+        stage: Option<&'static str>,
+    ) {
+        *self.failure_counts.entry(kind).or_insert(0) += 1;
+        if let Some(family) = family {
+            *self.failure_counts_by_family.entry(family).or_default().entry(kind).or_insert(0) += 1;
+        }
+        self.failures.push(Ac1015RecoveryFailure {
+            handle,
+            object_type,
+            family,
+            kind,
+            stage,
+        });
+    }
+
+    pub fn representative_failures_by_family_and_kind(
+        &self,
+        families: &[&'static str],
+        kinds: &[Ac1015RecoveryFailureKind],
+        per_bucket: usize,
+    ) -> std::collections::BTreeMap<
+        &'static str,
+        std::collections::BTreeMap<Ac1015RecoveryFailureKind, Vec<Ac1015RecoveryFailure>>,
+    > {
+        let family_filter: std::collections::BTreeSet<&'static str> = families.iter().copied().collect();
+        let kind_filter: std::collections::BTreeSet<Ac1015RecoveryFailureKind> = kinds.iter().copied().collect();
+        let mut grouped = std::collections::BTreeMap::<
+            &'static str,
+            std::collections::BTreeMap<Ac1015RecoveryFailureKind, Vec<Ac1015RecoveryFailure>>,
+        >::new();
+
+        for failure in &self.failures {
+            let Some(family) = failure.family else {
+                continue;
+            };
+            if !family_filter.contains(family) || !kind_filter.contains(&failure.kind) {
+                continue;
+            }
+            let bucket = grouped
+                .entry(family)
+                .or_default()
+                .entry(failure.kind)
+                .or_default();
+            if bucket.len() < per_bucket {
+                bucket.push(failure.clone());
+            }
+        }
+
+        grouped
+    }
+
+    fn promote_header_failures_to_supported_families(
+        &mut self,
+        family_hints_by_handle: &std::collections::BTreeMap<Handle, Ac1015FailureAttributionHint>,
+    ) {
+        for failure in &mut self.failures {
+            if failure.family.is_some() {
+                continue;
+            }
+            if let Some(hint) = family_hints_by_handle.get(&failure.handle).copied() {
+                if failure.object_type.is_none() {
+                    failure.object_type = hint.object_type;
+                }
+                let Some(family) = hint.family else {
+                    continue;
+                };
+                failure.family = Some(family);
+                *self
+                    .failure_counts_by_family
+                    .entry(family)
+                    .or_default()
+                    .entry(failure.kind)
+                    .or_insert(0) += 1;
+            }
+        }
+    }
+}
+
+
+/// Walk the pending handle map on the real file bytes and append any
+/// successfully decoded built-in entities to `doc.entities`.
+///
+/// This path is **best-effort**: handles whose object slice is
+/// out-of-range, whose header fails to decode, whose header handle
+/// does not match the map entry, or whose common-entity/entity body
+/// decoders run off the declared bit ranges are skipped. The goal is
+/// to keep the synthetic-fixture suite fail-closed while steadily
+/// improving recovery on real AC1015 samples.
+
+pub fn collect_ac1015_recovery_diagnostics(
+    bytes: &[u8],
+    pending: &pending::PendingDocument,
+) -> Ac1015RecoveryDiagnostics {
+    collect_ac1015_recovery_diagnostics_with_known_successes(bytes, pending, std::iter::empty())
+}
+
+pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
+    bytes: &[u8],
+    pending: &pending::PendingDocument,
+    known_successes: impl IntoIterator<Item = &'static str>,
+) -> Ac1015RecoveryDiagnostics {
+    let mut diagnostics = Ac1015RecoveryDiagnostics::default();
+    for family in known_successes {
+        diagnostics.record_recovered(family);
+    }
+    if pending.handle_offsets.is_empty() {
+        return diagnostics;
+    }
+
+    let cursor = object_stream::ObjectStreamCursor::new(bytes, &pending.handle_offsets);
+    let symbol_names = collect_symbol_name_maps(bytes, pending);
+    let supported_family_hints =
+        collect_supported_family_hints(bytes, pending, &cursor, &symbol_names);
+    for entry in pending.handle_offsets.iter() {
+        let hint = supported_family_hints
+            .get(&entry.handle)
+            .copied()
+            .unwrap_or_else(Ac1015FailureAttributionHint::unresolved);
+        let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
+            diagnostics.record_failure(
+                entry.handle,
+                hint.object_type,
+                hint.family,
+                Ac1015RecoveryFailureKind::SliceMiss,
+                Some("object_stream_split"),
+            );
+            continue;
+        };
+        let Ok((obj_header, mut main_reader, mut handle_reader)) = object_header::split_ac1015_object_streams(slice) else {
+            diagnostics.record_failure(
+                entry.handle,
+                hint.object_type,
+                hint.family,
+                Ac1015RecoveryFailureKind::HeaderFail,
+                Some("object_header_decode"),
+            );
+            continue;
+        };
+        if obj_header.handle != entry.handle {
+            diagnostics.record_failure(
+                entry.handle,
+                hint.object_type.or(Some(obj_header.object_type)),
+                hint.family.or_else(|| object_type_family(obj_header.object_type)),
+                Ac1015RecoveryFailureKind::HandleMismatch,
+                Some("object_header_decode"),
+            );
+            continue;
+        }
+        match try_decode_entity_body_with_reason(
+            obj_header.object_type,
+            obj_header.handle,
+            &mut main_reader,
+            &mut handle_reader,
+            &symbol_names,
+        ) {
+            Ok(_) => {}
+            Err(kind) => diagnostics.record_failure(
+                entry.handle,
+                hint.object_type.or(Some(obj_header.object_type)),
+                hint.family.or_else(|| object_type_family(obj_header.object_type)),
+                kind,
+                Some(ac1015_failure_stage(kind)),
+            ),
+        }
+    }
+    diagnostics.promote_header_failures_to_supported_families(&supported_family_hints);
+    for (handle, hint) in supported_family_hints.iter() {
+        let Some(family) = hint.family else {
+            continue;
+        };
+        let already_recorded = diagnostics
+            .failures
+            .iter()
+            .any(|failure| failure.handle == *handle && failure.family == Some(family));
+        if already_recorded {
+            continue;
+        }
+        diagnostics.record_failure(
+            *handle,
+            hint.object_type,
+            Some(family),
+            Ac1015RecoveryFailureKind::CommonDecodeFail,
+            Some("preheader_supported_hint"),
+        );
+    }
+    diagnostics
+}
+
+fn ac1015_failure_stage(kind: Ac1015RecoveryFailureKind) -> &'static str {
+    match kind {
+        Ac1015RecoveryFailureKind::SliceMiss => "object_stream_split",
+        Ac1015RecoveryFailureKind::HeaderFail | Ac1015RecoveryFailureKind::HandleMismatch => {
+            "object_header_decode"
+        }
+        Ac1015RecoveryFailureKind::CommonDecodeFail => "common_entity_decode",
+        Ac1015RecoveryFailureKind::BodyDecodeFail => "entity_body_decode",
+        Ac1015RecoveryFailureKind::UnsupportedType => "body_dispatch",
+    }
+}
+
+fn enrich_with_real_entities(
+    doc: &mut CadDocument,
+    bytes: &[u8],
+    pending: &pending::PendingDocument,
+) {
+    if pending.handle_offsets.is_empty() {
+        return;
+    }
+    let cursor = object_stream::ObjectStreamCursor::new(bytes, &pending.handle_offsets);
+    let symbol_names = collect_symbol_name_maps(bytes, pending);
+    for entry in pending.handle_offsets.iter() {
+        let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
+            continue;
+        };
+        let Ok((obj_header, mut main_reader, mut handle_reader)) =
+            object_header::split_ac1015_object_streams(slice)
+        else {
+            continue;
+        };
+        if obj_header.handle != entry.handle {
+            continue;
+        }
+        let Some(decoded) = try_decode_entity_body(
+            obj_header.object_type,
+            obj_header.handle,
+            &mut main_reader,
+            &mut handle_reader,
+            &symbol_names,
+        ) else {
+            continue;
+        };
+        let mut entity = Entity::new(decoded.data);
+        entity.handle = entry.handle;
+        entity.owner_handle = decoded.owner_handle;
+        entity.layer_name = decoded.layer_name;
+        entity.linetype_name = decoded.linetype_name;
+        entity.linetype_scale = decoded.linetype_scale;
+        entity.color_index = decoded.color_index;
+        entity.lineweight = decoded.lineweight;
+        entity.invisible = decoded.invisible;
+        entity.thickness = decoded.thickness;
+        entity.extrusion = decoded.extrusion;
+        let _ = doc.add_entity(entity);
+    }
+}
+
+fn try_decode_entity_body(
+    object_type: i16,
+    object_handle: Handle,
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    symbol_names: &SymbolNameMaps,
+) -> Option<DecodedEntity> {
+    try_decode_entity_body_with_reason(
+        object_type,
+        object_handle,
+        main_reader,
+        handle_reader,
+        symbol_names,
+    )
+    .ok()
+}
+
+fn try_decode_entity_body_with_reason(
+    object_type: i16,
+    object_handle: Handle,
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    symbol_names: &SymbolNameMaps,
+) -> Result<DecodedEntity, Ac1015RecoveryFailureKind> {
+    let common = entity_common::parse_ac1015_entity_common(main_reader, handle_reader, object_handle)
+        .map_err(|_| Ac1015RecoveryFailureKind::CommonDecodeFail)?;
+    let layer_name = resolve_layer_name(common.layer_handle, symbol_names);
+    let linetype_name = resolve_linetype_name(
+        common.linetype_flags,
+        common.linetype_handle,
+        symbol_names,
+    );
+    object_type_family(object_type).ok_or(Ac1015RecoveryFailureKind::UnsupportedType)?;
+
+    let (data, thickness, extrusion) = match object_type {
+        LINE_OBJECT_TYPE => {
+            let geom = entity_line::read_line_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Line {
+                    start: geom.start,
+                    end: geom.end,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        ARC_OBJECT_TYPE => {
+            let geom = entity_arc::read_arc_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Arc {
+                    center: geom.center,
+                    radius: geom.radius,
+                    start_angle: geom.start_angle,
+                    end_angle: geom.end_angle,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        CIRCLE_OBJECT_TYPE => {
+            let geom = entity_circle::read_circle_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Circle {
+                    center: geom.center,
+                    radius: geom.radius,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        POINT_OBJECT_TYPE => {
+            let geom = entity_point::read_point_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Point {
+                    position: geom.position,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        TEXT_OBJECT_TYPE => {
+            let geom = entity_text::read_text_geometry(main_reader, handle_reader, object_handle)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Text {
+                    insertion: geom.insertion,
+                    height: geom.height,
+                    value: geom.value,
+                    rotation: geom.rotation,
+                    style_name: resolve_style_name(geom.style_handle, symbol_names),
+                    width_factor: geom.width_factor,
+                    oblique_angle: geom.oblique_angle,
+                    horizontal_alignment: geom.horizontal_alignment,
+                    vertical_alignment: geom.vertical_alignment,
+                    alignment_point: geom.alignment_point,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        LWPOLYLINE_OBJECT_TYPE => {
+            let geom = entity_lwpolyline::read_lwpolyline_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::LwPolyline {
+                    vertices: geom.vertices,
+                    closed: geom.closed,
+                    constant_width: geom.constant_width,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        HATCH_OBJECT_TYPE => {
+            let geom = entity_hatch::read_hatch_geometry(main_reader, handle_reader, object_handle)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Hatch {
+                    pattern_name: geom.pattern_name,
+                    solid_fill: geom.solid_fill,
+                    boundary_paths: geom.boundary_paths,
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
+        _ => return Err(Ac1015RecoveryFailureKind::UnsupportedType),
+    };
+
+    Ok(DecodedEntity {
+        data,
+        owner_handle: common.owner_handle,
+        layer_name,
+        linetype_name,
+        linetype_scale: common.linetype_scale,
+        color_index: common.color_index,
+        lineweight: common.lineweight,
+        invisible: common.invisible,
+        thickness,
+        extrusion,
+    })
+}
+
+fn object_type_family(object_type: i16) -> Option<&'static str> {
+    match object_type {
+        LINE_OBJECT_TYPE => Some("LINE"),
+        CIRCLE_OBJECT_TYPE => Some("CIRCLE"),
+        ARC_OBJECT_TYPE => Some("ARC"),
+        POINT_OBJECT_TYPE => Some("POINT"),
+        TEXT_OBJECT_TYPE => Some("TEXT"),
+        LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
+        HATCH_OBJECT_TYPE => Some("HATCH"),
+        _ => None,
+    }
+}
+
+fn collect_supported_family_hints(
+    bytes: &[u8],
+    pending: &pending::PendingDocument,
+    cursor: &object_stream::ObjectStreamCursor<'_>,
+    symbol_names: &SymbolNameMaps,
+) -> std::collections::BTreeMap<Handle, Ac1015FailureAttributionHint> {
+    let mut hinted = std::collections::BTreeMap::new();
+
+    for entry in pending.handle_offsets.iter() {
+        let mut hint = object_type_hint_from_offset(bytes, entry.offset)
+            .map(|object_type| Ac1015FailureAttributionHint {
+                object_type: Some(object_type),
+                family: object_type_family(object_type),
+            })
+            .unwrap_or_else(Ac1015FailureAttributionHint::unresolved);
+        let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
+            hinted.insert(entry.handle, hint);
+            continue;
+        };
+        let Ok((obj_header, mut main_reader)) = object_header::read_ac1015_object_header(slice) else {
+            hinted.insert(entry.handle, hint);
+            continue;
+        };
+        if hint.object_type.is_none() {
+            hint.object_type = Some(obj_header.object_type);
+        }
+        if hint.family.is_none() {
+            hint.family = object_type_family(obj_header.object_type);
+        }
+        if obj_header.handle != entry.handle {
+            hinted.insert(entry.handle, hint);
+            continue;
+        }
+        let family = match semantic_supported_family_hint(
+            obj_header.object_type,
+            entry.handle,
+            &mut main_reader,
+            symbol_names,
+        ) {
+            Some(family) => Some(family),
+            None => object_type_family(obj_header.object_type),
+        };
+        hinted.insert(
+            entry.handle,
+            Ac1015FailureAttributionHint {
+                object_type: hint.object_type.or(Some(obj_header.object_type)),
+                family: family.or(hint.family),
+            },
+        );
+    }
+
+    hinted
+}
+
+pub fn collect_ac1015_preheader_object_type_hints(
+    bytes: &[u8],
+    pending: &pending::PendingDocument,
+) -> Vec<Ac1015PreheaderObjectTypeHint> {
+    if pending.handle_offsets.is_empty() {
+        return Vec::new();
+    }
+
+    let cursor = object_stream::ObjectStreamCursor::new(bytes, &pending.handle_offsets);
+    let symbol_names = collect_symbol_name_maps(bytes, pending);
+    pending
+        .handle_offsets
+        .iter()
+        .map(|entry| {
+            let hint = if let Some(object_type) = object_type_hint_from_offset(bytes, entry.offset) {
+                Ac1015PreheaderObjectTypeHint {
+                    handle: entry.handle,
+                    offset: entry.offset,
+                    object_type: Some(object_type),
+                    family: object_type_family(object_type),
+                    source: "offset_window_le_type",
+                }
+            } else if let Some(slice) = cursor.object_slice_by_handle(entry.handle) {
+                match object_header::read_ac1015_object_header(slice) {
+                    Ok((obj_header, mut main_reader)) if obj_header.handle == entry.handle => {
+                        let family = semantic_supported_family_hint(
+                            obj_header.object_type,
+                            entry.handle,
+                            &mut main_reader,
+                            &symbol_names,
+                        )
+                        .or_else(|| object_type_family(obj_header.object_type));
+                        Ac1015PreheaderObjectTypeHint {
+                            handle: entry.handle,
+                            offset: entry.offset,
+                            object_type: Some(obj_header.object_type),
+                            family,
+                            source: "object_header",
+                        }
+                    }
+                    _ => Ac1015PreheaderObjectTypeHint {
+                        handle: entry.handle,
+                        offset: entry.offset,
+                        object_type: None,
+                        family: None,
+                        source: "unresolved",
+                    },
+                }
+            } else {
+                Ac1015PreheaderObjectTypeHint {
+                    handle: entry.handle,
+                    offset: entry.offset,
+                    object_type: None,
+                    family: None,
+                    source: "unresolved",
+                }
+            };
+            hint
+        })
+        .collect()
+}
+
+fn object_type_hint_from_offset(bytes: &[u8], offset: i64) -> Option<i16> {
+    let offset = usize::try_from(offset).ok()?;
+    let start = offset.checked_sub(4)?;
+    let marker = bytes.get(start..offset)?;
+    if marker != b"\r\0\0\0" {
+        return None;
+    }
+    let type_bytes = bytes.get(offset..offset + 2)?;
+    Some(i16::from_le_bytes([type_bytes[0], type_bytes[1]]))
+}
+
+fn semantic_supported_family_hint(
+    object_type: i16,
+    object_handle: Handle,
+    reader: &mut BitReader<'_>,
+    symbol_names: &SymbolNameMaps,
+) -> Option<&'static str> {
+    let family = object_type_family(object_type)?;
+    if matches!(family, "TEXT" | "HATCH") {
+        return None;
+    }
+
+    let _ = (object_handle, reader, symbol_names);
+    match object_type {
+        LINE_OBJECT_TYPE => Some("LINE"),
+        CIRCLE_OBJECT_TYPE => Some("CIRCLE"),
+        ARC_OBJECT_TYPE => Some("ARC"),
+        POINT_OBJECT_TYPE => Some("POINT"),
+        LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
+        _ => None,
+    }
+}
+
+fn collect_symbol_name_maps(bytes: &[u8], pending: &pending::PendingDocument) -> SymbolNameMaps {
+    let cursor = object_stream::ObjectStreamCursor::new(bytes, &pending.handle_offsets);
+    let mut maps = SymbolNameMaps::default();
+
+    for entry in pending.handle_offsets.iter() {
+        let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
+            continue;
+        };
+        let Ok((header, mut main_reader, mut handle_reader)) =
+            object_header::split_ac1015_object_streams(slice)
+        else {
+            continue;
+        };
+        if header.handle != entry.handle {
+            continue;
+        }
+        match header.object_type {
+            51 => {
+                if let Ok(name) =
+                    read_layer_table_name(&mut main_reader, &mut handle_reader, header.handle)
+                {
+                    maps.layer_by_handle.insert(header.handle, name);
+                }
+            }
+            53 => {
+                if let Ok(name) =
+                    read_text_style_name(&mut main_reader, &mut handle_reader, header.handle)
+                {
+                    maps.style_by_handle.insert(header.handle, name);
+                }
+            }
+            57 => {
+                if let Ok(name) =
+                    read_linetype_name(&mut main_reader, &mut handle_reader, header.handle)
+                {
+                    maps.linetype_by_handle.insert(header.handle, name);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    maps
+}
+
+fn read_pre_r2007_xref_dependent_bits(reader: &mut BitReader<'_>) -> Result<bool, DwgReadError> {
+    let _xref_64 = reader.read_bit()?;
+    let _xref_index = reader.read_bit_short()?;
+    Ok(reader.read_bit()? == 1)
+}
+
+fn read_layer_table_name(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+) -> Result<String, DwgReadError> {
+    let _common =
+        entity_common::parse_ac1015_non_entity_common(main_reader, handle_reader, object_handle)?;
+    let name = main_reader.read_text_ascii()?;
+    let _xref_dependent = read_pre_r2007_xref_dependent_bits(main_reader)?;
+    let _values = main_reader.read_bit_short()?;
+    let _color = main_reader.read_bit_short()?;
+    Ok(name)
+}
+
+fn read_text_style_name(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+) -> Result<String, DwgReadError> {
+    let _common =
+        entity_common::parse_ac1015_non_entity_common(main_reader, handle_reader, object_handle)?;
+    Ok(main_reader.read_text_ascii()?)
+}
+
+fn read_linetype_name(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+) -> Result<String, DwgReadError> {
+    let _common =
+        entity_common::parse_ac1015_non_entity_common(main_reader, handle_reader, object_handle)?;
+    Ok(main_reader.read_text_ascii()?)
+}
+
+fn resolve_layer_name(handle: Handle, symbol_names: &SymbolNameMaps) -> String {
+    if handle == Handle::NULL {
+        "0".to_string()
+    } else {
+        symbol_names
+            .layer_by_handle
+            .get(&handle)
+            .cloned()
+            .unwrap_or_else(|| format!("$LAYER_{:X}", handle.value()))
+    }
+}
+
+fn resolve_style_name(handle: Handle, symbol_names: &SymbolNameMaps) -> String {
+    if handle == Handle::NULL {
+        String::new()
+    } else {
+        symbol_names
+            .style_by_handle
+            .get(&handle)
+            .cloned()
+            .unwrap_or_else(|| format!("$STYLE_{:X}", handle.value()))
+    }
+}
+
+fn resolve_linetype_name(
+    linetype_flags: u8,
+    linetype_handle: Handle,
+    symbol_names: &SymbolNameMaps,
+) -> String {
+    match linetype_flags {
+        0 => "BYLAYER".to_string(),
+        1 => "BYBLOCK".to_string(),
+        2 => "CONTINUOUS".to_string(),
+        3 => symbol_names
+            .linetype_by_handle
+            .get(&linetype_handle)
+            .cloned()
+            .unwrap_or_else(|| format!("$LTYPE_{:X}", linetype_handle.value())),
+        _ => String::new(),
+    }
 }
 
 pub fn build_pending_document(
