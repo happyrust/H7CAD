@@ -2,6 +2,36 @@
 
 ## [未发布]
 
+### 2026-04-17：C2g-2 LEADER 命令 native-first（annotate 创建命令收官）
+
+复用 C2g-1 新增的 `CommitManyAndExitNative` 变体，把 `leader_cmd.rs` 从
+`acadrust::entities::{Leader, MText, Insert}` + `ReplaceMany` 路径切到
+`nm::EntityData::{Leader, MText, Insert}` + `CommitManyAndExitNative`。
+
+- `build_leader / build_mtext / v3` → `build_leader_native / build_mtext_native /
+  build_insert_native`，三个构造都返回 `nm::Entity`
+- 六个 CmdResult 出口：
+  - `NoAnnotation`/`Tolerance` → `CommitAndExitNative(leader)`（原 `CommitAndExit`）
+  - `WithText`/`WithBlock` 空注释 → `CommitAndExitNative(leader)`
+  - `WithText` 有文本 → `CommitManyAndExitNative(vec![leader, mtext])`
+  - `WithBlock` 有块名 → `CommitManyAndExitNative(vec![leader, insert])`
+- 移除 `use acadrust::entities::{Insert, Leader, LeaderCreationType, MText}` /
+  `use acadrust::EntityType` / `use crate::types::Vector3`
+- `LeaderCreationType` 本地枚举化为 `enum CreationChoice { None, Text, Block, Tolerance }`
+  （只用于命令内部的分支逻辑，不传给 entity）
+- 字段损失说明：
+  - native `EntityData::Leader` 仅有 `vertices + has_arrowhead`，原命令设的
+    `creation_type / hookline_enabled / text_height` 无对等字段 — bridge 走
+    `ar::Leader::new` 默认 (WithText / hookline=false / text_height=2.5)
+  - 新增常量 `LEADER_TEXT_HEIGHT = 2.5` 替代原 `leader.text_height` 传给
+    `landing_pt / build_mtext_native`，与 bridge 默认保持一致
+- 度量：`leader_cmd.rs` 中 `acadrust::` 引用 3 → 0；主 crate 零 warning 保持
+- **annotate 创建命令 native-first 收官**：C2b-C2g 共 13 个创建命令已全部迁完
+  （TEXT / MTEXT / RAY / XLINE / 7 个 DIMENSION / TOLERANCE / MLEADER / TABLE / LEADER）。
+  `src/modules/annotate/` 剩余 `acadrust::` 均在**编辑型**命令（DIMEDIT / QDIM /
+  DIMBREAK / DIMSPACE / DDEDIT / DIMTEDIT / DIMJOGLINE / MLEADER-EDIT），
+  属 E 系列 "Edit operations native-first" 的范围
+
 ### 2026-04-17：C2g-1 CmdResult 新增 CommitManyAndExitNative 基础设施
 
 为 C2g LEADER native-first 迁移做准备：现有 `CmdResult::ReplaceMany(vec![], additions)`

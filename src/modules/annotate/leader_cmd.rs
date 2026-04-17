@@ -6,9 +6,7 @@
 //   3. AskAnnotation  — text string (Text) or block name (Block); blank = skip
 //   → commit Leader  [+ MText | + Insert]
 
-use acadrust::entities::{Insert, Leader, LeaderCreationType, MText};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -24,6 +22,19 @@ pub fn tool() -> ToolDef {
         icon: ICON,
         event: ModuleEvent::Command("LEADER".to_string()),
     }
+}
+
+// native::EntityData::Leader 不含 text_height 字段；bridge 投影到 acadrust 时
+// 使用 `ar::Leader::new` 的默认 2.5，这里保留相同常量用于 landing_pt / MText 高度
+const LEADER_TEXT_HEIGHT: f64 = 2.5;
+
+/// Creation choice parsed from the user's annotation-type prompt.
+#[derive(Clone, Copy)]
+enum CreationChoice {
+    None,
+    Text,
+    Block,
+    Tolerance,
 }
 
 enum Step {
@@ -89,15 +100,14 @@ impl CadCommand for LeaderCommand {
             Step::AskCreationType { verts } => {
                 let verts = verts.clone();
                 match parse_ct(text) {
-                    LeaderCreationType::NoAnnotation | LeaderCreationType::WithTolerance => {
-                        let ct = parse_ct(text);
-                        Some(CmdResult::CommitAndExit(EntityType::Leader(build_leader(&verts, ct))))
+                    CreationChoice::None | CreationChoice::Tolerance => {
+                        Some(CmdResult::CommitAndExitNative(build_leader_native(&verts)))
                     }
-                    LeaderCreationType::WithBlock => {
+                    CreationChoice::Block => {
                         self.step = Step::AskBlock { verts };
                         Some(CmdResult::NeedPoint)
                     }
-                    LeaderCreationType::WithText => {
+                    CreationChoice::Text => {
                         self.step = Step::AskText { verts };
                         Some(CmdResult::NeedPoint)
                     }
@@ -105,27 +115,25 @@ impl CadCommand for LeaderCommand {
             }
             Step::AskText { verts } => {
                 let verts = verts.clone();
-                let leader = build_leader(&verts, LeaderCreationType::WithText);
+                let leader = build_leader_native(&verts);
                 if text.is_empty() {
-                    return Some(CmdResult::CommitAndExit(EntityType::Leader(leader)));
+                    return Some(CmdResult::CommitAndExitNative(leader));
                 }
-                let mtext = build_mtext(text, landing_pt(&verts, leader.text_height), leader.text_height);
-                Some(CmdResult::ReplaceMany(
-                    vec![],
-                    vec![EntityType::Leader(leader), EntityType::MText(mtext)],
-                ))
+                let mtext = build_mtext_native(
+                    text,
+                    landing_pt(&verts, LEADER_TEXT_HEIGHT),
+                    LEADER_TEXT_HEIGHT,
+                );
+                Some(CmdResult::CommitManyAndExitNative(vec![leader, mtext]))
             }
             Step::AskBlock { verts } => {
                 let verts = verts.clone();
-                let leader = build_leader(&verts, LeaderCreationType::WithBlock);
+                let leader = build_leader_native(&verts);
                 if text.is_empty() {
-                    return Some(CmdResult::CommitAndExit(EntityType::Leader(leader)));
+                    return Some(CmdResult::CommitAndExitNative(leader));
                 }
-                let ins = Insert::new(text, v3(landing_pt(&verts, leader.text_height)));
-                Some(CmdResult::ReplaceMany(
-                    vec![],
-                    vec![EntityType::Leader(leader), EntityType::Insert(ins)],
-                ))
+                let insert = build_insert_native(text, landing_pt(&verts, LEADER_TEXT_HEIGHT));
+                Some(CmdResult::CommitManyAndExitNative(vec![leader, insert]))
             }
             Step::CollectPoints { .. } => None,
         }
@@ -147,22 +155,20 @@ impl CadCommand for LeaderCommand {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-fn parse_ct(s: &str) -> LeaderCreationType {
+fn parse_ct(s: &str) -> CreationChoice {
     match s.to_ascii_uppercase().as_str() {
-        "N" | "NONE"      => LeaderCreationType::NoAnnotation,
-        "B" | "BLOCK"     => LeaderCreationType::WithBlock,
-        "TL"| "TOLERANCE" => LeaderCreationType::WithTolerance,
-        _                 => LeaderCreationType::WithText,
+        "N" | "NONE"      => CreationChoice::None,
+        "B" | "BLOCK"     => CreationChoice::Block,
+        "TL"| "TOLERANCE" => CreationChoice::Tolerance,
+        _                 => CreationChoice::Text,
     }
 }
 
-fn v3(p: Vec3) -> Vector3 { Vector3::new(p.x as f64, p.y as f64, p.z as f64) }
-
-fn build_leader(verts: &[Vec3], ct: LeaderCreationType) -> Leader {
-    let mut l = Leader::from_vertices(verts.iter().map(|p| v3(*p)).collect());
-    l.creation_type = ct;
-    l.hookline_enabled = !matches!(ct, LeaderCreationType::NoAnnotation);
-    l
+fn build_leader_native(verts: &[Vec3]) -> nm::Entity {
+    nm::Entity::new(nm::EntityData::Leader {
+        vertices: verts.iter().map(|p| [p.x as f64, p.y as f64, p.z as f64]).collect(),
+        has_arrowhead: true,
+    })
 }
 
 fn landing_pt(verts: &[Vec3], text_height: f64) -> Vec3 {
@@ -172,12 +178,30 @@ fn landing_pt(verts: &[Vec3], text_height: f64) -> Vec3 {
     Vec3::new(last.x + sign * text_height as f32 * 1.5, last.y, last.z)
 }
 
-fn build_mtext(text: &str, pos: Vec3, height: f64) -> MText {
-    let mut m = MText::new();
-    m.value = text.to_string();
-    m.insertion_point = v3(pos);
-    m.height = height;
-    m
+fn build_mtext_native(text: &str, pos: Vec3, height: f64) -> nm::Entity {
+    nm::Entity::new(nm::EntityData::MText {
+        insertion: [pos.x as f64, pos.y as f64, pos.z as f64],
+        height,
+        width: 0.0,
+        rectangle_height: None,
+        value: text.to_string(),
+        rotation: 0.0,
+        style_name: "Standard".into(),
+        attachment_point: 1,
+        line_spacing_factor: 1.0,
+        drawing_direction: 1,
+    })
+}
+
+fn build_insert_native(block_name: &str, pos: Vec3) -> nm::Entity {
+    nm::Entity::new(nm::EntityData::Insert {
+        block_name: block_name.to_string(),
+        insertion: [pos.x as f64, pos.y as f64, pos.z as f64],
+        scale: [1.0, 1.0, 1.0],
+        rotation: 0.0,
+        has_attribs: false,
+        attribs: Vec::new(),
+    })
 }
 
 fn preview_wire(pts: &[Vec3]) -> WireModel {
