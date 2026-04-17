@@ -2,6 +2,23 @@
 
 ## [未发布]
 
+### 2026-04-17：C2b TEXT / MTEXT 命令 native-first
+
+把 `src/modules/annotate/{text,mtext}.rs` 两个命令从 `acadrust::{Text, MText}`
+切到 `nm::EntityData::{Text, MText}` 构造，沿用 B5b 的 `CommitEntityNative`
+通道。
+
+- `TextCommand::on_text_input`：`acadrust::Text::with_value` → `nm::Entity::new(
+  nm::EntityData::Text { insertion, height, value, rotation, style_name,
+  width_factor, oblique_angle, horizontal_alignment, vertical_alignment,
+  alignment_point })`
+- `MTextCommand::on_text_input`：`acadrust::MText { ... }` → `nm::Entity::new(
+  nm::EntityData::MText { insertion, height, width, rectangle_height, value,
+  rotation, style_name, attachment_point, line_spacing_factor, drawing_direction })`
+- 两个文件的 `acadrust::` 引用各 2 → 0
+- `native_bridge` 已有 Text/MText 的投影（以 radians 持有，度角在投影时转换）
+- DWG 88 / DXF 81 / model 9 全绿；主 crate 零 warning 保持
+
 ### 2026-04-17：C2a RAY / XLINE 命令 native-first
 
 沿用 B5b 模式，把 `src/modules/home/draw/ray.rs` 里的 RAY / XLINE 两个命令

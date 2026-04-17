@@ -1,5 +1,4 @@
-use crate::types::Vector3;
-use acadrust::{EntityType, Text};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -70,9 +69,19 @@ impl CadCommand for TextCommand {
             if text.trim().is_empty() {
                 return Some(CmdResult::Cancel);
             }
-            let t = Text::with_value(text, Vector3::new(pos.x as f64, pos.y as f64, pos.z as f64))
-                .with_height(0.25);
-            Some(CmdResult::CommitEntity(EntityType::Text(t)))
+            let entity = nm::Entity::new(nm::EntityData::Text {
+                insertion: [pos.x as f64, pos.y as f64, pos.z as f64],
+                height: 0.25,
+                value: text.to_string(),
+                rotation: 0.0,
+                style_name: String::new(),
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                horizontal_alignment: 0,
+                vertical_alignment: 0,
+                alignment_point: None,
+            });
+            Some(CmdResult::CommitEntityNative(entity))
         } else {
             None
         }

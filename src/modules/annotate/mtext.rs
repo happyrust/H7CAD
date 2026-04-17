@@ -1,5 +1,4 @@
-use crate::types::Vector3;
-use acadrust::{EntityType, MText};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -70,14 +69,19 @@ impl CadCommand for MTextCommand {
             if text.trim().is_empty() {
                 return Some(CmdResult::Cancel);
             }
-            let mt = MText {
-                insertion_point: Vector3::new(pos.x as f64, pos.y as f64, pos.z as f64),
-                value: text.to_string(),
+            let entity = nm::Entity::new(nm::EntityData::MText {
+                insertion: [pos.x as f64, pos.y as f64, pos.z as f64],
                 height: 0.25,
-                rectangle_width: text.len() as f64 * 0.15,
-                ..Default::default()
-            };
-            Some(CmdResult::CommitEntity(EntityType::MText(mt)))
+                width: text.len() as f64 * 0.15,
+                rectangle_height: None,
+                value: text.to_string(),
+                rotation: 0.0,
+                style_name: String::new(),
+                attachment_point: 0,
+                line_spacing_factor: 1.0,
+                drawing_direction: 0,
+            });
+            Some(CmdResult::CommitEntityNative(entity))
         } else {
             None
         }
