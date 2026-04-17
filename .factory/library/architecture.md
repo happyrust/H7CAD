@@ -1,208 +1,183 @@
 # Architecture
 
-High-level architecture for the DXF native migration mission.
+High-level architecture for the `PLAN-4-18` DWG mission.
 
-This document captures the worker-facing structure of the current DXF mission. It describes stable data flows, mission boundaries, invariants, and risk concentration areas. It should not be used for patch notes or implementation journaling.
-
-Use this document for high-level system intent. Use `validation-contract.md` for the exact observable behaviors that define done.
+This document is worker-facing guidance for how the AC1015 parser lane currently works, where this mission is allowed to change it, and which seams must stay untouched. It is intentionally high-level. Use `validation-contract.md` for the exact observable definition of done.
 
 ## Mission Scope
 
-This mission is intentionally bounded to the DXF-native pipeline and its runtime bridge surfaces:
+This mission is intentionally bounded to the parser side of the native DWG lane:
 
-- `crates/h7cad-native-dxf`
+- `crates/h7cad-native-dwg`
 - `crates/h7cad-native-model`
-- `crates/h7cad-native-facade`
-- `src/io/mod.rs`
-- `src/io/native_bridge.rs`
-- quick-win runtime files under `src/` that only need Handle/Color/LineWeight migration
+- `crates/h7cad-native-facade` only as a compile/fail-closed boundary
+- `CHANGELOG.md` for phase/status wording
 
 Out of scope:
 
-- changing the DWG parser or DWG runtime rollout
-- modifying the `acadrust` dependency directly
-- GUI automation or desktop smoke testing
-- large refactors of deep compat-coupled systems in `src/app`, `src/scene`, and `src/entities`
+- runtime DWG rollout in `src/io/mod.rs`
+- switching desktop/app DWG load/save to native
+- DWG writer work
+- AC1018+ parser expansion
+- modifying `acadrust`
+- GUI/browser/TUI validation
 
-## Current Runtime Shape
+## Current System Shape
 
-The runtime is mixed-mode today:
+There are two DWG tracks in the repository today:
 
-1. **DXF native read**  
-   `src/io/mod.rs::load_dxf_native()` reads bytes and calls `h7cad_native_dxf::read_dxf_bytes()`, producing `h7cad_native_model::CadDocument`.
+1. **Native parser track**  
+   `crates/h7cad-native-dwg::read_dwg(bytes)` reads bytes, builds a pending AC1015 document, resolves document structure, and then best-effort enriches real entities into `h7cad_native_model::CadDocument`.
 
-2. **Compat bridge for runtime**  
-   Runtime/UI code still expects `acadrust::CadDocument`, so `native_bridge::native_doc_to_acadrust()` converts the native document into compat entities.
+2. **Runtime compatibility track**  
+   `src/io/mod.rs` contains broader native-first helper wrappers from ongoing repo migration work, but the `.dwg` branches still route open/save through `acadrust::io::dwg::DwgReader` and `DwgWriter`. For this mission, that compat-backed `.dwg` behavior is the invariant that must remain unchanged.
 
-3. **Runtime mutation paths**  
-   Most editing, scene, command, and UI code still works on compat types. Some paths synchronize compat changes back into native documents through `acadrust_doc_to_native()` or entity-level bridge helpers.
+The mission therefore improves native parser truth without changing product runtime truth.
 
-4. **DXF native save**  
-   Native documents are written through `h7cad_native_dxf::write_dxf()`. The save path may start from an already-native document or from compat data first bridged into native.
+## Canonical DWG Flow
 
-The mission therefore improves the system by making the native read/write path and the compat bridge boundary trustworthy enough for M4 preparation, without replacing all compat runtime code.
+### Native parser flow
+`DWG bytes -> sniff_version -> DwgFileHeader::parse -> SectionMap::parse -> build_pending_document -> resolve_document -> enrich_with_real_entities -> native CadDocument`
 
-## Canonical Flows
+This is the flow the mission is allowed to deepen.
 
-### Native DXF read flow
-`bytes -> h7cad_native_dxf::read_dxf_bytes() -> native CadDocument`
+### Structural AC1015 observation flow
+`sample_AC1015.dwg -> section locator / handle map / object stream cursor / object header diagnostics`
 
-This flow must preserve:
-- DXF header/version metadata
-- entities, layers, tables, blocks, and objects needed by supported DXF surfaces
-- ownership and handle relationships needed by later bridge/write stages
+This flow is not just debugging output. It is the ground truth that explains why recovery counts move. Today the visible structural diagnostics already expose `slice_miss`, `header_fail`, and `handle_mismatch`; this mission extends that into named supported-family recovery diagnostics instead of silent skips.
 
-### Runtime bridge flow
-`native CadDocument -> native_bridge::native_doc_to_acadrust() -> compat CadDocument`
+### Native model consumption flow
+`native CadDocument -> entity/block/layout/owner queries -> resolve_insert_block(entity)`
 
-This is the key seam where silent loss currently occurs. Mission work here must:
-- bridge prioritized native entities into compat equivalents
-- preserve common fields and payload fields
-- keep supported entities enumerable and usable by runtime surfaces
-- preserve supported block-owned content and referenced-handle relationships
+This is the downstream contract for recovered entities. Recovery is not complete unless entities survive into this resolved document surface with usable metadata and relationships.
 
-### Reverse bridge flow
-`compat CadDocument / EntityType -> native_bridge::acadrust_doc_to_native() / acadrust_entity_to_native() -> native CadDocument`
+### Runtime boundary flow
+`src/io/mod.rs -> compat DwgReader/DwgWriter`
 
-This flow must preserve:
-- entity family/type
-- geometry and annotation payloads
-- shared fields
-- enough ownership intent for save and post-process logic to remain valid
-
-### Native DXF write flow
-`native CadDocument -> h7cad_native_dxf::write_dxf() -> DXF text`
-
-This flow must emit DXF that rereads cleanly and does not lose:
-- hatch boundary structure
-- classic polyline widths and flags
-- insert/attrib handle relationships
-- ACIS-backed payloads
+This path is intentionally unchanged. The native facade must stay fail-closed for DWG so parser progress cannot be mistaken for runtime availability.
 
 ## Mission Focus Areas
 
-### 1. Bridge completion
-Primary risk is `src/io/native_bridge.rs`, where unsupported native entities currently fall through to `None` and disappear from compat runtime documents.
+### 1. Recovery closure for already-supported AC1015 entities
+Current native recovery already handles these families on the mission-start baseline:
 
-The mission completes bidirectional support for:
-- ellipse and direct-map geometry entities
-- polyline families
-- hatch
-- leader-like annotation entities
-- image/wipeout
-- payload-bearing direct-map entities including ACIS-backed types
-
-Contract-critical bridge entities for this mission are:
-- `ELLIPSE`
-- classic polyline families (`POLYLINE`, `POLYLINE2D`, `POLYLINE3D`, `PolygonMesh`, `PolyfaceMesh`)
+- `TEXT`
+- `ARC`
+- `CIRCLE`
+- `LINE`
+- `POINT`
+- `LWPOLYLINE`
 - `HATCH`
-- `LEADER`
-- `MLINE`
-- `TOLERANCE`
-- `IMAGE`
-- `WIPEOUT`
-- direct-map geometry entities (`Face3D`, `Solid`, `Ray`, `XLine`, `Shape`)
-- text/opaque direct-map entities (`ATTDEF`, standalone `ATTRIB`, `PdfUnderlay`, `Unknown`)
-- ACIS-backed entities (`Solid3D`, `Region`)
 
-### 2. Writer hardening
-Primary risk is field-level data loss in `crates/h7cad-native-dxf/src/writer.rs`.
+The mission is not mainly about adding more unrelated types. It is about:
 
-The mission focuses on known high-risk cases:
-- hatch polyline boundaries
-- classic polyline vertex widths
-- insert/attrib/seqend handle integrity
-- 3DSOLID and REGION ACIS payload fidelity
+- raising recovery floors on the AC1015 real sample
+- making regression floors explicit in tests
+- surfacing why supported objects fail to recover
+- preserving non-default common metadata on recovered entities
 
-### 3. Integration regression
-Primary risk is that individually-correct pieces still lose data in the full pipeline:
+`INSERT` is the new family entering this mission; it is not part of the pre-mission recovered-family baseline above.
 
-`read_dxf_bytes -> native_bridge::native_doc_to_acadrust -> native_bridge::acadrust_doc_to_native -> write_dxf -> read_dxf`
+### 2. Recovery diagnostics
+The highest-risk current behavior is silent loss inside enrichment. The mission needs a named diagnostics surface that explains:
 
-This mission uses real ACadSharp DXF samples to validate:
-- supported-entity preservation
-- ownership/model-space/layout validity
-- referenced-handle resolvability
-- block-owned content observability
+- handle-map misses
+- object-header decode failures
+- supported-family decode failures
+- unsupported-type skips
 
-### 4. Dependency reduction
-Primary risk is widening scope too early. This mission only targets quick-win files that are mostly Handle/Color/LineWeight consumers.
+Diagnostics are part of the product of this mission, not just temporary debugging.
 
-Concrete examples of quick-win targets:
-- `src/modules/home/groups/*`
-- `src/modules/home/clipboard/paste.rs`
-- `src/modules/home/select.rs`
-- other similar files whose main compat dependency is `Handle`, `Color`, or `LineWeight`
+### 3. INSERT entry into the AC1015 read-path
+`h7cad-native-model` already has `EntityData::Insert`, and DXF/bridge layers already know how to carry it. The missing link is the DWG parser lane:
 
-The mission does **not** rewrite:
-- `src/entities/*`
-- `src/scene/*`
-- large `src/app/*` compat dispatch code
+- object type dispatch
+- INSERT body decode
+- common metadata attachment
+- block resolution in the resolved native document
 
-Instead it reduces low-risk dependency surface while keeping the mixed compat/native runtime compiling.
+This mission treats `INSERT` as the first new entity family because the model surface already exists and the value is high.
+
+### 4. Boundary preservation
+Even while the parser grows, these truths must remain stable:
+
+- `h7cad-native-facade` DWG load/save stays unavailable
+- `src/io/mod.rs` keeps `.dwg` behavior on the compat DWG runtime
+- no new services, ports, or credentials appear
+- no GUI/runtime rollout is implied
 
 ## Canonical Observable Surfaces
 
-Workers should treat the following as test-facing truths:
+Workers should treat these as the authoritative observable surfaces:
 
-- **Native document truth:** `h7cad_native_model::CadDocument`
-- **Compat bridge truth:** `native_doc_to_acadrust()` / `acadrust_doc_to_native()`
-- **Writer truth:** `write_dxf()` followed by reread through `read_dxf()` / `read_dxf_bytes()`
-- **Public API truth:** `h7cad-native-facade` DXF load/save functions
-- **Runtime compile truth:** targeted `src/` quick-win files plus dependent command/app compile surfaces
+- **Parser truth:** `crates/h7cad-native-dwg::read_dwg`
+- **Structural truth:** `crates/h7cad-native-dwg/tests/real_samples.rs` for both recovery-baseline assertions and handle-map/object-header diagnostics
+- **Resolved document truth:** `h7cad_native_model::CadDocument`
+- **Boundary truth:** `crates/h7cad-native-facade` plus `src/io/mod.rs`
+- **Phase/status truth:** `CHANGELOG.md`
 
-If a change only looks correct inside helper functions but cannot be asserted through cargo tests or cargo checks, it is not done.
+If a change only exists inside a helper function but cannot be observed through tests, cargo output, or boundary inspection, it is not complete.
 
 ## Invariants To Preserve
 
-- **No silent entity drops for prioritized bridge families.**
-- **Shared entity fields remain stable across bridge round-trips.**
-- **Supported block-owned content remains observable where the contract requires it.**
-- **Block-owned content is most likely to disappear at document-level bridge boundaries, so workers must validate it explicitly when a feature fulfills those assertions.**
-- **Referenced handles remain resolvable, not merely unique or monotonic.**
-- **Writer output remains rereadable with field fidelity on known-risk entities.**
-- **Facade DXF load/save remains healthy without GUI activation.**
-- **Quick-win runtime migration must not expand into deep compat refactors.**
+- **AC1015 remains the only active version target for this mission.**
+- **Supported-family recovery must never regress silently.**
+- **Recovery gains must be explainable by named diagnostics, not just higher counts.**
+- **Recovered entities must carry usable common metadata, not only geometry payloads.**
+- **INSERT is not complete until it resolves to block records on the native model surface.**
+- **Facade/runtime DWG boundaries remain fail-closed and compat-based.**
+- **The mission must remain cargo-only and parser-only.**
 
 ## Risk Concentration
 
-### `src/io/native_bridge.rs`
-This is the highest-risk seam because:
-- it currently handles only a subset of native entity families
-- document-level bridging can silently omit entities
-- runtime correctness depends on compat-side observability after native load
+### `crates/h7cad-native-dwg/src/lib.rs`
+This is the highest-risk seam because it owns:
 
-### `crates/h7cad-native-dxf/src/writer.rs`
-This is the main write-path risk because small omissions create structurally valid DXF with silently degraded semantics.
+- the `read_dwg()` orchestration path
+- supported-type dispatch
+- enrichment
+- silent loss behavior during best-effort recovery
 
-### `src/io/mod.rs`
-This is the integration boundary where native read/write and compat runtime expectations meet.
+### `crates/h7cad-native-dwg/tests/real_samples.rs`
+This is the main regression truth surface. If counts rise or fall here, the mission has materially changed behavior.
 
-### Quick-win runtime files under `src/`
-These are low-risk migration targets only when they stay in the Handle/Color/LineWeight lane. If a task discovers deeper entity-model coupling, it should return to the orchestrator.
+### `crates/h7cad-native-model/src/lib.rs`
+This is where recovered entities become usable document state. `INSERT` must be validated here through `resolve_insert_block(...)` and ownership/block relationships.
+
+### `crates/h7cad-native-facade/src/lib.rs` and `src/io/mod.rs`
+These two files define the user-visible DWG boundary. They are not implementation targets for rollout in this mission, but they are mandatory validation boundaries.
 
 ## Validation Surface Mapping
 
-### Synthetic tests
-Use synthetic docs/tests to isolate:
-- specific bridge mappings
-- common-field preservation
-- writer bug regressions
-- handle and owner invariants
+### Real sample regression
+Use `sample_AC1015.dwg` and `tests/real_samples.rs` for:
 
-### Real ACadSharp samples
-Use sample DXF files for milestone-gate regression of:
-- real header/version handling
-- end-to-end pipeline preservation
-- ownership/block/layout behavior on realistic content
+- total and per-family recovery floors
+- metadata checks
+- structural diagnostics
+- AC1015-specific regressions
 
-### Compile surfaces
-Use `cargo check` and `cargo test` to validate quick-win runtime migration without launching the app.
+### Focused parser tests
+Use crate-local tests for:
+
+- failure classification
+- object/body decode rules
+- INSERT payload decoding
+- resolver/document invariants
+
+### Boundary checks
+Use cargo tests and source inspection for:
+
+- facade fail-closed behavior
+- compat runtime DWG routing
+- changelog wording consistency
 
 ## Relationship Summary
 
 The architecture relationship for workers is:
 
-`DXF bytes -> native document -> compat bridge -> native bridge-back -> DXF writer -> native reread`
+`AC1015 DWG bytes -> native parser pipeline -> resolved native document -> recovery diagnostics and entity assertions`
 
-with `facade DXF APIs` and `runtime compile surfaces` observing that pipeline from outside the native crates.
+while
+
+`facade DWG APIs` and `src/io/mod.rs` continue to assert that runtime rollout has not happened yet.

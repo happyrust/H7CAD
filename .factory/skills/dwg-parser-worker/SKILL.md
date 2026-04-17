@@ -1,6 +1,6 @@
 ---
 name: dwg-parser-worker
-description: Implement parser-side DWG milestones inside h7cad-native-dwg with strict test-first verification.
+description: Implement parser-side DWG milestones for AC1015 recovery closure and INSERT entry with strict test-first verification.
 ---
 
 # DWG Parser Worker
@@ -9,7 +9,7 @@ NOTE: Startup and cleanup are handled by `worker-base`. This skill defines the w
 
 ## When to Use This Skill
 
-Use this skill for features that implement or refactor DWG parsing logic in `crates/h7cad-native-dwg`, including header decoding, section decoding, record classification, pending graph extraction, resolver behavior, and parser-facing compile-surface checks in `crates/h7cad-native-facade`.
+Use this skill for features that implement or refactor DWG parsing logic in `crates/h7cad-native-dwg`, especially AC1015 recovery closure, recovery diagnostics, INSERT decode/resolution, real-sample regression guards, and parser-facing compile-surface checks in `crates/h7cad-native-facade`. This skill may also update mission-status wording in `CHANGELOG.md` when the feature explicitly requires it.
 
 This mission is parser-only. Do not modify `src/io`, do not switch the desktop app's default DWG loading path, and do not introduce new services, ports, or credentials.
 
@@ -23,16 +23,20 @@ This mission is parser-only. Do not modify `src/io`, do not switch the desktop a
 
 1. Read `mission.md`, `AGENTS.md`, `.factory/library/architecture.md` if present, and `.factory/library/user-testing.md`. Restate the feature scope, constraints, and `fulfills` assertion IDs in your notes before editing.
 2. Check whether the feature is already materially present in the shared worktree. If so, take a verification-first path: prove the current implementation satisfies the feature’s `fulfills` assertions, then make only the smallest follow-up changes still needed for clarity, coverage, or auditability. Do not manufacture churn just to create edits. Verification-first success still requires direct targeted assertions or named tests for the claimed outward-facing behavior; broad category filters alone are not enough if they do not actually exercise the feature contract.
-3. If the feature is not already present, add or update failing tests first. Prefer crate-local unit tests or `crates/h7cad-native-dwg/tests/*.rs`. When a feature changes parser output, add assertions against `CadDocument`, pending structures, or record summaries before implementation.
+3. If the feature is not already present, add or update failing tests first. Prefer crate-local unit tests or `crates/h7cad-native-dwg/tests/*.rs`. When a feature changes parser output, add assertions against `CadDocument`, pending structures, recovery diagnostics, or record summaries before implementation.
 4. Implement the smallest parser-only change that makes the new tests pass. Keep edits focused on `crates/h7cad-native-dwg` unless the feature explicitly calls for a compile-surface adjustment in `crates/h7cad-native-facade`.
 5. Preserve DWG mission boundaries:
    - No edits to `src/io` or desktop DWG routing.
    - No new runtime services, background processes, or ports.
    - Prefer synthetic fixtures and inline byte layouts unless the feature explicitly requires a real DWG sample.
+   - If the feature fulfills recovery-floor or INSERT assertions, include `real_samples.rs` evidence rather than relying only on semantic fixtures.
+   - Do not treat semantic `ENT:INSERT` fixtures as sufficient proof that AC1015 object decoding supports INSERT.
 6. Re-run targeted tests during iteration until the new behavior is stable. Before handoff, run these sequential baseline commands unless the feature description requires a wider scope:
    - `cargo check -p h7cad-native-dwg`
-   - `cargo test -p h7cad-native-dwg`
+   - `cargo test -p h7cad-native-dwg -- --test-threads=1`
+   - `cargo test -p h7cad-native-dwg --test real_samples -- --nocapture --test-threads=1` when the feature touches AC1015 recovery floors, failure diagnostics, or INSERT
    - `cargo check -p h7cad-native-facade`
+   - `cargo test -p h7cad-native-facade -- --test-threads=1` when the feature touches facade boundary assertions
 7. Manually inspect parser invariants through assertions or debug-oriented test expectations: version detection, section offsets/sizes, record counts, handle stability, owner relationships, and block/layout presence when relevant to the feature.
 8. In the shared dirty workspace, create an isolated feature commit by staging only the files touched or intentionally audited for this feature. Never reuse an unrelated commit ID. If the verification-first path proves the feature is already present and the relevant files have no remaining diff, cite the latest truthful existing commit touching those feature files (for example via `git log -1 -- <paths>`) instead of manufacturing churn just to create a new commit. Return to the orchestrator only if you cannot identify truthful existing commit provenance for the already-present implementation, or if relevant and unrelated edits are interleaved in the same file.
 9. Prepare a concrete handoff. List exact files changed, whether the work was new implementation or verification-first audit of existing in-worktree behavior, tests added, commands run with observations, and any unresolved parser gaps or format ambiguities. If anything is incomplete, say exactly what remains and why.
