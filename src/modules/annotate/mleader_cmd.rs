@@ -5,9 +5,7 @@
 //   2. AskText       — wants_text_input; blank Enter = no text
 //   → commit single MultiLeader entity
 
-use acadrust::entities::MultiLeader;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -79,8 +77,8 @@ impl CadCommand for MLeaderCommand {
     fn on_text_input(&mut self, raw: &str) -> Option<CmdResult> {
         if let Step::AskText { verts } = &self.step {
             let text = raw.trim();
-            let ml = build_mleader(text, verts);
-            Some(CmdResult::CommitAndExit(EntityType::MultiLeader(ml)))
+            let entity = build_mleader_native(text, verts);
+            Some(CmdResult::CommitAndExitNative(entity))
         } else {
             None
         }
@@ -102,35 +100,43 @@ impl CadCommand for MLeaderCommand {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-fn v3(p: Vec3) -> Vector3 { Vector3::new(p.x as f64, p.y as f64, p.z as f64) }
-
-fn build_mleader(text: &str, verts: &[Vec3]) -> MultiLeader {
-    // Last vertex = content/text location; remaining = leader line points
+fn build_mleader_native(text: &str, verts: &[Vec3]) -> nm::Entity {
     let (leader_pts, content_pt) = verts.split_at(verts.len() - 1);
     let content_pt = content_pt[0];
 
-    let leader_v3: Vec<Vector3> = leader_pts.iter().map(|p| v3(*p)).collect();
-    let content_v3 = v3(content_pt);
+    let leader_vertices: Vec<[f64; 3]> = leader_pts
+        .iter()
+        .map(|p| [p.x as f64, p.y as f64, p.z as f64])
+        .collect();
+    let leader_root_lengths = if leader_vertices.is_empty() {
+        Vec::new()
+    } else {
+        vec![leader_vertices.len()]
+    };
+    let text_location = Some([content_pt.x as f64, content_pt.y as f64, content_pt.z as f64]);
 
-    let mut ml = MultiLeader::with_text(text, content_v3, leader_v3);
-
-    // Match Leader entity defaults
-    ml.text_height          = 2.5;
-    ml.context.text_height  = 2.5;
-    ml.arrowhead_size       = 2.5;
-    ml.dogleg_length        = 2.5;
-
-    // Direction: from last leader pt toward content
-    if let (Some(last_leader), Some(root)) = (leader_pts.last(), ml.context.leader_roots.first_mut()) {
-        let dx = (content_pt.x - last_leader.x) as f64;
-        let dy = (content_pt.y - last_leader.y) as f64;
-        let len = (dx * dx + dy * dy).sqrt().max(1e-9);
-        root.direction = Vector3::new(dx / len, dy / len, 0.0);
-        root.connection_point = content_v3;
-        root.landing_distance = 2.5;
-    }
-
-    ml
+    nm::Entity::new(nm::EntityData::MultiLeader {
+        content_type: 1,
+        text_label: text.to_string(),
+        style_name: "Standard".into(),
+        arrowhead_size: 2.5,
+        landing_gap: 0.0,
+        dogleg_length: 2.5,
+        property_override_flags: 0,
+        path_type: 1,
+        line_color: 0,
+        leader_line_weight: -1,
+        enable_landing: true,
+        enable_dogleg: true,
+        enable_annotation_scale: false,
+        scale_factor: 1.0,
+        text_attachment_direction: 0,
+        text_bottom_attachment_type: 9,
+        text_top_attachment_type: 9,
+        text_location,
+        leader_vertices,
+        leader_root_lengths,
+    })
 }
 
 fn preview_wire(pts: &[Vec3]) -> WireModel {

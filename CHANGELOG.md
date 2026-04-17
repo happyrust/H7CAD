@@ -2,6 +2,30 @@
 
 ## [未发布]
 
+### 2026-04-17：C2e MLEADER 命令 native-first
+
+沿用 C2a-C2d 模式，把 `src/modules/annotate/mleader_cmd.rs` 的 MLEADER 命令从
+`acadrust::entities::MultiLeader` 构造切到 `nm::EntityData::MultiLeader`。
+
+- `MLeaderCommand::on_text_input`：`MultiLeader::with_text(..)` +
+  `CmdResult::CommitAndExit(EntityType::MultiLeader(..))` →
+  `nm::Entity::new(nm::EntityData::MultiLeader { .. })` +
+  `CmdResult::CommitAndExitNative(entity)`
+- `build_mleader` → `build_mleader_native` 直接构造 native：
+  - `verts` 的最后一点作为 `text_location`，前面的点作为 `leader_vertices`
+  - `leader_root_lengths = vec![leader_vertices.len()]`（单 root）
+  - 默认值对齐 bridge `acad_multileader_to_native` 的反向映射：
+    `content_type=1` (MText) / `path_type=1` (Straight) / `style_name="Standard"` /
+    `scale_factor=1.0` / `leader_line_weight=-1` / `enable_landing=true` /
+    `enable_dogleg=true` / `text_attachment_type=9`
+  - 保留原命令的 `arrowhead_size=2.5` / `dogleg_length=2.5`
+- 移除 `use acadrust::entities::MultiLeader` / `use acadrust::EntityType` /
+  `use crate::types::Vector3` / 本地 `fn v3(..)` helper
+- 字段损失说明：原命令通过 `ml.context.leader_roots[0]` 设置的
+  `direction/connection_point/landing_distance` 在 native 模型中无对等字段，
+  bridge 会走默认值；渲染 / DXF / DWG 正常不受影响
+- 度量：`mleader_cmd.rs` 中 `acadrust::` 引用 3 → 0；主 crate 零 warning 保持
+
 ### 2026-04-17：C2d TOLERANCE 命令 native-first
 
 沿用 C2a/C2b/C2c 模式，把 `src/modules/annotate/tolerance_cmd.rs` 的 TOLERANCE
