@@ -2,6 +2,27 @@
 
 ## [未发布]
 
+### 2026-04-17：C3c ATTDEF 命令 native-first（home/draw 阶段收口）
+
+- **ATTDEF** (`attdef.rs`)：`AttributeDefinition { tag, prompt, default_value,
+  insertion_point, height, ..Default }` + `common.layer = "0"` →
+  `nm::Entity::new(nm::EntityData::AttDef { tag, prompt, default_value,
+  insertion, height })`；`nm::Entity::new` 默认 `layer_name = "0"` 与原命令一致，
+  无需显式设置
+- 移除 `use acadrust::entities::AttributeDefinition` / `use acadrust::EntityType` /
+  `use crate::types::Vector3`
+- 度量：`attdef.rs` 中 `acadrust::` 引用 2 → 0；主 crate 零 warning 保持
+
+**RASTER_IMAGE 延后说明**：`raster_image.rs` 需要传 `file_path`，但 native
+`EntityData::Image { insertion, u_vector, v_vector, image_size }` **无 file_path 字段**
+— bridge 投影时用 `ar::RasterImage::new("", ..)` 会让 path 丢失，导致图片渲染/保存
+失效。列为 D 系列必须扩展字段（file_path + flags + pixel_size）之前的必要前置。
+
+**home/draw 进度小结**：native-first **6/9** 完成
+（REVCLOUD / SHAPES×6 / SPLINE / MLINE / WIPEOUT / ATTDEF）；延后 3 项待 D 系列：
+- DONUT / POLYLINE（LwVertex 缺 start_width / end_width / constant_width）
+- RASTER_IMAGE（Image 缺 file_path / flags / pixel_size）
+
 ### 2026-04-17：C3b SPLINE / MLINE / WIPEOUT 命令 native-first
 
 继续 C3 系列，迁移 home/draw 里 3 个 native 字段基本对等的命令。

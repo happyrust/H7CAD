@@ -6,9 +6,7 @@
 //   3. Text: Enter default value    (optional — press Enter for blank)
 //   4. Point: Click insertion point
 
-use acadrust::entities::AttributeDefinition;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -78,16 +76,14 @@ impl CadCommand for AttdefCommand {
 
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         if let Step::Insertion { tag, prompt, default } = &self.step {
-            let mut attdef = AttributeDefinition {
+            let entity = nm::Entity::new(nm::EntityData::AttDef {
                 tag: tag.clone(),
                 prompt: prompt.clone(),
                 default_value: default.clone(),
-                insertion_point: Vector3::new(pt.x as f64, pt.z as f64, pt.y as f64),
+                insertion: [pt.x as f64, pt.z as f64, pt.y as f64],
                 height: self.height,
-                ..Default::default()
-            };
-            attdef.common.layer = "0".into();
-            CmdResult::CommitAndExit(EntityType::AttributeDefinition(attdef))
+            });
+            CmdResult::CommitAndExitNative(entity)
         } else {
             CmdResult::NeedPoint
         }
