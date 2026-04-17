@@ -24,6 +24,7 @@
 //! is pure byte data. Live validation against the real ACadSharp
 //! `sample_AC1015.dwg` returns **1047** entries across 2 chunks.
 
+use crate::modular::{read_modular_char, read_signed_modular_char};
 use crate::DwgReadError;
 use h7cad_native_model::Handle;
 
@@ -125,52 +126,6 @@ pub fn parse_handle_map(payload: &[u8]) -> Result<Vec<HandleMapEntry>, DwgReadEr
     }
 
     Ok(entries)
-}
-
-/// Decode an unsigned modular character: 7 bits per byte, continuation
-/// flagged by bit 7.
-fn read_modular_char(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
-    let mut value: u64 = 0;
-    let mut shift = 0u32;
-    loop {
-        let byte = *bytes.get(*cursor)?;
-        *cursor += 1;
-        value |= ((byte & 0x7F) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return Some(value);
-        }
-        shift += 7;
-        if shift > 63 {
-            return None;
-        }
-    }
-}
-
-/// Decode a signed modular character: same framing as the unsigned
-/// form, but the final byte's bit 6 (`0x40`) flags a negative value and
-/// the payload in the terminator is only the low 6 bits.
-fn read_signed_modular_char(bytes: &[u8], cursor: &mut usize) -> Option<i64> {
-    let mut value: u64 = 0;
-    let mut shift = 0u32;
-    loop {
-        let byte = *bytes.get(*cursor)?;
-        *cursor += 1;
-        if byte & 0x80 != 0 {
-            value |= ((byte & 0x7F) as u64) << shift;
-            shift += 7;
-            if shift > 63 {
-                return None;
-            }
-        } else {
-            let negative = byte & 0x40 != 0;
-            value |= ((byte & 0x3F) as u64) << shift;
-            return Some(if negative {
-                -(value as i64)
-            } else {
-                value as i64
-            });
-        }
-    }
 }
 
 #[cfg(test)]

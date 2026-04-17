@@ -2,6 +2,41 @@
 
 ## [未发布]
 
+### 2026-04-17：M3-B brick 2a — modular.rs 抽公共模块 + 新增 ModularShort 解码
+
+为 brick 2b（`ObjectStreamCursor`）准备基座：object stream 里的每个对象都以
+`MS`（Modular Short）作 size prefix，需要一个 byte-aligned、不走 `BitReader`
+的解码器。顺便把 brick 1 在 handle_map.rs 里实现的两个 byte-aligned reader
+抽成公共模块便于复用。
+
+**新增模块** (`crates/h7cad-native-dwg/src/modular.rs`)：
+
+- `read_modular_char(bytes, cursor) -> Option<u64>`（从 handle_map.rs 迁入）
+- `read_signed_modular_char(bytes, cursor) -> Option<i64>`（迁入）
+- **新增** `read_modular_short(bytes, cursor) -> Option<u64>`：
+  - 小端 2 字节为一 chunk，低 15 位贡献 payload
+  - word 的 `0x8000` = continuation flag
+  - 对齐 ACadSharp `ReadModularShort` 参考实现
+  - 防御：`shift > 60` 返回 None（4 chunks 是实际 AC1015 对象 size 上限远高于）
+  - 暂标 `#[allow(dead_code)]` — 生产代码调用点在 brick 2b `object_stream.rs`
+
+**单测**（11 个，全在 `modular::tests`）：
+
+- `read_modular_char`：single-byte terminator / multi-byte continuation / 截断报错
+- `read_signed_modular_char`：positive / negative / multi-byte positive
+- `read_modular_short`：single chunk / max single-chunk payload (0x7FFF) /
+  two-chunk continuation / 截断报错 / 单字节残缺报错
+
+**handle_map.rs 调整**：`use crate::modular::{read_modular_char,
+read_signed_modular_char}`，删除内部定义。`lib.rs` 注册 `mod modular;`（内部
+模块，不对外暴露；`pub(crate)` 足够）。
+
+- 测试：`cargo test -p h7cad-native-dwg -- --test-threads=1` 全绿
+  （45 unit + 53 read_headers + 8 real_samples；unit 从 34 增至 45 = 原
+  28 非 handle_map + 6 handle_map 保留 + 11 modular 新单测）
+- `cargo check --workspace --all-targets` 无新增 warning
+- handle_map.rs 行为字节对等（同一组内部 helper，只是换位置）
+
 ### 2026-04-17：M3-B brick 1 — AcDb:Handles 解码接入 build_pending_document
 
 开启 DWG parser M3-B 系列（对象流解码）第 1 砖 —— 把 AC1015 `AcDb:Handles`

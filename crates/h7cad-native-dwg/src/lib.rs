@@ -3,6 +3,7 @@ mod error;
 mod file_header;
 mod handle_map;
 mod known_section;
+mod modular;
 mod object_reader;
 mod pending;
 mod reader;
