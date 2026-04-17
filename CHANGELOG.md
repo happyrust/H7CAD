@@ -2,6 +2,24 @@
 
 ## [未发布]
 
+### 2026-04-17：C3d POLYLINE 命令 native-first（修正 C3c 判断）
+
+C3c changelog 误判 polyline.rs 使用宽度字段而延后；实际 PLINE 命令只使用
+`vertices + bulge + is_closed`，完全契合现有 native `EntityData::LwPolyline +
+LwVertex { x, y, bulge }`。本次直接迁移。
+
+- `PlineCommand::build_entity` 签名 `Option<EntityType>` → `Option<nm::Entity>`，
+  内部构造 `nm::Entity::new(nm::EntityData::LwPolyline { vertices, closed })`，
+  per-vertex 用 `nm::LwVertex { x, y, bulge }`
+- 3 个 CmdResult 出口 `CommitAndExit(e)` → `CommitAndExitNative(e)`（正常 Enter /
+  Escape / C/CLOSE 文本输入）
+- 移除 `use acadrust::entities::LwVertex` / `use acadrust::{EntityType, LwPolyline}` /
+  `use crate::types::Vector2`
+- 度量：`polyline.rs` 中 `acadrust::` 引用 2 → 0；主 crate 零 warning 保持
+
+**home/draw 进度更新**：native-first **7/9** 完成（REVCLOUD / SHAPES×6 / SPLINE /
+MLINE / WIPEOUT / ATTDEF / POLYLINE）；仅剩 DONUT / RASTER_IMAGE 待 D3 / D4。
+
 ### 2026-04-17：D2 扩展 native EntityData::Wipeout.elevation 字段
 
 修复 C3b WIPEOUT 迁移遗留的 DXF Z / elevation 丢失（世界 Y 轴）。

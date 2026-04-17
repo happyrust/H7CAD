@@ -9,9 +9,7 @@
 // Arc mode: arcs are tangent-continuous with the preceding segment.
 // Bulge is stored per vertex (segment i→i+1); positive = CCW, negative = CW.
 
-use acadrust::entities::LwVertex;
-use crate::types::Vector2;
-use acadrust::{EntityType, LwPolyline};
+use h7cad_native_model as nm;
 use glam::{Vec2, Vec3};
 
 use crate::command::{CadCommand, CmdResult};
@@ -58,26 +56,24 @@ impl PlineCommand {
         }
     }
 
-    fn build_entity(&self, closed: bool) -> Option<EntityType> {
+    fn build_entity(&self, closed: bool) -> Option<nm::Entity> {
         if self.vertices.len() < 2 {
             return None;
         }
-        let lw_verts: Vec<LwVertex> = self
+        let lw_verts: Vec<nm::LwVertex> = self
             .vertices
             .iter()
             .enumerate()
-            .map(|(i, v)| {
-                let mut lv = LwVertex::new(Vector2::new(v.x as f64, v.y as f64));
-                lv.bulge = self.bulges.get(i).copied().unwrap_or(0.0);
-                lv
+            .map(|(i, v)| nm::LwVertex {
+                x: v.x as f64,
+                y: v.y as f64,
+                bulge: self.bulges.get(i).copied().unwrap_or(0.0),
             })
             .collect();
-        let pline = LwPolyline {
+        Some(nm::Entity::new(nm::EntityData::LwPolyline {
             vertices: lw_verts,
-            is_closed: closed,
-            ..Default::default()
-        };
-        Some(EntityType::LwPolyline(pline))
+            closed,
+        }))
     }
 }
 
@@ -231,14 +227,14 @@ impl CadCommand for PlineCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match self.build_entity(false) {
-            Some(e) => CmdResult::CommitAndExit(e),
+            Some(e) => CmdResult::CommitAndExitNative(e),
             None => CmdResult::Cancel,
         }
     }
 
     fn on_escape(&mut self) -> CmdResult {
         match self.build_entity(false) {
-            Some(e) => CmdResult::CommitAndExit(e),
+            Some(e) => CmdResult::CommitAndExitNative(e),
             None => CmdResult::Cancel,
         }
     }
@@ -259,7 +255,7 @@ impl CadCommand for PlineCommand {
                 Some(CmdResult::NeedPoint)
             }
             "C" | "CLOSE" => match self.build_entity(true) {
-                Some(e) => Some(CmdResult::CommitAndExit(e)),
+                Some(e) => Some(CmdResult::CommitAndExitNative(e)),
                 None => Some(CmdResult::Cancel),
             },
             _ => None,
