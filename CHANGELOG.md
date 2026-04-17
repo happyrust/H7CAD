@@ -2,6 +2,34 @@
 
 ## [未发布]
 
+### 2026-04-17：C2c DIMENSION 家族 7 个命令 native-first
+
+把 `src/modules/annotate/` 里 7 个 dimension 命令从 `acadrust::Dimension::{
+Linear,Aligned,Radius,Diameter,Angular3Pt,Ordinate}` 切到
+`nm::EntityData::Dimension { dim_type, .. }` 构造。
+
+涉及文件：
+- `linear_dim.rs`（dim_type=0）
+- `aligned_dim.rs`（dim_type=1）
+- `diameter_dim.rs`（dim_type=3）
+- `radius_dim.rs`（dim_type=4）
+- `angular_dim.rs`（dim_type=5）
+- `ordinate_dim.rs`（dim_type=6，X/Y 方向通过 `dim_type & 0x40` 位标记）
+- `dim_continue.rs` / `dim_baseline.rs`（dim_type=0 链式/基线）
+
+**设计要点**：
+- nm 用单一变体 + `dim_type` (i16) 区分 7 种 sub-type，字段涵盖
+  definition_point / text_midpoint / first_point / second_point / angle_vertex /
+  dimension_arc / leader_length / rotation (degrees) / ext_line_rotation (degrees)
+- `measurement` 字段由命令侧自行计算（Linear/Aligned 用投影距离，Radius 用圆心-点距离，
+  Diameter 用 2×半径，Angular3Pt 用向量夹角度数，Ordinate 置 0）
+- Radius/Diameter：`angle_vertex` 承载 center，`definition_point` 承载圆周点
+- native_bridge 中 `native_dimension_to_acadrust` 已支持所有 7 种分支，直接复用
+- 每个文件删除本地 `fn v3(..)` helper（用 `[f64;3]` 字面量替代）
+
+**度量**：7 个命令文件中 `acadrust::` 引用各 3 → 0；共减少 21 处 acadrust 引用
+- DWG 88 / DXF 81 / model 9 全绿；主 crate 零 warning 保持
+
 ### 2026-04-17：C2b TEXT / MTEXT 命令 native-first
 
 把 `src/modules/annotate/{text,mtext}.rs` 两个命令从 `acadrust::{Text, MText}`

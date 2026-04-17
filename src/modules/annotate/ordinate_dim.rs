@@ -8,9 +8,7 @@
 // If the leader moves mainly in Y → X-type ordinate (shows X coordinate).
 // If the leader moves mainly in X → Y-type ordinate (shows Y coordinate).
 
-use acadrust::entities::{Dimension, DimensionOrdinate};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -60,21 +58,34 @@ impl CadCommand for OrdinateDimCommand {
             Step::LeaderEndpoint { feature } => {
                 let dx = (pt.x - feature.x).abs();
                 let dy = (pt.z - feature.z).abs();
-                // If leader is more vertical (Y-screen = Z-world moves more) → X ordinate.
-                // If leader is more horizontal → Y ordinate.
                 let is_x = dy >= dx;
-                let feat_v3 = v3(feature);
-                let lead_v3 = v3(pt);
-                let dim = DimensionOrdinate::new(feat_v3, lead_v3, is_x);
-                CmdResult::CommitAndExit(EntityType::Dimension(Dimension::Ordinate(dim)))
+                let dim_type = 6 | if is_x { 0x40 } else { 0 };
+                let entity = nm::Entity::new(nm::EntityData::Dimension {
+                    dim_type,
+                    block_name: String::new(),
+                    style_name: String::new(),
+                    definition_point: [0.0; 3],
+                    text_midpoint: [pt.x as f64, 0.0, pt.z as f64],
+                    text_override: String::new(),
+                    attachment_point: 0,
+                    measurement: 0.0,
+                    text_rotation: 0.0,
+                    horizontal_direction: 0.0,
+                    flip_arrow1: false,
+                    flip_arrow2: false,
+                    first_point: [feature.x as f64, 0.0, feature.z as f64],
+                    second_point: [pt.x as f64, 0.0, pt.z as f64],
+                    angle_vertex: [0.0; 3],
+                    dimension_arc: [0.0; 3],
+                    leader_length: 0.0,
+                    rotation: 0.0,
+                    ext_line_rotation: 0.0,
+                });
+                CmdResult::CommitAndExitNative(entity)
             }
         }
     }
 
     fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
     fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> { vec![] }
-}
-
-fn v3(p: Vec3) -> Vector3 {
-    Vector3::new(p.x as f64, 0.0, p.z as f64)
 }

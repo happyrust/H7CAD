@@ -6,9 +6,7 @@
 //
 // Constructed from commands.rs after finding the last placed linear/aligned dimension.
 
-use acadrust::entities::{Dimension, DimensionLinear};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -94,22 +92,37 @@ impl CadCommand for DimBaselineCommand {
         let p1 = self.base_p1;
         let p2 = pt;
 
-        // Build a new linear dimension.
-        let mut dim = DimensionLinear::new(v3(p1), v3(p2));
-        dim.rotation = self.rotation;
-
         let dim_line_pt = p1 + self.perp * self.next_offset;
         let dim_line_pt2 = p2 + self.perp * self.next_offset;
-        dim.definition_point = v3(dim_line_pt);
-        dim.base.definition_point = v3(dim_line_pt);
-        dim.base.text_middle_point = v3((dim_line_pt + dim_line_pt2) * 0.5);
-        dim.base.insertion_point = dim.base.text_middle_point;
-        dim.base.actual_measurement = dim.measurement();
+        let text_mid = (dim_line_pt + dim_line_pt2) * 0.5;
+        let axis = Vec3::new(self.rotation.cos() as f32, self.rotation.sin() as f32, 0.0);
+        let measurement = (p2 - p1).dot(axis).abs() as f64;
+        let rotation_deg = self.rotation.to_degrees();
+        let entity = nm::Entity::new(nm::EntityData::Dimension {
+            dim_type: 0,
+            block_name: String::new(),
+            style_name: String::new(),
+            definition_point: [dim_line_pt.x as f64, dim_line_pt.y as f64, dim_line_pt.z as f64],
+            text_midpoint: [text_mid.x as f64, text_mid.y as f64, text_mid.z as f64],
+            text_override: String::new(),
+            attachment_point: 0,
+            measurement,
+            text_rotation: 0.0,
+            horizontal_direction: 0.0,
+            flip_arrow1: false,
+            flip_arrow2: false,
+            first_point: [p1.x as f64, p1.y as f64, p1.z as f64],
+            second_point: [p2.x as f64, p2.y as f64, p2.z as f64],
+            angle_vertex: [0.0; 3],
+            dimension_arc: [0.0; 3],
+            leader_length: 0.0,
+            rotation: rotation_deg,
+            ext_line_rotation: 0.0,
+        });
 
-        // Stack the next dim line further out.
         self.next_offset += DIMDLI;
 
-        CmdResult::CommitEntity(EntityType::Dimension(Dimension::Linear(dim)))
+        CmdResult::CommitEntityNative(entity)
     }
 
     fn on_enter(&mut self) -> CmdResult {
@@ -144,8 +157,4 @@ impl CadCommand for DimBaselineCommand {
             key_vertices: vec![],
         })
     }
-}
-
-fn v3(p: Vec3) -> Vector3 {
-    Vector3::new(p.x as f64, p.y as f64, p.z as f64)
 }

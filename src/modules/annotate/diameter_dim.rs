@@ -1,8 +1,6 @@
 // DIMDIAMETER command — diameter dimension for circles and arcs.
 
-use acadrust::entities::{Dimension, DimensionDiameter};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -58,13 +56,29 @@ impl CadCommand for DiameterDimensionCommand {
                 CmdResult::NeedPoint
             }
             Step::TextPoint { center, arc_pt } => {
-                let mut dim = DimensionDiameter::new(v3(center), v3(arc_pt));
-                dim.base.definition_point  = v3(arc_pt);
-                dim.base.text_middle_point = v3(pt);
-                dim.base.insertion_point   = v3(pt);
-                dim.leader_length = arc_pt.distance(pt) as f64;
-                dim.base.actual_measurement = dim.measurement();
-                CmdResult::CommitAndExit(EntityType::Dimension(Dimension::Diameter(dim)))
+                let measurement = (center.distance(arc_pt) * 2.0) as f64;
+                let entity = nm::Entity::new(nm::EntityData::Dimension {
+                    dim_type: 3,
+                    block_name: String::new(),
+                    style_name: String::new(),
+                    definition_point: [arc_pt.x as f64, arc_pt.y as f64, arc_pt.z as f64],
+                    text_midpoint: [pt.x as f64, pt.y as f64, pt.z as f64],
+                    text_override: String::new(),
+                    attachment_point: 0,
+                    measurement,
+                    text_rotation: 0.0,
+                    horizontal_direction: 0.0,
+                    flip_arrow1: false,
+                    flip_arrow2: false,
+                    first_point: [0.0; 3],
+                    second_point: [0.0; 3],
+                    angle_vertex: [center.x as f64, center.y as f64, center.z as f64],
+                    dimension_arc: [0.0; 3],
+                    leader_length: arc_pt.distance(pt) as f64,
+                    rotation: 0.0,
+                    ext_line_rotation: 0.0,
+                });
+                CmdResult::CommitAndExitNative(entity)
             }
         }
     }
@@ -81,10 +95,6 @@ impl CadCommand for DiameterDimensionCommand {
             }
         }
     }
-}
-
-fn v3(p: Vec3) -> Vector3 {
-    Vector3::new(p.x as f64, p.y as f64, p.z as f64)
 }
 
 fn preview_line(a: Vec3, b: Vec3) -> WireModel {

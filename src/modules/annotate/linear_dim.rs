@@ -1,6 +1,4 @@
-use acadrust::entities::{Dimension, DimensionLinear};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -60,18 +58,37 @@ impl CadCommand for LinearDimensionCommand {
                 CmdResult::NeedPoint
             }
             Step::DimensionLine { first, second } => {
-                let mut dim = DimensionLinear::new(v3(first), v3(second));
-                dim.rotation = if (second.y - first.y).abs() > (second.x - first.x).abs() {
-                    std::f64::consts::FRAC_PI_2
+                let rotation_deg = if (second.y - first.y).abs() > (second.x - first.x).abs() {
+                    90.0
                 } else {
                     0.0
                 };
-                dim.definition_point = v3(pt);
-                dim.base.definition_point = v3(pt);
-                dim.base.text_middle_point = v3(linear_text_pos(first, second, pt));
-                dim.base.insertion_point = dim.base.text_middle_point;
-                dim.base.actual_measurement = dim.measurement();
-                CmdResult::CommitAndExit(EntityType::Dimension(Dimension::Linear(dim)))
+                let rotation_rad = rotation_deg as f64 * std::f64::consts::PI / 180.0;
+                let axis = Vec3::new(rotation_rad.cos() as f32, rotation_rad.sin() as f32, 0.0);
+                let measurement = (second - first).dot(axis).abs() as f64;
+                let text_mid = linear_text_pos(first, second, pt);
+                let entity = nm::Entity::new(nm::EntityData::Dimension {
+                    dim_type: 0,
+                    block_name: String::new(),
+                    style_name: String::new(),
+                    definition_point: [pt.x as f64, pt.y as f64, pt.z as f64],
+                    text_midpoint: [text_mid.x as f64, text_mid.y as f64, text_mid.z as f64],
+                    text_override: String::new(),
+                    attachment_point: 0,
+                    measurement,
+                    text_rotation: 0.0,
+                    horizontal_direction: 0.0,
+                    flip_arrow1: false,
+                    flip_arrow2: false,
+                    first_point: [first.x as f64, first.y as f64, first.z as f64],
+                    second_point: [second.x as f64, second.y as f64, second.z as f64],
+                    angle_vertex: [0.0; 3],
+                    dimension_arc: [0.0; 3],
+                    leader_length: 0.0,
+                    rotation: rotation_deg,
+                    ext_line_rotation: 0.0,
+                });
+                CmdResult::CommitAndExitNative(entity)
             }
         }
     }
@@ -93,10 +110,6 @@ impl CadCommand for LinearDimensionCommand {
             }
         }
     }
-}
-
-fn v3(pt: Vec3) -> Vector3 {
-    Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64)
 }
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {

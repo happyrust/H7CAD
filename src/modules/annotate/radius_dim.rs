@@ -1,6 +1,4 @@
-use acadrust::entities::{Dimension, DimensionRadius};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -60,13 +58,29 @@ impl CadCommand for RadiusDimensionCommand {
                 CmdResult::NeedPoint
             }
             Step::TextPoint { center, point } => {
-                let mut dim = DimensionRadius::new(v3(center), v3(point));
-                dim.base.definition_point = v3(point);
-                dim.base.text_middle_point = v3(pt);
-                dim.base.insertion_point = v3(pt);
-                dim.leader_length = point.distance(pt) as f64;
-                dim.base.actual_measurement = dim.measurement();
-                CmdResult::CommitAndExit(EntityType::Dimension(Dimension::Radius(dim)))
+                let measurement = center.distance(point) as f64;
+                let entity = nm::Entity::new(nm::EntityData::Dimension {
+                    dim_type: 4,
+                    block_name: String::new(),
+                    style_name: String::new(),
+                    definition_point: [point.x as f64, point.y as f64, point.z as f64],
+                    text_midpoint: [pt.x as f64, pt.y as f64, pt.z as f64],
+                    text_override: String::new(),
+                    attachment_point: 0,
+                    measurement,
+                    text_rotation: 0.0,
+                    horizontal_direction: 0.0,
+                    flip_arrow1: false,
+                    flip_arrow2: false,
+                    first_point: [0.0; 3],
+                    second_point: [0.0; 3],
+                    angle_vertex: [center.x as f64, center.y as f64, center.z as f64],
+                    dimension_arc: [0.0; 3],
+                    leader_length: point.distance(pt) as f64,
+                    rotation: 0.0,
+                    ext_line_rotation: 0.0,
+                });
+                CmdResult::CommitAndExitNative(entity)
             }
         }
     }
@@ -92,10 +106,6 @@ impl CadCommand for RadiusDimensionCommand {
             ])),
         }
     }
-}
-
-fn v3(pt: Vec3) -> Vector3 {
-    Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64)
 }
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {

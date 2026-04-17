@@ -1,6 +1,4 @@
-use acadrust::entities::{Dimension, DimensionAngular3Pt};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -72,13 +70,39 @@ impl CadCommand for AngularDimensionCommand {
                 first,
                 second,
             } => {
-                let mut dim = DimensionAngular3Pt::new(v3(vertex), v3(first), v3(second));
-                dim.definition_point = v3(pt);
-                dim.base.definition_point = v3(pt);
-                dim.base.text_middle_point = v3(pt);
-                dim.base.insertion_point = v3(pt);
-                dim.base.actual_measurement = dim.measurement_degrees();
-                CmdResult::CommitAndExit(EntityType::Dimension(Dimension::Angular3Pt(dim)))
+                let a0 = ((first.y - vertex.y) as f64).atan2((first.x - vertex.x) as f64);
+                let a1 = ((second.y - vertex.y) as f64).atan2((second.x - vertex.x) as f64);
+                let delta = {
+                    let d = a1 - a0;
+                    let mut d = d.rem_euclid(std::f64::consts::TAU);
+                    if d > std::f64::consts::PI {
+                        d -= std::f64::consts::TAU;
+                    }
+                    d.abs()
+                };
+                let measurement = delta.to_degrees();
+                let entity = nm::Entity::new(nm::EntityData::Dimension {
+                    dim_type: 5,
+                    block_name: String::new(),
+                    style_name: String::new(),
+                    definition_point: [pt.x as f64, pt.y as f64, pt.z as f64],
+                    text_midpoint: [pt.x as f64, pt.y as f64, pt.z as f64],
+                    text_override: String::new(),
+                    attachment_point: 0,
+                    measurement,
+                    text_rotation: 0.0,
+                    horizontal_direction: 0.0,
+                    flip_arrow1: false,
+                    flip_arrow2: false,
+                    first_point: [first.x as f64, first.y as f64, first.z as f64],
+                    second_point: [second.x as f64, second.y as f64, second.z as f64],
+                    angle_vertex: [vertex.x as f64, vertex.y as f64, vertex.z as f64],
+                    dimension_arc: [0.0; 3],
+                    leader_length: 0.0,
+                    rotation: 0.0,
+                    ext_line_rotation: 0.0,
+                });
+                CmdResult::CommitAndExitNative(entity)
             }
         }
     }
@@ -105,10 +129,6 @@ impl CadCommand for AngularDimensionCommand {
             } => Some(preview_wire(angular_preview(vertex, first, second, pt))),
         }
     }
-}
-
-fn v3(pt: Vec3) -> Vector3 {
-    Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64)
 }
 
 fn preview_wire(points: Vec<Vec3>) -> WireModel {

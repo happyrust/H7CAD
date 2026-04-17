@@ -1,8 +1,6 @@
 // DIMALIGNED command — aligned dimension (measures true distance between two points).
 
-use acadrust::entities::{Dimension, DimensionAligned};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -58,23 +56,30 @@ impl CadCommand for AlignedDimensionCommand {
                 CmdResult::NeedPoint
             }
             Step::DimLine { p1, p2 } => {
-                let mut dim = DimensionAligned::new(v3(p1), v3(p2));
-                // Set offset: distance from p2 to the dim line location
-                let dx = pt.x as f64 - p2.x as f64;
-                let dy = pt.z as f64 - p2.z as f64;
-                let offset = (dx * dx + dy * dy).sqrt();
-                dim.set_offset(offset);
-                dim.base.definition_point = v3(pt);
-                dim.base.text_middle_point = v3(
-                    Vec3::new(
-                        (p1.x + p2.x) * 0.5,
-                        (p1.y + p2.y) * 0.5,
-                        (p1.z + p2.z) * 0.5,
-                    )
-                );
-                dim.base.insertion_point = dim.base.text_middle_point;
-                dim.base.actual_measurement = dim.measurement();
-                CmdResult::CommitAndExit(EntityType::Dimension(Dimension::Aligned(dim)))
+                let mid = Vec3::new((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5, (p1.z + p2.z) * 0.5);
+                let measurement = (p2 - p1).length() as f64;
+                let entity = nm::Entity::new(nm::EntityData::Dimension {
+                    dim_type: 1,
+                    block_name: String::new(),
+                    style_name: String::new(),
+                    definition_point: [pt.x as f64, pt.y as f64, pt.z as f64],
+                    text_midpoint: [mid.x as f64, mid.y as f64, mid.z as f64],
+                    text_override: String::new(),
+                    attachment_point: 0,
+                    measurement,
+                    text_rotation: 0.0,
+                    horizontal_direction: 0.0,
+                    flip_arrow1: false,
+                    flip_arrow2: false,
+                    first_point: [p1.x as f64, p1.y as f64, p1.z as f64],
+                    second_point: [p2.x as f64, p2.y as f64, p2.z as f64],
+                    angle_vertex: [0.0; 3],
+                    dimension_arc: [0.0; 3],
+                    leader_length: 0.0,
+                    rotation: 0.0,
+                    ext_line_rotation: 0.0,
+                });
+                CmdResult::CommitAndExitNative(entity)
             }
         }
     }
@@ -103,10 +108,6 @@ impl CadCommand for AlignedDimensionCommand {
             key_vertices: vec![],
         })
     }
-}
-
-fn v3(p: Vec3) -> Vector3 {
-    Vector3::new(p.x as f64, p.y as f64, p.z as f64)
 }
 
 fn preview_aligned(p1: Vec3, p2: Vec3, dim_pt: Vec3) -> WireModel {
