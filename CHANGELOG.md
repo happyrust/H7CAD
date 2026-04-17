@@ -2,6 +2,26 @@
 
 ## [未发布]
 
+### 2026-04-17：D1 扩展 native EntityData::MLine.closed 字段
+
+修复 C3b MLINE 迁移遗留的字段损失（MLineFlags::CLOSED 被丢弃）。
+
+- `crates/h7cad-native-model/src/lib.rs`：`EntityData::MLine` 追加 `closed: bool`
+  字段
+- `src/io/native_bridge.rs`：
+  - `native_mline_to_acadrust`：`closed = true` 时调 `ar::MLine::close()`
+    （设置 `MLineFlags::CLOSED` bit）
+  - `acad_mline_to_native`：从 `mline.is_closed()` 读回 `closed`
+  - 3 处测试 fixture 显式设 `closed: false`
+- `crates/h7cad-native-dxf/src/entity_parsers.rs`：`parse_mline` 解码 code 71
+  flags bitfield（`CLOSED = 0x2`），提取 `closed`
+- `crates/h7cad-native-dxf/src/writer.rs`：MLine 写入时写 code 71
+  `HAS_VERTICES (1) | CLOSED (2)` bit
+- `src/modules/home/draw/mline.rs`：`build_mline_native` 的 `_closed` 参数
+  重新生效，直接传 `closed` 到 `EntityData::MLine`
+- 测试：workspace `cargo check` 零 warning；`native_bridge` 22 个测试全绿
+- 效果：MLINE Close 分支语义保真，DXF round-trip 保留 closed flag
+
 ### 2026-04-17：C3c ATTDEF 命令 native-first（home/draw 阶段收口）
 
 - **ATTDEF** (`attdef.rs`)：`AttributeDefinition { tag, prompt, default_value,

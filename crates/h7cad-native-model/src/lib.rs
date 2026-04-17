@@ -1128,6 +1128,9 @@ pub enum EntityData {
         vertices: Vec<[f64; 3]>,
         style_name: String,
         scale: f64,
+        /// MLineFlags::CLOSED (DXF code 71 bit 2). True when the multiline
+        /// forms a closed polygon. Native-model addition (D1 series).
+        closed: bool,
     },
     Image {
         insertion: [f64; 3],

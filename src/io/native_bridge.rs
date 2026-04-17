@@ -350,10 +350,14 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             vertices,
             style_name,
             scale,
+            closed,
         } => {
             let mut e = ar::MLine::from_points(&vertices.iter().map(v3).collect::<Vec<_>>());
             e.style_name = style_name.clone();
             e.scale_factor = *scale;
+            if *closed {
+                e.close();
+            }
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::MLine(e))
         }
@@ -818,6 +822,7 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                     .collect(),
                 style_name: mline.style_name.clone(),
                 scale: mline.scale_factor,
+                closed: mline.is_closed(),
             },
         )),
         ar::EntityType::RasterImage(image) => Some(native_common_from_acadrust(
@@ -2708,6 +2713,7 @@ mod tests {
             vertices: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 2.0, 0.0]],
             style_name: "BATT".into(),
             scale: 2.25,
+            closed: false,
         });
         mline.handle = nm::Handle::new(0x81);
 
@@ -2856,6 +2862,7 @@ mod tests {
                     vertices: vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
                     style_name: "BATT".into(),
                     scale: 1.5,
+                    closed: false,
                 },
                 0x95,
                 0x195,
@@ -2970,6 +2977,7 @@ mod tests {
                 vertices: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 2.0, 0.0]],
                 style_name: "BATT".into(),
                 scale: 2.25,
+                closed: false,
             },
             nm::EntityData::Image {
                 insertion: [10.0, 20.0, 0.0],

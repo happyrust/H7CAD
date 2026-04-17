@@ -208,12 +208,16 @@ pub(crate) fn parse_mline(codes: &[(i16, String)]) -> EntityData {
     let mut vertices: Vec<[f64; 3]> = Vec::new();
     let mut style_name = String::new();
     let mut scale = 1.0;
+    let mut closed = false;
     let (mut x, mut y, mut z) = (0.0, 0.0, 0.0);
     let mut has_vertex = false;
     for &(code, ref val) in codes {
         match code {
             2 => style_name = val.clone(),
             40 => scale = val.parse().unwrap_or(1.0),
+            // Code 71 = MLineFlags bitfield (HAS_VERTICES=1, CLOSED=2,
+            // NO_START_CAPS=4, NO_END_CAPS=8); we track closed only.
+            71 => closed = (val.parse::<i16>().unwrap_or(0) & 2) != 0,
             11 => {
                 if has_vertex {
                     vertices.push([x, y, z]);
@@ -235,6 +239,7 @@ pub(crate) fn parse_mline(codes: &[(i16, String)]) -> EntityData {
         vertices,
         style_name,
         scale,
+        closed,
     }
 }
 

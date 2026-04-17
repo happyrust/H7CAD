@@ -114,11 +114,8 @@ impl CadCommand for MlineCommand {
     }
 }
 
-fn build_mline_native(pts: &[Vec3], scale: f64, _closed: bool, style_name: &str) -> nm::Entity {
+fn build_mline_native(pts: &[Vec3], scale: f64, closed: bool, style_name: &str) -> nm::Entity {
     // Y-up world → DXF: X→X, Z→Y, Y→Z.
-    // Native EntityData::MLine 没有 `flags/closed` 字段 — bridge 投影到
-    // acadrust 时 MLine 默认为 open。若用户选 Close 分支，**closed 标志会丢失**
-    // （顶点不会被视觉闭合成环）。记为 D 系列待办：扩展 native MLine 字段。
     let vertices: Vec<[f64; 3]> = pts
         .iter()
         .map(|p| [p.x as f64, p.z as f64, p.y as f64])
@@ -127,5 +124,6 @@ fn build_mline_native(pts: &[Vec3], scale: f64, _closed: bool, style_name: &str)
         vertices,
         style_name: style_name.to_string(),
         scale,
+        closed,
     })
 }

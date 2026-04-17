@@ -834,9 +834,13 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             vertices,
             style_name,
             scale,
+            closed,
         } => {
             w.pair_str(2, style_name);
             w.pair_f64(40, *scale);
+            // MLineFlags: HAS_VERTICES (1) + CLOSED (2 when closed).
+            let flags: i16 = 1 | if *closed { 2 } else { 0 };
+            w.pair_i16(71, flags);
             w.pair_i16(72, vertices.len() as i16);
             for v in vertices {
                 w.point3d(11, *v);
