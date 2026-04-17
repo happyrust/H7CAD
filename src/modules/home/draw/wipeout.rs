@@ -4,9 +4,7 @@
 //   WIPEOUT (default): two-corner rectangular wipeout
 //   WIPEOUT P:         polygonal wipeout (pick corners, Enter to close)
 
-use acadrust::entities::Wipeout;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -70,8 +68,8 @@ impl CadCommand for WipeoutCommand {
         match &self.mode {
             WipeoutMode::Rectangular => {
                 if let Some(p1) = self.first {
-                    let entity = make_rect_wipeout(p1, pt);
-                    CmdResult::CommitAndExit(entity)
+                    let entity = make_rect_wipeout_native(p1, pt);
+                    CmdResult::CommitAndExitNative(entity)
                 } else {
                     self.first = Some(pt);
                     CmdResult::NeedPoint
@@ -87,8 +85,8 @@ impl CadCommand for WipeoutCommand {
     fn on_enter(&mut self) -> CmdResult {
         match &self.mode {
             WipeoutMode::Polygonal if self.poly_pts.len() >= 3 => {
-                let entity = make_poly_wipeout(&self.poly_pts);
-                CmdResult::CommitAndExit(entity)
+                let entity = make_poly_wipeout_native(&self.poly_pts);
+                CmdResult::CommitAndExitNative(entity)
             }
             _ => CmdResult::Cancel,
         }
@@ -144,26 +142,27 @@ impl CadCommand for WipeoutCommand {
     }
 }
 
-fn make_rect_wipeout(p1: Vec3, p2: Vec3) -> EntityType {
-    // Y-up world: X→DXF X, Z→DXF Y, Y→DXF Z
-    let c1 = Vector3::new(
-        p1.x.min(p2.x) as f64,
-        p1.z.min(p2.z) as f64,
-        p1.y as f64,
-    );
-    let c2 = Vector3::new(
-        p1.x.max(p2.x) as f64,
-        p1.z.max(p2.z) as f64,
-        p1.y as f64,
-    );
-    EntityType::Wipeout(Wipeout::from_corners(c1, c2))
+fn make_rect_wipeout_native(p1: Vec3, p2: Vec3) -> nm::Entity {
+    // Y-up world: X→DXF X, Z→DXF Y. Native Wipeout stores 2D clip vertices
+    // only; elevation (DXF Z = world Y) is not preserved by EntityData::Wipeout.
+    let min_x = p1.x.min(p2.x) as f64;
+    let max_x = p1.x.max(p2.x) as f64;
+    let min_y = p1.z.min(p2.z) as f64;
+    let max_y = p1.z.max(p2.z) as f64;
+    nm::Entity::new(nm::EntityData::Wipeout {
+        clip_vertices: vec![
+            [min_x, min_y],
+            [max_x, min_y],
+            [max_x, max_y],
+            [min_x, max_y],
+        ],
+    })
 }
 
-fn make_poly_wipeout(pts: &[Vec3]) -> EntityType {
-    use crate::types::Vector2;
-    let z = pts[0].y as f64;
-    let verts: Vec<Vector2> = pts.iter()
-        .map(|p| Vector2::new(p.x as f64, p.z as f64))
+fn make_poly_wipeout_native(pts: &[Vec3]) -> nm::Entity {
+    let clip_vertices: Vec<[f64; 2]> = pts
+        .iter()
+        .map(|p| [p.x as f64, p.z as f64])
         .collect();
-    EntityType::Wipeout(Wipeout::polygonal(&verts, z))
+    nm::Entity::new(nm::EntityData::Wipeout { clip_vertices })
 }

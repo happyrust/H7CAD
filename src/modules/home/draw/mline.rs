@@ -5,9 +5,7 @@
 //   C / CLOSE  → close and commit
 //   S <value>  → set scale factor then continue picking
 
-use acadrust::entities::MLine;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -61,8 +59,8 @@ impl CadCommand for MlineCommand {
 
         // Close command
         if (up == "C" || up == "CLOSE") && self.points.len() >= 3 {
-            let entity = build_mline(&self.points, self.scale, true, &self.style_name);
-            return Some(CmdResult::CommitAndExit(entity));
+            let entity = build_mline_native(&self.points, self.scale, true, &self.style_name);
+            return Some(CmdResult::CommitAndExitNative(entity));
         }
 
         // Scale: "S" alone → prompt for value
@@ -91,8 +89,8 @@ impl CadCommand for MlineCommand {
         if self.points.len() < 2 {
             return CmdResult::Cancel;
         }
-        let entity = build_mline(&self.points, self.scale, false, &self.style_name);
-        CmdResult::CommitAndExit(entity)
+        let entity = build_mline_native(&self.points, self.scale, false, &self.style_name);
+        CmdResult::CommitAndExitNative(entity)
     }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
@@ -116,16 +114,18 @@ impl CadCommand for MlineCommand {
     }
 }
 
-fn build_mline(pts: &[Vec3], scale: f64, closed: bool, style_name: &str) -> EntityType {
-    let verts: Vec<Vector3> = pts.iter()
-        .map(|p| Vector3::new(p.x as f64, p.z as f64, p.y as f64))
+fn build_mline_native(pts: &[Vec3], scale: f64, _closed: bool, style_name: &str) -> nm::Entity {
+    // Y-up world → DXF: X→X, Z→Y, Y→Z.
+    // Native EntityData::MLine 没有 `flags/closed` 字段 — bridge 投影到
+    // acadrust 时 MLine 默认为 open。若用户选 Close 分支，**closed 标志会丢失**
+    // （顶点不会被视觉闭合成环）。记为 D 系列待办：扩展 native MLine 字段。
+    let vertices: Vec<[f64; 3]> = pts
+        .iter()
+        .map(|p| [p.x as f64, p.z as f64, p.y as f64])
         .collect();
-    let mut mline = if closed {
-        MLine::closed_from_points(&verts)
-    } else {
-        MLine::from_points(&verts)
-    };
-    mline.scale_factor = scale;
-    mline.style_name = style_name.to_string();
-    EntityType::MLine(mline)
+    nm::Entity::new(nm::EntityData::MLine {
+        vertices,
+        style_name: style_name.to_string(),
+        scale,
+    })
 }

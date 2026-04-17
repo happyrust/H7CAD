@@ -2,6 +2,28 @@
 
 ## [未发布]
 
+### 2026-04-17：C3b SPLINE / MLINE / WIPEOUT 命令 native-first
+
+继续 C3 系列，迁移 home/draw 里 3 个 native 字段基本对等的命令。
+
+- **SPLINE** (`spline.rs`)：`Spline { degree, control_points, knots,
+  ..Default::default() }` → `nm::EntityData::Spline { degree, closed: false,
+  knots, control_points, weights, fit_points, start_tangent, end_tangent }`；
+  2 个 `CommitEntity` → `CommitEntityNative`
+- **MLINE** (`mline.rs`)：`MLine::from_points(..) / closed_from_points(..)` +
+  `scale_factor` + `style_name` → `nm::EntityData::MLine { vertices,
+  style_name, scale }`；2 个 `CommitAndExit` → `CommitAndExitNative`
+  - **字段损失**：native 无 `flags/closed` 字段，Close 分支的闭合语义丢失
+    （顶点不会视觉闭环）。D 系列待办：扩展 native MLine 加 closed 标志
+- **WIPEOUT** (`wipeout.rs`)：`Wipeout::from_corners(c1, c2)` /
+  `Wipeout::polygonal(verts, z)` → `nm::EntityData::Wipeout { clip_vertices }`；
+  矩形模式展开为 4 个 corner 顶点，多边形模式直接复制 xy
+  - **字段损失**：native Wipeout 只存 2D clip vertices，原命令传入的
+    DXF Z 高度（世界 Y 轴）丢失，bridge 默认归 0。D 系列待办
+- 共移除 3 处 `use acadrust::...` / `use crate::types::Vector3` / 局部 `v3`
+  helper；改为 `use h7cad_native_model as nm`
+- 度量：`spline.rs` 1→0，`mline.rs` 2→0，`wipeout.rs` 2→0；主 crate 零 warning 保持
+
 ### 2026-04-17：C3a REVCLOUD / SHAPES 命令 native-first（LwPolyline 纯 xy+bulge）
 
 开启 C3 系列 — home/draw 模块创建命令 native-first。首批选择**只使用 xy+bulge**

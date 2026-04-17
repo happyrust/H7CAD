@@ -3,8 +3,7 @@
 // Command:  SPLINE (SPL)
 //   Click to add control points.  Enter (≥2 pts) → commits EntityType::Spline.
 
-use crate::types::Vector3;
-use acadrust::{EntityType, Spline};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -30,26 +29,28 @@ impl SplineCommand {
         Self { pts: Vec::new() }
     }
 
-    fn build(&self) -> Option<EntityType> {
+    fn build(&self) -> Option<nm::Entity> {
         if self.pts.len() < 2 {
             return None;
         }
-        let control_points = self
+        let control_points: Vec<[f64; 3]> = self
             .pts
             .iter()
-            .map(|p| Vector3::new(p.x as f64, p.y as f64, p.z as f64))
+            .map(|p| [p.x as f64, p.y as f64, p.z as f64])
             .collect();
         let n = self.pts.len();
-        // Uniform open knot vector for degree-3 clamped B-spline
         let degree = 3_i32.min((n - 1) as i32);
         let knots = uniform_knots(n, degree as usize);
-        let spline = Spline {
+        Some(nm::Entity::new(nm::EntityData::Spline {
             degree,
-            control_points,
+            closed: false,
             knots,
-            ..Default::default()
-        };
-        Some(EntityType::Spline(spline))
+            control_points,
+            weights: Vec::new(),
+            fit_points: Vec::new(),
+            start_tangent: [0.0, 0.0, 0.0],
+            end_tangent: [0.0, 0.0, 0.0],
+        }))
     }
 }
 
@@ -91,14 +92,14 @@ impl CadCommand for SplineCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match self.build() {
-            Some(e) => CmdResult::CommitEntity(e),
+            Some(e) => CmdResult::CommitEntityNative(e),
             None => CmdResult::Cancel,
         }
     }
 
     fn on_escape(&mut self) -> CmdResult {
         match self.build() {
-            Some(e) => CmdResult::CommitEntity(e),
+            Some(e) => CmdResult::CommitEntityNative(e),
             None => CmdResult::Cancel,
         }
     }
