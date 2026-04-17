@@ -180,10 +180,17 @@ impl H7CAD {
             overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon, ost_points, tab.last_cursor_screen)
         };
 
-        let nav = container(overlay::nav_toolbar())
-            .align_right(Fill)
-            .align_top(Fill)
-            .padding(iced::Padding { top: 148.0, right: 8.0, bottom: 0.0, left: 0.0 });
+        let nav: Option<Element<'_, Message>> = if self.show_navbar {
+            Some(
+                container(overlay::nav_toolbar())
+                    .align_right(Fill)
+                    .align_top(Fill)
+                    .padding(iced::Padding { top: 148.0, right: 8.0, bottom: 0.0, left: 0.0 })
+                    .into(),
+            )
+        } else {
+            None
+        };
 
         let info = container(overlay::info_bar(
             if is_paper { &tab.scene.current_layout } else { "Custom View" },
@@ -204,20 +211,27 @@ impl H7CAD {
         .on_scroll(Message::ViewportScroll)
         .on_exit(Message::ViewportExit);
 
-        let cube_click = mouse_area(container(
-            iced::widget::Space::new()
-                .width(iced::Length::Fixed(VIEWCUBE_HIT_SIZE))
-                .height(iced::Length::Fixed(VIEWCUBE_HIT_SIZE)),
-        ))
-        .on_move(Message::CursorMoved)
-        .on_press(Message::ViewportClick);
+        let cube_click: Option<Element<'_, Message>> = if self.show_viewcube {
+            let hit = mouse_area(container(
+                iced::widget::Space::new()
+                    .width(iced::Length::Fixed(VIEWCUBE_HIT_SIZE))
+                    .height(iced::Length::Fixed(VIEWCUBE_HIT_SIZE)),
+            ))
+            .on_move(Message::CursorMoved)
+            .on_press(Message::ViewportClick);
 
-        let cube_click = container(cube_click)
-            .align_right(Fill)
-            .align_top(Fill)
-            .padding(iced::Padding { top: VIEWCUBE_PAD, right: VIEWCUBE_PAD, bottom: 0.0, left: 0.0 })
-            .width(Fill)
-            .height(Fill);
+            Some(
+                container(hit)
+                    .align_right(Fill)
+                    .align_top(Fill)
+                    .padding(iced::Padding { top: VIEWCUBE_PAD, right: VIEWCUBE_PAD, bottom: 0.0, left: 0.0 })
+                    .width(Fill)
+                    .height(Fill)
+                    .into(),
+            )
+        } else {
+            None
+        };
 
         let bg_color = if is_paper {
             tab.paper_bg_color
@@ -259,11 +273,15 @@ impl H7CAD {
             container(info).width(Fill).height(Fill),
             selection_overlay,
             viewport_mouse,
-            nav,
-            cube_click,
         ]
         .width(Fill)
         .height(Fill);
+        if let Some(n) = nav {
+            viewport_stack = viewport_stack.push(n);
+        }
+        if let Some(cc) = cube_click {
+            viewport_stack = viewport_stack.push(cc);
+        }
         if let Some(dyn_ol) = dyn_input_overlay {
             viewport_stack = viewport_stack.push(dyn_ol);
         }
@@ -276,7 +294,11 @@ impl H7CAD {
         .width(Fill)
         .height(Fill);
 
-        let tab_bar = doc_tab_bar(&self.tabs, self.active_tab);
+        let tab_bar: Element<'_, Message> = if self.show_file_tabs {
+            doc_tab_bar(&self.tabs, self.active_tab)
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
 
         let main_ui = container(
             column![
@@ -302,6 +324,7 @@ impl H7CAD {
                     self.layout_rename_state.as_ref(),
                     tab.scene.first_viewport_scale(),
                     tab.scene.viewport_count(),
+                    self.show_layout_tabs,
                 )
             ]
             .width(Fill)

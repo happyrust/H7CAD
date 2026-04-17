@@ -82,6 +82,14 @@ pub struct Scene {
     pub bg_color: [f32; 4],
     /// Custom paper-space background fill color for Wipeout entities.
     pub paper_bg_color: [f32; 4],
+    /// Whether the ViewCube overlay is rendered (mirrors `H7CAD.show_viewcube`).
+    pub show_viewcube: bool,
+    /// Underlay frame visibility: 0 = hidden, 1 = on, 2 = on + print.
+    /// (FRAMES0 / FRAMES1 / FRAMES2 commands, mirrors `H7CAD.frames_mode`.)
+    pub underlay_frames_mode: u8,
+    /// Whether object snap targets Underlay entities (UOSNAP command,
+    /// mirrors `H7CAD.uosnap`).
+    pub underlay_snap_enabled: bool,
 }
 
 impl Scene {
@@ -103,6 +111,9 @@ impl Scene {
             active_viewport: None,
             bg_color: [0.11, 0.11, 0.11, 1.0],
             paper_bg_color: [0.22, 0.24, 0.28, 1.0],
+            show_viewcube: true,
+            underlay_frames_mode: 1,
+            underlay_snap_enabled: true,
         }
     }
 
@@ -439,9 +450,28 @@ impl Scene {
                 if native_handles.contains(&c.handle.value()) {
                     return false;
                 }
+                // FRAMES0: hide all Underlay frames/boundaries.
+                if self.underlay_frames_mode == 0
+                    && matches!(e, acadrust::EntityType::Underlay(_))
+                {
+                    return false;
+                }
                 self.belongs_to_visible_block(e.common().handle, c.owner_handle, block_handle)
             })
-            .flat_map(|e| self.tessellate_one(e))
+            .flat_map(|e| {
+                let mut tessellated = self.tessellate_one(e);
+                // UOSNAP OFF: strip snap points from Underlay tessellation so
+                // object snap never targets Underlay geometry (the frame stays
+                // visible for rendering, just non-snappable).
+                if !self.underlay_snap_enabled
+                    && matches!(e, acadrust::EntityType::Underlay(_))
+                {
+                    for w in &mut tessellated {
+                        w.snap_pts.clear();
+                    }
+                }
+                tessellated
+            })
             .collect();
 
         native_wires.append(&mut wires);

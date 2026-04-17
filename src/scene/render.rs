@@ -40,6 +40,8 @@ pub struct Primitive {
     pub(super) hover_region: Option<usize>,
     /// Background color used to clear the MSAA buffer at the start of each frame.
     pub(super) bg_color: [f32; 4],
+    /// Whether to draw the ViewCube pipeline in `render()`.
+    pub(super) show_viewcube: bool,
 }
 
 // ── shader::Program impl ──────────────────────────────────────────────────
@@ -79,6 +81,7 @@ impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
             cam_rotation: cam.view_rotation_mat(),
             hover_region: state.hover_region,
             bg_color,
+            show_viewcube: self.show_viewcube,
         }
     }
 
@@ -91,15 +94,19 @@ impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
     ) -> Option<iced::widget::Action<Msg>> {
         let pos = cursor.position_in(bounds);
         let cam_rotation = { self.camera.borrow().view_rotation_mat() };
-        if let Some(p) = pos {
-            state.hover_region = hover_id(
-                p.x,
-                p.y,
-                bounds.width,
-                bounds.height,
-                cam_rotation,
-                VIEWCUBE_PX,
-            );
+        if self.show_viewcube {
+            if let Some(p) = pos {
+                state.hover_region = hover_id(
+                    p.x,
+                    p.y,
+                    bounds.width,
+                    bounds.height,
+                    cam_rotation,
+                    VIEWCUBE_PX,
+                );
+            } else {
+                state.hover_region = None;
+            }
         } else {
             state.hover_region = None;
         }
@@ -168,7 +175,9 @@ impl shader::Primitive for Primitive {
         clip: &Rectangle<u32>,
     ) {
         pipeline.render(encoder, target, *clip, self.bg_color);
-        pipeline.viewcube.render(encoder, target, *clip);
+        if self.show_viewcube {
+            pipeline.viewcube.render(encoder, target, *clip);
+        }
     }
 }
 

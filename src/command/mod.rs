@@ -181,6 +181,11 @@ pub enum CmdResult {
     /// The host should look up the attdefs for `block_name` from the document
     /// and call `attreq_set_attdefs()` on the command, then loop on text input.
     AttreqNeeded { block_name: String },
+    /// Write the model-space insertion base point (`$INSBASE`) into the active
+    /// document's header and end the command (BASE).
+    /// Values are world-space `[x, y, z]` matching the convention used by
+    /// `nm::EntityData::Point` (`[pt.x, pt.y, pt.z]`).
+    SetInsertionBase([f64; 3]),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────

@@ -6,6 +6,38 @@ use iced::Task;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+/// Parse `<CMD>` / `<CMD> ON` / `<CMD> OFF` / `<CMD> TOGGLE` (case-insensitive).
+/// Unknown/missing argument → toggle `current`.
+fn parse_on_off_toggle(cmd: &str, current: bool) -> bool {
+    let arg = cmd.split_whitespace().nth(1).map(|s| s.to_ascii_uppercase());
+    match arg.as_deref() {
+        Some("ON") => true,
+        Some("OFF") => false,
+        _ => !current,
+    }
+}
+
+/// Resolve a single command alias: if the first whitespace-separated token
+/// of `cmd` matches a key in `aliases`, return a new string with that token
+/// replaced by the alias target, otherwise `None`.
+///
+/// Only the first token is substituted — arguments after the first space are
+/// preserved verbatim.  The substitution is NOT applied recursively; that
+/// keeps semantics simple and avoids cycles.
+pub(super) fn resolve_command_alias(
+    cmd: &str,
+    aliases: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let trimmed = cmd.trim_start();
+    let (head, rest) = match trimmed.find(char::is_whitespace) {
+        Some(idx) => (&trimmed[..idx], &trimmed[idx..]),
+        None => (trimmed, ""),
+    };
+    let key = head.to_ascii_uppercase();
+    let target = aliases.get(&key)?.clone();
+    Some(format!("{}{}", target, rest))
+}
+
 impl H7CAD {
     fn selected_handles_snapshot(&self, i: usize) -> Vec<acadrust::Handle> {
         self.tabs[i].scene.selected.iter().copied().collect()
@@ -66,6 +98,12 @@ impl H7CAD {
             let path = PathBuf::from(path_str);
             return Task::perform(crate::io::open_path(path), Message::FileOpened);
         }
+
+        // User-defined alias: rewrite the first token via `command_aliases`
+        // BEFORE falling into the main match so aliases participate in the
+        // same dispatch path as built-in commands.  Non-recursive.
+        let rewritten = resolve_command_alias(cmd, &self.command_aliases);
+        let cmd: &str = rewritten.as_deref().unwrap_or(cmd);
 
         match cmd {
             "NEW"                => return Task::done(Message::ClearScene),
@@ -165,6 +203,40 @@ impl H7CAD {
             "ORTHO"              => return Task::done(Message::SetProjection(true)),
             "PERSP"              => return Task::done(Message::SetProjection(false)),
             "LAYERS"|"LA"        => return Task::done(Message::ToggleLayers),
+
+            // ── View-tab UI visibility toggles ─────────────────────────────
+            // Each accepts: `<CMD>` (toggle) | `<CMD> ON` | `<CMD> OFF`.
+            cmd if cmd == "NAVVCUBE" || cmd.starts_with("NAVVCUBE ") => {
+                let desired = parse_on_off_toggle(cmd, self.show_viewcube);
+                self.show_viewcube = desired;
+                for tab in &mut self.tabs {
+                    tab.scene.show_viewcube = desired;
+                }
+                self.command_line.push_output(
+                    if desired { "ViewCube: ON" } else { "ViewCube: OFF" },
+                );
+            }
+            cmd if cmd == "NAVBAR" || cmd.starts_with("NAVBAR ") => {
+                let desired = parse_on_off_toggle(cmd, self.show_navbar);
+                self.show_navbar = desired;
+                self.command_line.push_output(
+                    if desired { "Navigation Bar: ON" } else { "Navigation Bar: OFF" },
+                );
+            }
+            cmd if cmd == "FILETAB" || cmd.starts_with("FILETAB ") => {
+                let desired = parse_on_off_toggle(cmd, self.show_file_tabs);
+                self.show_file_tabs = desired;
+                self.command_line.push_output(
+                    if desired { "File Tabs: ON" } else { "File Tabs: OFF" },
+                );
+            }
+            cmd if cmd == "LAYOUTTAB" || cmd.starts_with("LAYOUTTAB ") => {
+                let desired = parse_on_off_toggle(cmd, self.show_layout_tabs);
+                self.show_layout_tabs = desired;
+                self.command_line.push_output(
+                    if desired { "Layout Tabs: ON" } else { "Layout Tabs: OFF" },
+                );
+            }
 
             // ── Layer object commands ──────────────────────────────────────
             "LAYOFF" => {
@@ -602,6 +674,18 @@ impl H7CAD {
             "LINE"|"L" => {
                 use crate::modules::home::draw::line::LineCommand;
                 let new_cmd = LineCommand::new();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            // ── BASE: set model-space insertion base point ($INSBASE) ─────
+            "BASE" => {
+                use crate::modules::insert::base_point::SetBasePointCommand;
+                let current = {
+                    let v = self.tabs[i].scene.document.header.model_space_insertion_base;
+                    [v.x, v.y, v.z]
+                };
+                let new_cmd = SetBasePointCommand::new(current);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
@@ -3383,6 +3467,490 @@ impl H7CAD {
                 }
             }
 
+            // ── ALIASEDIT: manage user-defined command aliases ─────────────
+            // Usage:
+            //   ALIASEDIT LIST              — show all aliases
+            //   ALIASEDIT ADD <alias> <cmd> — add or overwrite mapping
+            //   ALIASEDIT DEL <alias>       — remove an alias
+            //   ALIASEDIT CLEAR             — remove every alias
+            cmd if cmd == "ALIASEDIT" || cmd.starts_with("ALIASEDIT ") => {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                let sub = parts.get(1).map(|s| s.to_uppercase());
+                match sub.as_deref() {
+                    None | Some("LIST") => {
+                        if self.command_aliases.is_empty() {
+                            self.command_line.push_output("ALIASEDIT: no aliases defined.");
+                        } else {
+                            let mut rows: Vec<(String, String)> = self
+                                .command_aliases
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect();
+                            rows.sort_by(|a, b| a.0.cmp(&b.0));
+                            self.command_line.push_output(&format!(
+                                "ALIASEDIT: {} alias(es) defined:",
+                                rows.len()
+                            ));
+                            for (k, v) in rows {
+                                self.command_line.push_info(&format!("    {}  →  {}", k, v));
+                            }
+                        }
+                    }
+                    Some("ADD") => {
+                        let alias = parts.get(2).map(|s| s.to_uppercase());
+                        let target = parts.get(3).map(|s| s.to_uppercase());
+                        match (alias, target) {
+                            (Some(a), Some(t)) if !a.is_empty() && !t.is_empty() => {
+                                self.command_aliases.insert(a.clone(), t.clone());
+                                self.command_line.push_output(&format!(
+                                    "ALIASEDIT: {} → {}",
+                                    a, t
+                                ));
+                            }
+                            _ => {
+                                self.command_line.push_error(
+                                    "ALIASEDIT ADD <alias> <command>: both names required.",
+                                );
+                            }
+                        }
+                    }
+                    Some("DEL") | Some("DELETE") | Some("REMOVE") => {
+                        let alias = parts.get(2).map(|s| s.to_uppercase());
+                        match alias {
+                            Some(a) if !a.is_empty() => {
+                                if self.command_aliases.remove(&a).is_some() {
+                                    self.command_line
+                                        .push_output(&format!("ALIASEDIT: removed {}", a));
+                                } else {
+                                    self.command_line.push_error(&format!(
+                                        "ALIASEDIT: alias {} not found.",
+                                        a
+                                    ));
+                                }
+                            }
+                            _ => {
+                                self.command_line.push_error(
+                                    "ALIASEDIT DEL <alias>: alias name required.",
+                                );
+                            }
+                        }
+                    }
+                    Some("CLEAR") => {
+                        let n = self.command_aliases.len();
+                        self.command_aliases.clear();
+                        self.command_line
+                            .push_output(&format!("ALIASEDIT: cleared {} alias(es).", n));
+                    }
+                    Some(other) => {
+                        self.command_line.push_error(&format!(
+                            "ALIASEDIT: unknown subcommand '{}'. Use LIST | ADD | DEL | CLEAR.",
+                            other
+                        ));
+                    }
+                }
+            }
+
+            // ── FRAMES0 / FRAMES1 / FRAMES2: underlay frame visibility ────
+            // 0 = hidden, 1 = on (default), 2 = on + print.
+            frames_cmd @ ("FRAMES0" | "FRAMES1" | "FRAMES2") => {
+                let mode: u8 = match frames_cmd {
+                    "FRAMES0" => 0,
+                    "FRAMES1" => 1,
+                    "FRAMES2" => 2,
+                    _ => unreachable!(),
+                };
+                self.frames_mode = mode;
+                for tab in &mut self.tabs {
+                    tab.scene.underlay_frames_mode = mode;
+                }
+                self.command_line.push_output(match mode {
+                    0 => "FRAMES: Off",
+                    1 => "FRAMES: On",
+                    2 => "FRAMES: On + Print",
+                    _ => unreachable!(),
+                });
+            }
+
+            // ── UOSNAP: toggle object snap onto Underlay entities ─────────
+            // Usage: `UOSNAP` (toggle) | `UOSNAP ON` | `UOSNAP OFF`.
+            cmd if cmd == "UOSNAP" || cmd.starts_with("UOSNAP ") => {
+                let desired = parse_on_off_toggle(cmd, self.uosnap);
+                self.uosnap = desired;
+                for tab in &mut self.tabs {
+                    tab.scene.underlay_snap_enabled = desired;
+                }
+                self.command_line.push_output(
+                    if desired { "UOSNAP: ON" } else { "UOSNAP: OFF" },
+                );
+            }
+
+            // ── ADJUST: tweak selected Underlay fade/contrast/monochrome ──
+            // Usage:
+            //   ADJUST FADE <0-80>
+            //   ADJUST CONTRAST <0-100>
+            //   ADJUST MONO <ON|OFF|TOGGLE>
+            // Applies to all currently selected Underlay entities.
+            cmd if cmd == "ADJUST" || cmd.starts_with("ADJUST ") => {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                if parts.len() < 2 {
+                    self.command_line.push_info(
+                        "Usage: ADJUST FADE <0-80> | CONTRAST <0-100> | MONO <ON|OFF|TOGGLE>",
+                    );
+                    return Task::none();
+                }
+
+                enum Adj {
+                    Fade(u8),
+                    Contrast(u8),
+                    Mono(Option<bool>), // None = toggle
+                }
+
+                let sub = parts[1].to_uppercase();
+                let adj: Option<Adj> = match sub.as_str() {
+                    "FADE" => parts.get(2).and_then(|s| s.parse::<u8>().ok())
+                        .filter(|v| *v <= 80)
+                        .map(Adj::Fade),
+                    "CONTRAST" => parts.get(2).and_then(|s| s.parse::<u8>().ok())
+                        .filter(|v| *v <= 100)
+                        .map(Adj::Contrast),
+                    "MONO" | "MONOCHROME" => match parts.get(2).map(|s| s.to_uppercase()).as_deref() {
+                        Some("ON") => Some(Adj::Mono(Some(true))),
+                        Some("OFF") => Some(Adj::Mono(Some(false))),
+                        Some("TOGGLE") | None => Some(Adj::Mono(None)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+
+                let Some(adj) = adj else {
+                    self.command_line.push_error(
+                        "ADJUST: invalid argument. FADE 0-80, CONTRAST 0-100, MONO ON|OFF|TOGGLE.",
+                    );
+                    return Task::none();
+                };
+
+                // Collect handles of selected Underlay entities.
+                let targets: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter_map(|(h, e)| match e {
+                        acadrust::EntityType::Underlay(_) => Some(h),
+                        _ => None,
+                    })
+                    .collect();
+
+                if targets.is_empty() {
+                    self.command_line.push_error(
+                        "ADJUST: no Underlay entities in the current selection.",
+                    );
+                    return Task::none();
+                }
+
+                self.push_undo_snapshot(i, "ADJUST");
+
+                let mut changed = 0usize;
+                let mut summary = String::new();
+                for h in &targets {
+                    if let Some(acadrust::EntityType::Underlay(u)) =
+                        self.tabs[i].scene.document.get_entity_mut(*h)
+                    {
+                        match adj {
+                            Adj::Fade(v) => {
+                                u.fade = v;
+                                if summary.is_empty() {
+                                    summary = format!("fade={}", v);
+                                }
+                            }
+                            Adj::Contrast(v) => {
+                                u.contrast = v;
+                                if summary.is_empty() {
+                                    summary = format!("contrast={}", v);
+                                }
+                            }
+                            Adj::Mono(desired) => {
+                                let next = desired.unwrap_or(!u.is_monochrome());
+                                u.set_monochrome(next);
+                                if summary.is_empty() {
+                                    summary =
+                                        format!("mono={}", if next { "ON" } else { "OFF" });
+                                }
+                            }
+                        }
+                        changed += 1;
+                    }
+                }
+
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(&format!(
+                    "ADJUST: updated {} underlay(s) — {}",
+                    changed, summary
+                ));
+            }
+
+            // ── ATTSYNC: synchronise INSERT attributes with block AttDefs ─
+            // Usage:
+            //   ATTSYNC <blockname>    — sync every INSERT of <blockname>
+            //   ATTSYNC                — derive block name from selection
+            cmd if cmd == "ATTSYNC" || cmd.starts_with("ATTSYNC ") => {
+                use crate::modules::insert::attsync::sync_insert_attributes;
+
+                let arg = cmd.split_once(' ').map(|(_, r)| r.trim().to_string());
+                let block_name: Option<String> = if let Some(name) = arg.filter(|s| !s.is_empty()) {
+                    Some(name)
+                } else {
+                    // Fall back to the first selected INSERT.
+                    self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .find_map(|(_, e)| {
+                            if let acadrust::EntityType::Insert(ins) = e {
+                                Some(ins.block_name.clone())
+                            } else {
+                                None
+                            }
+                        })
+                };
+
+                let Some(block_name) = block_name else {
+                    self.command_line.push_info(
+                        "Usage: ATTSYNC <blockname>  |  select an INSERT first, then ATTSYNC.",
+                    );
+                    return Task::none();
+                };
+
+                // Step 1: collect AttributeDefinitions owned by the block record.
+                let attdefs: Vec<acadrust::entities::AttributeDefinition> = {
+                    let doc = &self.tabs[i].scene.document;
+                    match doc.block_records.get(&block_name) {
+                        Some(br) => br
+                            .entity_handles
+                            .iter()
+                            .filter_map(|&h| {
+                                if let Some(acadrust::EntityType::AttributeDefinition(ad)) =
+                                    doc.get_entity(h)
+                                {
+                                    Some(ad.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect(),
+                        None => {
+                            self.command_line.push_error(&format!(
+                                "ATTSYNC: block \"{}\" not found.",
+                                block_name
+                            ));
+                            return Task::none();
+                        }
+                    }
+                };
+
+                // Step 2: collect the handles of every matching INSERT so we
+                // can mutate them in a second pass without holding a long
+                // immutable borrow on `document`.
+                let target_handles: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter_map(|e| match e {
+                        acadrust::EntityType::Insert(ins) if ins.block_name == block_name => {
+                            Some(e.common().handle)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+
+                if target_handles.is_empty() {
+                    self.command_line.push_output(&format!(
+                        "ATTSYNC: no INSERT references of \"{}\" found.",
+                        block_name
+                    ));
+                    return Task::none();
+                }
+
+                self.push_undo_snapshot(i, "ATTSYNC");
+
+                let mut total_added = 0usize;
+                let mut total_removed = 0usize;
+                let mut total_preserved = 0usize;
+                let mut synced_inserts = 0usize;
+
+                for h in &target_handles {
+                    if let Some(acadrust::EntityType::Insert(ins)) =
+                        self.tabs[i].scene.document.get_entity_mut(*h)
+                    {
+                        let (fresh, delta) = sync_insert_attributes(&attdefs, &ins.attributes);
+                        ins.attributes = fresh;
+                        total_added += delta.added;
+                        total_removed += delta.removed;
+                        total_preserved += delta.preserved;
+                        synced_inserts += 1;
+                    }
+                }
+
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(&format!(
+                    "ATTSYNC: \"{}\" synced {} insert(s) — +{} / -{} / ={}",
+                    block_name, synced_inserts, total_added, total_removed, total_preserved
+                ));
+            }
+
+            // ── FINDNONPURGEABLE: read-only report of items PURGE cannot remove ─
+            // Lists each protected/in-use definition together with the reason.
+            // No mutation, no undo snapshot, no dirty flag.
+            "FINDNONPURGEABLE" => {
+                let doc = &self.tabs[i].scene.document;
+
+                let mut used_layers: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                let mut used_text_styles: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                let mut used_linetypes: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                let mut used_blocks: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                let mut used_dim_styles: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+
+                for e in doc.entities() {
+                    let common = e.common();
+                    if !common.layer.is_empty() {
+                        *used_layers.entry(common.layer.clone()).or_insert(0) += 1;
+                    }
+                    if !common.linetype.is_empty()
+                        && common.linetype != "ByLayer"
+                        && common.linetype != "ByBlock"
+                    {
+                        *used_linetypes.entry(common.linetype.clone()).or_insert(0) += 1;
+                    }
+                    match e {
+                        acadrust::EntityType::Text(t) if !t.style.is_empty() => {
+                            *used_text_styles.entry(t.style.clone()).or_insert(0) += 1;
+                        }
+                        acadrust::EntityType::MText(t) if !t.style.is_empty() => {
+                            *used_text_styles.entry(t.style.clone()).or_insert(0) += 1;
+                        }
+                        acadrust::EntityType::Insert(ins) if !ins.block_name.is_empty() => {
+                            *used_blocks.entry(ins.block_name.clone()).or_insert(0) += 1;
+                        }
+                        _ => {}
+                    }
+                    // Dimension entities (any variant) reference a DimStyle
+                    // through `DimensionBase.style_name`.
+                    if let acadrust::EntityType::Dimension(dim) = e {
+                        let name = dim.base().style_name.as_str();
+                        if !name.is_empty() {
+                            *used_dim_styles.entry(name.to_string()).or_insert(0) += 1;
+                        }
+                    }
+                }
+
+                let reason = |sys: bool, count: usize| -> String {
+                    if sys {
+                        "system default".to_string()
+                    } else if count > 0 {
+                        format!("in use by {} entity(ies)", count)
+                    } else {
+                        "unknown protection".to_string()
+                    }
+                };
+
+                let mut lines: Vec<String> = Vec::new();
+
+                // Layers
+                let mut layer_rows: Vec<String> = Vec::new();
+                for l in doc.layers.iter() {
+                    let sys = l.name == "0";
+                    let c = used_layers.get(&l.name).copied().unwrap_or(0);
+                    if sys || c > 0 {
+                        layer_rows.push(format!("    {}  ({})", l.name, reason(sys, c)));
+                    }
+                }
+                if !layer_rows.is_empty() {
+                    lines.push("  Layers:".into());
+                    lines.extend(layer_rows);
+                }
+
+                // Text styles
+                let mut ts_rows: Vec<String> = Vec::new();
+                for s in doc.text_styles.iter() {
+                    let sys = s.name == "Standard";
+                    let c = used_text_styles.get(&s.name).copied().unwrap_or(0);
+                    if sys || c > 0 {
+                        ts_rows.push(format!("    {}  ({})", s.name, reason(sys, c)));
+                    }
+                }
+                if !ts_rows.is_empty() {
+                    lines.push("  Text Styles:".into());
+                    lines.extend(ts_rows);
+                }
+
+                // Linetypes
+                let standard_lt = ["Continuous", "ByLayer", "ByBlock"];
+                let mut lt_rows: Vec<String> = Vec::new();
+                for lt in doc.line_types.iter() {
+                    let sys = standard_lt.iter().any(|s| s.eq_ignore_ascii_case(&lt.name));
+                    let c = used_linetypes.get(&lt.name).copied().unwrap_or(0);
+                    if sys || c > 0 {
+                        lt_rows.push(format!("    {}  ({})", lt.name, reason(sys, c)));
+                    }
+                }
+                if !lt_rows.is_empty() {
+                    lines.push("  Linetypes:".into());
+                    lines.extend(lt_rows);
+                }
+
+                // Blocks (via BlockRecords)
+                let mut blk_rows: Vec<String> = Vec::new();
+                for br in doc.block_records.iter() {
+                    let sys = br.name.starts_with('*');
+                    let c = used_blocks.get(&br.name).copied().unwrap_or(0);
+                    if sys || c > 0 {
+                        let why = if sys {
+                            "system block".to_string()
+                        } else {
+                            format!("in use by {} insert(s)", c)
+                        };
+                        blk_rows.push(format!("    {}  ({})", br.name, why));
+                    }
+                }
+                if !blk_rows.is_empty() {
+                    lines.push("  Blocks:".into());
+                    lines.extend(blk_rows);
+                }
+
+                // Dimension styles
+                let mut ds_rows: Vec<String> = Vec::new();
+                for s in doc.dim_styles.iter() {
+                    let sys = s.name == "Standard";
+                    let c = used_dim_styles.get(&s.name).copied().unwrap_or(0);
+                    if sys || c > 0 {
+                        ds_rows.push(format!("    {}  ({})", s.name, reason(sys, c)));
+                    }
+                }
+                if !ds_rows.is_empty() {
+                    lines.push("  Dimension Styles:".into());
+                    lines.extend(ds_rows);
+                }
+
+                if lines.is_empty() {
+                    self.command_line
+                        .push_output("FINDNONPURGEABLE: all items are purgeable.");
+                } else {
+                    let total =
+                        lines.iter().filter(|l| l.starts_with("    ")).count();
+                    self.command_line.push_output(&format!(
+                        "FINDNONPURGEABLE: {} non-purgeable item(s):",
+                        total
+                    ));
+                    for l in lines {
+                        self.command_line.push_info(&l);
+                    }
+                }
+            }
+
             // ── PURGE unused definitions ──────────────────────────────────
             cmd if cmd == "PURGE" || cmd.starts_with("PURGE ") => {
                 let sub = cmd.split_whitespace().nth(1).unwrap_or("ALL").to_uppercase();
@@ -4759,6 +5327,73 @@ mod tests {
         assert!(
             matches!(result, Some(CmdResult::BatchCopy(_, _))),
             "arraypath command should accept native-only source selection and path snapshot"
+        );
+    }
+
+    // ── resolve_command_alias ──────────────────────────────────────────
+    use super::resolve_command_alias;
+    use std::collections::HashMap;
+
+    #[test]
+    fn alias_resolve_returns_none_when_no_match() {
+        let aliases = HashMap::new();
+        assert_eq!(resolve_command_alias("LINE", &aliases), None);
+    }
+
+    #[test]
+    fn alias_resolve_rewrites_first_token_case_insensitive() {
+        let mut aliases = HashMap::new();
+        aliases.insert("LL".to_string(), "LINE".to_string());
+        assert_eq!(
+            resolve_command_alias("LL", &aliases).as_deref(),
+            Some("LINE"),
+            "bare alias"
+        );
+        assert_eq!(
+            resolve_command_alias("ll", &aliases).as_deref(),
+            Some("LINE"),
+            "lower-case matches upper-case table entry"
+        );
+    }
+
+    #[test]
+    fn alias_resolve_preserves_arguments_after_first_token() {
+        let mut aliases = HashMap::new();
+        aliases.insert("BG".to_string(), "BACKGROUND".to_string());
+        assert_eq!(
+            resolve_command_alias("BG 10 20 30", &aliases).as_deref(),
+            Some("BACKGROUND 10 20 30")
+        );
+    }
+
+    #[test]
+    fn alias_resolve_ignores_non_head_matches() {
+        let mut aliases = HashMap::new();
+        aliases.insert("LINE".to_string(), "POLYLINE".to_string());
+        // A cmd whose FIRST token is "ARC" must not be rewritten even if
+        // "LINE" appears later.
+        assert_eq!(
+            resolve_command_alias("ARC LINE STUFF", &aliases),
+            None
+        );
+    }
+
+    #[test]
+    fn alias_resolve_is_not_recursive() {
+        let mut aliases = HashMap::new();
+        aliases.insert("A".to_string(), "B".to_string());
+        aliases.insert("B".to_string(), "C".to_string());
+        // A → B (stop); must not collapse all the way to C.
+        assert_eq!(resolve_command_alias("A", &aliases).as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn alias_resolve_trims_leading_whitespace() {
+        let mut aliases = HashMap::new();
+        aliases.insert("LL".to_string(), "LINE".to_string());
+        assert_eq!(
+            resolve_command_alias("   LL 1 2", &aliases).as_deref(),
+            Some("LINE 1 2")
         );
     }
 }

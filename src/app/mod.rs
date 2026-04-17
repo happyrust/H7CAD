@@ -54,6 +54,24 @@ pub(super) struct H7CAD {
     dyn_input: bool,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
+    /// Show the ViewCube in the top-right of the viewport (NAVVCUBE).
+    show_viewcube: bool,
+    /// Show the vertical navigation toolbar (pan/zoom/orbit) in the viewport (NAVBAR).
+    show_navbar: bool,
+    /// Show the document file tab bar between the ribbon and viewport (FILETAB).
+    show_file_tabs: bool,
+    /// Show the layout tab strip inside the status bar (LAYOUTTAB).
+    show_layout_tabs: bool,
+    /// Underlay frame visibility (FRAMES0 / FRAMES1 / FRAMES2): 0 = hidden,
+    /// 1 = on, 2 = on + print.  Mirrored into `Scene.underlay_frames_mode`.
+    frames_mode: u8,
+    /// Whether object snap targets Underlay entities (UOSNAP).
+    /// Mirrored into `Scene.underlay_snap_enabled`.
+    uosnap: bool,
+    /// User-defined command aliases (ALIASEDIT command):
+    /// uppercase alias → uppercase target command, e.g. "LL" → "LINE".
+    /// Applied before `dispatch_command` dispatches the first token.
+    command_aliases: std::collections::HashMap<String, String>,
     /// Last point committed by a drawing command — used as ortho/polar base.
     last_point: Option<glam::Vec3>,
     /// OS window Id for the floating Layer Properties Manager (None when closed).
@@ -542,6 +560,13 @@ impl H7CAD {
             show_grid: false,
             dyn_input: true,
             show_ucs_icon: true,
+            show_viewcube: true,
+            show_navbar: true,
+            show_file_tabs: true,
+            show_layout_tabs: true,
+            frames_mode: 1,
+            uosnap: true,
+            command_aliases: std::collections::HashMap::new(),
             last_point: None,
             layer_window: None,
             main_window: None,

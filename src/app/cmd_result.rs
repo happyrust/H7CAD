@@ -916,6 +916,21 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
                 self.command_line.push_output(&msg);
             }
+            CmdResult::SetInsertionBase([x, y, z]) => {
+                self.push_undo_snapshot(i, "BASE");
+                self.tabs[i].scene.document.header.model_space_insertion_base =
+                    crate::types::Vector3::new(x, y, z);
+                if let Some(native_doc) = self.tabs[i].scene.native_doc_mut() {
+                    native_doc.header.insbase = [x, y, z];
+                }
+                self.tabs[i].dirty = true;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.command_line
+                    .push_output(&format!("Base point set to {:.4},{:.4},{:.4}", x, y, z));
+            }
             CmdResult::AlignSelected { handles, src1, dst1, angle_rad, scale } => {
                 if handles.is_empty() {
                     self.tabs[i].active_cmd = None;

@@ -3,8 +3,8 @@
 mod attdef;
 mod attedit;
 mod attman;
-mod attsync;
-mod base_point;
+pub(crate) mod attsync;
+pub(crate) mod base_point;
 pub(crate) mod create_block;
 mod content_browser;
 mod design_center;

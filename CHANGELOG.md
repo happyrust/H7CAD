@@ -2,6 +2,404 @@
 
 ## [未发布]
 
+### 2026-04-17：Manage Tab ALIASEDIT 命令接入 — 运行时命令别名管理
+
+ROADMAP Manage Tab / Customization 里 Medium 复杂度命令 **ALIASEDIT**
+从 ribbon stub 升级为可用 CLI 命令。AutoCAD 的 ALIASEDIT 会开一个
+dialog 编辑 `acad.pgp`，H7CAD 这里以命令行 sub-command 形式落地（和
+ADJUST / BACKGROUND 等已有命令风格一致）。本次**不**做 pgp 文件持久化，
+只实现会话内运行时 alias 表。
+
+**App 状态** (`src/app/mod.rs`)：
+
+- `H7CAD` 新增 `command_aliases: HashMap<String, String>`，默认空
+- alias 约定：key 和 value 都规范化为大写（dispatch 层匹配同样大写）
+
+**Alias resolver** (`src/app/commands.rs`)：
+
+- `pub(super) fn resolve_command_alias(cmd, aliases) -> Option<String>`：
+  纯函数，提取 cmd 的第一个 whitespace-delimited token，大写后查表，
+  命中则把 head 替换为 target、保留其余 arguments，否则返回 None
+- 设计要点：
+  - **非递归**：A → B 命中后不继续查 B → C，避免配置循环出事故
+  - **只替换 head**：后续参数原样透传（例：`BG 10 20 30` → `BACKGROUND 10 20 30`）
+  - **大小写无关**：输入小写 `ll` 也能命中大写表项 `LL`
+  - **trim_start**：容忍命令前导空白
+- 6 个单测覆盖上述全部约束（None/case-insensitive/preserve-args/not-head-
+  rewrite/not-recursive/leading-whitespace）
+
+**Dispatch 集成**：
+
+- `dispatch_command` 在 `OPEN_RECENT:` 分支之后、主 `match cmd` 之前
+  调 resolver；如有 rewrite，用新字符串进入 match
+- 结果：用户定义的 `LL` → `LINE` 别名和内置 `"LINE"|"L"` 走同一条
+  dispatch 链路，后续 argument（点选、文本输入）全部继承正常命令路径
+
+**ALIASEDIT 子命令** (`src/app/commands.rs`)：
+
+- `ALIASEDIT` / `ALIASEDIT LIST`：列出所有别名，按 key 字母序输出
+- `ALIASEDIT ADD <alias> <command>`：新增或覆盖映射（大写化）
+- `ALIASEDIT DEL <alias>` / `DELETE` / `REMOVE`：删除指定别名
+- `ALIASEDIT CLEAR`：清空全部
+- 未知 sub-command 输出友好 error
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（3.05s）
+- 主 crate 测试 **121/122**（新增 6 个 alias resolver 单测全绿；上一轮
+  115/116；唯一失败 `prop_geom_commit_rejects_unsupported_native_hatch`
+  依然 pre-existing，与本次无关）
+
+**ROADMAP 进度**：Manage Tab / Customization 里 Medium 复杂度 `ALIASEDIT`
+交付（dialog 版本未来可在此基础上做 UI 层）。combined 今日：View Tab 4
++ Insert Tab 7 + Manage Tab 2 (FINDNONPURGEABLE + ALIASEDIT) = **13 个**
+ROADMAP 命令后端落地。
+
+### 2026-04-17：Insert Tab Underlay 命令组 — FRAMES0/1/2 + UOSNAP
+
+ROADMAP Insert Tab / Reference 里 4 个 Low 复杂度命令一起落地：
+- `FRAMES0` / `FRAMES1` / `FRAMES2` — underlay 边框可见性 tri-state
+- `UOSNAP` — underlay 几何是否参与 object snap
+
+**Scene 层** (`src/scene/mod.rs`)：
+
+- `Scene` 新增两个字段（默认保持旧行为）：
+  - `underlay_frames_mode: u8` 默认 `1`（FRAMES1 = 一直显示）
+  - `underlay_snap_enabled: bool` 默认 `true`
+- `wires_for_block` 的 entity filter 链加一条：
+  `if underlay_frames_mode == 0 && matches!(e, EntityType::Underlay(_))
+  { return false; }` — FRAMES0 下 Underlay 的整个 wire 不进入渲染
+- `flat_map` 改 closure：若 `!underlay_snap_enabled` 且 entity 是
+  `Underlay`，对 `tessellate_one(e)` 返回的每个 wire 清 `snap_pts` —
+  frame 仍然可见，但 object snap 不会吸附 underlay 的 insertion/clip 角点
+
+**App 层** (`src/app/mod.rs`, `src/app/commands.rs`)：
+
+- `H7CAD` 新增 `frames_mode: u8`（默认 1）和 `uosnap: bool`（默认 true）
+- 4 个新 dispatch case：
+  - `FRAMES0` / `FRAMES1` / `FRAMES2`：直接写 `self.frames_mode = 0|1|2`
+    + 对所有 tab 同步 `scene.underlay_frames_mode`，命令行输出状态
+  - `UOSNAP [ON|OFF|TOGGLE]`：复用现有 `parse_on_off_toggle` helper
+    （NAVVCUBE/NAVBAR 同款），写 `self.uosnap` 并同步 `scene.underlay_snap_enabled`
+
+**语义决策**：
+
+- FRAMES2（"On + Print"）在当前渲染层和 FRAMES1 行为一致；
+  "+ Print" 意义在打印路径过滤 underlay 是否出图，当前占位 state，
+  将来 PLOT 路径可 gate 上
+- UOSNAP OFF 选择"保留视觉、屏蔽 snap"而不是完全隐藏 — 和 AutoCAD 语义
+  一致，用户关心"不要误吸附到 underlay"而非"让 underlay 消失"
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（3.09s）
+- 主 crate 测试 **115/116**（与上一轮一致，无回归；pre-existing 失败
+  依然是 `prop_geom_commit_rejects_unsupported_native_hatch`）
+
+**ROADMAP 进度**：Insert Tab / Reference 里 `FRAMES0` + `FRAMES1` +
+`FRAMES2` + `UOSNAP` 共 4 条 Low 复杂度命令交付。combined 今日：
+View Tab 4 + Insert Tab 7 (BASE + ATTSYNC + ADJUST + FRAMES×3 + UOSNAP) +
+Manage Tab 1 = **12 个** ROADMAP 命令后端落地。
+
+### 2026-04-17：Insert Tab ADJUST 命令接入 — 调整 Underlay fade/contrast/monochrome
+
+ROADMAP Insert Tab / Reference group 里 Low 复杂度命令 **ADJUST** 从 ribbon
+stub 升级为完整命令。AutoCAD 的 ADJUST 会弹一个对话框调 underlay 三个
+属性，H7CAD 这里用 CLI 风格（和 BACKGROUND / NATIVERENDER 等已有命令
+一致）省去 dialog 开发。
+
+**CLI 接口** (`src/app/commands.rs`)：
+
+- `ADJUST FADE <0-80>` — 设置 `underlay.fade`（DXF code 282）
+- `ADJUST CONTRAST <0-100>` — 设置 `underlay.contrast`（DXF code 281）
+- `ADJUST MONO <ON|OFF|TOGGLE>` — 通过 `underlay.set_monochrome(bool)`
+  切换 `UnderlayDisplayFlags::MONOCHROME` bit
+- 无参时 push_info 展示 usage 字符串
+
+**实现**：
+
+- 命令行 parse：`parts[1]` 是 sub-command（FADE/CONTRAST/MONO/MONOCHROME），
+  `parts[2]` 是值；`u8::parse().filter(|v| v <= 80)` 直接卡范围
+- 从 `scene.selected_entities()` 筛出 `EntityType::Underlay(_)`，收集
+  handles；空集直接 push_error early-return（不 push_undo_snapshot）
+- `push_undo_snapshot("ADJUST")` → `document.get_entity_mut(h)` 逐个修改
+  → mark dirty → 汇报 `"updated N underlay(s) — {summary}"`（summary 取第
+  一条的变更，e.g. `fade=30` / `mono=ON`）
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（4.45s）
+- 主 crate 测试 **115/116**（和上一轮一致无回归；pre-existing 失败项
+  依然是 `prop_geom_commit_rejects_unsupported_native_hatch`）
+
+**ROADMAP 进度**：Insert Tab / Reference 的 Low 复杂度 `ADJUST` 交付。
+combined 今日：View Tab 4 + Insert Tab 3 (BASE + ATTSYNC + ADJUST) +
+Manage Tab 1 = **8 个** ROADMAP 命令后端落地。
+
+### 2026-04-17：Insert Tab ATTSYNC 命令接入 — 同步 INSERT 属性到 block 定义
+
+ROADMAP Insert Tab / Attributes group 里 Medium 复杂度命令 **ATTSYNC**
+从 ribbon stub 升级为完整命令。该命令按 block 的 `AttributeDefinition`
+集合重塑**所有** INSERT 实例的 attribute 列表：新增 tag 用 attdef 默认值
+填充、stale tag 丢弃、已有 tag 的用户值保留。
+
+**算法核心** (`src/modules/insert/attsync.rs`)：
+
+- `pub(crate)` 模块暴露，供 dispatch 复用
+- `pub fn sync_insert_attributes(attdefs, existing) -> (Vec<AttributeEntity>, SyncDelta)`：
+  纯逻辑 helper
+  - 对每个 `AttributeDefinition.tag`：若 `existing` 有同 tag，走
+    `AttributeEntity::from_definition(attdef, Some(prev.value))`（保留用户值
+    + 刷新几何/style 字段），否则 `from_definition(attdef, None)`（attdef
+    default_value 填充）
+  - `SyncDelta { added, removed, preserved }` 汇报三路计数
+  - 输出顺序 = attdef 顺序（DXF 按 attdef 在 block 内的出现顺序写入）
+  - 保留 `prev.common.handle` 让 host 继续持有现有 handle，避免选择/undo
+    链路失联
+- 5 个纯单测：全空 existing → 全 add；全匹配 → 全 preserve；部分 stale
+  → 删；混合（+2 / -1 / =1）；空 attdefs → 清空 existing
+
+**Dispatch 集成** (`src/app/commands.rs`)：
+
+- `"ATTSYNC" | "ATTSYNC <name>"`：
+  - 参数解析：`ATTSYNC <blockname>` 直接用，或空参时从 `selected_entities()`
+    里找第一个 `Insert` 的 `block_name` 作为默认
+  - Step 1 — 从 `block_records.get(&name).entity_handles` 收集全部
+    `AttributeDefinition`（参考 `CmdResult::AttreqNeeded` 的同款模板）
+  - Step 2 — 遍历 `document.entities()` 找 `Insert` 且 `block_name ==
+    target`，收集 handles
+  - Step 3 — `push_undo_snapshot("ATTSYNC")` → 对每个 handle
+    `document.get_entity_mut(h)` 拿可变 ref → `ins.attributes = sync_insert_
+    attributes(&attdefs, &ins.attributes).0`
+  - 输出：`ATTSYNC: "<name>" synced N insert(s) — +ADD / -REM / =PRESERVE`
+  - 错误路径：block 不存在 → `push_error`；无匹配 INSERT → `push_output
+    "no INSERT references"`（仍然不 mark dirty，不 push_undo_snapshot）
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（2.17s）
+- 主 crate 测试：**115/116 通过**（相比上一轮 110/111，**新增 5 个
+  attsync 单测全绿**）；唯一失败 `prop_geom_commit_rejects_unsupported_
+  native_hatch` 为 pre-existing，不在本次 scope
+- 踩坑一次：第一版用 `entities_with_handles()`（不存在于 `acadrust::CadDocument`），改用 `.entities()` + `e.common().handle`；单测 fixture 里
+  `AttributeDefinition::new(tag, default)` 少了一个 prompt 参数，实际签名是
+  `new(tag, prompt, default_value)`，一次性修正
+
+**ROADMAP 进度**：Insert Tab / Attributes group 的 Medium 复杂度 `ATTSYNC`
+交付。combined 今日：View Tab 4 + Insert Tab 2 (BASE + ATTSYNC) +
+Manage Tab 1 = **7 个** ROADMAP 命令后端落地。
+
+### 2026-04-17：Manage Tab FINDNONPURGEABLE 命令接入 — 列不可 purge 的项
+
+ROADMAP Manage Tab / Cleanup group 里 Medium 复杂度命令 **FINDNONPURGEABLE**
+从 ribbon stub 升级为完整只读查询命令。是现有 PURGE 命令的语义对偶 —
+PURGE 删除**可 purge**（不被引用且非系统保留）的定义，
+FINDNONPURGEABLE 列出**不可 purge**的定义以及原因。
+
+**实现** (`src/app/commands.rs`)：
+
+- 新增 `"FINDNONPURGEABLE"` dispatch case，read-only：无 mutation、无 undo
+  snapshot、无 dirty flag
+- 扫描 `document.entities()` 统计引用次数：
+  - `common.layer` → 每个 layer 的使用计数
+  - `common.linetype`（排除 `ByLayer`/`ByBlock`）→ 每个 linetype 的使用计数
+  - `Text.style` / `MText.style` → 每个 text style 的使用计数
+  - `Insert.block_name` → 每个 block 的使用计数
+  - `Dimension(dim).base().style_name` → 每个 dim style 的使用计数
+- 对每个 table 输出分组：
+  - **Layers**：名字为 `"0"`（系统默认）或被引用的
+  - **Text Styles**：名字为 `"Standard"`（系统默认）或被引用的
+  - **Linetypes**：`"Continuous"`/`"ByLayer"`/`"ByBlock"`（系统默认）或被引用的
+  - **Blocks**（via `block_records`）：名字以 `*` 开头（系统块，如
+    `*Model_Space`/`*Paper_Space*`）或被 `INSERT` 引用的
+  - **Dimension Styles**：名字为 `"Standard"`（系统默认）或被引用的
+- 每条输出格式：`    NAME  (reason)`，reason 有 `system default` /
+  `system block` / `in use by N entity(ies)` / `in use by N insert(s)` 几类
+- 汇总行：`"FINDNONPURGEABLE: {N} non-purgeable item(s):"`；若所有项都可 purge
+  输出 `"FINDNONPURGEABLE: all items are purgeable."`
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（2.40s）
+- 主 crate 测试：**110/111**（和上一轮一致，无回归；pre-existing 失败项
+  `prop_geom_commit_rejects_unsupported_native_hatch` 仍在）
+- `cargo check --workspace --all-targets`：零新增 warning
+
+**ROADMAP 进度**：Manage Tab / Cleanup 里 Medium 复杂度 `FINDNONPURGEABLE`
+交付。combined 今日：View Tab 4 + Insert Tab 1 + Manage Tab 1 = **6 个**
+ROADMAP 命令后端落地。
+
+### 2026-04-17：Insert Tab BASE 命令接入 — 设置图纸 `$INSBASE` 基点
+
+ROADMAP Insert Tab / Block group 里 Low 复杂度命令 **BASE** 从 ribbon stub
+升级到完整交互命令。该命令决定了当前图纸被 XREF/INSERT 到其他图纸时的
+默认插入原点（DXF 系统变量 `$INSBASE`）。
+
+**CmdResult 扩展** (`src/command/mod.rs`)：
+
+- 新增变体 `SetInsertionBase([f64; 3])`：把 world-space 点写入 document 的
+  header（与 `nm::EntityData::Point::position` 使用同一 `[x, y, z]` 约定）
+
+**CmdResult handler** (`src/app/cmd_result.rs`)：
+
+- `SetInsertionBase([x, y, z])` → `push_undo_snapshot("BASE")` →
+  - `scene.document.header.model_space_insertion_base = Vector3::new(x,y,z)`
+    （acadrust 路径）
+  - `scene.native_doc_mut().header.insbase = [x, y, z]`（native 路径；
+    已经是 DXF reader/writer 两侧完整覆盖的字段）
+  - mark tab dirty、清 `active_cmd`/`snap_result`/preview wire、restore tangent snap
+  - 命令行输出 `"Base point set to X,Y,Z"`
+
+**SetBasePointCommand** (`src/modules/insert/base_point.rs`)：
+
+- 之前只有 `tool()` ribbon stub，本次加 `SetBasePointCommand` 结构体实现
+  `CadCommand` trait
+- 交互三路：
+  - `on_point(pt)` — viewport 点选 → `SetInsertionBase([pt.x, pt.y, pt.z])`
+  - `on_text_input("x,y[,z]")` — 命令行输入（支持逗号或空白分隔，Z 缺省=0）
+  - `on_enter()` — 回车接受当前 header 值作为默认
+- `wants_text_input = true`：让命令行 input 走 `on_text_input` 分支
+- prompt 动态显示当前 `$INSBASE` 值作为 `<default>` 提示
+- 5 个单测：`parse_point` 两维/三维/非法输入、`on_enter` 默认值回落、
+  `on_point` world 坐标透传
+
+**模块暴露** (`src/modules/insert/mod.rs`)：
+
+- `mod base_point` → `pub(crate) mod base_point`，让 `dispatch_command`
+  能 `use crate::modules::insert::base_point::SetBasePointCommand`
+
+**Dispatch** (`src/app/commands.rs`)：
+
+- `"BASE"` 新 case：从当前 header 读出 `model_space_insertion_base` 作为
+  默认值喂入 `SetBasePointCommand::new(current)`，推 prompt 到命令行，
+  挂到 `tabs[i].active_cmd`
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（2.83s）
+- `cargo check --workspace --all-targets`：仅原有 h7cad-native-dwg 8 条
+  warning，本次零新增
+- 主 crate 测试：**110/111 通过**（对比上一轮 105/106，新增 5 个
+  base_point 单测全绿）；唯一失败 `prop_geom_commit_rejects_unsupported_
+  native_hatch` 是 pre-existing，不在本次 scope
+
+**ROADMAP 进度**：Insert Tab/Block group 里 Low 复杂度 `BASE` 命令交付。
+combined 今日：View Tab 4 个 + Insert Tab 1 个 = 5 个 Low 复杂度命令后端落地。
+
+### 2026-04-17：View Tab 4 个 UI 开关命令后端接入 (FILETAB/LAYOUTTAB/NAVVCUBE/NAVBAR)
+
+落地 `ROADMAP.md` View Tab 里 4 个 Low 复杂度 UI 切换命令的运行时行为。
+之前这些 ribbon 按钮点击后只会派发命令字符串，没有任何后端效果；
+本次把它们接到真实的 state + 条件渲染。
+
+**State 层** (`src/app/mod.rs`)：
+
+- `H7CAD` 新增 4 个 bool 字段，默认全 `true`：
+  - `show_viewcube` — ViewCube 显示开关 (NAVVCUBE)
+  - `show_navbar` — 右侧 pan/zoom/orbit 工具栏开关 (NAVBAR)
+  - `show_file_tabs` — ribbon 下方文档 tab 栏开关 (FILETAB)
+  - `show_layout_tabs` — 状态栏里的 Model/Layoutn 标签栏开关 (LAYOUTTAB)
+
+**Scene/GPU 层** (`src/scene/mod.rs`, `src/scene/render.rs`)：
+
+- `Scene` 新增 `show_viewcube: bool`（默认 `true`）；由 `NAVVCUBE`
+  命令在每个 tab 上写入
+- `Primitive` 新增 `show_viewcube` 字段；`render()` 在 `show_viewcube == false`
+  时**跳过** `pipeline.viewcube.render(...)`，避免 GPU 提交 ViewCube 几何
+- `update()`（鼠标 hover 区域计算）在关闭 ViewCube 时强制 `state.hover_region = None`，
+  避免在原 ViewCube 区域误报指针变化
+
+**命令层** (`src/app/commands.rs`)：
+
+- 新增 helper `parse_on_off_toggle(cmd, current) -> bool`：解析
+  `<CMD>` / `<CMD> ON` / `<CMD> OFF` / `<CMD> TOGGLE`，未知或缺省 = toggle
+- `dispatch_command` 里新增 4 个 case（均支持 ON/OFF/TOGGLE 语法）：
+  - `NAVVCUBE`：同步写 `self.show_viewcube` 和所有 tab 的 `scene.show_viewcube`
+  - `NAVBAR` / `FILETAB` / `LAYOUTTAB`：写对应 `self.show_*` 字段
+  - 每个命令会 `push_output` 状态提示到命令行历史
+
+**UI 渲染层** (`src/app/view.rs`, `src/ui/statusbar.rs`)：
+
+- `cube_click`（ViewCube 点击热区 overlay）变为 `Option<Element>`，
+  按 `show_viewcube` 条件加入 `viewport_stack`
+- `nav`（右侧 nav toolbar）同理变为 `Option<Element>`，按 `show_navbar` 条件加入
+- `tab_bar`（doc tab 栏）按 `show_file_tabs` 切换为 `doc_tab_bar(...)` 或
+  零尺寸 `Space`，保持 column! 结构稳定
+- `StatusBar::view` 签名新增 `show_layout_tabs: bool` 参数；
+  为 `false` 时跳过 `for name in layouts` 循环和 `add_btn`，让 layout 标签与
+  "+" 按钮都不渲染（右侧状态 pill 保留）
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 error、零 warning
+- `cargo check --workspace --all-targets`：零新增 warning（h7cad-native-dwg
+  既有的 8 条 warning 在本次改动前就存在，`git stash` 复测确认）
+- `cargo test -p H7CAD`：105/106 通过。唯一失败 `prop_geom_commit_rejects_
+  unsupported_native_hatch` 是 pre-existing failure（git stash 后同样失败），
+  与本次改动无关
+- `cargo test --workspace --exclude H7CAD`：全绿（124 + 81 + 14 = 219）
+
+**ROADMAP 进度**：View Tab/Viewport Tools 与 Interface group 里 4 个 Low
+复杂度命令全部交付（NAVVCUBE / NAVBAR / FILETAB / LAYOUTTAB）。剩余 Low
+复杂度命令：HORIZONTAL / VERTICAL / CASCADE（多文档窗口排列，依赖 iced 窗口
+子系统，不是单 bool 可解）、UOSNAP / FRAMES0/1/2（Underlay 相关，需要
+underlay runtime 先就位）。
+
+### 2026-04-17：M3-B brick 3a — AC1015 object header 三件套解码
+
+消费 brick 2b 切出来的 `&[u8]` 对象切片，用 `BitReader` 解出 AC1015 每个对象
+开头的 `[BS object_type][RL main_size_bits][H handle]`，把字节切片变成**带语义
+路由信息的 `ObjectHeader`**。AC1015 真实样本首 20 个 handle **20/20 解码成功**
+且 handle 字段 **20/20 与 handle_map 一致**。
+
+**新增模块** (`crates/h7cad-native-dwg/src/object_header.rs`)：
+
+- `ObjectHeader { object_type, main_size_bits, handle, handle_code }`：
+  四个字段对应 ODA R2000 对象公共头；`main_size_bits` 是 handle 流起点的
+  绝对 bit 位置，brick 3b 用它分割 merged-data 主/handle 流
+- `HANDLE_CODE_HARD_OWNER = 0x5`：对象自指 handle 的标准 code nibble
+- `read_ac1015_object_header(&[u8]) -> Result<(ObjectHeader, BitReader<'_>)>`：
+  先 byte-aligned 消耗 MS 前缀，再在 body 上建 BitReader 读 BS + RL + H；
+  返回 reader 定位在 **xdata 起点**，brick 3b 可直接继续消费
+- 防御：
+  - `MAX_MAIN_SIZE_BITS = 128 Mbits`（约 16 MiB）防止损坏驱动大分配
+  - MS body 越切片尾 → `UnexpectedEof { context: "object body extends past slice" }`
+  - BS/RL/H 任一字段截断 → `BitReader` 原生 EOF 错误冒泡
+- 单测 8 个：
+  - `decodes_well_formed_header` / `decodes_large_handle`：正常路径 + 4 字节 handle
+  - `rejects_empty_slice` / `rejects_truncated_ms_prefix` / `rejects_body_size_larger_than_slice` /
+    `rejects_truncated_bs_field` / `rejects_implausible_main_size_bits`：5 种失败路径
+  - `reader_positioned_exactly_after_header`：断言 reader 在 **bit 58**（保证
+    brick 3b 不需要重算 header offset）
+
+**接入** (`crates/h7cad-native-dwg/src/lib.rs`)：
+
+- `mod object_header;`
+- `pub use object_header::{read_ac1015_object_header, ObjectHeader, HANDLE_CODE_HARD_OWNER};`
+
+**集成测试** (`tests/real_samples.rs`)：
+
+- `real_ac1015_object_header_decodes_first_objects`：用真实 `sample_AC1015.dwg`
+  → `build_pending_document` → `ObjectStreamCursor` → 对前 20 条 handle 逐一解
+  `ObjectHeader`，打印 type histogram
+  - 断言：至少 50% 解码成功
+  - 断言：每个解码成功的 header.handle 必须等于 handle_map 对应条目的 handle（0 容忍漂移）
+  - 断言：`main_size_bits ≤ slice_bits_upper`（不越切片）
+  - 实测结果：**20/20 解码成功、20/20 handle 匹配**，type 分布 =
+    {42×3, 48, 50-53, 56-57×3, 60, 62, 64, 66-68, 500, 501}，**2 个 ≥500 的自定义 class**
+    精确对应 Classes section 里 51 个注册类中最早出现的两个
+
+**测试与验证**：
+
+- `cargo test -p h7cad-native-dwg -- --test-threads=1`：**61 + 53 + 10 = 124** 全绿
+  （lib 单测 53 → 61；read_headers 53 保持；real_samples 9 → 10）
+- `cargo check --workspace --all-targets`：无新增 warning（原有 7 条 warning
+  均是 real_samples/bit_reader 既存代码，不属本砖 scope）
+- **brick 3 起步**：下一砖 brick 3b 可用 `ObjectHeader.object_type` 直接路由到
+  class-specific decoder（先做 ENTITY / OBJECT 两大类的 common header：owner
+  handle + reactors + xdictionary handle + linetype/layer 引用），然后按
+  `object_type` 分派到各 entity family 解几何字段
+
 ### 2026-04-17：M3-B brick 2b — ObjectStreamCursor 按 handle 切对象字节范围
 
 激活 brick 2a 的 `read_modular_short`，新增 `ObjectStreamCursor`，把

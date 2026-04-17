@@ -9,8 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use h7cad_native_dwg::{
-    build_pending_document, read_dwg, sniff_version, BitReader, DwgFileHeader, DwgReadError,
-    DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
+    build_pending_document, read_ac1015_object_header, read_dwg, sniff_version, BitReader,
+    DwgFileHeader, DwgReadError, DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
 };
 
 /// Decode a modular char (variable-length unsigned integer, 7 bits
@@ -845,5 +845,118 @@ fn real_ac1015_object_stream_cursor_slices_first_objects() {
         "at least half of the first {probe_count} handles must resolve to a \
          valid object slice; got only {resolved}. Likely an MS header or \
          offset-range regression."
+    );
+}
+
+/// M3-B brick 3a: `read_ac1015_object_header` turns each slice from
+/// brick 2b into a typed `ObjectHeader`. The three fields decoded
+/// (object_type, main_size_bits, handle) are the minimum routing
+/// information brick 3b needs before class-specific decoders can run.
+///
+/// Real-sample expectations on AC1015:
+///
+/// * The decoded handle inside the header must match the handle map
+///   entry that routed us to the slice. A mismatch means either the
+///   slice is misaligned or the handle reader dropped bits.
+/// * `main_size_bits` must be strictly positive and fit inside the
+///   slice's body (after the MS prefix). AutoCAD never writes a
+///   zero-size body for a real object.
+/// * `object_type` values on AC1015 cluster into two ranges:
+///   1..=0x1F1 (built-in types, e.g. LINE=19, CIRCLE=17, TEXT=1) and
+///   ≥ 0x1F4 (custom classes registered in the Classes section).
+///   Both are plausible; we only reject obviously broken values
+///   like `0`.
+///
+/// The test logs the observed type histogram so future changes to
+/// sample files or decoder behaviour surface as a diff in the test
+/// output.
+#[test]
+fn real_ac1015_object_header_decodes_first_objects() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    let cursor = ObjectStreamCursor::new(&bytes, &pending.handle_offsets);
+
+    let probe_count = pending.handle_offsets.len().min(20);
+    let mut type_histogram: std::collections::BTreeMap<i16, usize> =
+        std::collections::BTreeMap::new();
+    let mut decoded = 0usize;
+    let mut handle_matches = 0usize;
+
+    for entry in pending.handle_offsets.iter().take(probe_count) {
+        let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
+            continue;
+        };
+        let Ok((obj_header, _reader)) = read_ac1015_object_header(slice) else {
+            eprintln!(
+                "  handle 0x{:X}: object_header decode failed (slice len = {})",
+                entry.handle.value(),
+                slice.len()
+            );
+            continue;
+        };
+        decoded += 1;
+        *type_histogram.entry(obj_header.object_type).or_insert(0) += 1;
+        if obj_header.handle == entry.handle {
+            handle_matches += 1;
+        } else {
+            eprintln!(
+                "  handle mismatch: map says 0x{:X} but header says 0x{:X} \
+                 (object_type={}, main_size_bits={})",
+                entry.handle.value(),
+                obj_header.handle.value(),
+                obj_header.object_type,
+                obj_header.main_size_bits
+            );
+        }
+
+        // main_size_bits must fit inside the slice's body portion.
+        // slice = [MS header (1-4 bytes)] + [body (body_size bytes)].
+        // We can't reach body_size from outside the module, but the
+        // slice length is an upper bound: body_size ≤ slice.len().
+        let slice_bits_upper = (slice.len() as u64) * 8;
+        assert!(
+            (obj_header.main_size_bits as u64) <= slice_bits_upper,
+            "handle 0x{:X}: main_size_bits {} exceeds slice bits {}",
+            entry.handle.value(),
+            obj_header.main_size_bits,
+            slice_bits_upper
+        );
+    }
+
+    eprintln!(
+        "AC1015 object_header: {decoded} / {probe_count} probed handles decoded, \
+         {handle_matches} matched map handle. type histogram:"
+    );
+    for (type_code, count) in &type_histogram {
+        eprintln!("  type={type_code}: {count}");
+    }
+
+    // At least half of the probed handles must decode cleanly. An
+    // outright zero would mean brick 3a is broken; the 50% floor
+    // accommodates the long tail of purged/garbage handles in the
+    // Handle map that can reach deep into `probe_count` on edge-case
+    // samples.
+    assert!(
+        decoded >= probe_count / 2,
+        "expected at least half the probed handles to decode an \
+         object_header; got only {decoded} / {probe_count}"
+    );
+    // Any handle that did decode must also match its own map entry.
+    // A mismatch means the bit cursor drifted somewhere inside
+    // BS/RL/H, which invalidates every downstream byte the slice
+    // would otherwise hand off to brick 3b.
+    assert_eq!(
+        handle_matches, decoded,
+        "every decoded header must agree with its handle-map handle"
     );
 }

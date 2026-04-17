@@ -4,6 +4,7 @@ mod file_header;
 mod handle_map;
 mod known_section;
 mod modular;
+mod object_header;
 mod object_reader;
 mod object_stream;
 mod pending;
@@ -20,6 +21,7 @@ pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
 pub use handle_map::{parse_handle_map, HandleMapEntry};
 pub use known_section::KnownSection;
+pub use object_header::{read_ac1015_object_header, ObjectHeader, HANDLE_CODE_HARD_OWNER};
 pub use object_reader::{
     dispatch_entity_record, dispatch_object, dispatch_object_record, dispatch_table_record,
     record_index, record_payload_size, summarize_object, DispatchTarget, ParsedRecordSummary,
