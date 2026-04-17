@@ -2,6 +2,21 @@
 
 ## [未发布]
 
+### 2026-04-17：C2d TOLERANCE 命令 native-first
+
+沿用 C2a/C2b/C2c 模式，把 `src/modules/annotate/tolerance_cmd.rs` 的 TOLERANCE
+命令从 `acadrust::entities::Tolerance` 构造切到 `nm::EntityData::Tolerance`。
+
+- `ToleranceCommand::on_point`：`Tolerance::with_text(ins, text)` +
+  `CmdResult::CommitAndExit(EntityType::Tolerance(..))` →
+  `nm::Entity::new(nm::EntityData::Tolerance { text, insertion })` +
+  `CmdResult::CommitAndExitNative(entity)`
+- 移除 `use acadrust::entities::Tolerance` / `use acadrust::EntityType` /
+  `use crate::types::Vector3`；只 `use h7cad_native_model as nm`
+- `insertion` 坐标沿用 `[pt.x, pt.z, pt.y]`（Y↔Z 翻转与其它命令一致）
+- `native_bridge` 已有 Tolerance 分支，CommitAndExitNative handler 自动走投影路径
+- 度量：`tolerance_cmd.rs` 中 `acadrust::` 引用 3 → 0
+
 ### 2026-04-17：C2c DIMENSION 家族 7 个命令 native-first
 
 把 `src/modules/annotate/` 里 7 个 dimension 命令从 `acadrust::Dimension::{

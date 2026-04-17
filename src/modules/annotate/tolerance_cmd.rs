@@ -4,9 +4,7 @@
 //   1. Text: Enter tolerance string  (e.g. "%%v0.05|A" or plain text)
 //   2. Point: Click insertion point
 
-use acadrust::entities::Tolerance;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -64,9 +62,11 @@ impl CadCommand for ToleranceCommand {
 
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         if let Step::Insertion { text } = &self.step {
-            let ins = Vector3::new(pt.x as f64, pt.z as f64, pt.y as f64);
-            let tol = Tolerance::with_text(ins, text.clone());
-            CmdResult::CommitAndExit(EntityType::Tolerance(tol))
+            let entity = nm::Entity::new(nm::EntityData::Tolerance {
+                text: text.clone(),
+                insertion: [pt.x as f64, pt.z as f64, pt.y as f64],
+            });
+            CmdResult::CommitAndExitNative(entity)
         } else {
             CmdResult::NeedPoint
         }
