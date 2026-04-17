@@ -109,16 +109,6 @@ pub fn pt_to_vec3(p: &[f64; 3]) -> Vec3 {
     Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)
 }
 
-#[inline]
-pub fn v3_to_arr(v: &crate::types::Vector3) -> [f64; 3] {
-    [v.x, v.y, v.z]
-}
-
-#[inline]
-pub fn arr_to_v3(a: &[f64; 3]) -> crate::types::Vector3 {
-    crate::types::Vector3::new(a[0], a[1], a[2])
-}
-
 pub fn mirror_dir(dir: &mut [f64; 3], p1: Vec3, p2: Vec3) {
     let ax = (p2.x - p1.x) as f64;
     let ay = (p2.y - p1.y) as f64;

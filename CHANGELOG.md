@@ -2,6 +2,34 @@
 
 ## [未发布]
 
+### 2026-04-17：B5g Compat adapter 物理删除 + feature 移除
+
+把 10 个 entity 文件里全部 **44 个** `#[cfg(feature = "acadrust-compat")]`
+adapter impl 物理删除，从 `Cargo.toml` 移除 `acadrust-compat` feature 及其
+`default` 声明，完成 B 系列 compat 清理最终一步。
+
+- 删除的文件：`line/circle/arc/point/ellipse/lwpolyline/ray/solid/spline/shape`
+  各自的 `impl {TruckConvertible,Grippable,PropertyEditable,Transformable} for
+  acadrust::entities::Xxx` 共 44 个 impl
+- 连带删除的 adapter 专用 helper：`lwpolyline::ar_to_nm` /
+  `lwpolyline::write_back_verts` / `solid::ar_corners` / `solid::write_back` /
+  `common::v3_to_arr` / `common::arr_to_v3`
+- `Cargo.toml`：移除 `[features] default = ["acadrust-compat"]` 和 `acadrust-compat = []`
+- B5 系列的"精确量化"闭环：B3 建 feature gate → B5a/b/c/d/e inline dispatch →
+  B5g 物理删除，全部 66 处 trait bound 依赖彻底消除
+
+**度量**：
+- `cargo check -p H7CAD` 0 error / 0 warning
+- `cargo check -p H7CAD --no-default-features` 已不适用（feature 已删）
+- DWG 88/88、DXF 81/81、model 9/9 全绿
+- 10 个 entity 文件 `acadrust::` 引用：全部仅保留 free function 内部（~30 处，
+  属 bridge 合理归属）
+
+**剩余 acadrust 依赖**：`src/scene/*`, `src/modules/*`, `src/app/*`, `src/entities/`
+中复杂 entity（Polyline/Hatch/Text/Dimension/Insert/Viewport 等 25 个）仍通过
+本地 `struct` 承载 acadrust 字段；`src/io/{mod,native_bridge}.rs` 保留 acadrust
+DwgReader/Writer 路径。这些属于 B 系列之外的长期工作，不影响 B5 闭环。
+
 ### 2026-04-17：B5e 剩余 5 个 entity dispatch 彻底脱钩 acadrust
 
 把 `src/entities/traits.rs::EntityTypeOps` 里 6 个 dispatch 方法中，对 Ray / XLine /
