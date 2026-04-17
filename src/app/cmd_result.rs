@@ -2123,14 +2123,19 @@ mod tests {
                         x: 0.0,
                         y: 0.0,
                         bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
                     },
                     nm::LwVertex {
                         x: 10.0,
                         y: 0.0,
                         bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
                     },
                 ],
                 closed: false,
+                constant_width: 0.0,
             }))
             .expect("native lwpolyline");
         app.tabs[0].scene.set_native_doc(Some(native));
@@ -2236,19 +2241,26 @@ mod tests {
                         x: 0.0,
                         y: 0.0,
                         bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
                     },
                     nm::LwVertex {
                         x: 5.0,
                         y: 0.0,
                         bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
                     },
                     nm::LwVertex {
                         x: 10.0,
                         y: 0.0,
                         bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
                     },
                 ],
                 closed: false,
+                constant_width: 0.0,
             }))
             .expect("native lwpolyline");
         app.tabs[0].scene.set_native_doc(Some(native));
@@ -2329,12 +2341,13 @@ mod tests {
         let profile = native
             .add_entity(nm::Entity::new(nm::EntityData::LwPolyline {
                 vertices: vec![
-                    nm::LwVertex { x: -1.0, y: -1.0, bulge: 0.0 },
-                    nm::LwVertex { x: 1.0, y: -1.0, bulge: 0.0 },
-                    nm::LwVertex { x: 1.0, y: 1.0, bulge: 0.0 },
-                    nm::LwVertex { x: -1.0, y: 1.0, bulge: 0.0 },
+                    nm::LwVertex { x: -1.0, y: -1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                    nm::LwVertex { x: 1.0, y: -1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                    nm::LwVertex { x: 1.0, y: 1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                    nm::LwVertex { x: -1.0, y: 1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
                 ],
                 closed: true,
+                constant_width: 0.0,
             }))
             .expect("native profile");
         let path = native

@@ -85,28 +85,51 @@ pub(crate) fn parse_lwpolyline(codes: &[(i16, String)]) -> EntityData {
 
     let mut vertices: Vec<LwVertex> = Vec::new();
     let mut closed = false;
+    let mut constant_width = 0.0;
     let mut cur_x = 0.0;
     let mut cur_y = 0.0;
     let mut cur_bulge = 0.0;
+    let mut cur_start_width = 0.0;
+    let mut cur_end_width = 0.0;
     let mut has_vertex = false;
+    let mut saw_xy = false;
 
     for &(code, ref val) in codes {
         match code {
             70 => closed = val.parse::<i16>().unwrap_or(0) & 1 != 0,
+            // Code 43 = LwPolyline constant width (uniform segment width).
+            43 => constant_width = val.parse().unwrap_or(0.0),
             10 => {
                 if has_vertex {
                     vertices.push(LwVertex {
                         x: cur_x,
                         y: cur_y,
                         bulge: cur_bulge,
+                        start_width: cur_start_width,
+                        end_width: cur_end_width,
                     });
                     cur_bulge = 0.0;
+                    cur_start_width = 0.0;
+                    cur_end_width = 0.0;
                 }
                 cur_x = val.parse().unwrap_or(0.0);
                 cur_y = 0.0;
                 has_vertex = true;
+                saw_xy = true;
             }
             20 => cur_y = val.parse().unwrap_or(0.0),
+            // Code 40 before the first 10/20 is LwPolyline constant_width;
+            // after 10/20 it's per-vertex starting width.
+            40 => {
+                let v: f64 = val.parse().unwrap_or(0.0);
+                if saw_xy {
+                    cur_start_width = v;
+                } else {
+                    constant_width = v;
+                }
+            }
+            // Code 41 = per-vertex end_width.
+            41 => cur_end_width = val.parse().unwrap_or(0.0),
             42 => cur_bulge = val.parse().unwrap_or(0.0),
             _ => {}
         }
@@ -116,10 +139,16 @@ pub(crate) fn parse_lwpolyline(codes: &[(i16, String)]) -> EntityData {
             x: cur_x,
             y: cur_y,
             bulge: cur_bulge,
+            start_width: cur_start_width,
+            end_width: cur_end_width,
         });
     }
 
-    EntityData::LwPolyline { vertices, closed }
+    EntityData::LwPolyline {
+        vertices,
+        closed,
+        constant_width,
+    }
 }
 
 pub(crate) fn parse_attrib(codes: &[(i16, String)]) -> EntityData {

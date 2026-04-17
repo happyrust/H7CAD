@@ -1813,7 +1813,7 @@ mod tests {
         let doc = read_dxf(input).unwrap();
         assert_eq!(doc.entities.len(), 1);
         match &doc.entities[0].data {
-            h7cad_native_model::EntityData::LwPolyline { vertices, closed } => {
+            h7cad_native_model::EntityData::LwPolyline { vertices, closed, .. } => {
                 assert!(closed);
                 assert_eq!(vertices.len(), 3);
                 assert_eq!(vertices[0].x, 0.0);

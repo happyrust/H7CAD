@@ -207,17 +207,24 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::MText(e))
         }
-        nm::EntityData::LwPolyline { vertices, closed } => {
+        nm::EntityData::LwPolyline {
+            vertices,
+            closed,
+            constant_width,
+        } => {
             let mut e = ar::LwPolyline {
                 vertices: vertices
                     .iter()
                     .map(|vertex| {
                         let mut out = ar::LwVertex::new(Vector2::new(vertex.x, vertex.y));
                         out.bulge = vertex.bulge;
+                        out.start_width = vertex.start_width;
+                        out.end_width = vertex.end_width;
                         out
                     })
                     .collect(),
                 is_closed: *closed,
+                constant_width: *constant_width,
                 ..Default::default()
             };
             apply_common(&mut e.common, entity);
@@ -693,9 +700,12 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                         x: vertex.location.x,
                         y: vertex.location.y,
                         bulge: vertex.bulge,
+                        start_width: vertex.start_width,
+                        end_width: vertex.end_width,
                     })
                     .collect(),
                 closed: pline.is_closed,
+                constant_width: pline.constant_width,
             },
         )),
         ar::EntityType::Spline(spline) => Some(native_common_from_acadrust(

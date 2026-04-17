@@ -103,12 +103,19 @@ fn make_revcloud_native(pts: &[Vec3], arc_len: f64) -> nm::Entity {
         for j in 0..num_arcs {
             let x = p0.x as f64 + step_x * j as f64;
             let y = p0.z as f64 + step_z * j as f64;
-            vertices.push(nm::LwVertex { x, y, bulge: bump_bulge });
+            vertices.push(nm::LwVertex {
+                x,
+                y,
+                bulge: bump_bulge,
+                start_width: 0.0,
+                end_width: 0.0,
+            });
         }
     }
 
     nm::Entity::new(nm::EntityData::LwPolyline {
         vertices,
         closed: true,
+        constant_width: 0.0,
     })
 }

@@ -68,11 +68,14 @@ impl PlineCommand {
                 x: v.x as f64,
                 y: v.y as f64,
                 bulge: self.bulges.get(i).copied().unwrap_or(0.0),
+                start_width: 0.0,
+                end_width: 0.0,
             })
             .collect();
         Some(nm::Entity::new(nm::EntityData::LwPolyline {
             vertices: lw_verts,
             closed,
+            constant_width: 0.0,
         }))
     }
 }

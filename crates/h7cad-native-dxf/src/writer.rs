@@ -479,12 +479,26 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             w.pair_f64(41, *start_param);
             w.pair_f64(42, *end_param);
         }
-        EntityData::LwPolyline { vertices, closed } => {
+        EntityData::LwPolyline {
+            vertices,
+            closed,
+            constant_width,
+        } => {
             w.pair_i32(90, vertices.len() as i32);
             w.pair_i16(70, if *closed { 1 } else { 0 });
+            // Code 43 = LwPolyline constant width (only written when non-zero).
+            if *constant_width != 0.0 {
+                w.pair_f64(43, *constant_width);
+            }
             for v in vertices {
                 w.pair_f64(10, v.x);
                 w.pair_f64(20, v.y);
+                if v.start_width != 0.0 {
+                    w.pair_f64(40, v.start_width);
+                }
+                if v.end_width != 0.0 {
+                    w.pair_f64(41, v.end_width);
+                }
                 if v.bulge != 0.0 {
                     w.pair_f64(42, v.bulge);
                 }

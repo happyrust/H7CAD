@@ -58,9 +58,16 @@ fn make_pline(xy_pairs: &[[f64; 2]]) -> nm::Entity {
     nm::Entity::new(nm::EntityData::LwPolyline {
         vertices: xy_pairs
             .iter()
-            .map(|&[x, y]| nm::LwVertex { x, y, bulge: 0.0 })
+            .map(|&[x, y]| nm::LwVertex {
+                x,
+                y,
+                bulge: 0.0,
+                start_width: 0.0,
+                end_width: 0.0,
+            })
             .collect(),
         closed: true,
+        constant_width: 0.0,
     })
 }
 

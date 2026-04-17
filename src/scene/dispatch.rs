@@ -667,7 +667,7 @@ fn geometry_properties_native(entity: &nm::Entity, text_style_names: &[String]) 
             start_angle,
             end_angle,
         } => Some(arc::properties(center, *radius, *start_angle, *end_angle)),
-        nm::EntityData::LwPolyline { vertices, closed } => {
+        nm::EntityData::LwPolyline { vertices, closed, .. } => {
             Some(lwpolyline::properties(vertices, *closed, 0.0))
         }
         nm::EntityData::Text {

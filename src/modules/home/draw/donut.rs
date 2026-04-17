@@ -10,8 +10,7 @@
 //   2. Type outer diameter
 //   3. Click center point(s); Enter to finish
 
-use acadrust::entities::{LwPolyline, LwVertex};
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -77,9 +76,8 @@ impl CadCommand for DonutCommand {
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         match &self.state {
             DonutState::PlaceCenter => {
-                let entity = make_donut(pt.x as f64, pt.z as f64, self.inner_r, self.outer_r);
-                // Keep command active so user can place more donuts.
-                CmdResult::CommitEntity(entity)
+                let entity = make_donut_native(pt.x as f64, pt.z as f64, self.inner_r, self.outer_r);
+                CmdResult::CommitEntityNative(entity)
             }
             _ => CmdResult::NeedPoint,
         }
@@ -99,27 +97,28 @@ impl CadCommand for DonutCommand {
     }
 }
 
-fn make_donut(cx: f64, cy: f64, inner_r: f64, outer_r: f64) -> EntityType {
-    use crate::types::Vector2;
+fn make_donut_native(cx: f64, cy: f64, inner_r: f64, outer_r: f64) -> nm::Entity {
     let r_avg = (inner_r + outer_r) / 2.0;
     let width = outer_r - inner_r;
 
-    let mut p = LwPolyline::new();
-    p.is_closed = true;
-    p.constant_width = width;
-
-    // Vertex at (cx - r, cy) with bulge 1.0 (180° CCW arc to next vertex)
-    let mut v0 = LwVertex::new(Vector2::new(cx - r_avg, cy));
-    v0.bulge = 1.0;
-    v0.start_width = width;
-    v0.end_width = width;
-
-    // Vertex at (cx + r, cy) with bulge 1.0 (second 180° arc back to v0)
-    let mut v1 = LwVertex::new(Vector2::new(cx + r_avg, cy));
-    v1.bulge = 1.0;
-    v1.start_width = width;
-    v1.end_width = width;
-
-    p.vertices = vec![v0, v1];
-    EntityType::LwPolyline(p)
+    nm::Entity::new(nm::EntityData::LwPolyline {
+        vertices: vec![
+            nm::LwVertex {
+                x: cx - r_avg,
+                y: cy,
+                bulge: 1.0,
+                start_width: width,
+                end_width: width,
+            },
+            nm::LwVertex {
+                x: cx + r_avg,
+                y: cy,
+                bulge: 1.0,
+                start_width: width,
+                end_width: width,
+            },
+        ],
+        closed: true,
+        constant_width: width,
+    })
 }

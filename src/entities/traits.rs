@@ -17,6 +17,8 @@ fn lwv_ar_to_nm(verts: &[acadrust::entities::LwVertex]) -> Vec<nm::LwVertex> {
             x: v.location.x,
             y: v.location.y,
             bulge: v.bulge,
+            start_width: v.start_width,
+            end_width: v.end_width,
         })
         .collect()
 }
@@ -26,6 +28,8 @@ fn lwv_write_back(dst: &mut [acadrust::entities::LwVertex], src: &[nm::LwVertex]
         d.location.x = s.x;
         d.location.y = s.y;
         d.bulge = s.bulge;
+        d.start_width = s.start_width;
+        d.end_width = s.end_width;
     }
 }
 

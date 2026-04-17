@@ -993,6 +993,9 @@ pub enum EntityData {
     LwPolyline {
         vertices: Vec<LwVertex>,
         closed: bool,
+        /// Uniform segment width overriding per-vertex widths when > 0
+        /// (DXF code 43). Native-model addition (D3 series).
+        constant_width: f64,
     },
     Text {
         insertion: [f64; 3],
@@ -1405,6 +1408,11 @@ pub struct LwVertex {
     pub x: f64,
     pub y: f64,
     pub bulge: f64,
+    /// Per-vertex starting width (DXF code 40 after 10/20). Native-model
+    /// addition (D3 series).
+    pub start_width: f64,
+    /// Per-vertex ending width (DXF code 41). Native-model addition (D3 series).
+    pub end_width: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]

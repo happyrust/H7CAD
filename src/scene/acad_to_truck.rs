@@ -42,7 +42,7 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
             start_angle,
             end_angle,
         } => Some(arc::to_truck(center, *radius, *start_angle, *end_angle)),
-        nm::EntityData::LwPolyline { vertices, closed } => {
+        nm::EntityData::LwPolyline { vertices, closed, .. } => {
             Some(lwpolyline::to_truck(vertices, *closed, 0.0))
         }
         nm::EntityData::Text {
