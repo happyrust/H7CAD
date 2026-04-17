@@ -2,6 +2,42 @@
 
 ## [未发布]
 
+### 2026-04-17：D4 扩展 EntityData::Image 字段 + RASTER_IMAGE native-first
+
+解锁 home/draw 最后一个延后命令 — RASTER_IMAGE，**home/draw 创建命令 native-first
+9/9 全部收官**。
+
+**模型层** (`crates/h7cad-native-model/src/lib.rs`)：
+- `EntityData::Image` 追加 `file_path: String`（文件路径，acadrust 直接有对等字段）
+  和 `display_flags: i32`（bitfield：SHOW_IMAGE / SHOW_WHEN_NOT_ALIGNED /
+  USE_CLIPPING_BOUNDARY / TRANSPARENCY_IS_ON）
+
+**Bridge 双向** (`src/io/native_bridge.rs`)：
+- `native_image_to_acadrust`：用 `RasterImage::new(file_path, ..)` 构造（之前硬
+  编码为 `""` 路径 → 渲染失效），从 `display_flags` 重建 `ImageDisplayFlags`
+- `acad_image_to_native`：从 `image.file_path.clone()` 和 `image.flags.bits()` 读回
+
+**DXF parser/writer**：
+- 由于 DXF 标准将 file_path 存在 **IMAGEDEF 对象**上（IMAGE 实体通过 code 340
+  handle 链接），native-dxf 当前未实现 object 层；本次折中方案为在 IMAGE 实体
+  上用**非标准 code 1** 存 file_path（保证 native round-trip，其他 CAD 读取时
+  会忽略 code 1）。document 内明确标注为 TODO 升级为标准 IMAGEDEF 链。
+- code 70 用于 display_flags
+
+**RASTER_IMAGE 命令** (`src/modules/home/draw/raster_image.rs`)：
+- `make_entity` → `make_entity_native`：构造 `nm::Entity::new(nm::EntityData::
+  Image { .. })`
+- `u_vector/v_vector` 按 `world_size / pixel_count` 缩放（对齐 acadrust
+  `RasterImage::set_size` 的语义）
+- `display_flags = SHOW_IMAGE (1) | USE_CLIPPING_BOUNDARY (4)`（保留原命令默认）
+- 2 个 `CommitAndExit` → `CommitAndExitNative`
+- 移除 `use acadrust::entities::RasterImage` / `use acadrust::EntityType` /
+  `use crate::types::Vector3`
+- 度量：`raster_image.rs` 中 `acadrust::` 代码引用 4 → 0
+
+- 测试：workspace `cargo check` 零 warning；`native_bridge` 22 个测试全绿
+- **home/draw 进度 9/9 ✓**：C3 阶段 **全部命令 native-first 收官**
+
 ### 2026-04-17：D3 扩展 LwVertex/LwPolyline 宽度字段 + DONUT native-first
 
 扩 native 模型支持 LwPolyline 族宽度属性，同步解锁 DONUT 命令 native-first。

@@ -277,21 +277,32 @@ pub(crate) fn parse_image(codes: &[(i16, String)]) -> EntityData {
     let (mut ux, mut uy, mut uz) = (1.0, 0.0, 0.0);
     let (mut vx, mut vy, mut vz) = (0.0, 1.0, 0.0);
     let (mut sx, mut sy) = (1.0, 1.0);
+    let mut file_path = String::new();
+    let mut display_flags: i32 = 0;
     for &(code, ref val) in codes {
-        let v: f64 = val.parse().unwrap_or(0.0);
         match code {
-            10 => x = v,
-            20 => y = v,
-            30 => z = v,
-            11 => ux = v,
-            21 => uy = v,
-            31 => uz = v,
-            12 => vx = v,
-            22 => vy = v,
-            32 => vz = v,
-            13 => sx = v,
-            23 => sy = v,
-            _ => {}
+            // Non-standard: file_path stored directly on IMAGE entity via
+            // code 1 for native round-trip (D4 series); standard DXF stores
+            // this on a linked IMAGEDEF object.
+            1 => file_path = val.clone(),
+            70 => display_flags = val.parse::<i32>().unwrap_or(0),
+            _ => {
+                let v: f64 = val.parse().unwrap_or(0.0);
+                match code {
+                    10 => x = v,
+                    20 => y = v,
+                    30 => z = v,
+                    11 => ux = v,
+                    21 => uy = v,
+                    31 => uz = v,
+                    12 => vx = v,
+                    22 => vy = v,
+                    32 => vz = v,
+                    13 => sx = v,
+                    23 => sy = v,
+                    _ => {}
+                }
+            }
         }
     }
     EntityData::Image {
@@ -299,6 +310,8 @@ pub(crate) fn parse_image(codes: &[(i16, String)]) -> EntityData {
         u_vector: [ux, uy, uz],
         v_vector: [vx, vy, vz],
         image_size: [sx, sy],
+        file_path,
+        display_flags,
     }
 }
 

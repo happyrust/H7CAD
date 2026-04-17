@@ -6,9 +6,7 @@
 //   3. User drags to pick width; height is computed from the image's aspect ratio.
 //   4. Entity is committed.
 
-use acadrust::entities::RasterImage;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -34,23 +32,27 @@ impl ImageCommand {
         }
     }
 
-    fn make_entity(&self, origin: Vec3, width_pt: Vec3) -> EntityType {
+    fn make_entity_native(&self, origin: Vec3, width_pt: Vec3) -> nm::Entity {
         let world_width = ((width_pt.x - origin.x) as f64).abs().max(0.001);
         let world_height = world_width / self.aspect();
 
-        let ins = Vector3::new(origin.x as f64, origin.z as f64, origin.y as f64);
-
-        let mut img = RasterImage::with_size(
-            &self.file_path,
-            ins,
-            self.pixel_width as f64,
-            self.pixel_height as f64,
-            world_width,
-            world_height,
-        );
-        img.flags = acadrust::entities::ImageDisplayFlags::SHOW_IMAGE
-            | acadrust::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
-        EntityType::RasterImage(img)
+        // Y-up world → DXF: X→X, Z→Y, Y→Z.
+        let insertion = [origin.x as f64, origin.z as f64, origin.y as f64];
+        // Native Image stores u_vector / v_vector as world-axis vectors scaled
+        // to 1 pixel of the world size, matching acadrust::RasterImage.set_size
+        // (world_size / pixel_count).
+        let u_scale = world_width / self.pixel_width.max(1) as f64;
+        let v_scale = world_height / self.pixel_height.max(1) as f64;
+        // SHOW_IMAGE (1) | USE_CLIPPING_BOUNDARY (4) = 5
+        const DISPLAY_FLAGS: i32 = 1 | 4;
+        nm::Entity::new(nm::EntityData::Image {
+            insertion,
+            u_vector: [u_scale, 0.0, 0.0],
+            v_vector: [0.0, v_scale, 0.0],
+            image_size: [self.pixel_width as f64, self.pixel_height as f64],
+            file_path: self.file_path.clone(),
+            display_flags: DISPLAY_FLAGS,
+        })
     }
 }
 
@@ -69,8 +71,8 @@ impl CadCommand for ImageCommand {
 
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         if let Some(origin) = self.origin {
-            let entity = self.make_entity(origin, pt);
-            CmdResult::CommitAndExit(entity)
+            let entity = self.make_entity_native(origin, pt);
+            CmdResult::CommitAndExitNative(entity)
         } else {
             self.origin = Some(pt);
             CmdResult::NeedPoint
@@ -78,12 +80,11 @@ impl CadCommand for ImageCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        // If origin is set, place with a default width of 1 unit * pixel count / 100
         if let Some(origin) = self.origin {
             let default_w = (self.pixel_width as f64 / 100.0).max(1.0);
             let width_pt = Vec3::new(origin.x + default_w as f32, origin.y, origin.z);
-            let entity = self.make_entity(origin, width_pt);
-            CmdResult::CommitAndExit(entity)
+            let entity = self.make_entity_native(origin, width_pt);
+            CmdResult::CommitAndExitNative(entity)
         } else {
             CmdResult::Cancel
         }

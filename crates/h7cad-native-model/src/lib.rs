@@ -1140,6 +1140,15 @@ pub enum EntityData {
         u_vector: [f64; 3],
         v_vector: [f64; 3],
         image_size: [f64; 2],
+        /// File path to the raster image. Native-model addition (D4 series);
+        /// DXF IMAGE standard stores this in a linked IMAGEDEF object (code
+        /// 340 -> IMAGEDEF; code 1 on IMAGEDEF), but the native-dxf writer
+        /// currently round-trips it as a direct code 1 on the IMAGE entity.
+        file_path: String,
+        /// DXF code 70 image display flags bitfield
+        /// (bit 1=SHOW_IMAGE, bit 2=SHOW_WHEN_NOT_ALIGNED_WITH_SCREEN,
+        ///  bit 4=USE_CLIPPING_BOUNDARY, bit 8=TRANSPARENCY_IS_ON).
+        display_flags: i32,
     },
     Wipeout {
         clip_vertices: Vec<[f64; 2]>,

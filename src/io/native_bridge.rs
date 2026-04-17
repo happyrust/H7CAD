@@ -373,11 +373,17 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             u_vector,
             v_vector,
             image_size,
+            file_path,
+            display_flags,
         } => {
-            let mut e = ar::RasterImage::new("", v3(insertion), image_size[0], image_size[1]);
+            let mut e =
+                ar::RasterImage::new(file_path, v3(insertion), image_size[0], image_size[1]);
             e.u_vector = v3(u_vector);
             e.v_vector = v3(v_vector);
             e.size = Vector2::new(image_size[0], image_size[1]);
+            if let Some(flags) = ar::ImageDisplayFlags::from_bits(*display_flags as i16) {
+                e.flags = flags;
+            }
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::RasterImage(e))
         }
@@ -849,6 +855,8 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 u_vector: [image.u_vector.x, image.u_vector.y, image.u_vector.z],
                 v_vector: [image.v_vector.x, image.v_vector.y, image.v_vector.z],
                 image_size: [image.size.x, image.size.y],
+                file_path: image.file_path.clone(),
+                display_flags: image.flags.bits() as i32,
             },
         )),
         ar::EntityType::Wipeout(wipeout) => Some(native_common_from_acadrust(
@@ -2895,6 +2903,8 @@ mod tests {
                     u_vector: [0.5, 0.0, 0.0],
                     v_vector: [0.0, 0.25, 0.0],
                     image_size: [640.0, 480.0],
+                    file_path: String::new(),
+                    display_flags: 0,
                 },
                 0x97,
                 0x197,
@@ -2999,6 +3009,8 @@ mod tests {
                 u_vector: [0.5, 0.0, 0.0],
                 v_vector: [0.0, 0.25, 0.0],
                 image_size: [640.0, 480.0],
+                file_path: String::new(),
+                display_flags: 0,
             },
             nm::EntityData::Wipeout {
                 clip_vertices: vec![[0.0, 0.0], [4.0, 0.0], [3.0, 2.0], [0.0, 3.0]],
@@ -3065,6 +3077,8 @@ mod tests {
             u_vector: [0.5, 0.0, 0.0],
             v_vector: [0.0, 0.25, 0.0],
             image_size: [640.0, 480.0],
+            file_path: String::new(),
+            display_flags: 0,
         };
         let wipeout_data = nm::EntityData::Wipeout {
             clip_vertices: vec![[0.0, 0.0], [1.0, 0.0], [0.75, 2.0 / 3.0], [0.0, 1.0]],

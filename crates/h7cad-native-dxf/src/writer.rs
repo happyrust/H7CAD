@@ -865,12 +865,22 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             u_vector,
             v_vector,
             image_size,
+            file_path,
+            display_flags,
         } => {
             w.point3d(10, *insertion);
             w.point3d(11, *u_vector);
             w.point3d(12, *v_vector);
             w.pair_f64(13, image_size[0]);
             w.pair_f64(23, image_size[1]);
+            // Code 1 used as non-standard inline file path for native
+            // round-trip (D4). Standard DXF stores this on IMAGEDEF.
+            if !file_path.is_empty() {
+                w.pair_str(1, file_path);
+            }
+            if *display_flags != 0 {
+                w.pair_i32(70, *display_flags);
+            }
         }
         EntityData::Wipeout {
             clip_vertices,
