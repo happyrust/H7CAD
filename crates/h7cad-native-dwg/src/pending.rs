@@ -1,4 +1,4 @@
-use crate::DwgVersion;
+use crate::{DwgVersion, HandleMapEntry};
 use h7cad_native_model::Handle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +9,12 @@ pub struct PendingDocument {
     pub objects: Vec<PendingObject>,
     pub layers: Vec<PendingLayer>,
     pub entities: Vec<PendingEntity>,
+    /// Decoded `AcDb:Handles` section, one entry per `(handle, offset)`
+    /// pair. Entries appear in strictly increasing handle order because
+    /// the underlying stream uses a delta encoding. Empty on versions /
+    /// layouts where no Handle section was present in the descriptor
+    /// table.
+    pub handle_offsets: Vec<HandleMapEntry>,
 }
 
 impl PendingDocument {
@@ -20,6 +26,7 @@ impl PendingDocument {
             objects: Vec::new(),
             layers: Vec::new(),
             entities: Vec::new(),
+            handle_offsets: Vec::new(),
         }
     }
 }

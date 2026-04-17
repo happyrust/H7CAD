@@ -2,6 +2,58 @@
 
 ## [未发布]
 
+### 2026-04-17：M3-B brick 1 — AcDb:Handles 解码接入 build_pending_document
+
+开启 DWG parser M3-B 系列（对象流解码）第 1 砖 —— 把 AC1015 `AcDb:Handles`
+section 从「描述符层可见、未被消费」的状态打通到 `PendingDocument`，为后续
+brick 2（对象流游标）和 brick 3（类路由对象解码）铺路。
+
+**新增模块** (`crates/h7cad-native-dwg/src/handle_map.rs`)：
+
+- `HandleMapEntry { handle, offset }`：单条 `(handle, object_stream_offset)`
+  记录
+- `parse_handle_map(payload) -> Result<Vec<HandleMapEntry>, DwgReadError>`：
+  解码 byte-aligned 的 Handle section chunk 流
+  - chunk 头：RS big-endian `size`（含自身 2 字节）
+  - `size == 2` → 空尾 chunk，终止
+  - chunk payload 上限 `min(size - 2, 2032)`
+  - 每个条目：`ModularChar(unsigned)` delta_handle + `SignedModularChar`
+    delta_loc；delta_handle > 0 时才产出条目（AutoCAD 偶尔用 0-delta 做流
+    填充）
+  - 每 chunk 尾 2 字节 CRC（跳过，校验延后到全文件 pass）
+- 自带 6 个单测覆盖：single-chunk 基本解码 / 忽略 zero-delta / 负 offset
+  / multi-byte modular char / 截断报错 / 立即空尾
+- 硬性上限：`MAX_HANDLE_MAP_ENTRIES = 2^20`、`MAX_HANDLE_MAP_CHUNKS = 1024`
+  防止损坏 size 前缀触发无界循环
+
+**接入** (`crates/h7cad-native-dwg/src/lib.rs`)：
+
+- `build_pending_document` 开头新增一次遍历：遇到 `record_number` 对应
+  `KnownSection::Handles` 的描述符，调 `parse_handle_map`，成功则追加到
+  `pending.handle_offsets`
+- **容错原则**：解码失败（合成测试 fixture 里 record_number == 2 但 payload
+  不是真实 Handle map 的情况）只是让该 crate 的 `handle_offsets` 为空，不
+  会破坏整体文档流水线
+
+**PendingDocument 字段扩展** (`crates/h7cad-native-dwg/src/pending.rs`)：
+
+- 新增 `pub handle_offsets: Vec<HandleMapEntry>`，严格单调递增（delta encoding
+  保证），空 vec 意味着当前 section layout 没有 Handle 块
+
+**集成测试** (`crates/h7cad-native-dwg/tests/real_samples.rs`)：
+
+- `real_ac1015_build_pending_document_populates_handle_offsets`：用真实
+  `sample_AC1015.dwg` 跑主入口 `build_pending_document`，断言
+  - `handle_offsets.len() >= 20`（实际样本 1047 条）
+  - 前 5 条 offset 都 `> 0` 且 `< file_size`（handle 表后段允许越界，是
+    AutoCAD 写 purged/GC 条目的正常现象，留给 brick 2 过滤）
+  - handles 整体严格递增
+
+- 测试：`cargo test -p h7cad-native-dwg -- --test-threads=1` 全绿（34 unit +
+  53 read_headers + 8 real_samples）；`cargo check -p h7cad-native-facade` /
+  `cargo check --workspace` 无新增 warning（pre-existing 的 `real_samples.rs`
+  7 条 reader-reassign 和 `bit_reader.rs` 1 条 `mut` 警告与本次改动无关）
+
 ### 2026-04-17：D4 扩展 EntityData::Image 字段 + RASTER_IMAGE native-first
 
 解锁 home/draw 最后一个延后命令 — RASTER_IMAGE，**home/draw 创建命令 native-first

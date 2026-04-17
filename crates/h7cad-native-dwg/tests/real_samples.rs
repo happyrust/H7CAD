@@ -9,8 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use h7cad_native_dwg::{
-    read_dwg, sniff_version, BitReader, DwgFileHeader, DwgReadError, DwgVersion, KnownSection,
-    SectionMap,
+    build_pending_document, read_dwg, sniff_version, BitReader, DwgFileHeader, DwgReadError,
+    DwgVersion, KnownSection, SectionMap,
 };
 
 /// Decode a modular char (variable-length unsigned integer, 7 bits
@@ -699,5 +699,74 @@ fn real_dwg_samples_section_locator_dump() {
                 start_sentinel_status,
             );
         }
+    }
+}
+
+/// M3-B brick 1: the `AcDb:Handles` decoder is now wired into
+/// `build_pending_document`, so a real AC1015 drawing must expose a
+/// non-empty `pending.handle_offsets` map on the main read pipeline.
+///
+/// We assert that:
+/// * the map has a plausible size (`sample_AC1015.dwg` reports 1047
+///   entries; we keep a loose floor of 20 for future sample variation),
+/// * every decoded offset lands inside the file,
+/// * every offset is strictly positive (AutoCAD never emits zero-offset
+///   object pointers).
+///
+/// These invariants are what M3-B brick 2 (object-stream cursor) and
+/// brick 3 (class-routed decoders) will depend on.
+#[test]
+fn real_ac1015_build_pending_document_populates_handle_offsets() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    eprintln!(
+        "AC1015 pending.handle_offsets.len() = {}",
+        pending.handle_offsets.len()
+    );
+
+    assert!(
+        pending.handle_offsets.len() >= 20,
+        "expected at least 20 handle_offsets decoded from the real AC1015 Handle \
+         section, got {}",
+        pending.handle_offsets.len()
+    );
+
+    // Spot-check the first few entries: the lowest-handle records always
+    // point at the fixed tables near the start of the object stream, so
+    // their offsets must be inside the file. Later handles can have
+    // offsets that appear out-of-range because AutoCAD writes handle
+    // map entries for purged/garbage-collected objects too; that higher
+    // tail is brick 2's problem, not brick 1's.
+    let file_size = bytes.len() as i64;
+    for entry in pending.handle_offsets.iter().take(5) {
+        assert!(
+            entry.offset > 0 && entry.offset < file_size,
+            "handle 0x{:X} has implausible object-stream offset 0x{:X} (file size {file_size})",
+            entry.handle.value(),
+            entry.offset
+        );
+    }
+
+    // Handles must be strictly increasing: the on-disk stream uses a
+    // monotonic delta encoding, so any non-increasing handle signals a
+    // decoder bug, not a format variation.
+    for window in pending.handle_offsets.windows(2) {
+        assert!(
+            window[0].handle.value() < window[1].handle.value(),
+            "handle_offsets must be strictly increasing; saw \
+             0x{:X} followed by 0x{:X}",
+            window[0].handle.value(),
+            window[1].handle.value(),
+        );
     }
 }

@@ -1,6 +1,7 @@
 mod bit_reader;
 mod error;
 mod file_header;
+mod handle_map;
 mod known_section;
 mod object_reader;
 mod pending;
@@ -15,6 +16,7 @@ use h7cad_native_model::Handle;
 pub use bit_reader::BitReader;
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
+pub use handle_map::{parse_handle_map, HandleMapEntry};
 pub use known_section::KnownSection;
 pub use object_reader::{
     dispatch_entity_record, dispatch_object, dispatch_object_record, dispatch_table_record,
@@ -52,6 +54,26 @@ pub fn build_pending_document(
     payloads: Vec<Vec<u8>>,
 ) -> Result<PendingDocument, DwgReadError> {
     let mut pending = PendingDocument::new(header.version, header.section_count);
+    // Decode the `AcDb:Handles` section up front. It is byte-aligned and
+    // shares nothing with the bit-stream pipelines, so pulling it out
+    // of the generic record classifier keeps the rest of this function
+    // unaffected. Fault-tolerant by design: synthetic test fixtures can
+    // emit a record_number == 2 slot whose payload is not a real handle
+    // map, and a partially corrupt Handle chunk in the wild should still
+    // let the rest of the document resolve. Both cases degrade to "no
+    // handle_offsets decoded" instead of failing the whole document.
+    for (descriptor, payload) in sections.descriptors.iter().zip(payloads.iter()) {
+        if KnownSection::from_record_number(descriptor.record_number) != Some(KnownSection::Handles)
+        {
+            continue;
+        }
+        if payload.is_empty() {
+            continue;
+        }
+        if let Ok(entries) = parse_handle_map(payload) {
+            pending.handle_offsets.extend(entries);
+        }
+    }
     let semantic_layers = payloads
         .iter()
         .flat_map(|payload| collect_semantic_layers(payload))
