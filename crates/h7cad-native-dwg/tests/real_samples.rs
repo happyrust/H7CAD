@@ -15,6 +15,7 @@ use h7cad_native_dwg::{
     read_ac1015_object_header, read_dwg, sniff_version, Ac1015RecoveryFailureKind, BitReader, DwgFileHeader,
     DwgReadError, DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
 };
+use h7cad_native_model::Handle;
 
 /// Decode a modular char (variable-length unsigned integer, 7 bits
 /// per byte with continuation bit in the MSB).
@@ -1605,6 +1606,831 @@ fn ac1015_geometric_family_from_type(object_type: i16) -> Option<&'static str> {
         77 => Some("LWPOLYLINE"),
         _ => None,
     }
+}
+
+#[derive(Debug, Clone)]
+struct Ac1015CommonProbeReport {
+    handle: u64,
+    family: &'static str,
+    object_type: i16,
+    header_main_size_bits: u32,
+    header_end_bits: usize,
+    main_position_bits_before_common: usize,
+    main_bits_remaining_before_common: usize,
+    handle_position_bits_before_common: usize,
+    handle_bits_remaining_before_common: usize,
+    common_result: String,
+    common_failure_stage: Option<String>,
+    common_failure_context: Option<String>,
+    main_position_bits_after_common: usize,
+    main_bits_remaining_after_common: usize,
+    handle_position_bits_after_common: usize,
+    handle_bits_remaining_after_common: usize,
+    handle_reads: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct Ac1015CommonLayoutComparison {
+    family: &'static str,
+    representative_handle: u64,
+    blocked_handle: u64,
+    representative_xdata_size: Option<i32>,
+    blocked_xdata_size: Option<i32>,
+    representative_first_xdata_block_size: Option<i32>,
+    blocked_first_xdata_block_size: Option<i32>,
+    representative_reaches_xdictionary: bool,
+    blocked_reaches_xdictionary: bool,
+    representative_reaches_layer: bool,
+    blocked_reaches_layer: bool,
+    representative_handle_stream_advanced: bool,
+    blocked_handle_stream_advanced: bool,
+    representative_main_remaining_after_common: usize,
+    blocked_main_remaining_after_common: usize,
+    blocked_failure_stage: Option<String>,
+}
+
+fn extract_logged_i32(entries: &[String], needle: &str) -> Option<i32> {
+    entries.iter().find_map(|entry| {
+        if !entry.contains(needle) {
+            return None;
+        }
+        let value = entry
+            .split("value=")
+            .nth(1)?
+            .split_whitespace()
+            .next()?;
+        value.parse::<i32>().ok()
+    })
+}
+
+fn ac1015_common_layout_comparison(
+    bytes: &[u8],
+    family: &'static str,
+    representative_handle: u64,
+    blocked_handle: u64,
+) -> Ac1015CommonLayoutComparison {
+    let representative = ac1015_common_stream_probe_report(bytes, representative_handle, family);
+    let blocked = ac1015_common_stream_probe_report(bytes, blocked_handle, family);
+
+    Ac1015CommonLayoutComparison {
+        family,
+        representative_handle,
+        blocked_handle,
+        representative_xdata_size: extract_logged_i32(&representative.handle_reads, "label=xdata_size"),
+        blocked_xdata_size: extract_logged_i32(&blocked.handle_reads, "label=xdata_size"),
+        representative_first_xdata_block_size: extract_logged_i32(
+            &representative.handle_reads,
+            "label=xdata[0].size",
+        ),
+        blocked_first_xdata_block_size: extract_logged_i32(&blocked.handle_reads, "label=xdata[0].size"),
+        representative_reaches_xdictionary: representative
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=xdictionary")),
+        blocked_reaches_xdictionary: blocked
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=xdictionary")),
+        representative_reaches_layer: representative
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=layer")),
+        blocked_reaches_layer: blocked
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=layer")),
+        representative_handle_stream_advanced: representative.handle_position_bits_after_common
+            > representative.handle_position_bits_before_common,
+        blocked_handle_stream_advanced: blocked.handle_position_bits_after_common
+            > blocked.handle_position_bits_before_common,
+        representative_main_remaining_after_common: representative.main_bits_remaining_after_common,
+        blocked_main_remaining_after_common: blocked.main_bits_remaining_after_common,
+        blocked_failure_stage: blocked.common_failure_stage.clone(),
+    }
+}
+
+fn ac1015_common_stream_probe_report(
+    bytes: &[u8],
+    handle_value: u64,
+    family: &'static str,
+) -> Ac1015CommonProbeReport {
+    let header = DwgFileHeader::parse(bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+    let target = Handle::new(handle_value);
+    let cursor = ObjectStreamCursor::new(bytes, &pending.handle_offsets);
+    let slice = cursor
+        .object_slice_by_handle(target)
+        .unwrap_or_else(|| panic!("expected object slice for 0x{handle_value:X}"));
+    let (obj_header, main_reader, handle_reader) =
+        h7cad_native_dwg::split_ac1015_object_streams(slice).unwrap_or_else(|err| {
+            panic!("split object streams for 0x{handle_value:X} should succeed: {err:?}")
+        });
+
+    assert_eq!(
+        obj_header.handle, target,
+        "object header handle should match representative handle 0x{handle_value:X}"
+    );
+
+    let header_reader = read_ac1015_object_header(slice)
+        .expect("header reader should decode representative handle");
+    let header_end_bits = header_reader.1.position_in_bits();
+
+    let main_position_bits_before_common = main_reader.position_in_bits();
+    let main_bits_remaining_before_common = main_reader.bits_remaining();
+    let handle_position_bits_before_common = handle_reader.position_in_bits();
+    let handle_bits_remaining_before_common = handle_reader.bits_remaining();
+
+    let mut instrumented_main = main_reader.clone();
+    let mut instrumented_handle = handle_reader.clone();
+    let mut handle_reads = Vec::new();
+    let common_result = match parse_ac1015_entity_common_instrumented(
+        &mut instrumented_main,
+        &mut instrumented_handle,
+        target,
+        &mut handle_reads,
+    ) {
+        Ok(()) => "ok".to_string(),
+        Err(err) => format!("err({err:?})"),
+    };
+    let common_failure_stage = handle_reads
+        .iter()
+        .find_map(|entry| {
+            entry.strip_prefix("stage=").and_then(|stage| {
+                if stage == "done" {
+                    None
+                } else {
+                    Some(stage.to_string())
+                }
+            })
+        });
+    let common_failure_context = handle_reads
+        .iter()
+        .find_map(|entry| entry.strip_prefix("failure_context=").map(str::to_string));
+
+    Ac1015CommonProbeReport {
+        handle: handle_value,
+        family,
+        object_type: obj_header.object_type,
+        header_main_size_bits: obj_header.main_size_bits,
+        header_end_bits,
+        main_position_bits_before_common,
+        main_bits_remaining_before_common,
+        handle_position_bits_before_common,
+        handle_bits_remaining_before_common,
+        common_result,
+        common_failure_stage,
+        common_failure_context,
+        main_position_bits_after_common: instrumented_main.position_in_bits(),
+        main_bits_remaining_after_common: instrumented_main.bits_remaining(),
+        handle_position_bits_after_common: instrumented_handle.position_in_bits(),
+        handle_bits_remaining_after_common: instrumented_handle.bits_remaining(),
+        handle_reads,
+    }
+}
+
+fn parse_ac1015_entity_common_instrumented(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+    log: &mut Vec<String>,
+) -> Result<(), h7cad_native_dwg::DwgReadError> {
+    fn resolve_handle(
+        handle_reader: &mut BitReader<'_>,
+        object_handle: Handle,
+        label: &str,
+        log: &mut Vec<String>,
+    ) -> Result<Handle, h7cad_native_dwg::DwgReadError> {
+        let before = handle_reader.position_in_bits();
+        let before_remaining = handle_reader.bits_remaining();
+        let (code, raw) = handle_reader.read_handle()?;
+        let resolved = match code {
+            0x0..=0x5 => raw,
+            0x6 => object_handle.value().saturating_add(1),
+            0x8 => object_handle.value().saturating_sub(1),
+            0xA => object_handle.value().saturating_add(raw),
+            0xC => object_handle.value().saturating_sub(raw),
+            _ => raw,
+        };
+        log.push(format!(
+            "handle_read label={label} before_bit={before} before_remaining={before_remaining} code=0x{code:X} raw=0x{raw:X} resolved=0x{resolved:X} after_bit={} after_remaining={}",
+            handle_reader.position_in_bits(),
+            handle_reader.bits_remaining()
+        ));
+        Ok(Handle::new(resolved))
+    }
+
+    fn optional_handle(
+        handle_reader: &mut BitReader<'_>,
+        object_handle: Handle,
+        label: &str,
+        log: &mut Vec<String>,
+    ) -> Result<Option<Handle>, h7cad_native_dwg::DwgReadError> {
+        let before = handle_reader.position_in_bits();
+        let before_remaining = handle_reader.bits_remaining();
+        let (code, raw) = handle_reader.read_handle()?;
+        if code == 0 && raw == 0 {
+            log.push(format!(
+                "handle_read label={label} before_bit={before} before_remaining={before_remaining} code=0x0 raw=0x0 resolved=NULL after_bit={} after_remaining={}",
+                handle_reader.position_in_bits(),
+                handle_reader.bits_remaining()
+            ));
+            return Ok(None);
+        }
+        let resolved = match code {
+            0x0..=0x5 => raw,
+            0x6 => object_handle.value().saturating_add(1),
+            0x8 => object_handle.value().saturating_sub(1),
+            0xA => object_handle.value().saturating_add(raw),
+            0xC => object_handle.value().saturating_sub(raw),
+            _ => raw,
+        };
+        log.push(format!(
+            "handle_read label={label} before_bit={before} before_remaining={before_remaining} code=0x{code:X} raw=0x{raw:X} resolved=0x{resolved:X} after_bit={} after_remaining={}",
+            handle_reader.position_in_bits(),
+            handle_reader.bits_remaining()
+        ));
+        Ok(Some(Handle::new(resolved)))
+    }
+
+    let stage = |label: &'static str, log: &mut Vec<String>| {
+        log.push(format!("stage={label}"));
+    };
+
+    log.push(format!(
+        "main_start bit={} remaining={} handle_start bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining(),
+        handle_reader.position_in_bits(),
+        handle_reader.bits_remaining()
+    ));
+
+    stage("skip_extended_entity_data", log);
+    let xdata_size = main_reader.read_bit_short()?;
+    log.push(format!(
+        "main_field label=xdata_size value={xdata_size} bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    for index in 0..xdata_size.max(0) as usize {
+        let size = main_reader.read_bit_short()?;
+        log.push(format!(
+            "main_field label=xdata[{index}].size value={size} bit={} remaining={}",
+            main_reader.position_in_bits(),
+            main_reader.bits_remaining()
+        ));
+        if size < 0 {
+            log.push("failure_context=negative extended entity data size".to_string());
+            return Err(h7cad_native_dwg::DwgReadError::UnexpectedEof {
+                context: "negative extended entity data size",
+            });
+        }
+        for byte_index in 0..size as usize {
+            let _ = main_reader.read_raw_u8()?;
+            log.push(format!(
+                "main_field label=xdata[{index}].byte[{byte_index}] bit={} remaining={}",
+                main_reader.position_in_bits(),
+                main_reader.bits_remaining()
+            ));
+        }
+    }
+
+    stage("graphic_marker", log);
+    let has_graphic = main_reader.read_bit()? == 1;
+    log.push(format!(
+        "main_field label=has_graphic value={} bit={} remaining={}",
+        has_graphic,
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    if has_graphic {
+        let graphic_size = main_reader.read_raw_u32_le()? as usize;
+        log.push(format!(
+            "main_field label=graphic_size value={graphic_size} bit={} remaining={}",
+            main_reader.position_in_bits(),
+            main_reader.bits_remaining()
+        ));
+        for byte_index in 0..graphic_size {
+            let _ = main_reader.read_raw_u8()?;
+            log.push(format!(
+                "main_field label=graphic.byte[{byte_index}] bit={} remaining={}",
+                main_reader.position_in_bits(),
+                main_reader.bits_remaining()
+            ));
+        }
+    }
+
+    stage("entity_mode_and_owner", log);
+    let entity_mode = main_reader.read_bits(2)? as u8;
+    log.push(format!(
+        "main_field label=entity_mode value={entity_mode} bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    if entity_mode == 0 {
+        let _ = resolve_handle(handle_reader, object_handle, "owner", log)?;
+    } else {
+        log.push("handle_read label=owner skipped=entity_mode_nonzero".to_string());
+    }
+
+    stage("reactors", log);
+    let reactor_count = main_reader.read_bit_long()?;
+    log.push(format!(
+        "main_field label=reactor_count value={reactor_count} bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    for index in 0..reactor_count.max(0) as usize {
+        let label = format!("reactor[{index}]");
+        let _ = resolve_handle(handle_reader, object_handle, &label, log)?;
+    }
+
+    stage("xdictionary", log);
+    let _ = optional_handle(handle_reader, object_handle, "xdictionary", log)?;
+
+    stage("nolinks", log);
+    let nolinks = main_reader.read_bit()? == 1;
+    log.push(format!(
+        "main_field label=nolinks value={} bit={} remaining={}",
+        nolinks,
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    if !nolinks {
+        let _ = resolve_handle(handle_reader, object_handle, "previous", log)?;
+        let _ = resolve_handle(handle_reader, object_handle, "next", log)?;
+    }
+
+    stage("presentation", log);
+    let color_index = main_reader.read_bit_short()?;
+    log.push(format!(
+        "main_field label=color_index value={color_index} bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    match main_reader.read_bit_double() {
+        Ok(value) => log.push(format!(
+            "main_field label=linetype_scale value={value:?} bit={} remaining={}",
+            main_reader.position_in_bits(),
+            main_reader.bits_remaining()
+        )),
+        Err(err) => {
+            log.push("failure_context=BD".to_string());
+            return Err(err);
+        }
+    }
+    let _ = resolve_handle(handle_reader, object_handle, "layer", log)?;
+
+    stage("linetype", log);
+    let linetype_flags = main_reader.read_bits(2)? as u8;
+    log.push(format!(
+        "main_field label=linetype_flags value={linetype_flags} bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    if linetype_flags == 0b11 {
+        let _ = resolve_handle(handle_reader, object_handle, "linetype", log)?;
+    } else {
+        log.push("handle_read label=linetype skipped=flags_not_explicit".to_string());
+    }
+
+    stage("plotstyle", log);
+    let plotstyle_flags = main_reader.read_bits(2)? as u8;
+    log.push(format!(
+        "main_field label=plotstyle_flags value={plotstyle_flags} bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    if plotstyle_flags == 0b11 {
+        let _ = resolve_handle(handle_reader, object_handle, "plotstyle", log)?;
+    } else {
+        log.push("handle_read label=plotstyle skipped=flags_not_explicit".to_string());
+    }
+
+    stage("visibility", log);
+    let invisible = main_reader.read_bit_short()? != 0;
+    log.push(format!(
+        "main_field label=invisible value={} bit={} remaining={}",
+        invisible,
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+
+    stage("lineweight", log);
+    let lineweight_raw = main_reader.read_raw_u8()?;
+    log.push(format!(
+        "main_field label=lineweight_raw value={lineweight_raw} bit={} remaining={}",
+        main_reader.position_in_bits(),
+        main_reader.bits_remaining()
+    ));
+    log.push("stage=done".to_string());
+    Ok(())
+}
+
+#[test]
+fn ac1015_line_point_common_stream_instrumentation_reports_alignment_for_representative_handles() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        return;
+    };
+
+    let probes = [
+        (0x2C7, "LINE"),
+        (0x2CF, "LINE"),
+        (0x517, "LINE"),
+        (0x28E, "POINT"),
+        (0x298, "POINT"),
+        (0x299, "POINT"),
+    ]
+    .into_iter()
+    .map(|(handle, family)| ac1015_common_stream_probe_report(&bytes, handle, family))
+    .collect::<Vec<_>>();
+
+    eprintln!("AC1015 representative LINE/POINT common-stream probes:");
+    for probe in &probes {
+        eprintln!(
+            "  handle=0x{:X} family={} type={} header_main_size_bits={} header_end_bits={} main_before={}bits/{}rem handle_before={}bits/{}rem result={} stage={} failure_context={} main_after={}bits/{}rem handle_after={}bits/{}rem",
+            probe.handle,
+            probe.family,
+            probe.object_type,
+            probe.header_main_size_bits,
+            probe.header_end_bits,
+            probe.main_position_bits_before_common,
+            probe.main_bits_remaining_before_common,
+            probe.handle_position_bits_before_common,
+            probe.handle_bits_remaining_before_common,
+            probe.common_result,
+            probe.common_failure_stage.as_deref().unwrap_or("none"),
+            probe.common_failure_context.as_deref().unwrap_or("none"),
+            probe.main_position_bits_after_common,
+            probe.main_bits_remaining_after_common,
+            probe.handle_position_bits_after_common,
+            probe.handle_bits_remaining_after_common,
+        );
+        for entry in &probe.handle_reads {
+            eprintln!("    {entry}");
+        }
+    }
+
+    for probe in &probes {
+        assert_eq!(probe.object_type, if probe.family == "LINE" { 19 } else { 27 });
+        assert!(
+            probe.main_position_bits_before_common < probe.header_main_size_bits as usize,
+            "expected representative handle 0x{:X} to enter common decode before the declared AC1015 main-stream boundary",
+            probe.handle
+        );
+        assert!(
+            probe.main_position_bits_after_common > probe.main_position_bits_before_common,
+            "expected representative handle 0x{:X} to advance through common main-stream fields before failing",
+            probe.handle
+        );
+        assert!(
+            probe.handle_position_bits_after_common >= probe.handle_position_bits_before_common,
+            "expected representative handle 0x{:X} to preserve or advance handle-stream position during probing",
+            probe.handle
+        );
+        if probe.handle == 0x298 {
+            assert!(
+                probe.common_result.starts_with("err("),
+                "expected representative handle 0x298 to fail during the overlong xdata walk"
+            );
+            assert_eq!(
+                probe.common_failure_stage.as_deref(),
+                Some("skip_extended_entity_data")
+            );
+            assert_eq!(probe.handle_position_bits_after_common, probe.handle_position_bits_before_common);
+            assert!(
+                probe.handle_reads
+                    .iter()
+                    .any(|entry| entry.contains("label=xdata[0].size value=68")),
+                "expected representative handle 0x298 to expose the oversized xdata preamble before alignment diverges"
+            );
+            assert!(
+                probe.handle_reads
+                    .iter()
+                    .all(|entry| !entry.contains("label=xdictionary")),
+                "expected representative handle 0x298 to diverge before the handle stream begins"
+            );
+        } else {
+            assert_eq!(probe.common_result, "ok");
+            assert_eq!(probe.common_failure_context.as_deref(), None);
+            assert!(
+                matches!(
+                    probe.common_failure_stage.as_deref(),
+                    Some("skip_extended_entity_data")
+                ),
+                "expected representative handle 0x{:X} to progress through the common preamble",
+                probe.handle
+            );
+            assert!(
+                probe.handle_reads.iter().any(|entry| entry.contains("label=layer")),
+                "expected representative handle 0x{:X} to consume the layer handle after common-preamble presentation fields",
+                probe.handle
+            );
+            assert!(
+                probe.handle_reads
+                    .iter()
+                    .any(|entry| entry.contains("label=xdictionary")),
+                "expected representative handle 0x{:X} to consume the optional xdictionary handle before divergence",
+                probe.handle
+            );
+        }
+    }
+}
+
+#[test]
+fn ac1015_common_xdata_semantics_audit_identifies_overlong_main_stream_xdata_rule() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        return;
+    };
+
+    let probes = [
+        (0x2C7, "LINE"),
+        (0x2CF, "LINE"),
+        (0x517, "LINE"),
+        (0x28E, "POINT"),
+        (0x298, "POINT"),
+        (0x299, "POINT"),
+    ]
+    .into_iter()
+    .map(|(handle, family)| ac1015_common_stream_probe_report(&bytes, handle, family))
+    .collect::<Vec<_>>();
+
+    let ok_handles = probes
+        .iter()
+        .filter(|probe| probe.handle != 0x298)
+        .collect::<Vec<_>>();
+    let overlong = probes
+        .iter()
+        .find(|probe| probe.handle == 0x298)
+        .expect("representative point 0x298 should be probed");
+
+    eprintln!("AC1015 common/XDATA semantics audit:");
+    eprintln!(
+        "  truthful_rule=AC1015 entity EED count/size fields stay on the main stream and application handles do not come from the separate handle stream"
+    );
+    for probe in &ok_handles {
+        eprintln!(
+            "  representative_ok handle=0x{:X} family={} xdata_size_entry={} xdictionary_seen={} layer_seen={}",
+            probe.handle,
+            probe.family,
+            probe.handle_reads
+                .iter()
+                .find(|entry| entry.contains("label=xdata_size"))
+                .cloned()
+                .unwrap_or_else(|| "missing".to_string()),
+            probe.handle_reads
+                .iter()
+                .any(|entry| entry.contains("label=xdictionary")),
+            probe.handle_reads
+                .iter()
+                .any(|entry| entry.contains("label=layer")),
+        );
+    }
+    eprintln!(
+        "  representative_overlong handle=0x{:X} family={} result={} stage={} main_after={} handle_after={} xdata_size_entry={} first_block_size_entry={}",
+        overlong.handle,
+        overlong.family,
+        overlong.common_result,
+        overlong.common_failure_stage.as_deref().unwrap_or("none"),
+        overlong.main_position_bits_after_common,
+        overlong.handle_position_bits_after_common,
+        overlong
+            .handle_reads
+            .iter()
+            .find(|entry| entry.contains("label=xdata_size"))
+            .cloned()
+            .unwrap_or_else(|| "missing".to_string()),
+        overlong
+            .handle_reads
+            .iter()
+            .find(|entry| entry.contains("label=xdata[0].size"))
+            .cloned()
+            .unwrap_or_else(|| "missing".to_string()),
+    );
+
+    assert!(
+        ok_handles.iter().all(|probe| probe.common_result == "ok"),
+        "all representative LINE/POINT handles except 0x298 should still traverse the common preamble successfully"
+    );
+    assert!(
+        ok_handles.iter().all(|probe| probe
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=xdictionary"))),
+        "successful representative handles should reach the xdictionary handle after xdata skipping"
+    );
+    assert!(
+        ok_handles.iter().all(|probe| probe
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=layer"))),
+        "successful representative handles should consume the layer handle from the handle stream"
+    );
+
+    assert_eq!(
+        overlong.common_failure_stage.as_deref(),
+        Some("skip_extended_entity_data"),
+        "handle 0x298 should diverge inside the xdata skip stage itself"
+    );
+    assert!(
+        overlong.common_result.starts_with("err("),
+        "handle 0x298 should fail before any downstream handle decoding begins"
+    );
+    assert_eq!(
+        overlong.handle_position_bits_after_common,
+        overlong.handle_position_bits_before_common,
+        "handle 0x298 should leave the separate handle stream untouched"
+    );
+    assert!(
+        overlong
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=xdata_size value=23")),
+        "handle 0x298 should report the main-stream xdata block count exactly as observed on the live sample"
+    );
+    assert!(
+        overlong
+            .handle_reads
+            .iter()
+            .any(|entry| entry.contains("label=xdata[0].size value=68")),
+        "handle 0x298 should expose the oversized first xdata block size before EOF"
+    );
+    assert!(
+        overlong
+            .handle_reads
+            .iter()
+            .all(|entry| !entry.contains("label=xdictionary")),
+        "handle 0x298 should never reach xdictionary if the main stream is exhausted by xdata bytes"
+    );
+    assert_eq!(
+        overlong.main_bits_remaining_after_common,
+        0,
+        "handle 0x298 should exhaust the declared main stream during the xdata walk"
+    );
+}
+
+#[test]
+fn ac1015_line_point_blocked_handles_compare_common_layouts_against_recovered_representatives() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        return;
+    };
+
+    let comparisons = [
+        ac1015_common_layout_comparison(&bytes, "LINE", 0x2C7, 0x99E),
+        ac1015_common_layout_comparison(&bytes, "LINE", 0x2CF, 0x9CD),
+        ac1015_common_layout_comparison(&bytes, "LINE", 0x517, 0x9D4),
+        ac1015_common_layout_comparison(&bytes, "POINT", 0x28E, 0x298),
+        ac1015_common_layout_comparison(&bytes, "POINT", 0x299, 0x29A),
+    ];
+
+    eprintln!("AC1015 blocked-vs-recovered LINE/POINT common-layout comparison:");
+    for comparison in &comparisons {
+        eprintln!(
+            "  family={} representative=0x{:X} blocked=0x{:X} rep_xdata_size={:?} blocked_xdata_size={:?} rep_first_block={:?} blocked_first_block={:?} rep_xdict={} blocked_xdict={} rep_layer={} blocked_layer={} rep_handle_advanced={} blocked_handle_advanced={} rep_main_remaining={} blocked_main_remaining={} blocked_stage={}",
+            comparison.family,
+            comparison.representative_handle,
+            comparison.blocked_handle,
+            comparison.representative_xdata_size,
+            comparison.blocked_xdata_size,
+            comparison.representative_first_xdata_block_size,
+            comparison.blocked_first_xdata_block_size,
+            comparison.representative_reaches_xdictionary,
+            comparison.blocked_reaches_xdictionary,
+            comparison.representative_reaches_layer,
+            comparison.blocked_reaches_layer,
+            comparison.representative_handle_stream_advanced,
+            comparison.blocked_handle_stream_advanced,
+            comparison.representative_main_remaining_after_common,
+            comparison.blocked_main_remaining_after_common,
+            comparison
+                .blocked_failure_stage
+                .as_deref()
+                .unwrap_or("none"),
+        );
+    }
+
+    let blocked_line_comparisons = comparisons
+        .iter()
+        .filter(|comparison| comparison.family == "LINE")
+        .collect::<Vec<_>>();
+    let blocked_point_comparisons = comparisons
+        .iter()
+        .filter(|comparison| comparison.family == "POINT")
+        .collect::<Vec<_>>();
+
+    assert!(
+        blocked_line_comparisons.iter().all(|comparison| {
+            comparison.representative_xdata_size == Some(0)
+                && comparison.blocked_xdata_size == Some(32)
+                && comparison.blocked_first_xdata_block_size == Some(68)
+                && !comparison.blocked_reaches_xdictionary
+                && !comparison.blocked_reaches_layer
+                && !comparison.blocked_handle_stream_advanced
+                && comparison
+                    .blocked_failure_stage
+                    .as_deref()
+                    == Some("skip_extended_entity_data")
+        }),
+        "blocked LINE handles should share the same overlong main-stream xdata divergence pattern instead of reaching xdictionary/layer consumption"
+    );
+    assert!(
+        blocked_point_comparisons.iter().any(|comparison| {
+            comparison.blocked_handle == 0x298
+                && comparison.representative_xdata_size == Some(0)
+                && comparison.blocked_xdata_size == Some(23)
+                && comparison.blocked_first_xdata_block_size == Some(68)
+                && !comparison.blocked_reaches_xdictionary
+                && !comparison.blocked_reaches_layer
+                && !comparison.blocked_handle_stream_advanced
+                && comparison.blocked_main_remaining_after_common == 0
+                && comparison.blocked_failure_stage.as_deref() == Some("skip_extended_entity_data")
+        }),
+        "POINT 0x298 should isolate the selective overlong-main-stream xdata rule difference versus recovered representatives"
+    );
+    assert!(
+        blocked_point_comparisons.iter().any(|comparison| {
+            comparison.blocked_handle == 0x29A
+                && comparison.representative_xdata_size == Some(0)
+                && comparison.blocked_xdata_size == Some(32)
+                && comparison.blocked_first_xdata_block_size == Some(68)
+                && !comparison.blocked_reaches_xdictionary
+                && !comparison.blocked_reaches_layer
+                && !comparison.blocked_handle_stream_advanced
+                && comparison.blocked_failure_stage.as_deref() == Some("skip_extended_entity_data")
+        }),
+        "POINT 0x29A should show the same blocked overlong-xdata pattern as the other stuck POINT/LINE handles on the live sample"
+    );
+}
+
+#[test]
+fn ac1015_line_point_blocked_handles_real_decode_path_remains_stuck_before_selective_fix() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        return;
+    };
+
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+    let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
+
+    let stuck_handles = [
+        (0x99E_u64, "LINE"),
+        (0x9CD, "LINE"),
+        (0x9D4, "LINE"),
+        (0x298, "POINT"),
+        (0x29A, "POINT"),
+    ];
+
+    for (handle, family) in stuck_handles {
+        let failure = diagnostics
+            .failures
+            .iter()
+            .find(|failure| {
+                failure.handle.value() == handle
+                    && failure.kind == Ac1015RecoveryFailureKind::CommonDecodeFail
+                    && matches!(
+                        failure.stage,
+                        Some("common_entity_decode") | Some("preheader_supported_hint")
+                    )
+            })
+            .unwrap_or_else(|| panic!("blocked {family} handle 0x{handle:X} should still remain blocked on the real decode path before the selective fix"));
+        assert_eq!(
+            failure.family,
+            Some(family),
+            "blocked handle 0x{handle:X} should stay attributed to the {family} family on the real decode path"
+        );
+        assert_eq!(
+            failure.kind,
+            Ac1015RecoveryFailureKind::CommonDecodeFail,
+            "blocked handle 0x{handle:X} should still be blocked in common decode before the selective fix"
+        );
+        assert!(
+            matches!(
+                failure.stage,
+                Some("common_entity_decode") | Some("preheader_supported_hint")
+            ),
+            "blocked handle 0x{handle:X} should remain on the parser's current pre-fix common-decode path"
+        );
+    }
+
+    let line_recovered = diagnostics.recovered_by_family.get("LINE").copied().unwrap_or(0);
+    let point_recovered = diagnostics.recovered_by_family.get("POINT").copied().unwrap_or(0);
+    assert!(
+        line_recovered < 40,
+        "before the selective fix, the real decode path should still be below the raised LINE floor; got {line_recovered}"
+    );
+    assert!(
+        point_recovered < 12,
+        "before the selective fix, the real decode path should still be below the raised POINT floor; got {point_recovered}"
+    );
 }
 
 fn print_supported_geometric_failure_examples(
