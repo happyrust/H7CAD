@@ -2,7 +2,7 @@ use acadrust::{CadDocument, EntityType};
 use h7cad_native_model as nm;
 
 use crate::command::EntityTransform;
-use crate::entities::{arc, circle, ellipse, line, lwpolyline, point};
+use crate::entities::{arc, circle, ellipse, line, lwpolyline, point, ray, shape, solid, spline};
 use crate::scene::acad_to_truck::TruckEntity;
 use crate::scene::object::{GripApply, GripDef, PropSection};
 
@@ -248,8 +248,43 @@ impl EntityTypeOps for EntityType {
                     e.end_parameter,
                 ))
             }
+            // ── B5e: Ray/XLine/Solid/Spline/Shape inline native dispatch ──
+            EntityType::Spline(sp) => {
+                let cps: Vec<[f64; 3]> = sp
+                    .control_points
+                    .iter()
+                    .map(|p| [p.x, p.y, p.z])
+                    .collect();
+                Some(spline::to_truck(sp.degree, &sp.knots, &cps))
+            }
+            EntityType::Ray(r) => {
+                let o = [r.base_point.x, r.base_point.y, r.base_point.z];
+                let d = [r.direction.x, r.direction.y, r.direction.z];
+                Some(ray::ray_to_truck(&o, &d))
+            }
+            EntityType::XLine(xl) => {
+                let o = [xl.base_point.x, xl.base_point.y, xl.base_point.z];
+                let d = [xl.direction.x, xl.direction.y, xl.direction.z];
+                Some(ray::xline_to_truck(&o, &d))
+            }
+            EntityType::Solid(sd) => {
+                let corners = [
+                    [sd.first_corner.x, sd.first_corner.y, sd.first_corner.z],
+                    [sd.second_corner.x, sd.second_corner.y, sd.second_corner.z],
+                    [sd.third_corner.x, sd.third_corner.y, sd.third_corner.z],
+                    [sd.fourth_corner.x, sd.fourth_corner.y, sd.fourth_corner.z],
+                ];
+                Some(solid::to_truck(&corners))
+            }
+            EntityType::Shape(shp) => {
+                let ins = [
+                    shp.insertion_point.x,
+                    shp.insertion_point.y,
+                    shp.insertion_point.z,
+                ];
+                Some(shape::to_truck(&ins, shp.size))
+            }
             // ── 其余类型暂走 acadrust adapter（B5 后续批次扩展） ────────────
-            EntityType::Spline(spline) => TruckConvertible::to_truck(spline, document),
             EntityType::LwPolyline(pline) => {
                 let verts = lwv_ar_to_nm(&pline.vertices);
                 Some(lwpolyline::to_truck(&verts, pline.is_closed, pline.elevation))
@@ -257,15 +292,12 @@ impl EntityTypeOps for EntityType {
             EntityType::Polyline(pl) => TruckConvertible::to_truck(pl, document),
             EntityType::Polyline2D(pl) => TruckConvertible::to_truck(pl, document),
             EntityType::Polyline3D(pl) => TruckConvertible::to_truck(pl, document),
-            EntityType::Ray(ray) => TruckConvertible::to_truck(ray, document),
-            EntityType::XLine(xl) => TruckConvertible::to_truck(xl, document),
             EntityType::RasterImage(img) => TruckConvertible::to_truck(img, document),
             EntityType::Wipeout(wo) => TruckConvertible::to_truck(wo, document),
             EntityType::AttributeDefinition(a) => TruckConvertible::to_truck(a, document),
             EntityType::AttributeEntity(a) => TruckConvertible::to_truck(a, document),
             EntityType::MLine(ml) => TruckConvertible::to_truck(ml, document),
             EntityType::Tolerance(tol) => TruckConvertible::to_truck(tol, document),
-            EntityType::Solid(solid) => TruckConvertible::to_truck(solid, document),
             EntityType::Face3D(f) => TruckConvertible::to_truck(f, document),
             EntityType::PolygonMesh(pm) => TruckConvertible::to_truck(pm, document),
             EntityType::PolyfaceMesh(pfm) => TruckConvertible::to_truck(pfm, document),
@@ -275,7 +307,6 @@ impl EntityTypeOps for EntityType {
             EntityType::Leader(leader) => TruckConvertible::to_truck(leader, document),
             EntityType::MultiLeader(ml) => TruckConvertible::to_truck(ml, document),
             EntityType::Underlay(ul) => TruckConvertible::to_truck(ul, document),
-            EntityType::Shape(shp) => TruckConvertible::to_truck(shp, document),
             _ => None,
         }
     }
@@ -315,23 +346,53 @@ impl EntityTypeOps for EntityType {
                 let verts = lwv_ar_to_nm(&pline.vertices);
                 lwpolyline::grips(&verts, pline.elevation)
             }
+            // ── B5e: Ray/XLine/Solid/Spline/Shape inline ──────────────────
+            EntityType::Ray(r) => {
+                let o = [r.base_point.x, r.base_point.y, r.base_point.z];
+                let d = [r.direction.x, r.direction.y, r.direction.z];
+                ray::ray_grips(&o, &d)
+            }
+            EntityType::XLine(xl) => {
+                let o = [xl.base_point.x, xl.base_point.y, xl.base_point.z];
+                let d = [xl.direction.x, xl.direction.y, xl.direction.z];
+                ray::ray_grips(&o, &d)
+            }
+            EntityType::Solid(sd) => {
+                let corners = [
+                    [sd.first_corner.x, sd.first_corner.y, sd.first_corner.z],
+                    [sd.second_corner.x, sd.second_corner.y, sd.second_corner.z],
+                    [sd.third_corner.x, sd.third_corner.y, sd.third_corner.z],
+                    [sd.fourth_corner.x, sd.fourth_corner.y, sd.fourth_corner.z],
+                ];
+                solid::grips(&corners)
+            }
+            EntityType::Spline(sp) => {
+                let cps: Vec<[f64; 3]> =
+                    sp.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                spline::grips(&cps)
+            }
+            EntityType::Shape(shp) => {
+                let ins = [
+                    shp.insertion_point.x,
+                    shp.insertion_point.y,
+                    shp.insertion_point.z,
+                ];
+                shape::grips(&ins)
+            }
+            // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::Polyline(pl) => Grippable::grips(pl),
             EntityType::Polyline2D(pl) => Grippable::grips(pl),
             EntityType::Polyline3D(pl) => Grippable::grips(pl),
-            EntityType::Ray(ray) => Grippable::grips(ray),
-            EntityType::XLine(xl) => Grippable::grips(xl),
             EntityType::RasterImage(img) => Grippable::grips(img),
             EntityType::Wipeout(wo) => Grippable::grips(wo),
             EntityType::AttributeDefinition(a) => Grippable::grips(a),
             EntityType::AttributeEntity(a) => Grippable::grips(a),
             EntityType::MLine(ml) => Grippable::grips(ml),
             EntityType::Tolerance(tol) => Grippable::grips(tol),
-            EntityType::Solid(solid) => Grippable::grips(solid),
             EntityType::Face3D(f) => Grippable::grips(f),
             EntityType::PolygonMesh(pm) => Grippable::grips(pm),
             EntityType::PolyfaceMesh(pfm) => Grippable::grips(pfm),
             EntityType::Table(tbl) => Grippable::grips(tbl),
-            EntityType::Spline(spline) => Grippable::grips(spline),
             EntityType::Text(text) => Grippable::grips(text),
             EntityType::MText(text) => Grippable::grips(text),
             EntityType::Viewport(vp) => Grippable::grips(vp),
@@ -341,7 +402,6 @@ impl EntityTypeOps for EntityType {
             EntityType::Dimension(dim) => Grippable::grips(dim),
             EntityType::Hatch(hatch) => Grippable::grips(hatch),
             EntityType::Underlay(ul) => Grippable::grips(ul),
-            EntityType::Shape(shp) => Grippable::grips(shp),
             _ => vec![],
         }
     }
@@ -381,6 +441,48 @@ impl EntityTypeOps for EntityType {
                 let verts = lwv_ar_to_nm(&pline.vertices);
                 Some(lwpolyline::properties(&verts, pline.is_closed, pline.elevation))
             }
+            // ── B5e: Ray/XLine/Solid/Spline/Shape inline ──────────────────
+            EntityType::Ray(r) => {
+                let o = [r.base_point.x, r.base_point.y, r.base_point.z];
+                let d = [r.direction.x, r.direction.y, r.direction.z];
+                Some(ray::ray_properties(&o, &d, "ray"))
+            }
+            EntityType::XLine(xl) => {
+                let o = [xl.base_point.x, xl.base_point.y, xl.base_point.z];
+                let d = [xl.direction.x, xl.direction.y, xl.direction.z];
+                Some(ray::ray_properties(&o, &d, "xl"))
+            }
+            EntityType::Solid(sd) => {
+                let corners = [
+                    [sd.first_corner.x, sd.first_corner.y, sd.first_corner.z],
+                    [sd.second_corner.x, sd.second_corner.y, sd.second_corner.z],
+                    [sd.third_corner.x, sd.third_corner.y, sd.third_corner.z],
+                    [sd.fourth_corner.x, sd.fourth_corner.y, sd.fourth_corner.z],
+                ];
+                Some(solid::properties(&corners, sd.thickness))
+            }
+            EntityType::Spline(sp) => {
+                let cps: Vec<[f64; 3]> =
+                    sp.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                let fps: Vec<[f64; 3]> =
+                    sp.fit_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                Some(spline::properties(sp.degree, &cps, &fps))
+            }
+            EntityType::Shape(shp) => {
+                let ins = [
+                    shp.insertion_point.x,
+                    shp.insertion_point.y,
+                    shp.insertion_point.z,
+                ];
+                Some(shape::properties(
+                    &ins,
+                    shp.size,
+                    shp.rotation,
+                    &shp.shape_name,
+                    &shp.style_name,
+                ))
+            }
+            // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::Polyline(pl) => Some(PropertyEditable::geometry_properties(
                 pl,
                 text_style_names,
@@ -391,14 +493,6 @@ impl EntityTypeOps for EntityType {
             )),
             EntityType::Polyline3D(pl) => Some(PropertyEditable::geometry_properties(
                 pl,
-                text_style_names,
-            )),
-            EntityType::Ray(ray) => Some(PropertyEditable::geometry_properties(
-                ray,
-                text_style_names,
-            )),
-            EntityType::XLine(xl) => Some(PropertyEditable::geometry_properties(
-                xl,
                 text_style_names,
             )),
             EntityType::RasterImage(img) => Some(PropertyEditable::geometry_properties(
@@ -425,10 +519,6 @@ impl EntityTypeOps for EntityType {
                 tol,
                 text_style_names,
             )),
-            EntityType::Solid(solid) => Some(PropertyEditable::geometry_properties(
-                solid,
-                text_style_names,
-            )),
             EntityType::Face3D(f) => Some(PropertyEditable::geometry_properties(
                 f,
                 text_style_names,
@@ -447,10 +537,6 @@ impl EntityTypeOps for EntityType {
             )),
             EntityType::Hatch(hatch) => Some(PropertyEditable::geometry_properties(
                 hatch,
-                text_style_names,
-            )),
-            EntityType::Spline(spline) => Some(PropertyEditable::geometry_properties(
-                spline,
                 text_style_names,
             )),
             EntityType::Text(text) => Some(PropertyEditable::geometry_properties(
@@ -481,10 +567,6 @@ impl EntityTypeOps for EntityType {
             )),
             EntityType::Underlay(ul) => Some(PropertyEditable::geometry_properties(
                 ul,
-                text_style_names,
-            )),
-            EntityType::Shape(shp) => Some(PropertyEditable::geometry_properties(
-                shp,
                 text_style_names,
             )),
             _ => None,
@@ -537,24 +619,85 @@ impl EntityTypeOps for EntityType {
             EntityType::LwPolyline(pline) => {
                 lwpolyline::apply_geom_prop(&mut pline.elevation, field, value);
             }
+            // ── B5e: Ray/XLine/Solid/Shape inline (Spline 空实现 noop) ────
+            EntityType::Ray(r) => {
+                let mut o = [r.base_point.x, r.base_point.y, r.base_point.z];
+                let mut d = [r.direction.x, r.direction.y, r.direction.z];
+                ray::ray_apply_geom_prop(&mut o, &mut d, field, value);
+                r.base_point.x = o[0];
+                r.base_point.y = o[1];
+                r.base_point.z = o[2];
+                r.direction.x = d[0];
+                r.direction.y = d[1];
+                r.direction.z = d[2];
+            }
+            EntityType::XLine(xl) => {
+                let mut o = [xl.base_point.x, xl.base_point.y, xl.base_point.z];
+                let mut d = [xl.direction.x, xl.direction.y, xl.direction.z];
+                ray::ray_apply_geom_prop(&mut o, &mut d, field, value);
+                xl.base_point.x = o[0];
+                xl.base_point.y = o[1];
+                xl.base_point.z = o[2];
+                xl.direction.x = d[0];
+                xl.direction.y = d[1];
+                xl.direction.z = d[2];
+            }
+            EntityType::Solid(sd) => {
+                let mut corners = [
+                    [sd.first_corner.x, sd.first_corner.y, sd.first_corner.z],
+                    [sd.second_corner.x, sd.second_corner.y, sd.second_corner.z],
+                    [sd.third_corner.x, sd.third_corner.y, sd.third_corner.z],
+                    [sd.fourth_corner.x, sd.fourth_corner.y, sd.fourth_corner.z],
+                ];
+                let mut th = sd.thickness;
+                solid::apply_geom_prop(&mut corners, &mut th, field, value);
+                sd.first_corner.x = corners[0][0];
+                sd.first_corner.y = corners[0][1];
+                sd.first_corner.z = corners[0][2];
+                sd.second_corner.x = corners[1][0];
+                sd.second_corner.y = corners[1][1];
+                sd.second_corner.z = corners[1][2];
+                sd.third_corner.x = corners[2][0];
+                sd.third_corner.y = corners[2][1];
+                sd.third_corner.z = corners[2][2];
+                sd.fourth_corner.x = corners[3][0];
+                sd.fourth_corner.y = corners[3][1];
+                sd.fourth_corner.z = corners[3][2];
+                sd.thickness = th;
+            }
+            EntityType::Spline(_) => {
+                // native spline 无 apply_geom_prop（只读属性）
+            }
+            EntityType::Shape(shp) => {
+                let mut ins = [
+                    shp.insertion_point.x,
+                    shp.insertion_point.y,
+                    shp.insertion_point.z,
+                ];
+                let mut sz = shp.size;
+                let mut rot = shp.rotation;
+                shape::apply_geom_prop(&mut ins, &mut sz, &mut rot, field, value);
+                shp.insertion_point.x = ins[0];
+                shp.insertion_point.y = ins[1];
+                shp.insertion_point.z = ins[2];
+                shp.size = sz;
+                shp.rotation = rot;
+            }
+            // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::Polyline(pl) => PropertyEditable::apply_geom_prop(pl, field, value),
             EntityType::Polyline2D(pl) => PropertyEditable::apply_geom_prop(pl, field, value),
             EntityType::Polyline3D(pl) => PropertyEditable::apply_geom_prop(pl, field, value),
-            EntityType::Ray(ray) => PropertyEditable::apply_geom_prop(ray, field, value),
-            EntityType::XLine(xl) => PropertyEditable::apply_geom_prop(xl, field, value),
             EntityType::RasterImage(img) => PropertyEditable::apply_geom_prop(img, field, value),
             EntityType::Wipeout(wo) => PropertyEditable::apply_geom_prop(wo, field, value),
             EntityType::AttributeDefinition(a) => PropertyEditable::apply_geom_prop(a, field, value),
             EntityType::AttributeEntity(a) => PropertyEditable::apply_geom_prop(a, field, value),
             EntityType::MLine(ml) => PropertyEditable::apply_geom_prop(ml, field, value),
             EntityType::Tolerance(tol) => PropertyEditable::apply_geom_prop(tol, field, value),
-            EntityType::Solid(solid) => PropertyEditable::apply_geom_prop(solid, field, value),
             EntityType::Face3D(f) => PropertyEditable::apply_geom_prop(f, field, value),
             EntityType::PolygonMesh(pm) => PropertyEditable::apply_geom_prop(pm, field, value),
             EntityType::PolyfaceMesh(pfm) => PropertyEditable::apply_geom_prop(pfm, field, value),
             EntityType::Table(tbl) => PropertyEditable::apply_geom_prop(tbl, field, value),
             EntityType::Hatch(hatch) => PropertyEditable::apply_geom_prop(hatch, field, value),
-            EntityType::Spline(spline) => PropertyEditable::apply_geom_prop(spline, field, value),
             EntityType::Text(text) => PropertyEditable::apply_geom_prop(text, field, value),
             EntityType::MText(text) => PropertyEditable::apply_geom_prop(text, field, value),
             EntityType::Viewport(vp) => PropertyEditable::apply_geom_prop(vp, field, value),
@@ -563,7 +706,6 @@ impl EntityTypeOps for EntityType {
             EntityType::Leader(leader) => PropertyEditable::apply_geom_prop(leader, field, value),
             EntityType::MultiLeader(ml) => PropertyEditable::apply_geom_prop(ml, field, value),
             EntityType::Underlay(ul) => PropertyEditable::apply_geom_prop(ul, field, value),
-            EntityType::Shape(shp) => PropertyEditable::apply_geom_prop(shp, field, value),
             _ => {}
         }
     }
@@ -616,23 +758,85 @@ impl EntityTypeOps for EntityType {
                 lwpolyline::apply_grip(&mut verts, grip_id, apply);
                 lwv_write_back(&mut pline.vertices, &verts);
             }
+            // ── B5e: Ray/XLine/Solid/Spline/Shape inline ──────────────────
+            EntityType::Ray(r) => {
+                let mut o = [r.base_point.x, r.base_point.y, r.base_point.z];
+                let mut d = [r.direction.x, r.direction.y, r.direction.z];
+                ray::ray_apply_grip(&mut o, &mut d, grip_id, apply);
+                r.base_point.x = o[0];
+                r.base_point.y = o[1];
+                r.base_point.z = o[2];
+                r.direction.x = d[0];
+                r.direction.y = d[1];
+                r.direction.z = d[2];
+            }
+            EntityType::XLine(xl) => {
+                let mut o = [xl.base_point.x, xl.base_point.y, xl.base_point.z];
+                let mut d = [xl.direction.x, xl.direction.y, xl.direction.z];
+                ray::ray_apply_grip(&mut o, &mut d, grip_id, apply);
+                xl.base_point.x = o[0];
+                xl.base_point.y = o[1];
+                xl.base_point.z = o[2];
+                xl.direction.x = d[0];
+                xl.direction.y = d[1];
+                xl.direction.z = d[2];
+            }
+            EntityType::Solid(sd) => {
+                let mut corners = [
+                    [sd.first_corner.x, sd.first_corner.y, sd.first_corner.z],
+                    [sd.second_corner.x, sd.second_corner.y, sd.second_corner.z],
+                    [sd.third_corner.x, sd.third_corner.y, sd.third_corner.z],
+                    [sd.fourth_corner.x, sd.fourth_corner.y, sd.fourth_corner.z],
+                ];
+                solid::apply_grip(&mut corners, grip_id, apply);
+                sd.first_corner.x = corners[0][0];
+                sd.first_corner.y = corners[0][1];
+                sd.first_corner.z = corners[0][2];
+                sd.second_corner.x = corners[1][0];
+                sd.second_corner.y = corners[1][1];
+                sd.second_corner.z = corners[1][2];
+                sd.third_corner.x = corners[2][0];
+                sd.third_corner.y = corners[2][1];
+                sd.third_corner.z = corners[2][2];
+                sd.fourth_corner.x = corners[3][0];
+                sd.fourth_corner.y = corners[3][1];
+                sd.fourth_corner.z = corners[3][2];
+            }
+            EntityType::Spline(sp) => {
+                let mut cps: Vec<[f64; 3]> =
+                    sp.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                spline::apply_grip(&mut cps, grip_id, apply);
+                for (dst, src) in sp.control_points.iter_mut().zip(cps.iter()) {
+                    dst.x = src[0];
+                    dst.y = src[1];
+                    dst.z = src[2];
+                }
+            }
+            EntityType::Shape(shp) => {
+                let mut ins = [
+                    shp.insertion_point.x,
+                    shp.insertion_point.y,
+                    shp.insertion_point.z,
+                ];
+                shape::apply_grip(&mut ins, grip_id, apply);
+                shp.insertion_point.x = ins[0];
+                shp.insertion_point.y = ins[1];
+                shp.insertion_point.z = ins[2];
+            }
+            // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::Polyline(pl) => Grippable::apply_grip(pl, grip_id, apply),
             EntityType::Polyline2D(pl) => Grippable::apply_grip(pl, grip_id, apply),
             EntityType::Polyline3D(pl) => Grippable::apply_grip(pl, grip_id, apply),
-            EntityType::Ray(ray) => Grippable::apply_grip(ray, grip_id, apply),
-            EntityType::XLine(xl) => Grippable::apply_grip(xl, grip_id, apply),
             EntityType::RasterImage(img) => Grippable::apply_grip(img, grip_id, apply),
             EntityType::Wipeout(wo) => Grippable::apply_grip(wo, grip_id, apply),
             EntityType::AttributeDefinition(a) => Grippable::apply_grip(a, grip_id, apply),
             EntityType::AttributeEntity(a) => Grippable::apply_grip(a, grip_id, apply),
             EntityType::MLine(ml) => Grippable::apply_grip(ml, grip_id, apply),
             EntityType::Tolerance(tol) => Grippable::apply_grip(tol, grip_id, apply),
-            EntityType::Solid(solid) => Grippable::apply_grip(solid, grip_id, apply),
             EntityType::Face3D(f) => Grippable::apply_grip(f, grip_id, apply),
             EntityType::PolygonMesh(pm) => Grippable::apply_grip(pm, grip_id, apply),
             EntityType::PolyfaceMesh(pfm) => Grippable::apply_grip(pfm, grip_id, apply),
             EntityType::Table(tbl) => Grippable::apply_grip(tbl, grip_id, apply),
-            EntityType::Spline(spline) => Grippable::apply_grip(spline, grip_id, apply),
             EntityType::Text(text) => Grippable::apply_grip(text, grip_id, apply),
             EntityType::MText(text) => Grippable::apply_grip(text, grip_id, apply),
             EntityType::Viewport(vp) => Grippable::apply_grip(vp, grip_id, apply),
@@ -642,7 +846,6 @@ impl EntityTypeOps for EntityType {
             EntityType::Dimension(dim) => Grippable::apply_grip(dim, grip_id, apply),
             EntityType::Hatch(hatch) => Grippable::apply_grip(hatch, grip_id, apply),
             EntityType::Underlay(ul) => Grippable::apply_grip(ul, grip_id, apply),
-            EntityType::Shape(shp) => Grippable::apply_grip(shp, grip_id, apply),
             _ => {}
         }
     }
@@ -692,34 +895,101 @@ impl EntityTypeOps for EntityType {
                 lwpolyline::apply_transform(&mut verts, t);
                 lwv_write_back(&mut pline.vertices, &verts);
             }
+            // ── B5e: Ray/XLine/Solid/Spline/Shape inline ──────────────────
+            EntityType::Ray(r) => {
+                let mut o = [r.base_point.x, r.base_point.y, r.base_point.z];
+                let mut d = [r.direction.x, r.direction.y, r.direction.z];
+                ray::ray_apply_transform(&mut o, &mut d, t);
+                r.base_point.x = o[0];
+                r.base_point.y = o[1];
+                r.base_point.z = o[2];
+                r.direction.x = d[0];
+                r.direction.y = d[1];
+                r.direction.z = d[2];
+            }
+            EntityType::XLine(xl) => {
+                let mut o = [xl.base_point.x, xl.base_point.y, xl.base_point.z];
+                let mut d = [xl.direction.x, xl.direction.y, xl.direction.z];
+                ray::ray_apply_transform(&mut o, &mut d, t);
+                xl.base_point.x = o[0];
+                xl.base_point.y = o[1];
+                xl.base_point.z = o[2];
+                xl.direction.x = d[0];
+                xl.direction.y = d[1];
+                xl.direction.z = d[2];
+            }
+            EntityType::Solid(sd) => {
+                let mut corners = [
+                    [sd.first_corner.x, sd.first_corner.y, sd.first_corner.z],
+                    [sd.second_corner.x, sd.second_corner.y, sd.second_corner.z],
+                    [sd.third_corner.x, sd.third_corner.y, sd.third_corner.z],
+                    [sd.fourth_corner.x, sd.fourth_corner.y, sd.fourth_corner.z],
+                ];
+                solid::apply_transform(&mut corners, t);
+                sd.first_corner.x = corners[0][0];
+                sd.first_corner.y = corners[0][1];
+                sd.first_corner.z = corners[0][2];
+                sd.second_corner.x = corners[1][0];
+                sd.second_corner.y = corners[1][1];
+                sd.second_corner.z = corners[1][2];
+                sd.third_corner.x = corners[2][0];
+                sd.third_corner.y = corners[2][1];
+                sd.third_corner.z = corners[2][2];
+                sd.fourth_corner.x = corners[3][0];
+                sd.fourth_corner.y = corners[3][1];
+                sd.fourth_corner.z = corners[3][2];
+            }
+            EntityType::Spline(sp) => {
+                let mut cps: Vec<[f64; 3]> =
+                    sp.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                let mut fps: Vec<[f64; 3]> =
+                    sp.fit_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                spline::apply_transform(&mut cps, &mut fps, t);
+                for (dst, src) in sp.control_points.iter_mut().zip(cps.iter()) {
+                    dst.x = src[0];
+                    dst.y = src[1];
+                    dst.z = src[2];
+                }
+                for (dst, src) in sp.fit_points.iter_mut().zip(fps.iter()) {
+                    dst.x = src[0];
+                    dst.y = src[1];
+                    dst.z = src[2];
+                }
+            }
+            EntityType::Shape(shp) => {
+                let mut ins = [
+                    shp.insertion_point.x,
+                    shp.insertion_point.y,
+                    shp.insertion_point.z,
+                ];
+                shape::apply_transform(&mut ins, t);
+                shp.insertion_point.x = ins[0];
+                shp.insertion_point.y = ins[1];
+                shp.insertion_point.z = ins[2];
+            }
             // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::Hatch(hatch) => Transformable::apply_transform(hatch, t),
             EntityType::Insert(ins) => Transformable::apply_transform(ins, t),
             EntityType::Polyline(pl) => Transformable::apply_transform(pl, t),
             EntityType::Polyline2D(pl) => Transformable::apply_transform(pl, t),
             EntityType::Polyline3D(pl) => Transformable::apply_transform(pl, t),
-            EntityType::Ray(ray) => Transformable::apply_transform(ray, t),
-            EntityType::XLine(xl) => Transformable::apply_transform(xl, t),
             EntityType::RasterImage(img) => Transformable::apply_transform(img, t),
             EntityType::Wipeout(wo) => Transformable::apply_transform(wo, t),
             EntityType::AttributeDefinition(a) => Transformable::apply_transform(a, t),
             EntityType::AttributeEntity(a) => Transformable::apply_transform(a, t),
             EntityType::MLine(ml) => Transformable::apply_transform(ml, t),
             EntityType::Tolerance(tol) => Transformable::apply_transform(tol, t),
-            EntityType::Solid(solid) => Transformable::apply_transform(solid, t),
             EntityType::Face3D(f) => Transformable::apply_transform(f, t),
             EntityType::PolygonMesh(pm) => Transformable::apply_transform(pm, t),
             EntityType::PolyfaceMesh(pfm) => Transformable::apply_transform(pfm, t),
             EntityType::Table(tbl) => Transformable::apply_transform(tbl, t),
             EntityType::MText(text) => Transformable::apply_transform(text, t),
-            EntityType::Spline(spline) => Transformable::apply_transform(spline, t),
             EntityType::Text(text) => Transformable::apply_transform(text, t),
             EntityType::Viewport(vp) => Transformable::apply_transform(vp, t),
             EntityType::Dimension(dim) => Transformable::apply_transform(dim, t),
             EntityType::Leader(leader) => Transformable::apply_transform(leader, t),
             EntityType::MultiLeader(ml) => Transformable::apply_transform(ml, t),
             EntityType::Underlay(ul) => Transformable::apply_transform(ul, t),
-            EntityType::Shape(shp) => Transformable::apply_transform(shp, t),
             _ => {}
         }
     }

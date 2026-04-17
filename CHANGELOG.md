@@ -2,6 +2,32 @@
 
 ## [未发布]
 
+### 2026-04-17：B5e 剩余 5 个 entity dispatch 彻底脱钩 acadrust
+
+把 `src/entities/traits.rs::EntityTypeOps` 里 6 个 dispatch 方法中，对 Ray / XLine /
+Solid / Spline / Shape 这 5 个复杂 entity 的调用从 `Trait::method(x)`（依赖
+`impl ... for acadrust::entities::X` adapter）inline 成直接调用 native free
+function（`ray::ray_to_truck(&o, &d)`、`solid::to_truck(&corners)`、
+`spline::to_truck(degree, knots, &cps)`、`shape::to_truck(&ins, size)` 等）。
+
+- `to_truck_entity` / `grips` / `geometry_properties` / `apply_geom_prop` /
+  `apply_grip` / `apply_transform` 6 个方法中的 5 个 arm 全部 inline
+- 共 **30 个 arm** 改造完成（Spline 的 `apply_geom_prop` 本就是空实现，改为 noop）
+- XLine 的 grips/properties/apply_* 复用 Ray 的 free function（`ray::ray_grips` 等），
+  native 层已经这样设计，本次只是把 dispatch 接过来
+
+**量化收益**：`cargo check -p H7CAD --no-default-features` 错误数
+  **31 → 0**（全部 5 个 entity 的 trait bound 错误消除）
+
+- DWG 88/88、DXF 81/81、model 9/9 全绿
+- 主 crate 默认 feature 下零 warning 保持
+- 至此，`--no-default-features` **首次能完整编译**（纯 native dispatch 路径打通）
+
+**下一步（B5g）**：可物理删除 `src/entities/{line,circle,arc,point,ellipse,
+lwpolyline,ray,solid,spline,shape}.rs` 中的 44 个 `#[cfg(feature = "acadrust-compat")]`
+adapter impl，最终从 `Cargo.toml` 移除 `acadrust-compat` feature。需先处理
+`src/scene`/`src/modules` 中仍直接使用 `EntityType` dispatch 的业务代码。
+
 ### 2026-04-17：B5c LwPolyline inline dispatch
 
 把 LwPolyline 加入 traits.rs 的 inline native dispatch 行列。
