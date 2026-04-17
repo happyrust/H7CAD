@@ -2,6 +2,21 @@
 
 ## [未发布]
 
+### 2026-04-17：C2a RAY / XLINE 命令 native-first
+
+沿用 B5b 模式，把 `src/modules/home/draw/ray.rs` 里的 RAY / XLINE 两个命令
+从 `acadrust::EntityType::{Ray,XLine}` 构造切到 `nm::EntityData::{Ray,XLine}`。
+
+- `RayCommand::on_point` / `XLineCommand::on_point` 的 `CmdResult::CommitEntity(
+  EntityType::Ray(..))` 全部改为 `CmdResult::CommitEntityNative(nm::Entity::new(
+  nm::EntityData::Ray {..}))`
+- 移除 `use acadrust::entities::{Ray as RayEnt, XLine as XLineEnt}` 和
+  `use acadrust::EntityType`；只 `use h7cad_native_model as nm`
+- `native_entity_to_acadrust` 已有 Ray/XLine 分支，cmd_result 的
+  CommitEntityNative handler 自动走投影路径
+- 度量：`ray.rs` 中 `acadrust::` 引用 3 → 0；DWG 88 / DXF 81 / model 9 全绿；
+  主 crate 零 warning 保持
+
 ### 2026-04-17：B5g Compat adapter 物理删除 + feature 移除
 
 把 10 个 entity 文件里全部 **44 个** `#[cfg(feature = "acadrust-compat")]`

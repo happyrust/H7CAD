@@ -4,9 +4,7 @@
 //          Produces a Ray entity; repeats until Enter/Esc.
 //  XLINE — infinite construction line: same two-click pattern, yields XLine.
 
-use acadrust::entities::{Ray as RayEnt, XLine as XLineEnt};
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::wire_model::WireModel;
@@ -47,14 +45,12 @@ impl CadCommand for RayCommand {
                 return CmdResult::NeedPoint;
             }
             let dir_n = dir / len;
-            let ray = RayEnt::new(
-                Vector3::new(base.x as f64, base.y as f64, base.z as f64),
-                Vector3::new(dir_n.x as f64, dir_n.y as f64, dir_n.z as f64),
-            );
-            // Stay active: new base = same base (can keep clicking through points)
-            // Actually AutoCAD prompts for new start after each ray — reset base.
+            let entity = nm::Entity::new(nm::EntityData::Ray {
+                origin: [base.x as f64, base.y as f64, base.z as f64],
+                direction: [dir_n.x as f64, dir_n.y as f64, dir_n.z as f64],
+            });
             self.base = None;
-            CmdResult::CommitEntity(EntityType::Ray(ray))
+            CmdResult::CommitEntityNative(entity)
         } else {
             self.base = Some(pt);
             CmdResult::NeedPoint
@@ -122,12 +118,12 @@ impl CadCommand for XLineCommand {
                 return CmdResult::NeedPoint;
             }
             let dir_n = dir / len;
-            let xline = XLineEnt::new(
-                Vector3::new(base.x as f64, base.y as f64, base.z as f64),
-                Vector3::new(dir_n.x as f64, dir_n.y as f64, dir_n.z as f64),
-            );
+            let entity = nm::Entity::new(nm::EntityData::XLine {
+                origin: [base.x as f64, base.y as f64, base.z as f64],
+                direction: [dir_n.x as f64, dir_n.y as f64, dir_n.z as f64],
+            });
             self.base = None;
-            CmdResult::CommitEntity(EntityType::XLine(xline))
+            CmdResult::CommitEntityNative(entity)
         } else {
             self.base = Some(pt);
             CmdResult::NeedPoint
