@@ -1521,11 +1521,11 @@ fn ac1015_recovery_diagnostics_attribute_supported_families_from_preheader_hints
     };
 
     for (family, kind) in [
-        ("LINE", Ac1015RecoveryFailureKind::CommonDecodeFail),
-        ("POINT", Ac1015RecoveryFailureKind::CommonDecodeFail),
-        ("CIRCLE", Ac1015RecoveryFailureKind::CommonDecodeFail),
-        ("ARC", Ac1015RecoveryFailureKind::CommonDecodeFail),
-        ("LWPOLYLINE", Ac1015RecoveryFailureKind::CommonDecodeFail),
+        ("LINE", Ac1015RecoveryFailureKind::BodyDecodeFail),
+        ("POINT", Ac1015RecoveryFailureKind::BodyDecodeFail),
+        ("CIRCLE", Ac1015RecoveryFailureKind::BodyDecodeFail),
+        ("ARC", Ac1015RecoveryFailureKind::BodyDecodeFail),
+        ("LWPOLYLINE", Ac1015RecoveryFailureKind::BodyDecodeFail),
     ] {
         assert!(
             family_bucket_count(family, kind) > 0,
