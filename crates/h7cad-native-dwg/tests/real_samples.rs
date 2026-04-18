@@ -2467,41 +2467,34 @@ fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage
             "representative {family} handle 0x{handle_value:X} should remain visible on the diagnostics surface"
         );
 
-        let common_failure = failures
+        let body_failure = failures
             .iter()
-            .find(|failure| failure.kind == Ac1015RecoveryFailureKind::CommonDecodeFail)
-            .expect("representative handle should still fail during common decode after the selective fix");
+            .find(|failure| failure.kind == Ac1015RecoveryFailureKind::BodyDecodeFail)
+            .expect("representative handle should still fail during body decode on the live sample");
 
         assert_eq!(
-            common_failure.family,
+            body_failure.family,
             Some(family),
             "representative handle 0x{handle_value:X} should retain its supported family attribution"
         );
         assert_eq!(
-            common_failure.object_type,
+            body_failure.object_type,
             Some(if family == "LINE" { 19 } else { 27 }),
             "representative handle 0x{handle_value:X} should keep the truthful supported object type hint"
         );
         assert!(
-            matches!(
-                common_failure.stage,
-                Some("common_entity_decode") | Some("entity_body_decode")
-            ),
+            matches!(body_failure.stage, Some("entity_body_decode")),
             "representative handle 0x{handle_value:X} should persist a truthful later-stage failure before the synthetic fallback path"
         );
         assert!(
-            matches!(
-                common_failure.kind,
-                Ac1015RecoveryFailureKind::CommonDecodeFail
-                    | Ac1015RecoveryFailureKind::BodyDecodeFail
-            ),
-            "representative handle 0x{handle_value:X} should now fail on the real common/body decode path"
+            matches!(body_failure.kind, Ac1015RecoveryFailureKind::BodyDecodeFail),
+            "representative handle 0x{handle_value:X} should now fail on the real body decode path"
         );
         observed.push(format!(
             "handle=0x{handle_value:X} family={family} kind={} stage={} object_type={}",
-            common_failure.kind.as_str(),
-            common_failure.stage.unwrap_or("none"),
-            common_failure.object_type.unwrap_or_default()
+            body_failure.kind.as_str(),
+            body_failure.stage.unwrap_or("none"),
+            body_failure.object_type.unwrap_or_default()
         ));
     }
 
