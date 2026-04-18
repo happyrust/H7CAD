@@ -44,14 +44,34 @@ pub struct Ac1015NonEntityCommonData {
 
 fn skip_extended_entity_data(reader: &mut BitReader<'_>) -> Result<(), DwgReadError> {
     loop {
+        let block_start = reader.position_in_bits();
         let size = reader.read_bit_short()?;
         if size <= 0 {
             break;
         }
-        // AC1015 entity EED carries the application handle inline in
-        // the main stream.
-        let _ = reader.read_handle()?;
-        for _ in 0..size as usize {
+        let (app_code, app_value) = reader.read_handle()?;
+        let available_payload_bytes = reader.bits_remaining() / 8;
+        let declared_payload_bytes = size as usize;
+
+        // The blocked AC1015 LINE/POINT handles show a distinctive pattern:
+        // the first "xdata" block declares far more payload bytes than remain
+        // in the main stream, while the inline application handle is just the
+        // NULL marker (code=3,len=0). Recovered LINE/POINT/TEXT/HATCH examples
+        // do not exhibit this combination. Treat that shape as a selective
+        // false-positive xdata sentinel so we can continue with the normal
+        // common/entity decode path instead of consuming the entire main stream.
+        if declared_payload_bytes > available_payload_bytes && app_code == 0x3 && app_value == 0 {
+            reader.set_position_in_bits(block_start)?;
+            break;
+        }
+
+        if declared_payload_bytes > available_payload_bytes {
+            return Err(DwgReadError::UnexpectedEof {
+                context: "extended entity data payload exceeds main stream",
+            });
+        }
+
+        for _ in 0..declared_payload_bytes {
             reader.read_raw_u8()?;
         }
     }

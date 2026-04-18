@@ -2411,10 +2411,10 @@ fn ac1015_line_point_blocked_handles_real_decode_path_advances_after_selective_f
             matches!(
                 failure.stage,
                 Some("common_entity_decode")
-                    | Some("body_decode")
+                    | Some("entity_body_decode")
                     | Some("preheader_supported_hint")
             ),
-            "blocked handle 0x{handle:X} should stay on a truthful later-stage decode path after the selective fix"
+            "blocked handle 0x{handle:X} should stay on the observed post-selective decode path after the selective fix"
         );
         assert!(
             !matches!(failure.stage, Some("skip_extended_entity_data")),
@@ -2477,26 +2477,30 @@ fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage
             "representative handle 0x{handle_value:X} should retain its supported family attribution"
         );
         assert_eq!(
-            common_failure.stage,
-            Some("preheader_supported_hint"),
-            "representative handle 0x{handle_value:X} should currently remain blocked on the synthetic fallback until the parser starts surfacing a truthful later stage"
-        );
-        assert_eq!(
             common_failure.object_type,
             Some(if family == "LINE" { 19 } else { 27 }),
             "representative handle 0x{handle_value:X} should keep the truthful supported object type hint"
         );
         assert!(
-            failures
-                .iter()
-                .all(|failure| failure.stage != Some("common_entity_decode")),
-            "representative handle 0x{handle_value:X} should not yet report a concrete common_entity_decode stage before this audit feature lands"
+            matches!(
+                common_failure.stage,
+                Some("common_entity_decode") | Some("entity_body_decode")
+            ),
+            "representative handle 0x{handle_value:X} should surface a truthful later-stage failure instead of the synthetic preheader hint fallback"
+        );
+        assert!(
+            matches!(
+                common_failure.kind,
+                Ac1015RecoveryFailureKind::CommonDecodeFail
+                    | Ac1015RecoveryFailureKind::BodyDecodeFail
+            ),
+            "representative handle 0x{handle_value:X} should now fail on the real common/body decode path"
         );
         assert!(
             failures
                 .iter()
-                .all(|failure| failure.kind != Ac1015RecoveryFailureKind::BodyDecodeFail),
-            "representative handle 0x{handle_value:X} should not reach the body decoder yet"
+                .all(|failure| failure.stage != Some("preheader_supported_hint")),
+            "representative handle 0x{handle_value:X} should no longer rely on the synthetic preheader fallback once later-stage attribution is available"
         );
 
         observed.push(format!(

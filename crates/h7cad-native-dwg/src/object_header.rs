@@ -73,22 +73,9 @@ pub struct ObjectHeader {
 /// slice is mis-aligned.
 pub const HANDLE_CODE_HARD_OWNER: u8 = 0x5;
 
-/// Decode the AC1015 object header from a slice produced by
-/// [`crate::ObjectStreamCursor::object_slice_by_handle`].
-///
-/// On success returns the parsed header together with a
-/// [`BitReader`] that has already consumed `[BS type][RL bits][H
-/// handle]` and sits at the xdata/payload that follows.
-///
-/// Failure modes:
-///
-/// * [`DwgReadError::UnexpectedEof`] when any of the MS header,
-///   body bytes, BS/RL/H fields, or their encoding would read past
-///   the slice.
-/// * [`DwgReadError::UnexpectedEof`] with a specific context when
-///   the `MS` field decodes to a body larger than the slice or
-///   when `main_size_bits` is obviously out of range.
-pub fn read_ac1015_object_header(slice: &[u8]) -> Result<(ObjectHeader, BitReader<'_>), DwgReadError> {
+fn parse_ac1015_object_header_internal(
+    slice: &[u8],
+) -> Result<(ObjectHeader, &'_ [u8], usize), DwgReadError> {
     let mut cursor = 0usize;
     let body_size = read_modular_short(slice, &mut cursor).ok_or(DwgReadError::UnexpectedEof {
         context: "object MS size prefix",
@@ -119,6 +106,7 @@ pub fn read_ac1015_object_header(slice: &[u8]) -> Result<(ObjectHeader, BitReade
     }
 
     let (handle_code, handle_value) = reader.read_handle()?;
+    let header_end_bits = reader.position_in_bits();
 
     Ok((
         ObjectHeader {
@@ -127,8 +115,55 @@ pub fn read_ac1015_object_header(slice: &[u8]) -> Result<(ObjectHeader, BitReade
             handle: Handle::new(handle_value),
             handle_code,
         },
-        reader,
+        body,
+        header_end_bits,
     ))
+}
+
+/// Decode the AC1015 object header from a slice produced by
+/// [`crate::ObjectStreamCursor::object_slice_by_handle`].
+///
+/// On success returns the parsed header together with a
+/// [`BitReader`] that has already consumed `[BS type][RL bits][H
+/// handle]` and sits at the xdata/payload that follows.
+///
+/// Failure modes:
+///
+/// * [`DwgReadError::UnexpectedEof`] when any of the MS header,
+///   body bytes, BS/RL/H fields, or their encoding would read past
+///   the slice.
+/// * [`DwgReadError::UnexpectedEof`] with a specific context when
+///   the `MS` field decodes to a body larger than the slice or
+///   when `main_size_bits` is obviously out of range.
+pub fn read_ac1015_object_header(slice: &[u8]) -> Result<(ObjectHeader, BitReader<'_>), DwgReadError> {
+    let (header, body, header_end_bits) = parse_ac1015_object_header_internal(slice)?;
+    let mut reader = BitReader::new(body);
+    reader.set_position_in_bits(header_end_bits)?;
+    Ok((header, reader))
+}
+
+/// Decode the AC1015 object header and split the remaining body into
+/// the R2000 main + handle sub-readers.
+///
+/// `main_size_bits` is measured from the first bit of the object body,
+/// i.e. immediately after the modular-short body-size prefix. The
+/// returned `main_reader` is restricted to `[header_end_bits,
+/// main_size_bits)` and the returned `handle_reader` is restricted to
+/// `[main_size_bits, body_bits)`.
+pub fn split_ac1015_object_streams(
+    slice: &[u8],
+) -> Result<(ObjectHeader, BitReader<'_>, BitReader<'_>), DwgReadError> {
+    let (header, body, header_end_bits) = parse_ac1015_object_header_internal(slice)?;
+    let body_bits = body.len() * 8;
+    let main_end_bits = header.main_size_bits as usize;
+    if main_end_bits < header_end_bits || main_end_bits > body_bits {
+        return Err(DwgReadError::UnexpectedEof {
+            context: "object main_size_bits outside body range",
+        });
+    }
+    let main_reader = BitReader::from_bit_range(body, header_end_bits, main_end_bits)?;
+    let handle_reader = BitReader::from_bit_range(body, main_end_bits, body_bits)?;
+    Ok((header, main_reader, handle_reader))
 }
 
 #[cfg(test)]
@@ -297,5 +332,25 @@ mod tests {
         let slice = synth_slice(&body);
         let (_header, reader) = read_ac1015_object_header(&slice).unwrap();
         assert_eq!(reader.position_in_bits(), 58);
+    }
+
+    #[test]
+    fn split_streams_bounds_follow_main_size_bits() {
+        let body = synth_body(0x11, 64, HANDLE_CODE_HARD_OWNER, &[0x2A]);
+        let slice = synth_slice(&body);
+        let (header, main, handle) = split_ac1015_object_streams(&slice).unwrap();
+        assert_eq!(header.object_type, 17);
+        assert_eq!(main.position_in_bits(), 58);
+        assert_eq!(main.bits_remaining(), 6);
+        assert_eq!(handle.position_in_bits(), 64);
+        assert_eq!(handle.bits_remaining(), body.len() * 8 - 64);
+    }
+
+    #[test]
+    fn split_streams_rejects_main_size_before_header_end() {
+        let body = synth_body(0x11, 8, HANDLE_CODE_HARD_OWNER, &[0x2A]);
+        let slice = synth_slice(&body);
+        let err = split_ac1015_object_streams(&slice).unwrap_err();
+        assert!(matches!(err, DwgReadError::UnexpectedEof { .. }));
     }
 }

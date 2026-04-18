@@ -361,10 +361,11 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
         let Some(family) = hint.family else {
             continue;
         };
-        let already_recorded = diagnostics
-            .failures
-            .iter()
-            .any(|failure| failure.handle == *handle && failure.family == Some(family));
+        let already_recorded = diagnostics.failures.iter().any(|failure| {
+            failure.handle == *handle
+                && failure.family == Some(family)
+                && failure.stage != Some("preheader_supported_hint")
+        });
         if already_recorded {
             continue;
         }
