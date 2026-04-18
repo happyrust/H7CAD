@@ -636,7 +636,6 @@ fn try_decode_entity_body_with_reason(
         symbol_names,
     );
     object_type_family(object_type).ok_or(Ac1015RecoveryFailureKind::UnsupportedType)?;
-
     let (data, thickness, extrusion) = match object_type {
         LINE_OBJECT_TYPE => {
             let geom = entity_line::read_line_geometry(main_reader)

@@ -6,6 +6,30 @@ use iced::Task;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+/// Short human-readable name for an EntityType variant — used by diagnostic
+/// commands (AUDIT, etc.) to label entities in reports.
+fn kind_label(e: &acadrust::EntityType) -> &'static str {
+    match e {
+        acadrust::EntityType::Line(_) => "Line",
+        acadrust::EntityType::Circle(_) => "Circle",
+        acadrust::EntityType::Arc(_) => "Arc",
+        acadrust::EntityType::Ellipse(_) => "Ellipse",
+        acadrust::EntityType::Spline(_) => "Spline",
+        acadrust::EntityType::LwPolyline(_) => "LwPolyline",
+        acadrust::EntityType::Polyline(_) => "Polyline",
+        acadrust::EntityType::Text(_) => "Text",
+        acadrust::EntityType::MText(_) => "MText",
+        acadrust::EntityType::Dimension(_) => "Dimension",
+        acadrust::EntityType::Insert(_) => "Insert",
+        acadrust::EntityType::Solid3D(_) => "Solid3D",
+        acadrust::EntityType::Point(_) => "Point",
+        acadrust::EntityType::Hatch(_) => "Hatch",
+        acadrust::EntityType::Leader(_) => "Leader",
+        acadrust::EntityType::MultiLeader(_) => "MultiLeader",
+        _ => "Entity",
+    }
+}
+
 /// Parse `<CMD>` / `<CMD> ON` / `<CMD> OFF` / `<CMD> TOGGLE` (case-insensitive).
 /// Unknown/missing argument → toggle `current`.
 fn parse_on_off_toggle(cmd: &str, current: bool) -> bool {
@@ -3634,6 +3658,503 @@ impl H7CAD {
                     "VPJOIN: merged 2 viewports into one ({:.2} × {:.2}).",
                     merged.w, merged.h
                 ));
+            }
+
+            // ── AUDIT: drawing integrity check (read-only report) ──────────
+            // Scans the document for seven classes of integrity issues:
+            //   1. entity references a layer not in the layer table
+            //   2. Text/MText style not in text_styles
+            //   3. linetype (not ByLayer/ByBlock) not in line_types
+            //   4. Dimension style_name not in dim_styles
+            //   5. Insert references a block not in block_records
+            //   6. user block (non-'*') with empty entity_handles
+            //   7. entity with NULL handle
+            // AutoCAD's `AUDIT FIX` form is left as future enhancement —
+            // this command is strictly read-only.
+            "AUDIT" => {
+                let doc = &self.tabs[i].scene.document;
+
+                let layer_names: std::collections::HashSet<String> =
+                    doc.layers.iter().map(|l| l.name.clone()).collect();
+                let text_style_names: std::collections::HashSet<String> =
+                    doc.text_styles.iter().map(|s| s.name.clone()).collect();
+                let linetype_names: std::collections::HashSet<String> =
+                    doc.line_types.iter().map(|lt| lt.name.clone()).collect();
+                let dim_style_names: std::collections::HashSet<String> =
+                    doc.dim_styles.iter().map(|s| s.name.clone()).collect();
+                let block_record_names: std::collections::HashSet<String> =
+                    doc.block_records.iter().map(|br| br.name.clone()).collect();
+
+                let mut issues: Vec<String> = Vec::new();
+
+                // 1-5 + 7: per-entity checks
+                for e in doc.entities() {
+                    let common = e.common();
+                    let h = common.handle;
+
+                    if h.is_null() {
+                        issues.push(format!(
+                            "    NULL handle entity: {}",
+                            kind_label(e)
+                        ));
+                    }
+
+                    if !common.layer.is_empty() && !layer_names.contains(&common.layer) {
+                        issues.push(format!(
+                            "    {}({:#x}) refers to missing layer \"{}\"",
+                            kind_label(e),
+                            h.value(),
+                            common.layer
+                        ));
+                    }
+
+                    let lt = &common.linetype;
+                    if !lt.is_empty()
+                        && lt != "ByLayer"
+                        && lt != "ByBlock"
+                        && !linetype_names.iter().any(|n| n.eq_ignore_ascii_case(lt))
+                    {
+                        issues.push(format!(
+                            "    {}({:#x}) refers to missing linetype \"{}\"",
+                            kind_label(e),
+                            h.value(),
+                            lt
+                        ));
+                    }
+
+                    match e {
+                        acadrust::EntityType::Text(t)
+                            if !t.style.is_empty() && !text_style_names.contains(&t.style) =>
+                        {
+                            issues.push(format!(
+                                "    Text({:#x}) refers to missing text style \"{}\"",
+                                h.value(),
+                                t.style
+                            ));
+                        }
+                        acadrust::EntityType::MText(t)
+                            if !t.style.is_empty() && !text_style_names.contains(&t.style) =>
+                        {
+                            issues.push(format!(
+                                "    MText({:#x}) refers to missing text style \"{}\"",
+                                h.value(),
+                                t.style
+                            ));
+                        }
+                        acadrust::EntityType::Insert(ins)
+                            if !ins.block_name.is_empty()
+                                && !block_record_names.contains(&ins.block_name) =>
+                        {
+                            issues.push(format!(
+                                "    Insert({:#x}) refers to missing block \"{}\"",
+                                h.value(),
+                                ins.block_name
+                            ));
+                        }
+                        acadrust::EntityType::Dimension(dim) => {
+                            let sn = &dim.base().style_name;
+                            if !sn.is_empty() && !dim_style_names.contains(sn) {
+                                issues.push(format!(
+                                    "    Dimension({:#x}) refers to missing dim style \"{}\"",
+                                    h.value(),
+                                    sn
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // 6: user blocks with no contents
+                for br in doc.block_records.iter() {
+                    if br.name.starts_with('*') {
+                        continue;
+                    }
+                    if br.entity_handles.is_empty() {
+                        issues.push(format!(
+                            "    Block \"{}\" is empty (no entities)",
+                            br.name
+                        ));
+                    }
+                }
+
+                if issues.is_empty() {
+                    self.command_line.push_output(
+                        "AUDIT: drawing passed — no integrity issues detected.",
+                    );
+                } else {
+                    self.command_line.push_output(&format!(
+                        "AUDIT: {} issue(s) detected:",
+                        issues.len()
+                    ));
+                    for line in &issues {
+                        self.command_line.push_info(line);
+                    }
+                    self.command_line.push_info(
+                        "Note: this AUDIT is read-only.  AUDIT FIX is not yet implemented.",
+                    );
+                }
+                return Task::none();
+            }
+
+            // ── OVERKILL: remove duplicate / overlapping geometry ──────────
+            // Supports Line / Circle / Arc / Point; other entity types are
+            // skipped conservatively.  Scope:
+            //   OVERKILL              — scan selection if any, else whole doc
+            //   (future: OVERKILL TOLERANCE <v> — custom epsilon)
+            "OVERKILL" => {
+                use crate::modules::manage::overkill::find_duplicates;
+
+                // Build (Handle, EntityType) list from the scope.
+                let selected = self.tabs[i].scene.selected_entities();
+                let entries: Vec<(acadrust::Handle, acadrust::EntityType)> =
+                    if !selected.is_empty() {
+                        selected
+                            .into_iter()
+                            .map(|(h, e)| (h, e.clone()))
+                            .collect()
+                    } else {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
+                            .filter_map(|e| {
+                                let handle = e.common().handle;
+                                if handle.is_null() {
+                                    None
+                                } else {
+                                    Some((handle, e.clone()))
+                                }
+                            })
+                            .collect()
+                    };
+
+                if entries.is_empty() {
+                    self.command_line.push_info(
+                        "OVERKILL: no entities to scan (empty drawing or empty selection).",
+                    );
+                    return Task::none();
+                }
+
+                let dupes = find_duplicates(&entries);
+                if dupes.is_empty() {
+                    self.command_line.push_output(&format!(
+                        "OVERKILL: no duplicates found in {} entity(ies).",
+                        entries.len()
+                    ));
+                } else {
+                    self.push_undo_snapshot(i, "OVERKILL");
+                    self.tabs[i].scene.erase_entities(&dupes);
+                    self.tabs[i].dirty = true;
+                    self.command_line.push_output(&format!(
+                        "OVERKILL: removed {} duplicate entity(ies) (scanned {}).",
+                        dupes.len(),
+                        entries.len()
+                    ));
+                }
+                return Task::none();
+            }
+
+            // ── WORKSPACE: VS Code-style folder browser ────────────────────
+            // WORKSPACE          — pick a folder to open
+            // WORKSPACECLOSE     — close the current workspace
+            // WORKSPACEREFRESH   — re-scan the current root
+            // WORKSPACETOGGLE    — show / hide the side panel
+            "WORKSPACE"        => return Task::done(Message::WorkspaceOpen),
+            "WORKSPACECLOSE"   => return Task::done(Message::WorkspaceClose),
+            "WORKSPACEREFRESH" => return Task::done(Message::WorkspaceRefresh),
+            "WORKSPACETOGGLE"  => return Task::done(Message::WorkspaceToggle),
+
+            // ── XCLIP: toggle / delete clipping on selected images & underlays ─
+            // Sub-commands:
+            //   XCLIP | XCLIP STATUS   — report each selected clippable entity
+            //   XCLIP ON               — enable USE_CLIPPING_BOUNDARY / CLIPPING
+            //   XCLIP OFF              — disable the flag (keep the boundary)
+            //   XCLIP DELETE           — remove clip boundary entirely
+            // `XCLIP NEW` (draw a new boundary) is not supported yet; it would
+            // require an interactive point-picker and is left as a future
+            // enhancement.
+            cmd if cmd == "XCLIP" || cmd.starts_with("XCLIP ") => {
+                use acadrust::entities::{ImageDisplayFlags, UnderlayDisplayFlags};
+                let sub = cmd.split_whitespace().nth(1).map(|s| s.to_uppercase());
+
+                let clippable_handles: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter(|(_, e)| matches!(
+                        e,
+                        acadrust::EntityType::RasterImage(_)
+                            | acadrust::EntityType::Underlay(_)
+                    ))
+                    .map(|(h, _)| h)
+                    .collect();
+                if clippable_handles.is_empty() {
+                    self.command_line.push_info(
+                        "XCLIP: select one or more RasterImage or Underlay entities first.",
+                    );
+                    return Task::none();
+                }
+
+                match sub.as_deref() {
+                    None | Some("STATUS") => {
+                        self.command_line.push_output(&format!(
+                            "XCLIP: {} clippable entity(ies) in selection:",
+                            clippable_handles.len()
+                        ));
+                        for &h in &clippable_handles {
+                            match self.tabs[i].scene.document.get_entity(h) {
+                                Some(acadrust::EntityType::RasterImage(img)) => {
+                                    let on = img
+                                        .flags
+                                        .contains(ImageDisplayFlags::USE_CLIPPING_BOUNDARY);
+                                    self.command_line.push_info(&format!(
+                                        "    RasterImage({:#x})  clip={}",
+                                        h.value(),
+                                        if on { "ON" } else { "OFF" }
+                                    ));
+                                }
+                                Some(acadrust::EntityType::Underlay(und)) => {
+                                    let on = und.flags.contains(UnderlayDisplayFlags::CLIPPING);
+                                    self.command_line.push_info(&format!(
+                                        "    Underlay({:#x})   clip={}  boundary_verts={}",
+                                        h.value(),
+                                        if on { "ON" } else { "OFF" },
+                                        und.clip_boundary_vertices.len()
+                                    ));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Some("ON") | Some("OFF") => {
+                        let turn_on = matches!(sub.as_deref(), Some("ON"));
+                        self.push_undo_snapshot(i, "XCLIP");
+                        let mut changed = 0usize;
+                        for &h in &clippable_handles {
+                            match self.tabs[i].scene.document.get_entity_mut(h) {
+                                Some(acadrust::EntityType::RasterImage(img)) => {
+                                    let before = img.flags;
+                                    if turn_on {
+                                        img.flags |= ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                                    } else {
+                                        img.flags &= !ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                                    }
+                                    if img.flags != before {
+                                        changed += 1;
+                                    }
+                                }
+                                Some(acadrust::EntityType::Underlay(und)) => {
+                                    let before = und.flags;
+                                    if turn_on {
+                                        und.flags |= UnderlayDisplayFlags::CLIPPING;
+                                    } else {
+                                        und.flags &= !UnderlayDisplayFlags::CLIPPING;
+                                    }
+                                    if und.flags != before {
+                                        changed += 1;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!(
+                            "XCLIP {}: {} of {} entity(ies) changed.",
+                            if turn_on { "ON" } else { "OFF" },
+                            changed,
+                            clippable_handles.len()
+                        ));
+                    }
+                    Some("DELETE") => {
+                        self.push_undo_snapshot(i, "XCLIP");
+                        let mut removed = 0usize;
+                        for &h in &clippable_handles {
+                            match self.tabs[i].scene.document.get_entity_mut(h) {
+                                Some(acadrust::EntityType::RasterImage(img)) => {
+                                    let w = img.size.x;
+                                    let hp = img.size.y;
+                                    img.clip_boundary =
+                                        acadrust::entities::ClipBoundary::full_image(w, hp);
+                                    img.flags &= !ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+                                    removed += 1;
+                                }
+                                Some(acadrust::EntityType::Underlay(und)) => {
+                                    und.clip_boundary_vertices.clear();
+                                    und.flags &= !UnderlayDisplayFlags::CLIPPING;
+                                    removed += 1;
+                                }
+                                _ => {}
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!(
+                            "XCLIP DELETE: removed clip boundary from {} entity(ies).",
+                            removed
+                        ));
+                    }
+                    Some("NEW") => {
+                        self.command_line.push_info(
+                            "XCLIP NEW: interactive boundary picker not yet supported.  Use ON/OFF/DELETE/STATUS.",
+                        );
+                    }
+                    Some(other) => {
+                        self.command_line.push_info(&format!(
+                            "XCLIP: unknown subcommand \"{}\".  Use ON / OFF / DELETE / STATUS.",
+                            other
+                        ));
+                    }
+                }
+                return Task::none();
+            }
+
+            // ── BLOCKPALETTE: list user blocks + quick-insert dispatch ─────
+            // Sub-commands:
+            //   BLOCKPALETTE | BLOCKPALETTE LIST         — list all non-system
+            //                                              blocks + metadata
+            //   BLOCKPALETTE INSERT <name>               — delegate to INSERT
+            //   BLOCKPALETTE COUNT                       — just print the total
+            cmd if cmd == "BLOCKPALETTE" || cmd.starts_with("BLOCKPALETTE ") => {
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                let sub = parts.get(1).map(|s| s.to_uppercase());
+                let doc = &self.tabs[i].scene.document;
+
+                // Collect (name, attdef_count) for user blocks only
+                // (system blocks start with '*' — Model_Space, Paper_Space, …).
+                let user_blocks: Vec<(String, usize)> = doc
+                    .block_records
+                    .iter()
+                    .filter(|br| !br.name.starts_with('*'))
+                    .map(|br| {
+                        let attdef_count = br
+                            .entity_handles
+                            .iter()
+                            .filter(|&&h| matches!(
+                                doc.get_entity(h),
+                                Some(acadrust::EntityType::AttributeDefinition(_))
+                            ))
+                            .count();
+                        (br.name.clone(), attdef_count)
+                    })
+                    .collect();
+
+                // INSERT counts per block — one pass over entities
+                let mut insert_counts: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                for e in doc.entities() {
+                    if let acadrust::EntityType::Insert(ins) = e {
+                        if !ins.block_name.is_empty() {
+                            *insert_counts.entry(ins.block_name.clone()).or_insert(0) += 1;
+                        }
+                    }
+                }
+
+                match sub.as_deref() {
+                    None | Some("LIST") => {
+                        if user_blocks.is_empty() {
+                            self.command_line.push_output(
+                                "BLOCKPALETTE: no user-defined blocks in this drawing.",
+                            );
+                        } else {
+                            let mut rows = user_blocks.clone();
+                            rows.sort_by(|a, b| a.0.cmp(&b.0));
+                            self.command_line.push_output(&format!(
+                                "BLOCKPALETTE: {} user block(s):",
+                                rows.len()
+                            ));
+                            for (name, attdef_count) in &rows {
+                                let inserts = insert_counts.get(name).copied().unwrap_or(0);
+                                self.command_line.push_info(&format!(
+                                    "    {}  (insert×{}, attdef×{})",
+                                    name, inserts, attdef_count
+                                ));
+                            }
+                        }
+                    }
+                    Some("COUNT") => {
+                        self.command_line.push_output(&format!(
+                            "BLOCKPALETTE: {} user block(s), {} INSERT reference(s).",
+                            user_blocks.len(),
+                            insert_counts.values().sum::<usize>(),
+                        ));
+                    }
+                    Some("INSERT") => {
+                        let name = parts.get(2).map(|s| s.to_string());
+                        let Some(name) = name else {
+                            self.command_line.push_info(
+                                "Usage: BLOCKPALETTE INSERT <blockname>",
+                            );
+                            return Task::none();
+                        };
+                        if !user_blocks.iter().any(|(n, _)| n == &name) {
+                            self.command_line.push_error(&format!(
+                                "BLOCKPALETTE: user block \"{}\" not found.",
+                                name
+                            ));
+                            return Task::none();
+                        }
+                        // Delegate to the existing INSERT command.
+                        return Task::done(Message::Command(format!("INSERT {}", name)));
+                    }
+                    Some(other) => {
+                        self.command_line.push_info(&format!(
+                            "BLOCKPALETTE: unknown subcommand \"{}\".  Use LIST / COUNT / INSERT.",
+                            other
+                        ));
+                    }
+                }
+            }
+
+            // ── TOOLPALETTES: informational — H7CAD uses the ribbon ────────
+            // AutoCAD's Tool Palettes is a floating panel with drag-and-drop
+            // tool tiles.  H7CAD's ribbon tabs (Home / Annotate / Insert /
+            // View / Manage) already provide the equivalent surface; emit an
+            // info message rather than a no-op.
+            "TOOLPALETTES" => {
+                self.command_line.push_output(
+                    "TOOLPALETTES: H7CAD uses the ribbon tabs (Home / Annotate / Insert / View / Manage) as the tool surface.",
+                );
+                self.command_line.push_info(
+                    "Use the top ribbon or the command line to invoke tools — there is no separate Tool Palettes panel.",
+                );
+            }
+
+            // ── CUI (Command User Interface) — export / import / load ─────
+            // Persist the runtime alias table and shortcut overrides to a
+            // plain-text H7CAD CUI file.  Three verbs:
+            //   CUIEXPORT — save current maps to a user-picked file
+            //   CUIIMPORT — load, REPLACING current maps
+            //   CUILOAD   — load, MERGING into current maps (later wins)
+            "CUIEXPORT" => return Task::done(Message::CuiExport),
+            "CUIIMPORT" => return Task::done(Message::CuiImport),
+            "CUILOAD"   => return Task::done(Message::CuiLoad),
+
+            // ── HORIZONTAL / VERTICAL / CASCADE: document window arrangement ─
+            // Traditional AutoCAD MDI commands that arrange child drawing windows.
+            // H7CAD uses a single-window tab UI instead of MDI child windows, so
+            // these commands do not perform geometric window tiling — they emit
+            // an informational message explaining the tab-based equivalent.
+            "HORIZONTAL" | "VERTICAL" | "CASCADE" => {
+                let mode = match cmd {
+                    "HORIZONTAL" => "Tile Horizontal",
+                    "VERTICAL"   => "Tile Vertical",
+                    _            => "Cascade",
+                };
+                let n = self.tabs.len();
+                if n <= 1 {
+                    self.command_line.push_info(&format!(
+                        "{}: only one document open — nothing to arrange.",
+                        mode
+                    ));
+                } else {
+                    self.command_line.push_output(&format!(
+                        "{}: H7CAD uses a single-window tab UI; {} documents are open as tabs.",
+                        mode, n
+                    ));
+                    self.command_line.push_info(
+                        "Use the tab bar or Ctrl+Tab / Ctrl+Shift+Tab to switch between documents.",
+                    );
+                }
             }
 
             // ── ALIASEDIT: manage user-defined command aliases ─────────────

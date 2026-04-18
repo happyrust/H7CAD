@@ -18,6 +18,7 @@ pub mod snap_popup;
 pub mod statusbar;
 pub mod tablestyle;
 pub mod textstyle;
+pub mod workspace_panel;
 
 pub use app_menu::AppMenu;
 pub use command_line::CommandLine;

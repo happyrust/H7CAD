@@ -2,6 +2,613 @@
 
 ## [未发布]
 
+### 2026-04-18：DWG M3-B 深化调试 — AC1015 LINE/POINT body 解码链路诊断与修复
+
+在 M3-B 收口（7 种实体 84 个 entity，163/163 全绿）基础上，对 AC1015 对象体解码
+链路进行深度诊断和修复，重点解决 LINE body 字段默认值错误与 body/handle 流边界
+handoff 的 bit 坐标错位问题。
+
+**主要修复**：
+
+- **AC1015 common decode 诊断本地化** (`bit_reader.rs` 新增阶段追踪)
+  - 精确定位 common preamble 各字段（owner / reactor / xdict / entity flags）
+    在 bit 级别的解码失败点，区分"blocked handle early exit"与"默认值断言
+    失败"两类根因
+
+- **split_ac1015_object_streams bit 坐标修复** (`object_header.rs`)
+  - `main_size_bits` 与 post-header cursor 均以绝对 body-bit 坐标表达；修复
+    分流时 `BitReader::from_bit_range` 调用参数，防止 header 在中途 byte 边界
+    时的隐性字节对齐舍入（保留同一坐标空间，不做提前截断）
+
+- **AC1015 LINE body 默认值全链路对齐**
+  - `fix(native-dwg): align ac1015 line body defaults`：修正 LINE entity body
+    字段的测试期望默认值，与真实 `sample_AC1015.dwg` BitReader 读出值一致
+  - `fix(native-dwg): align line dd defaults`：修正 DD（Double-Double）字段
+    的默认值期望
+
+- **LINE/POINT body 解码失败路径系统枚举**
+  - `feat(native-dwg): trace AC1015 line point failure stages`：新增分阶段
+    失败追踪，枚举各 body 字段解码顺序中可能的断点
+  - 新增多组集成测试：body framing boundary / live line point body / line body
+    values — 与真实 DWG 数据锚定，确保每次 bit_reader 改动后可立即发现回归
+
+- **DWG worker 任务基础设施**（chore）
+  - 初始化 AC1015 DWG worker 任务配置
+  - 允许以验证优先的 worker 完成标准
+  - 修复任务初始化脚本 shell 兼容性
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning 保持
+- `cargo test -p h7cad-native-dwg -- --test-threads=1`：body 解码基线
+  与 real_samples 诊断断言全部对齐
+
+### 2026-04-17：DWG Native M3-B 收口 — ARC/CIRCLE 纠偏 + common metadata + TEXT/LWPOLYLINE/HATCH 入场
+
+继续推进 `crates/h7cad-native-dwg`，本轮**不改 facade、不改主程序 DWG runtime**，
+只把 AC1015 真对象流 enrichment 从“少量几何 best-effort”推进到
+“几何 + common metadata 基本可信 + 高收益实体类型接入”。
+
+**本轮完成：**
+
+- **统一 AC1015 固定 type code 口径**
+  - 改成与 `vendor_tmp/acadrust` / ACadSharp 一致：
+    - `TEXT=1`
+    - `ARC=17`
+    - `CIRCLE=18`
+    - `LINE=19`
+    - `POINT=27`
+    - `LWPOLYLINE=77`
+    - `HATCH=78`
+  - `real_samples.rs` 的 histogram label 与真实恢复统计现已同口径
+
+- **object body 两流拆分正式落地**
+  - `src/object_header.rs` 新增 `split_ac1015_object_streams()`
+  - 基于 `main_size_bits` 把 object body 切成：
+    - main stream
+    - handle stream
+  - 后续 common/entity/table 解码都不再靠“单 reader 顺序猜位”
+
+- **common entity / non-entity preamble 从 skip 升级到 parse**
+  - `src/entity_common.rs` 新增：
+    - `Ac1015EntityCommonData`
+    - `Ac1015NonEntityCommonData`
+    - `parse_ac1015_entity_common()`
+    - `parse_ac1015_non_entity_common()`
+    - `dwg_lineweight_from_index()`
+  - 现可真实写回：
+    - `owner_handle`
+    - `layer_handle -> layer_name`
+    - `linetype_flags / linetype_handle -> linetype_name`
+    - `color_index`
+    - `linetype_scale`
+    - `lineweight`
+    - `invisible`
+  - `Entity::new()` 默认 common 字段不再是 enrichment 唯一来源
+
+- **新增 3 个高收益实体解码器**
+  - `src/entity_text.rs`
+  - `src/entity_lwpolyline.rs`
+  - `src/entity_hatch.rs`
+  - 当前 AC1015 enrichment 已支持：
+    - `LINE`
+    - `ARC`
+    - `CIRCLE`
+    - `POINT`
+    - `TEXT`
+    - `LWPOLYLINE`
+    - `HATCH`
+
+- **真实表记录名映射预扫**
+  - 在 enrichment 前预扫真实 table records：
+    - `LAYER (51)`
+    - `STYLE (53)`
+    - `LTYPE (57)`
+  - 用其反解实体 common metadata 中的 layer/style/linetype handle
+
+**真实样本基线（`sample_AC1015.dwg`）现状：**
+
+- `read_dwg()` 现恢复：
+  - `26 LINE`
+  - `4 CIRCLE`
+  - `1 ARC`
+  - `6 POINT`
+  - `26 TEXT`
+  - `15 LWPOLYLINE`
+  - `6 HATCH`
+- 合计 **84 个真实 native entities**
+- 仍保留 `2 blocks / 2 layouts / 271 objects` scaffold
+- common metadata 抽样断言已加入：
+  - 不能全部 `owner_handle = NULL`
+  - 不能全部 `layer_name = "0"`
+  - 至少一部分 `color / linetype` 非默认
+
+**验证：**
+
+- `cargo test -p h7cad-native-dwg -- --test-threads=1`：**163/163** 全绿
+  - unit **99**
+  - `read_headers.rs` **53**
+  - `real_samples.rs` **11**
+- `cargo test -p h7cad-native-dwg --test real_samples real_dwg_samples_baseline_m3b -- --nocapture --test-threads=1`
+  - AC1015 基线通过，TEXT/LWPOLYLINE/HATCH 均已非零
+- `cargo test -p h7cad-native-facade -- --test-threads=1`：通过
+- `cargo check -p H7CAD`：通过
+
+**边界仍保持不变：**
+
+- `crates/h7cad-native-facade` 仍返回 `native DWG reader not implemented yet`
+- `src/io/mod.rs` 仍继续走 `acadrust::DwgReader / DwgWriter`
+- 不做 DWG writer
+- 不做 AC1018+ 支持
+
+### 2026-04-17：Manage Tab AUDIT — 图纸完整性体检（read-only 报告）
+
+ROADMAP Manage Tab / Cleanup 里最后一条 **High** 复杂度命令 **AUDIT** 从
+ribbon stub 升级为完整命令。与 FINDNONPURGEABLE 形成"只读体检"组合 ——
+FINDNONPURGEABLE 列 purge 不了的定义，AUDIT 找**被引用但引用不到**的
+问题。MVP 为纯只读报告，AutoCAD 的 `AUDIT FIX` 修复模式留作未来增强。
+
+**检查清单** (`src/app/commands.rs`)：
+
+AUDIT 对当前 document 扫描 7 类完整性问题：
+
+1. **孤立图层引用** — `entity.common.layer` 非空且不在 `document.layers`
+2. **未知文字样式** — `Text.style` / `MText.style` 不在 `text_styles`
+3. **未知线型** — `entity.common.linetype` 非空非 `ByLayer`/`ByBlock` 且
+   不在 `line_types`（大小写不敏感匹配）
+4. **未知标注样式** — `Dimension.base().style_name` 不在 `dim_styles`
+5. **孤立 INSERT** — `Insert.block_name` 不在 `block_records`
+6. **空用户 block** — `BlockRecord.name` 非 `*`-prefix 且 `entity_handles`
+   为空
+7. **NULL handle entity** — `entity.common.handle.is_null()`
+
+**实现细节**：
+
+- 开头预计算 5 个 `HashSet<String>`（layer / text_style / linetype /
+  dim_style / block_record 名字池），避免 O(N×M) 扫描
+- `kind_label(&EntityType) -> &'static str` 新增 helper，覆盖 17 种
+  variant，用于报告里 `"Line(0x...)"` 格式化（未识别的 fallback "Entity"）
+- 输出格式：
+  - 零问题 → `AUDIT: drawing passed — no integrity issues detected.`
+  - 有问题 → `AUDIT: N issue(s) detected:` + 每条 push_info 一行 +
+    结尾提示 `"AUDIT FIX is not yet implemented."`
+- read-only：无 mutation、无 undo snapshot、无 dirty flag
+
+**决策**：
+
+- **只报告不修复**：AutoCAD 的 AUDIT 交互式提问"Fix errors? (Y/N)"并自动
+  reset 坏引用到 layer "0" / 删除孤立 INSERT / 等。这部分涉及破坏性编辑，
+  scope 显著变大且需要 undo 策略。MVP 先确保"找得出"，修复后续再加
+- **大小写不敏感的 linetype 匹配**：CAD 线型名约定大写（`DASHED` /
+  `CONTINUOUS`），用户或第三方 DXF 可能写 `Dashed`，用 `eq_ignore_ascii_case`
+  避免误报
+- **不检查字段级内容**：如 DXF 里 handle 为 0、bounding box NaN 等更深
+  invariants 暂不做，依赖 parser 在 load 阶段已 reject
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（5.13s）
+- 主 crate 测试 **153/154**（和上一轮一致，无回归；AUDIT 是 CLI 读取
+  路径，核心逻辑和 FINDNONPURGEABLE 模式同源，该模式已被实战验证）
+
+**ROADMAP 进度**：Manage Tab / Cleanup 全部 3 条命令交付（FINDNONPURGEABLE
++ OVERKILL + AUDIT）。combined 今日：View Tab 9 + Insert Tab 11 + Manage
+Tab 7 = **27 个** ROADMAP 命令后端落地。
+
+### 2026-04-17：Manage Tab OVERKILL — 几何重复去重（Line / Circle / Arc / Point）
+
+ROADMAP Manage Tab / Cleanup group 里 **High** 复杂度命令 **OVERKILL** 从
+ribbon stub 升级为完整去重命令。覆盖 AutoCAD OVERKILL 最核心的 80% 用例：
+**Line / Circle / Arc / Point** 四种简单几何的重复检测与删除。复杂实体
+（Polyline / Hatch / Text / Dimension / Spline）保守跳过，确保不误删
+用户数据。
+
+**核心算法** (`src/modules/manage/overkill.rs` 扩展自原 ribbon stub)：
+
+- `GeomKey` enum：规范化几何指纹，4 个变体对应 4 种支持的实体类型
+- `QPoint(i64, i64, i64)` / `QScalar(i64)`：量化坐标/标量；用
+  `(f64 * 1e6).round() as i64` 避开 `f64` 不能 `Hash` 的限制，`1e-6`
+  tolerance 覆盖 CAD 工程精度
+- `line_key(a, b)`：端点按字典序排序后构造 key，使 `Line(A→B)` 和
+  `Line(B→A)` 归一为同一 key —— CAD 语境下方向无语义
+- `geom_key(entity) -> Option<GeomKey>`：不支持的 entity 返回 `None`，
+  确保 `find_duplicates` 不会把它们算进任何桶里
+- `find_duplicates(entries) -> Vec<Handle>`：单遍 HashSet 扫描，对每个
+  entity 取 key；key 已见过则 handle 归入 dupes，按 encounter order
+  返回；第一次出现的 handle 保留
+- **11 个单测**全绿：identical lines / reversed endpoints / concentric
+  circles / different radius kept / arcs differing angle kept / identical
+  arcs / line vs circle no-cross-collision / identical points /
+  sub-epsilon tolerance folding / empty input / first-occurrence kept
+
+**Dispatch** (`src/app/commands.rs`)：
+
+- `"OVERKILL"` case：
+  - Scope 选择：selection 非空时仅在选择集内去重；否则扫描 `document.entities()`
+    全集（过滤掉 `Handle::is_null()` 的异常条目）
+  - 空 scope 时 `push_info` 引导用户；有 dupes 时 `push_undo_snapshot("OVERKILL")`
+    → `scene.erase_entities(&dupes)` → mark dirty → 汇报 `"removed X of Y"`；
+    零 dupes 时 push_output 告知"no duplicates found"
+  - `return Task::none()` 明确终止
+
+**模块暴露** (`src/modules/manage/mod.rs`)：`mod overkill` → `pub(crate) mod overkill`
+
+**设计决策**：
+
+- **保守 scope（4 种简单几何）**：AutoCAD OVERKILL 还会合并共线首尾相接的
+  Line 段 —— 这是"真正 High"的部分；MVP 只做去重不做合并，避免算法蔓延
+  与测试爆炸
+- **手写量化替代 `ordered-float` crate**：不引入新依赖，`(f64 * 1e6).round()
+  as i64` 覆盖 ±9e12 坐标范围，CAD 工程绝对够用
+- **端点排序用 `PartialOrd` derive**：`QPoint` 加 `#[derive(PartialOrd, Ord)]`
+  让 `a <= b` 比较直接可用（编译一次发现问题，一次修正）
+- **保留第一个 Handle**：按 `entities()` 返回顺序稳定，undo 后 Handle 不变
+- **风险提示文档化**：Arc 方向差异（顺时针 vs 逆时针）不处理，会被视为不同；
+  浮点 quantise 在接近整数边界时可能误判（保守错误方向：假阴性/漏删，不会
+  误删用户数据）
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（9.54s）
+- 主 crate 测试 **153/154**（相比上一轮 142/143 新增 11 个 overkill 单测
+  全绿；pre-existing 失败依然，无新回归）
+
+**ROADMAP 进度**：Manage Tab / Cleanup 的 High 复杂度 `OVERKILL` 交付。
+combined 今日：View Tab 9 + Insert Tab 11 + Manage Tab 6 (ALIASEDIT + 
+FINDNONPURGEABLE + CUIEXPORT + CUIIMPORT + CUILOAD + OVERKILL) = **26 个**
+ROADMAP 命令后端落地。
+
+### 2026-04-17：VS Code 风格 Workspace Phase 2 — 左侧面板 UI 集成
+
+给 Workspace 基础架构接上可见的 UI：在 properties panel 左侧渲染一个 240px
+宽的 EXPLORER 风格面板。与 Phase 1 的 state + Message + 命令行命令已就绪
+配合后，现在用户从 `WORKSPACE` 命令选目录 → 面板自动显示 → 单击文件打开
+tab、单击目录展开折叠 — 全链路可用。
+
+**新模块** (`src/ui/workspace_panel.rs`)：
+
+- `pub fn view_panel<'a>(ws, active_path, expanded_dirs) -> Element<'a, Message>`
+  返回已样式化的 panel
+- 常量：`PANEL_WIDTH = 240px` / `ROW_HEIGHT = 22px` / `HEADER_HEIGHT = 28px`
+  / `INDENT_PX = 12px`；统一的 dark-theme 颜色常量（PANEL_BG / HEADER_BG /
+  ROW_HOVER / ROW_ACTIVE / TEXT_COLOR / TEXT_MUTED / BORDER_COLOR）
+- `panel_header(ws)` — 顶部 28px 容器：workspace 根目录名（`ws.root_label()`
+  取 last-component）+ 刷新按钮（↻ → `WorkspaceRefresh`）+ 关闭按钮
+  （× → `WorkspaceClose`，hover 时变暗红色）
+- `panel_body(ws, active_path, expanded_dirs)` — 调 Phase 1 的
+  `visible_entries()` 过滤后用 scrollable 列出每行；空时显示 `(empty workspace)`
+- `row_element(entry, active_path, expanded_dirs)` — 按 `depth - 1` 计算
+  缩进（顶层 0 缩进），每行结构：`[indent space][icon][4px space][name]`
+- 图标方案（Unicode emoji 临时方案）：
+  - `Directory` → `▼ 📁` 展开 / `▶ 📁` 折叠
+  - `DxfFile` → `📐`
+  - `DwgFile` → `📏`
+  - `Truncated` → `⋯`（灰色、click 为 Noop）
+- 点击行为：
+  - 文件行 → `Message::WorkspaceFileClick(path)` — host 自动判断已打开切 tab
+  - 目录行 → `Message::WorkspaceDirToggle(path)` — 反转 expanded 状态
+  - Truncated 行 → `Message::Noop`（不可交互）
+- active_path（= 当前 tab 的 `current_path`）匹配的文件行用 ROW_ACTIVE
+  （#335890）背景高亮；其他行 hover 时用 ROW_HOVER
+
+**主布局集成** (`src/app/view.rs`)：
+
+- `center_stack` 构造逻辑变成：
+  - `ws_panel: Option<Element>` — 仅当 `workspace_panel_open == true` **且**
+    `workspace: Some(_)` 时调 `view_panel(...)`
+  - `center_row` = 有 panel 时 `row![wp, properties, viewport]`，无则
+    `row![properties, viewport]`（不占空间）
+- 命名 clash 风险已规避（`ws_panel` 与原本 `nav` / `cube_click` 类似都是
+  `Option<Element>` pattern）
+
+**模块挂载** (`src/ui/mod.rs`)：
+
+- `pub mod workspace_panel;`（插在 `tablestyle` / `textstyle` 之后）
+
+**Phase 1 遗留的 dead-code 解除**：
+- `Message::WorkspaceFileClick` / `Message::WorkspaceDirToggle` 去掉
+  `#[allow(dead_code)]`
+- `Workspace::root_label` / `visible_entries()` 同样去掉标注
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（5.17s）
+- 主 crate 测试 **142/143**（和 Phase 1 一致 — UI 层纯渲染无新单测，核心
+  逻辑单测在 Phase 1 的 workspace 7 条；pre-existing 失败不变）
+
+**完整使用路径**（Phase 1 + Phase 2 合起来）：
+1. 用户输入 `WORKSPACE` → rfd folder picker 弹出
+2. 选目录 → `scan_workspace` 扫描（<50ms）→ 240px 面板在 properties
+   左侧出现
+3. 单击文件 → 自动打开 tab 或切换到已打开的 tab
+4. 单击目录 → ▶ ↔ ▼ 切换展开 / 折叠
+5. Header 点 ↻ 重新扫描；点 × 关闭 workspace（tabs 不受影响）
+6. 面板本身可通过 `WORKSPACETOGGLE` 隐藏/恢复（workspace state 保留）
+
+**ROADMAP 关系**：Workspace 是**非 ROADMAP** 的主动功能，用户明确要求
+"参考 VS Code 打开文件夹方式"。与 ROADMAP 命令解耦，新增。
+
+### 2026-04-17：VS Code 风格 Workspace 基础架构 — 扫描 + state + 命令（Phase 1）
+
+给 H7CAD 接入 VS Code EXPLORER 风格的工作空间功能。**本轮 Phase 1 交付
+基础架构**（扫描逻辑 + state + Message + dispatch + handler，可通过命令
+行完整驱动），**下一轮 Phase 2 交付左侧面板 UI**。
+
+**扫描模块** (`src/app/workspace.rs` 新文件)：
+
+- `Workspace { root: PathBuf, entries: Vec<WorkspaceEntry>, truncated: bool }`
+  —— 工作空间扫描快照
+- `WorkspaceEntry { path, name, depth, parent, kind }` —— 扁平列表每条记录
+- `EntryKind = Directory / DxfFile / DwgFile / Truncated`
+- 常量 `DEFAULT_MAX_DEPTH = 3` / `DEFAULT_MAX_ENTRIES = 2000`
+- 黑名单目录常量 `BLACKLIST_DIR_NAMES`：`.git / .cargo / .cursor / target /
+  node_modules / vendor_tmp / .agents / .memory / .factory / ...` 等 18 条
+- `scan_workspace(root, max_depth, max_entries) -> Result<Workspace, String>`：
+  递归扫描，仅保留 `.dxf` / `.dwg`（case-insensitive） + 目录结构；每层
+  **目录优先 + 文件字母序**；超出 max_entries 时停止并标 truncated，追加
+  `EntryKind::Truncated` 标记行
+- `visible_entries(&entries, &expanded_dirs) -> Vec<&WorkspaceEntry>`：按
+  祖先目录是否展开过滤可见行（下一轮 UI 消费）
+- `Workspace::root_label()` 显示用 helper
+- **7 个单测**全绿：top-level CAD filter / blacklist skip / max_depth /
+  sort order / truncation flag / 非 dir 根错误处理 / visible_entries
+  collapse 行为
+
+**State 扩展** (`src/app/mod.rs`)：
+
+- `H7CAD` 新增 3 字段：
+  - `workspace: Option<workspace::Workspace>`
+  - `workspace_panel_open: bool`（默认 `false`，打开工作区时自动置 true）
+  - `expanded_dirs: HashSet<PathBuf>`
+- `Message` 扩 7 个 variant：`WorkspaceOpen` / `WorkspaceOpened(Option<
+  PathBuf>)` / `WorkspaceClose` / `WorkspaceRefresh` / `WorkspaceToggle` /
+  `WorkspaceFileClick(PathBuf)` / `WorkspaceDirToggle(PathBuf)`
+- `mod workspace` 以 `pub(crate)` 暴露
+
+**文件对话框** (`src/io/mod.rs`)：
+
+- `pub async fn pick_workspace_folder() -> Option<PathBuf>` — rfd
+  `.pick_folder()` 包装，标题 "Open Workspace Folder"
+
+**Dispatch** (`src/app/commands.rs`)：
+
+- `"WORKSPACE"` / `"WORKSPACECLOSE"` / `"WORKSPACEREFRESH"` /
+  `"WORKSPACETOGGLE"` 四个 case，各自 `Task::done(Message::...)`
+
+**Update handlers** (`src/app/update.rs`)：
+
+- `WorkspaceOpen` → `Task::perform(pick_workspace_folder(), WorkspaceOpened)`
+- `WorkspaceOpened(Some(root))` → `scan_workspace(…)` 成功则存入 state 并
+  自动打开面板 + 清空 `expanded_dirs`；失败 push_error
+- `WorkspaceClose` → `workspace.take()` + 关面板 + 清 expanded；no-op
+  提示已无 workspace
+- `WorkspaceRefresh` → 对当前 root 重新 scan；无 workspace 时友好提示
+- `WorkspaceToggle` → 仅当 workspace 存在时切换 `panel_open`
+- `WorkspaceDirToggle(path)` → `expanded_dirs` insert/remove
+- `WorkspaceFileClick(path)` → 遍历 `self.tabs` 找 `current_path == Some(&
+  path)`，匹配则 `self.active_tab = idx`（无需 Task 重载）；否则
+  `Task::perform(open_path(path), FileOpened)`（复用已有 loader）
+
+**设计决策**：
+
+- **扁平 entries + expanded_dirs 过滤** 而非嵌套 tree struct — 更简单、
+  更 diff-friendly、避免 iced 嵌套借用问题
+- **扫描同步执行** — 深度 3 + 黑名单 + 2000 条截断下 <50ms，不需要 async
+  Task，也省掉线程 safety 问题
+- **绝对路径直比** 做 tab 重复判定（不做 canonicalize） — 用户交互路径
+  都是 FileDialog 返回的绝对路径，够用；避免 file 可能不存在时 canonicalize
+  失败
+- **黑名单预先硬编码** — 包含 H7CAD 工作目录下常见的 agent / cargo /
+  VC 等配置目录 18 条，防止误扫巨大子树
+- **Phase 1 / Phase 2 切分** — state + 命令行驱动先交付可验证的闭环；
+  UI panel 放 Phase 2 独立 commit，避免 iced 布局集成与核心逻辑耦合
+
+**Dead code 预留**：`WorkspaceFileClick` / `WorkspaceDirToggle` 两个 Message
+variant + `root_label` / `visible_entries` 两个 helper 本轮未被构造 / 调用
+（它们是 Phase 2 UI 的消费点），加 `#[allow(dead_code)]` 并注释
+"consumed by the side-panel UI (next iteration)"。
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（3.89s）
+- 主 crate 测试 **142/143**（相比上一轮 135/136，新增 7 个 workspace
+  单测全绿；pre-existing `prop_geom_commit_rejects_unsupported_native_hatch`
+  失败依然 pre-existing，无新回归）
+
+**下一轮 (Phase 2)**：
+- `src/ui/workspace_panel.rs`：`view_panel(&Workspace, active_path,
+  &expanded_dirs) -> Element<Message>`
+- `src/app/view.rs`：center_stack 集成 workspace panel 在 properties panel
+  左侧
+- Panel：240px 固定宽度 / 滚动列表 / 目录 ▶▼ 展开折叠 / 文件单击触发
+  `WorkspaceFileClick` / 高亮当前 active tab 对应文件行
+
+### 2026-04-17：Insert Tab XCLIP — 选中 RasterImage / Underlay 的裁剪控制
+
+ROADMAP Insert Tab / Reference group 的 Medium 复杂度命令 **XCLIP** 从
+ribbon stub 升级为 CLI 子命令集合，覆盖裁剪 **状态查询 / 启停 / 删除**
+三大场景。交互式 `XCLIP NEW`（draw a new boundary）暂不支持—— 需要点
+拾取命令对象，留作未来 enhancement。
+
+**子命令** (`src/app/commands.rs`)：
+
+- `XCLIP` / `XCLIP STATUS` — 对当前 selection 里的每个 `RasterImage` 和
+  `Underlay` 输出 `clip=ON|OFF` 以及（Underlay）边界顶点数
+- `XCLIP ON` / `XCLIP OFF` — 切换 clipping flag：
+  - `RasterImage`：修改 `flags` 上的 `ImageDisplayFlags::USE_CLIPPING_BOUNDARY` 位
+  - `Underlay`：修改 `flags` 上的 `UnderlayDisplayFlags::CLIPPING` 位
+  - 统计改变的 entity 数后输出 `"XCLIP ON/OFF: N of M entity(ies) changed."`
+- `XCLIP DELETE` — 彻底移除 clip boundary：
+  - `RasterImage`：`clip_boundary = ClipBoundary::full_image(size.x, size.y)` +
+    清 `USE_CLIPPING_BOUNDARY` 位
+  - `Underlay`：`clip_boundary_vertices.clear()` + 清 `CLIPPING` 位
+- `XCLIP NEW` — 给出提示 "interactive boundary picker not yet supported"
+- 未知子命令 — 使用说明提示
+
+**行为细节**：
+- 命令前首先过滤 selection 为 clippable entities（`RasterImage` 或 `Underlay`），
+  空时 push_info 引导用户"select first"并 `Task::none()` 返回
+- 任何 mutating 路径（ON/OFF/DELETE）前执行 `push_undo_snapshot("XCLIP")`，
+  完成后 mark tab dirty
+- STATUS 路径 read-only，无 snapshot、无 dirty
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（5.44s）
+- 主 crate 测试 **135/136**（和上一轮一致，无回归；pre-existing
+  `prop_geom_commit_rejects_unsupported_native_hatch` 失败依然）
+
+**踩坑**：第一版用了 `Handle::as_u64()` 方法，实际 acadrust `Handle` 只
+暴露 `.value() -> u64`，一次修正。
+
+**ROADMAP 进度**：Insert Tab / Reference 的 Medium `XCLIP` 交付。combined
+今日：View Tab 9 + Insert Tab 10 + Manage Tab 5 = **24 个** ROADMAP 命令
+后端落地。
+
+### 2026-04-17：Insert Tab BLOCKPALETTE + View Tab TOOLPALETTES — block 清单 + 面板反馈
+
+本轮交付 2 条 Medium 复杂度命令 —— `BLOCKPALETTE`（block 清单 + 快捷插入）
+和 `TOOLPALETTES`（tool palettes 面板在 H7CAD 的映射）。
+
+**BLOCKPALETTE** (`src/app/commands.rs`)：
+
+ROADMAP 原义是 "open block palette for inserting blocks with multiple
+views" — H7CAD 没有独立浮动面板，落地为 CLI 子命令集合：
+- `BLOCKPALETTE` / `BLOCKPALETTE LIST` — 列出所有 **user-defined** block
+  records（跳过系统 block `*Model_Space` 等），每条显示名字 + INSERT
+  引用数 + AttributeDefinition 数
+- `BLOCKPALETTE COUNT` — 只打印聚合值
+- `BLOCKPALETTE INSERT <name>` — 验证 block 存在后 `Task::done(Message::
+  Command("INSERT <name>"))` 派发到现有 INSERT 命令
+- INSERT 引用数通过一次 entities() 扫描按 `block_name` 聚合；AttDef 数通过
+  `br.entity_handles` 过滤 `EntityType::AttributeDefinition` 得到
+- read-only；未知子命令给出用法提示
+
+**TOOLPALETTES** (`src/app/commands.rs`)：
+
+AutoCAD Tool Palettes 是一个带 drag-and-drop 工具瓦片的浮动面板；H7CAD
+的 ribbon tabs (Home / Annotate / Insert / View / Manage) 已经提供等价
+表面。因此 `TOOLPALETTES` 命令兑现为**信息性反馈**（和 HORIZONTAL /
+VERTICAL / CASCADE 同款策略）—— 说明 ribbon 是 tool surface，引导用户
+使用 ribbon 或命令行。read-only、无 mutation。
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（3.90s）
+- 主 crate 测试：**135/136**（和上一轮一致，无回归；pre-existing 失败
+  依然。本轮命令为 CLI 读取 + dispatch，不独立写单测）
+
+**ROADMAP 进度**：Insert Tab / Block 的 `BLOCKPALETTE` + View Tab / Palettes
+的 `TOOLPALETTES` 两条 Medium 交付。combined 今日：View Tab 9 + Insert
+Tab 9 + Manage Tab 5 = **23 个** ROADMAP 命令后端落地。
+
+### 2026-04-17：Manage Tab CUIEXPORT / CUIIMPORT / CUILOAD — CUI 持久化三件套
+
+ROADMAP Manage Tab / Customization group 里 3 条 Medium 复杂度命令
+`CUIEXPORT` / `CUIIMPORT` / `CUILOAD` 从 ribbon stub 升级为完整文件 I/O
+命令。复用 `ALIASEDIT` 已维护的 `command_aliases` 和 shortcut 编辑器已
+维护的 `shortcut_overrides` 两个 map，落地到磁盘的 H7CAD CUI 文本格式。
+
+**格式设计** (`src/io/cui.rs` 新模块)：
+
+- 自定义纯文本 schema（不走 AutoCAD `.cuix` XML/ZIP）：
+  ```
+  # H7CAD CUI v1
+  [aliases]
+  L=LINE
+  CO=COPY
+  [shortcuts]
+  F3=SNAPOFF
+  ```
+- `CuiDocument { aliases, shortcuts }` 结构体
+- `serialize_cui(&CuiDocument) -> String`：每个 section 内键按字母序写出，
+  保证 diff 稳定
+- `parse_cui(&str) -> Result<CuiDocument, String>`：宽容解析 — 空行 /
+  `#` 注释 / 未知 section / 无 `=` 的行 / 空 key 全部 silently 跳过，
+  便于用户手编
+- 7 个单测：round-trip / 排序 / 忽略注释空行 / 忽略未知 section /
+  容忍畸形行 / key-value 两侧 trim / 空文档 round-trip
+
+**文件对话框** (`src/io/mod.rs`)：
+
+- `pub async fn pick_cui_save_path()` — save-file 对话框，扩展 `.cui/.txt`
+- `pub async fn pick_cui_open_path()` — open-file 对话框，同样过滤器
+- `mod cui;` 挂在 `io/mod.rs` 顶部
+
+**Message 扩展** (`src/app/mod.rs`)：
+
+- 新增 6 个 variant：
+  - `CuiExport` / `CuiExportPath(Option<PathBuf>)`
+  - `CuiImport` / `CuiImportPath(Option<PathBuf>)`
+  - `CuiLoad` / `CuiLoadPath(Option<PathBuf>)`
+- 分别对应三条命令的触发和文件对话框回调
+
+**Dispatch** (`src/app/commands.rs`)：
+
+- `"CUIEXPORT"` / `"CUIIMPORT"` / `"CUILOAD"` 各自 `return Task::done(Message::...)`
+  同一行打通
+- 三者语义区分：
+  - **CUIEXPORT**：把当前 `command_aliases` + `shortcut_overrides` 写到用户选的文件
+  - **CUIIMPORT**：**替换** 当前两个 map（用于"换一套配置"）
+  - **CUILOAD**：**合并** 到当前两个 map（用于"追加部分配置"，AutoCAD 里
+    partial CUI load 的语义）；同 key 时文件值覆盖，同时汇报 added vs overwritten 数
+
+**Update handler** (`src/app/update.rs`)：
+
+- `CuiExport` → `Task::perform(pick_cui_save_path(), CuiExportPath)`；
+  拿到路径后 `serialize_cui` + `std::fs::write`，成功则 push_output 汇报
+  写入项数和路径
+- `CuiImport` → 同款 pick_cui_open_path → `fs::read_to_string` +
+  `parse_cui` → 两个 map 直接整体赋值
+- `CuiLoad` → pick → parse → 逐项 `insert` 到 map，统计 added vs
+  overwritten 两个计数器（根据 `insert` 返回的 `Option<String>` 是 Some 还是
+  None 判断）；push_output + push_info 两行详细汇报
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（6.99s）
+- 主 crate 测试：**135/136**（相比上一轮 128/129 新增 7 个 cui 单测全绿；
+  pre-existing 失败 `prop_geom_commit_rejects_unsupported_native_hatch`
+  依然，与本轮改动无关）
+
+**ROADMAP 进度**：Manage Tab / Customization 里 `CUIEXPORT` + `CUIIMPORT`
++ `CUILOAD` 三条 Medium 全部交付。combined 今日：View Tab 8 + Insert Tab 8
++ Manage Tab 5 (ALIASEDIT + FINDNONPURGEABLE + CUIEXPORT + CUIIMPORT +
+CUILOAD) = **21 个** ROADMAP 命令后端落地。
+
+### 2026-04-17：View Tab HORIZONTAL / VERTICAL / CASCADE — tab 架构下的信息性反馈
+
+ROADMAP View Tab / Interface group 的 3 个 Low 复杂度命令 **HORIZONTAL**、
+**VERTICAL**、**CASCADE** 从 ribbon stub 升级为信息性命令。传统 AutoCAD 这
+三条命令用来重新排列 MDI 子窗口（水平平铺 / 垂直平铺 / 层叠），而 H7CAD
+采用**单窗口 tab UI**，没有可独立几何排列的子窗口——这三条命令兑现为
+描述当前 tab 状态 + 指引用户使用 tab 切换的等价路径。
+
+**实现** (`src/app/commands.rs`)：
+
+- `HORIZONTAL | VERTICAL | CASCADE` 联合 case，按 cmd 字符串映射到显示名
+  (`"Tile Horizontal"` / `"Tile Vertical"` / `"Cascade"`)
+- 当前 tab 数 `n = self.tabs.len()`：
+  - `n <= 1`：push_info `"<mode>: only one document open — nothing to
+    arrange."`
+  - `n > 1`：push_output 说明 H7CAD 是单窗口 tab UI + 当前打开 tab 数；
+    push_info 提示用户使用 tab 栏或 Ctrl+Tab / Ctrl+Shift+Tab 切换
+- read-only：无 mutation、无 undo snapshot、无 dirty flag
+
+**决策**：
+- 不做"假平铺"（比如平分屏幕或切换 tab 样式），因为 iced 的 tab UI 本身
+  就是最优架构；伪装成"平铺"反而损伤一致性
+- 信息性反馈是 ROADMAP 这三条命令在当前架构下的诚实兑现
+
+**验证**：
+
+- `cargo check -p H7CAD`：零 warning（3.22s）
+- 主 crate 测试 **128/129**（和上一轮一致，无回归）
+
+**ROADMAP 进度**：View Tab / Interface 的 3 条 Low 命令全部交付。combined
+今日：View Tab 8 + Insert Tab 8 + Manage Tab 2 = **18 个** ROADMAP 命令
+后端落地。
+
 ### 2026-04-17：Insert Tab ATTMAN 命令接入 — block AttributeDefinition 只读清单
 
 ROADMAP Insert Tab / Attributes Group 里 Medium 复杂度命令 **ATTMAN**

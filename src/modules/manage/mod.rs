@@ -6,7 +6,7 @@ mod cui_import;
 mod edit_aliases;
 mod find_nonpurgeable;
 mod options;
-mod overkill;
+pub(crate) mod overkill;
 mod purge;
 mod user_interface;
 

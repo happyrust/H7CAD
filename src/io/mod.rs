@@ -3,6 +3,7 @@
 // Native I/O helpers are the forward path. Compatibility wrappers remain for
 // the current UI/runtime until scene/document migration is complete.
 
+pub mod cui;
 pub mod obj;
 pub mod pdf_export;
 pub mod plot_style;
@@ -131,6 +132,45 @@ pub async fn pick_plot_style() -> Option<plot_style::PlotStyleTable> {
         .pick_file()
         .await?;
     plot_style::PlotStyleTable::load(handle.path()).ok()
+}
+
+// ── Workspace (VS Code-style folder picker) ──────────────────────────────
+
+/// Show a folder-picker dialog for selecting a workspace root.  Returns
+/// `None` if the user cancels.
+pub async fn pick_workspace_folder() -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
+        .set_title("Open Workspace Folder")
+        .pick_folder()
+        .await
+        .map(|h| h.path().to_path_buf())
+}
+
+// ── CUI (Command User Interface) ──────────────────────────────────────────
+
+/// Show a save-file dialog for exporting the runtime CUI (aliases +
+/// shortcuts) to disk.  Returns the picked path (or `None` on cancel).
+pub async fn pick_cui_save_path() -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
+        .set_title("Export CUI (aliases + shortcuts)")
+        .set_file_name("h7cad.cui")
+        .add_filter("H7CAD CUI Files", &["cui", "txt"])
+        .add_filter("All Files", &["*"])
+        .save_file()
+        .await
+        .map(|h| h.path().to_path_buf())
+}
+
+/// Show a file-open dialog for importing a H7CAD CUI file.  Returns the
+/// picked path (or `None` on cancel).
+pub async fn pick_cui_open_path() -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
+        .set_title("Import CUI (aliases + shortcuts)")
+        .add_filter("H7CAD CUI Files", &["cui", "txt"])
+        .add_filter("All Files", &["*"])
+        .pick_file()
+        .await
+        .map(|h| h.path().to_path_buf())
 }
 
 // ── Image file picker ─────────────────────────────────────────────────────

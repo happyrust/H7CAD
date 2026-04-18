@@ -286,13 +286,30 @@ impl H7CAD {
             viewport_stack = viewport_stack.push(dyn_ol);
         }
 
-        let center_stack = iced::widget::stack![
+        let ws_panel: Option<Element<'_, Message>> = if self.workspace_panel_open {
+            self.workspace.as_ref().map(|ws| {
+                let active = tab.current_path.as_deref();
+                crate::ui::workspace_panel::view_panel(ws, active, &self.expanded_dirs)
+            })
+        } else {
+            None
+        };
+
+        let center_row: Element<'_, Message> = if let Some(wp) = ws_panel {
+            row![wp, tab.properties.view(), viewport_stack]
+                .width(Fill)
+                .height(Fill)
+                .into()
+        } else {
             row![tab.properties.view(), viewport_stack]
                 .width(Fill)
-                .height(Fill),
-        ]
-        .width(Fill)
-        .height(Fill);
+                .height(Fill)
+                .into()
+        };
+
+        let center_stack = iced::widget::stack![center_row]
+            .width(Fill)
+            .height(Fill);
 
         let tab_bar: Element<'_, Message> = if self.show_file_tabs {
             doc_tab_bar(&self.tabs, self.active_tab)

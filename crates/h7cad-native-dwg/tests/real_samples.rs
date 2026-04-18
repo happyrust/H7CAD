@@ -1680,6 +1680,26 @@ struct Ac1015LineBodyProbe {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+struct Ac1015LineBodyHypothesisAudit {
+    recovered_handle: u64,
+    failing_handle: u64,
+    recovered_body_start_bits: usize,
+    failing_body_start_bits: usize,
+    body_start_bit_delta: isize,
+    body_start_byte_delta: isize,
+    recovered_body_prefix_bytes: Vec<u8>,
+    failing_body_prefix_bytes: Vec<u8>,
+    recovered_start_y: f64,
+    failing_start_y: f64,
+    recovered_end_y: f64,
+    failing_end_y: f64,
+    start_y_dd_prefix_bits: u8,
+    end_y_dd_prefix_bits: u8,
+    thickness_flag_bits: u8,
+    extrusion_flag_bits: u8,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct Ac1015LineBodySemanticAudit {
     z_are_zero: bool,
     start: [f64; 3],
@@ -2001,6 +2021,41 @@ fn ac1015_line_body_probe(
         fields,
         boundary_audit,
     }
+}
+
+fn probe_line_body_field_hypothesis(
+    probe: &Ac1015LineBodyProbe,
+    body_offset_bits: usize,
+) -> Option<Ac1015LineBodySemanticAudit> {
+    let mut reader = BitReader::from_bit_range(
+        &probe.body_bytes,
+        body_offset_bits,
+        probe.body_bytes.len() * 8,
+    )
+    .expect("line body hypothesis bit range should be valid");
+
+    let z_are_zero = reader.read_bit().ok()? == 1;
+    let sx = reader.read_raw_f64_le().ok()?;
+    let ex = reader.read_bit_double_with_default(sx).ok()?;
+    let sy = reader.read_raw_f64_le().ok()?;
+    let ey = reader.read_bit_double_with_default(sy).ok()?;
+    let (sz, ez) = if z_are_zero {
+        (0.0, 0.0)
+    } else {
+        let sz = reader.read_raw_f64_le().ok()?;
+        let ez = reader.read_bit_double_with_default(sz).ok()?;
+        (sz, ez)
+    };
+    let thickness = reader.read_bit_thickness_r2000_plus().ok()?;
+    let extrusion = reader.read_bit_extrusion_r2000_plus().ok()?;
+
+    Some(Ac1015LineBodySemanticAudit {
+        z_are_zero,
+        start: [sx, sy, sz],
+        end: [ex, ey, ez],
+        thickness,
+        extrusion,
+    })
 }
 
 fn parse_ac1015_entity_common_instrumented(
@@ -2720,7 +2775,6 @@ fn ac1015_line_body_byte_position_red_test_proves_representative_field_mismatch(
         return;
     };
 
-    let recovered = ac1015_line_body_probe(&bytes, 0x2C7, "LINE");
     let failing = ac1015_line_body_probe(&bytes, 0x2CF, "LINE");
 
     eprintln!("AC1015 LINE body byte-position red test:");
@@ -2989,6 +3043,261 @@ fn ac1015_line_body_byte_position_red_test_proves_representative_field_mismatch(
 }
 
 #[test]
+fn ac1015_line_body_post_starty_hypothesis_audit_isolates_line_only_offset_vs_primitive() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+
+    let recovered = ac1015_line_body_probe(&bytes, 0x2C7, "LINE");
+    let failing = ac1015_line_body_probe(&bytes, 0x2CF, "LINE");
+    let second_failing = ac1015_line_body_probe(&bytes, 0x517, "LINE");
+
+    let parse_bool = |probe: &Ac1015LineBodyProbe, label: &'static str| {
+        probe
+            .fields
+            .iter()
+            .find(|field| field.label == label)
+            .and_then(|field| field.semantic_value.parse::<bool>().ok())
+            .unwrap_or_else(|| panic!("expected boolean field {label}"))
+    };
+    let parse_f64 = |probe: &Ac1015LineBodyProbe, label: &'static str| {
+        probe
+            .fields
+            .iter()
+            .find(|field| field.label == label)
+            .and_then(|field| field.semantic_value.parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("expected f64 field {label}"))
+    };
+    let parse_vec3 = |probe: &Ac1015LineBodyProbe, label: &'static str| {
+        let value = probe
+            .fields
+            .iter()
+            .find(|field| field.label == label)
+            .map(|field| field.semantic_value.clone())
+            .unwrap_or_else(|| panic!("expected vec3 field {label}"));
+        let trimmed = value.trim_matches(|c| c == '[' || c == ']');
+        let parts = trimmed
+            .split(',')
+            .map(|part| part.trim().parse::<f64>().expect("vec component"))
+            .collect::<Vec<_>>();
+        [parts[0], parts[1], parts[2]]
+    };
+    let semantic_of = |probe: &Ac1015LineBodyProbe| Ac1015LineBodySemanticAudit {
+        z_are_zero: parse_bool(probe, "z_are_zero"),
+        start: [
+            parse_f64(probe, "start.x"),
+            parse_f64(probe, "start.y"),
+            probe.fields
+                .iter()
+                .find(|field| field.label == "start.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        end: [
+            parse_f64(probe, "end.x"),
+            parse_f64(probe, "end.y"),
+            probe.fields
+                .iter()
+                .find(|field| field.label == "end.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        thickness: parse_f64(probe, "thickness"),
+        extrusion: parse_vec3(probe, "extrusion"),
+    };
+
+    let recovered_semantics = semantic_of(&recovered);
+    let failing_semantics = semantic_of(&failing);
+    let second_failing_semantics = semantic_of(&second_failing);
+
+    let start_y_dd_prefix = {
+        let mut reader = BitReader::from_bit_range(
+            &recovered.body_bytes,
+            195,
+            recovered.body_bytes.len() * 8,
+        )
+        .expect("LINE start.y DD prefix bit range");
+        reader
+            .read_bits(2)
+            .expect("LINE start.y DD prefix should decode") as u8
+    };
+    let end_y_dd_prefix = {
+        let mut reader = BitReader::from_bit_range(
+            &recovered.body_bytes,
+            287 - recovered.body_start_bits,
+            recovered.body_bytes.len() * 8,
+        )
+        .expect("LINE end.y DD prefix bit range");
+        reader
+            .read_bits(2)
+            .expect("LINE end.y DD prefix should decode") as u8
+    };
+    let thickness_flag = {
+        let mut reader = BitReader::from_bit_range(
+            &recovered.body_bytes,
+            289 - recovered.body_start_bits,
+            recovered.body_bytes.len() * 8,
+        )
+        .expect("LINE thickness flag bit range");
+        reader.read_bit().expect("LINE thickness flag should decode")
+    };
+    let extrusion_flag = {
+        let mut reader = BitReader::from_bit_range(
+            &recovered.body_bytes,
+            290 - recovered.body_start_bits,
+            recovered.body_bytes.len() * 8,
+        )
+        .expect("LINE extrusion flag bit range");
+        reader.read_bit().expect("LINE extrusion flag should decode")
+    };
+
+    let audit = Ac1015LineBodyHypothesisAudit {
+        recovered_handle: recovered.handle,
+        failing_handle: failing.handle,
+        recovered_body_start_bits: recovered.body_start_bits,
+        failing_body_start_bits: failing.body_start_bits,
+        body_start_bit_delta: failing.body_start_bits as isize - recovered.body_start_bits as isize,
+        body_start_byte_delta: failing.body_start_bits as isize / 8 - recovered.body_start_bits as isize / 8,
+        recovered_body_prefix_bytes: recovered.body_bytes.iter().take(8).copied().collect(),
+        failing_body_prefix_bytes: failing.body_bytes.iter().take(8).copied().collect(),
+        recovered_start_y: recovered_semantics.start[1],
+        failing_start_y: failing_semantics.start[1],
+        recovered_end_y: recovered_semantics.end[1],
+        failing_end_y: failing_semantics.end[1],
+        start_y_dd_prefix_bits: start_y_dd_prefix,
+        end_y_dd_prefix_bits: end_y_dd_prefix,
+        thickness_flag_bits: thickness_flag,
+        extrusion_flag_bits: extrusion_flag,
+    };
+
+    eprintln!("AC1015 LINE post-start.y hypothesis audit: {audit:?}");
+
+    let failing_from_recovered_body_plus_8 = probe_line_body_field_hypothesis(&recovered, 8);
+    eprintln!(
+        "  recovered semantics={recovered_semantics:?}\n  failing semantics={failing_semantics:?}\n  second failing semantics={second_failing_semantics:?}\n  recovered+8 hypothesis={failing_from_recovered_body_plus_8:?}"
+    );
+
+    assert_eq!(
+        audit.body_start_bit_delta, 8,
+        "representative failing LINE handle should enter the body exactly one byte later than the recovered representative"
+    );
+    assert_eq!(
+        audit.body_start_byte_delta, 1,
+        "the common/body handoff divergence should be byte-aligned, not a sub-byte primitive decode drift"
+    );
+    assert_eq!(
+        audit.start_y_dd_prefix_bits, 0b00,
+        "the recovered representative still encodes start.y as a raw double, not a DD-compressed paired field"
+    );
+    assert_eq!(
+        audit.end_y_dd_prefix_bits, 0b00,
+        "the recovered representative still uses the ordinary DD default for end.y after start.y is decoded"
+    );
+    assert_eq!(
+        audit.thickness_flag_bits, 1,
+        "the recovered representative still reaches the default thickness flag"
+    );
+    assert_eq!(
+        audit.extrusion_flag_bits, 0,
+        "the recovered representative currently hands the last body bit to the non-default extrusion branch once the one-byte handoff offset is preserved in the live slice audit"
+    );
+    assert_ne!(
+        recovered_semantics.start[1], failing_semantics.start[1],
+        "baseline evidence: start.y remains the first value-level divergence on live LINE slices"
+    );
+    assert_ne!(
+        failing_semantics, second_failing_semantics,
+        "representative failing LINE handles still diverge from each other, reinforcing that the remaining issue lives at the per-object common/body handoff boundary rather than a single universal LINE primitive/default rule"
+    );
+    assert!(
+        failing_from_recovered_body_plus_8.is_none(),
+        "a naive one-byte shift inside the already-sliced LINE body should not fully decode, which points to the semantic common/body handoff boundary rather than an internal primitive/default mismatch"
+    );
+}
+
+#[test]
+fn ac1015_line_body_recovery_lift_red_test_requires_byte_handoff_correction() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+
+    let recovered = ac1015_line_body_probe(&bytes, 0x2C7, "LINE");
+    let failing = ac1015_line_body_probe(&bytes, 0x2CF, "LINE");
+
+    let shifted = probe_line_body_field_hypothesis(&failing, 0);
+
+    assert!(
+        shifted.is_some(),
+        "red test: representative failing LINE body should become self-consistent once the parser hands off to its truthful body start"
+    );
+
+    let shifted = shifted.expect("failing LINE body should decode from its truthful handoff");
+    let parse_bool = |probe: &Ac1015LineBodyProbe, label: &'static str| {
+        probe
+            .fields
+            .iter()
+            .find(|field| field.label == label)
+            .and_then(|field| field.semantic_value.parse::<bool>().ok())
+            .unwrap_or_else(|| panic!("expected boolean field {label}"))
+    };
+    let parse_f64 = |probe: &Ac1015LineBodyProbe, label: &'static str| {
+        probe
+            .fields
+            .iter()
+            .find(|field| field.label == label)
+            .and_then(|field| field.semantic_value.parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("expected f64 field {label}"))
+    };
+    let parse_vec3 = |probe: &Ac1015LineBodyProbe, label: &'static str| {
+        let value = probe
+            .fields
+            .iter()
+            .find(|field| field.label == label)
+            .map(|field| field.semantic_value.clone())
+            .unwrap_or_else(|| panic!("expected vec3 field {label}"));
+        let trimmed = value.trim_matches(|c| c == '[' || c == ']');
+        let parts = trimmed
+            .split(',')
+            .map(|part| part.trim().parse::<f64>().expect("vec component"))
+            .collect::<Vec<_>>();
+        [parts[0], parts[1], parts[2]]
+    };
+
+    let failing_semantics = Ac1015LineBodySemanticAudit {
+        z_are_zero: parse_bool(&failing, "z_are_zero"),
+        start: [
+            parse_f64(&failing, "start.x"),
+            parse_f64(&failing, "start.y"),
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "start.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        end: [
+            parse_f64(&failing, "end.x"),
+            parse_f64(&failing, "end.y"),
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "end.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        thickness: parse_f64(&failing, "thickness"),
+        extrusion: parse_vec3(&failing, "extrusion"),
+    };
+
+    assert_eq!(
+        shifted, failing_semantics,
+        "red test: once the parser applies the body handoff correction, the failing LINE slice should decode to the already-observed truthful semantics"
+    );
+}
+
+#[test]
 fn ac1015_line_point_targeted_debug_trace_reports_first_missing_record_point() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
         eprintln!("skip: sample_AC1015.dwg not present");
@@ -3041,6 +3350,60 @@ fn ac1015_line_point_targeted_debug_trace_reports_first_missing_record_point() {
         );
         assert_eq!(trace.common_probe_stage, Some("ok"));
     }
+}
+
+#[test]
+fn ac1015_split_streams_main_reader_starts_after_header_even_when_body_start_is_unaligned() {
+    fn pack_bits(fields: &[(u64, u8)]) -> Vec<u8> {
+        let total_bits: usize = fields.iter().map(|(_, count)| *count as usize).sum();
+        let byte_count = total_bits.div_ceil(8);
+        let mut out = vec![0u8; byte_count];
+        let mut cursor = 0usize;
+        for (value, count) in fields {
+            for bit in (0..*count).rev() {
+                if ((value >> bit) & 1) == 1 {
+                    let byte_idx = cursor / 8;
+                    let bit_idx = 7 - (cursor % 8);
+                    out[byte_idx] |= 1 << bit_idx;
+                }
+                cursor += 1;
+            }
+        }
+        out
+    }
+
+    let mut fields = vec![(0b01, 2), (19, 8)];
+    for byte in [96_u8, 0, 0, 0] {
+        fields.push((byte as u64, 8));
+    }
+    fields.push((0x51, 8));
+    fields.push((0x2C, 8));
+    for byte in [0xAA_u8, 0xBB, 0xCC, 0xDD, 0xEE] {
+        fields.push((byte as u64, 8));
+    }
+    let body = pack_bits(&fields);
+    let mut slice = vec![body.len() as u8, 0x00];
+    slice.extend_from_slice(&body);
+
+    let (_header, main_reader, handle_reader) =
+        h7cad_native_dwg::split_ac1015_object_streams(&slice)
+            .expect("synthetic AC1015 object slice should split");
+
+    assert_eq!(
+        main_reader.position_in_bits(),
+        58,
+        "split_ac1015_object_streams must preserve the post-header bit position instead of rounding the body start down to the enclosing byte"
+    );
+    assert_eq!(
+        main_reader.bits_remaining(),
+        38,
+        "main stream should expose only the declared payload bits after the unaligned header handoff"
+    );
+    assert_eq!(
+        handle_reader.position_in_bits(),
+        96,
+        "handle stream should still begin at the declared main_size_bits boundary"
+    );
 }
 
 fn print_supported_geometric_failure_examples(

@@ -481,6 +481,223 @@ impl H7CAD {
 
             Message::ObjImportPath(None) => Task::none(),
 
+            // ── Workspace (VS Code-style folder browser) ───────────────────
+            Message::WorkspaceOpen => Task::perform(
+                crate::io::pick_workspace_folder(),
+                Message::WorkspaceOpened,
+            ),
+            Message::WorkspaceOpened(Some(root)) => {
+                match crate::app::workspace::scan_workspace(
+                    &root,
+                    crate::app::workspace::DEFAULT_MAX_DEPTH,
+                    crate::app::workspace::DEFAULT_MAX_ENTRIES,
+                ) {
+                    Ok(ws) => {
+                        let cad_count = ws
+                            .entries
+                            .iter()
+                            .filter(|e| matches!(
+                                e.kind,
+                                crate::app::workspace::EntryKind::DxfFile
+                                    | crate::app::workspace::EntryKind::DwgFile
+                            ))
+                            .count();
+                        self.command_line.push_output(&format!(
+                            "WORKSPACE: opened \"{}\" — {} CAD file(s) in {} entry(ies){}",
+                            ws.root.display(),
+                            cad_count,
+                            ws.entries.len(),
+                            if ws.truncated { " (truncated)" } else { "" },
+                        ));
+                        self.workspace = Some(ws);
+                        self.workspace_panel_open = true;
+                        self.expanded_dirs.clear();
+                    }
+                    Err(e) => {
+                        self.command_line
+                            .push_error(&format!("WORKSPACE: scan failed: {}", e));
+                    }
+                }
+                Task::none()
+            }
+            Message::WorkspaceOpened(None) => Task::none(),
+            Message::WorkspaceClose => {
+                if self.workspace.take().is_some() {
+                    self.workspace_panel_open = false;
+                    self.expanded_dirs.clear();
+                    self.command_line.push_output("WORKSPACE: closed.");
+                } else {
+                    self.command_line
+                        .push_info("WORKSPACE: no workspace is open.");
+                }
+                Task::none()
+            }
+            Message::WorkspaceRefresh => {
+                if let Some(ws) = &self.workspace {
+                    let root = ws.root.clone();
+                    match crate::app::workspace::scan_workspace(
+                        &root,
+                        crate::app::workspace::DEFAULT_MAX_DEPTH,
+                        crate::app::workspace::DEFAULT_MAX_ENTRIES,
+                    ) {
+                        Ok(ws) => {
+                            self.command_line.push_output(&format!(
+                                "WORKSPACE: refreshed — {} entry(ies).",
+                                ws.entries.len()
+                            ));
+                            self.workspace = Some(ws);
+                        }
+                        Err(e) => self
+                            .command_line
+                            .push_error(&format!("WORKSPACE refresh failed: {}", e)),
+                    }
+                } else {
+                    self.command_line
+                        .push_info("WORKSPACE: no workspace is open to refresh.");
+                }
+                Task::none()
+            }
+            Message::WorkspaceToggle => {
+                if self.workspace.is_none() {
+                    self.command_line
+                        .push_info("WORKSPACE: no workspace is open — use WORKSPACE to pick a folder first.");
+                } else {
+                    self.workspace_panel_open = !self.workspace_panel_open;
+                    self.command_line.push_output(&format!(
+                        "WORKSPACE panel: {}",
+                        if self.workspace_panel_open { "ON" } else { "OFF" }
+                    ));
+                }
+                Task::none()
+            }
+            Message::WorkspaceDirToggle(path) => {
+                if self.expanded_dirs.contains(&path) {
+                    self.expanded_dirs.remove(&path);
+                } else {
+                    self.expanded_dirs.insert(path);
+                }
+                Task::none()
+            }
+            Message::WorkspaceFileClick(path) => {
+                // Already open? Switch to that tab.
+                let existing = self.tabs.iter().position(|t| {
+                    t.current_path.as_deref() == Some(path.as_path())
+                });
+                if let Some(idx) = existing {
+                    self.active_tab = idx;
+                    self.command_line.push_info(&format!(
+                        "WORKSPACE: switched to existing tab for \"{}\".",
+                        path.display()
+                    ));
+                    return Task::none();
+                }
+                // Otherwise load as a new tab via the standard open path.
+                Task::perform(crate::io::open_path(path), Message::FileOpened)
+            }
+
+            // ── CUI (Command User Interface) ────────────────────────────────
+            Message::CuiExport => Task::perform(
+                crate::io::pick_cui_save_path(),
+                Message::CuiExportPath,
+            ),
+            Message::CuiExportPath(Some(path)) => {
+                let doc = crate::io::cui::CuiDocument {
+                    aliases: self.command_aliases.clone(),
+                    shortcuts: self.shortcut_overrides.clone(),
+                };
+                let text = crate::io::cui::serialize_cui(&doc);
+                match std::fs::write(&path, text) {
+                    Ok(_) => self.command_line.push_output(&format!(
+                        "CUIEXPORT: wrote {} alias(es) + {} shortcut(s) to {}",
+                        doc.aliases.len(),
+                        doc.shortcuts.len(),
+                        path.display(),
+                    )),
+                    Err(e) => self.command_line.push_error(&format!(
+                        "CUIEXPORT: failed to write {}: {}",
+                        path.display(),
+                        e
+                    )),
+                }
+                Task::none()
+            }
+            Message::CuiExportPath(None) => Task::none(),
+
+            Message::CuiImport => Task::perform(
+                crate::io::pick_cui_open_path(),
+                Message::CuiImportPath,
+            ),
+            Message::CuiImportPath(Some(path)) => {
+                match std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|s| crate::io::cui::parse_cui(&s))
+                {
+                    Ok(doc) => {
+                        let (na, ns) = (doc.aliases.len(), doc.shortcuts.len());
+                        self.command_aliases = doc.aliases;
+                        self.shortcut_overrides = doc.shortcuts;
+                        self.command_line.push_output(&format!(
+                            "CUIIMPORT: replaced runtime CUI — {} alias(es) + {} shortcut(s) from {}",
+                            na,
+                            ns,
+                            path.display(),
+                        ));
+                    }
+                    Err(e) => self.command_line.push_error(&format!(
+                        "CUIIMPORT: failed to read {}: {}",
+                        path.display(),
+                        e
+                    )),
+                }
+                Task::none()
+            }
+            Message::CuiImportPath(None) => Task::none(),
+
+            Message::CuiLoad => Task::perform(
+                crate::io::pick_cui_open_path(),
+                Message::CuiLoadPath,
+            ),
+            Message::CuiLoadPath(Some(path)) => {
+                match std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|s| crate::io::cui::parse_cui(&s))
+                {
+                    Ok(doc) => {
+                        let (mut added_a, mut overwritten_a) = (0usize, 0usize);
+                        for (k, v) in doc.aliases {
+                            if self.command_aliases.insert(k, v).is_some() {
+                                overwritten_a += 1;
+                            } else {
+                                added_a += 1;
+                            }
+                        }
+                        let (mut added_s, mut overwritten_s) = (0usize, 0usize);
+                        for (k, v) in doc.shortcuts {
+                            if self.shortcut_overrides.insert(k, v).is_some() {
+                                overwritten_s += 1;
+                            } else {
+                                added_s += 1;
+                            }
+                        }
+                        self.command_line.push_output(&format!(
+                            "CUILOAD: merged {}",
+                            path.display()
+                        ));
+                        self.command_line.push_info(&format!(
+                            "  aliases: +{} new, {} overwritten; shortcuts: +{} new, {} overwritten",
+                            added_a, overwritten_a, added_s, overwritten_s,
+                        ));
+                    }
+                    Err(e) => self.command_line.push_error(&format!(
+                        "CUILOAD: failed to read {}: {}",
+                        path.display(),
+                        e
+                    )),
+                }
+                Task::none()
+            }
+            Message::CuiLoadPath(None) => Task::none(),
+
             Message::SaveFile => {
                 let i = self.active_tab;
                 if let Some(path) = &self.tabs[i].current_path {

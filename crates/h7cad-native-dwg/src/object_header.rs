@@ -161,6 +161,11 @@ pub fn split_ac1015_object_streams(
             context: "object main_size_bits outside body range",
         });
     }
+    // `main_size_bits` and the post-header cursor are both expressed in
+    // absolute body-bit coordinates. Preserve that same coordinate space
+    // in the split readers so later common/body decoders do not silently
+    // round the handoff down to the enclosing byte when the header ends
+    // mid-byte.
     let main_reader = BitReader::from_bit_range(body, header_end_bits, main_end_bits)?;
     let handle_reader = BitReader::from_bit_range(body, main_end_bits, body_bits)?;
     Ok((header, main_reader, handle_reader))

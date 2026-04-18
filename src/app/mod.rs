@@ -7,6 +7,7 @@ mod commands;
 mod cmd_result;
 mod view;
 mod update;
+pub(crate) mod workspace;
 
 use document::DocumentTab;
 
@@ -142,6 +143,14 @@ pub(super) struct H7CAD {
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
     /// User-defined function-key overrides: "F3" → command string.
     shortcut_overrides: std::collections::HashMap<String, String>,
+
+    // ── Workspace (VS Code-style folder browser) ──────────────────────────
+    /// Currently open workspace (folder scan snapshot), or `None`.
+    workspace: Option<workspace::Workspace>,
+    /// Whether the workspace side panel is visible.
+    workspace_panel_open: bool,
+    /// Directories the user has expanded in the workspace panel.
+    expanded_dirs: std::collections::HashSet<std::path::PathBuf>,
 
     // ── Layout Manager Panel ──────────────────────────────────────────────
     layout_manager_selected: String,
@@ -535,6 +544,39 @@ pub enum Message {
     ObjImport,
     /// Callback after the user picks (or cancels) the OBJ file path.
     ObjImportPath(Option<std::path::PathBuf>),
+    // ── Workspace (VS Code-style folder browser) ─────────────────────────
+    /// Trigger workspace folder picker dialog.
+    WorkspaceOpen,
+    /// Callback after the user picks (or cancels) a workspace folder.
+    WorkspaceOpened(Option<std::path::PathBuf>),
+    /// Close the current workspace (clears the state, does not close tabs).
+    WorkspaceClose,
+    /// Re-scan the current workspace root to refresh the file list.
+    WorkspaceRefresh,
+    /// Show / hide the workspace side panel without affecting the
+    /// underlying workspace data.
+    WorkspaceToggle,
+    /// User single-clicked a file row in the workspace panel.  Opens the
+    /// file in a new tab — or switches to an existing tab if the same
+    /// absolute path is already loaded.
+    WorkspaceFileClick(std::path::PathBuf),
+    /// User clicked a directory row in the workspace panel to expand or
+    /// collapse its children.
+    WorkspaceDirToggle(std::path::PathBuf),
+
+    // ── CUI (Command User Interface) ─────────────────────────────────────
+    /// Trigger CUI export: show save dialog.
+    CuiExport,
+    /// Callback after the user picks (or cancels) the CUI save path.
+    CuiExportPath(Option<std::path::PathBuf>),
+    /// Trigger CUI import (replace current aliases/shortcuts): show open dialog.
+    CuiImport,
+    /// Callback after the user picks (or cancels) the CUI import path.
+    CuiImportPath(Option<std::path::PathBuf>),
+    /// Trigger CUI partial load (merge into current aliases/shortcuts).
+    CuiLoad,
+    /// Callback after the user picks (or cancels) the CUI load path.
+    CuiLoadPath(Option<std::path::PathBuf>),
 }
 
 impl H7CAD {
@@ -598,6 +640,10 @@ impl H7CAD {
             active_theme: Theme::Dark,
             // Keyboard shortcuts
             shortcut_overrides: std::collections::HashMap::new(),
+            // Workspace
+            workspace: None,
+            workspace_panel_open: false,
+            expanded_dirs: std::collections::HashSet::new(),
             // Layout Manager
             layout_manager_selected: "Model".to_string(),
             layout_manager_rename_buf: String::new(),
@@ -640,6 +686,10 @@ impl H7CAD {
 
     /// Boot function for `iced::daemon`: returns initial state plus a task that
     /// opens the primary application window.
+    ///
+    /// If the first CLI argument is a path to an existing DWG/DXF file, a
+    /// follow-up `FileOpened` task is chained so the drawing loads
+    /// automatically after the main window opens.
     fn boot() -> (Self, Task<Message>) {
         use helpers::build_window_icon;
         let state = Self::new();
@@ -650,7 +700,26 @@ impl H7CAD {
         });
         let mut s = state;
         s.main_window = Some(id);
-        let task = open_task.map(|_| Message::Noop);
+        let mut task = open_task.map(|_| Message::Noop);
+
+        // If a file path was supplied on the command line, chain an async
+        // load task so the drawing opens shortly after the window appears.
+        if let Some(arg) = std::env::args().nth(1) {
+            let path = PathBuf::from(&arg);
+            if path.is_file() {
+                let load = Task::perform(
+                    crate::io::open_path(path),
+                    Message::FileOpened,
+                );
+                task = Task::batch([task, load]);
+            } else {
+                eprintln!(
+                    "H7CAD: CLI argument \"{}\" is not an existing file — ignored.",
+                    arg
+                );
+            }
+        }
+
         (s, task)
     }
 }
