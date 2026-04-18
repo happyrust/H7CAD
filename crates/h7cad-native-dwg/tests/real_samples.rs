@@ -1657,6 +1657,7 @@ struct Ac1015LineBodyFieldProgress {
     remaining_before_bits: usize,
     position_after_bits: usize,
     remaining_after_bits: usize,
+    semantic_value: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1678,6 +1679,15 @@ struct Ac1015LineBodyProbe {
     boundary_audit: Ac1015BodyBoundaryAudit,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct Ac1015LineBodySemanticAudit {
+    z_are_zero: bool,
+    start: [f64; 3],
+    end: [f64; 3],
+    thickness: f64,
+    extrusion: [f64; 3],
+}
+
 fn extract_logged_i32(entries: &[String], needle: &str) -> Option<i32> {
     entries.iter().find_map(|entry| {
         if !entry.contains(needle) {
@@ -1690,6 +1700,28 @@ fn extract_logged_i32(entries: &[String], needle: &str) -> Option<i32> {
             .next()?;
         value.parse::<i32>().ok()
     })
+}
+
+fn record_line_body_field<T>(
+    fields: &mut Vec<Ac1015LineBodyFieldProgress>,
+    label: &'static str,
+    reader: &mut BitReader<'_>,
+    semantic_value: impl FnOnce(&T) -> String,
+    read: impl FnOnce(&mut BitReader<'_>) -> T,
+) -> T {
+    let position_before_bits = reader.position_in_bits();
+    let remaining_before_bits = reader.bits_remaining();
+    let value = read(reader);
+    let semantic_value = semantic_value(&value);
+    fields.push(Ac1015LineBodyFieldProgress {
+        label,
+        position_before_bits,
+        remaining_before_bits,
+        position_after_bits: reader.position_in_bits(),
+        remaining_after_bits: reader.bits_remaining(),
+        semantic_value,
+    });
+    value
 }
 
 fn ac1015_common_layout_comparison(
@@ -1860,62 +1892,95 @@ fn ac1015_line_body_probe(
     let mut body_reader = common_main.clone();
     let mut fields = Vec::new();
 
-    let mut record_field = |label: &'static str, reader: &mut BitReader<'_>, read: &mut dyn FnMut(&mut BitReader<'_>)| {
-        let position_before_bits = reader.position_in_bits();
-        let remaining_before_bits = reader.bits_remaining();
-        read(reader);
-        fields.push(Ac1015LineBodyFieldProgress {
-            label,
-            position_before_bits,
-            remaining_before_bits,
-            position_after_bits: reader.position_in_bits(),
-            remaining_after_bits: reader.bits_remaining(),
-        });
-    };
-
-    let z_are_zero = {
-        let mut value = 0u8;
-        record_field("z_are_zero", &mut body_reader, &mut |reader| {
-            value = reader.read_bit().expect("z_are_zero bit");
-        });
-        value == 1
-    };
-    record_field("start.x", &mut body_reader, &mut |reader| {
-        let _ = reader.read_raw_f64_le().expect("LINE start.x");
-    });
-    record_field("end.x", &mut body_reader, &mut |reader| {
-        let _ = reader
-            .read_bit_double_with_default(0.0)
-            .expect("LINE end.x bit-double");
-    });
-    record_field("start.y", &mut body_reader, &mut |reader| {
-        let _ = reader.read_raw_f64_le().expect("LINE start.y");
-    });
-    record_field("end.y", &mut body_reader, &mut |reader| {
-        let _ = reader
-            .read_bit_double_with_default(0.0)
-            .expect("LINE end.y bit-double");
-    });
+    let z_are_zero = record_line_body_field(
+        &mut fields,
+        "z_are_zero",
+        &mut body_reader,
+        |value: &u8| format!("{}", *value == 1),
+        |reader| reader.read_bit().expect("z_are_zero bit"),
+    ) == 1;
+    let start_x = record_line_body_field(
+        &mut fields,
+        "start.x",
+        &mut body_reader,
+        |value: &f64| format!("{value:?}"),
+        |reader| reader.read_raw_f64_le().expect("LINE start.x"),
+    );
+    let _end_x = record_line_body_field(
+        &mut fields,
+        "end.x",
+        &mut body_reader,
+        |value: &f64| format!("{value:?}"),
+        |reader| {
+            reader
+                .read_bit_double_with_default(start_x)
+                .expect("LINE end.x bit-double")
+        },
+    );
+    let start_y = record_line_body_field(
+        &mut fields,
+        "start.y",
+        &mut body_reader,
+        |value: &f64| format!("{value:?}"),
+        |reader| reader.read_raw_f64_le().expect("LINE start.y"),
+    );
+    let _end_y = record_line_body_field(
+        &mut fields,
+        "end.y",
+        &mut body_reader,
+        |value: &f64| format!("{value:?}"),
+        |reader| {
+            reader
+                .read_bit_double_with_default(start_y)
+                .expect("LINE end.y bit-double")
+        },
+    );
     if !z_are_zero {
-        record_field("start.z", &mut body_reader, &mut |reader| {
-            let _ = reader.read_raw_f64_le().expect("LINE start.z");
-        });
-        record_field("end.z", &mut body_reader, &mut |reader| {
-            let _ = reader
-                .read_bit_double_with_default(0.0)
-                .expect("LINE end.z bit-double");
-        });
+        let start_z = {
+            record_line_body_field(
+                &mut fields,
+                "start.z",
+                &mut body_reader,
+                |value: &f64| format!("{value:?}"),
+                |reader| reader.read_raw_f64_le().expect("LINE start.z"),
+            )
+        };
+        let _end_z = {
+            record_line_body_field(
+                &mut fields,
+                "end.z",
+                &mut body_reader,
+                |value: &f64| format!("{value:?}"),
+                |reader| {
+                    reader
+                    .read_bit_double_with_default(start_z)
+                    .expect("LINE end.z bit-double")
+                },
+            )
+        };
     }
-    record_field("thickness", &mut body_reader, &mut |reader| {
-        let _ = reader
-            .read_bit_thickness_r2000_plus()
-            .expect("LINE thickness");
-    });
-    record_field("extrusion", &mut body_reader, &mut |reader| {
-        let _ = reader
-            .read_bit_extrusion_r2000_plus()
-            .expect("LINE extrusion");
-    });
+    let _thickness = record_line_body_field(
+        &mut fields,
+        "thickness",
+        &mut body_reader,
+        |value: &f64| format!("{value:?}"),
+        |reader| {
+            reader
+                .read_bit_thickness_r2000_plus()
+                .expect("LINE thickness")
+        },
+    );
+    let _extrusion = record_line_body_field(
+        &mut fields,
+        "extrusion",
+        &mut body_reader,
+        |value: &[f64; 3]| format!("{value:?}"),
+        |reader| {
+            reader
+                .read_bit_extrusion_r2000_plus()
+                .expect("LINE extrusion")
+        },
+    );
 
     let body_start_byte = body_start_bits / 8;
     let body_end_byte = (obj_header.main_size_bits as usize).div_ceil(8);
@@ -2747,6 +2812,179 @@ fn ac1015_line_body_byte_position_red_test_proves_representative_field_mismatch(
         recovered.boundary_audit.payload_remaining_bits,
         failing.boundary_audit.payload_remaining_bits,
         "recovered and failing LINE probes should leave the same residual bit count after payload decoding"
+    );
+
+    let recovered_semantics = Ac1015LineBodySemanticAudit {
+        z_are_zero: recovered
+            .fields
+            .iter()
+            .find(|field| field.label == "z_are_zero")
+            .and_then(|field| field.semantic_value.parse::<bool>().ok())
+            .expect("recovered z_are_zero semantic value"),
+        start: [
+            recovered
+                .fields
+                .iter()
+                .find(|field| field.label == "start.x")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("recovered start.x"),
+            recovered
+                .fields
+                .iter()
+                .find(|field| field.label == "start.y")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("recovered start.y"),
+            recovered
+                .fields
+                .iter()
+                .find(|field| field.label == "start.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        end: [
+            recovered
+                .fields
+                .iter()
+                .find(|field| field.label == "end.x")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("recovered end.x"),
+            recovered
+                .fields
+                .iter()
+                .find(|field| field.label == "end.y")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("recovered end.y"),
+            recovered
+                .fields
+                .iter()
+                .find(|field| field.label == "end.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        thickness: recovered
+            .fields
+            .iter()
+            .find(|field| field.label == "thickness")
+            .and_then(|field| field.semantic_value.parse::<f64>().ok())
+            .expect("recovered thickness"),
+        extrusion: [
+            0.0, 0.0, 0.0,
+        ],
+    };
+    let failing_semantics = Ac1015LineBodySemanticAudit {
+        z_are_zero: failing
+            .fields
+            .iter()
+            .find(|field| field.label == "z_are_zero")
+            .and_then(|field| field.semantic_value.parse::<bool>().ok())
+            .expect("failing z_are_zero semantic value"),
+        start: [
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "start.x")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("failing start.x"),
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "start.y")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("failing start.y"),
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "start.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        end: [
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "end.x")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("failing end.x"),
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "end.y")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .expect("failing end.y"),
+            failing
+                .fields
+                .iter()
+                .find(|field| field.label == "end.z")
+                .and_then(|field| field.semantic_value.parse::<f64>().ok())
+                .unwrap_or(0.0),
+        ],
+        thickness: failing
+            .fields
+            .iter()
+            .find(|field| field.label == "thickness")
+            .and_then(|field| field.semantic_value.parse::<f64>().ok())
+            .expect("failing thickness"),
+        extrusion: [
+            0.0, 0.0, 0.0,
+        ],
+    };
+    let parse_vec3 = |value: &str| -> [f64; 3] {
+        let trimmed = value.trim_matches(|c| c == '[' || c == ']');
+        let parts = trimmed
+            .split(',')
+            .map(|part| part.trim().parse::<f64>().expect("vec component"))
+            .collect::<Vec<_>>();
+        [parts[0], parts[1], parts[2]]
+    };
+    let recovered_extrusion = recovered
+        .fields
+        .iter()
+        .find(|field| field.label == "extrusion")
+        .map(|field| parse_vec3(&field.semantic_value))
+        .expect("recovered extrusion");
+    let failing_extrusion = failing
+        .fields
+        .iter()
+        .find(|field| field.label == "extrusion")
+        .map(|field| parse_vec3(&field.semantic_value))
+        .expect("failing extrusion");
+    let recovered_semantics = Ac1015LineBodySemanticAudit {
+        extrusion: recovered_extrusion,
+        ..recovered_semantics
+    };
+    let failing_semantics = Ac1015LineBodySemanticAudit {
+        extrusion: failing_extrusion,
+        ..failing_semantics
+    };
+    eprintln!("  recovered semantics: {:?}", recovered_semantics);
+    eprintln!("  failing   semantics: {:?}", failing_semantics);
+    assert_ne!(
+        recovered_semantics, failing_semantics,
+        "decoded LINE body values should diverge even when field boundaries and residual payload counts align"
+    );
+    assert_eq!(
+        recovered_semantics.z_are_zero, failing_semantics.z_are_zero,
+        "representative LINE handles should keep the same z_are_zero flag so the first value-level divergence comes from decoded coordinates or defaults"
+    );
+    assert_eq!(
+        recovered_semantics.z_are_zero, failing_semantics.z_are_zero,
+        "representative LINE handles should keep the same z_are_zero flag so the semantic mismatch comes from decoded coordinates/defaults rather than payload shape"
+    );
+    assert_eq!(
+        recovered_semantics.start[0], failing_semantics.start[0],
+        "representative LINE handles should agree on decoded start.x before the first semantic divergence"
+    );
+    assert_ne!(
+        recovered_semantics.start[1], failing_semantics.start[1],
+        "the first semantic divergence currently appears at start.y, isolating a value-level mismatch before end/thickness/extrusion defaults differ"
+    );
+    assert_eq!(
+        recovered_semantics.end[0], failing_semantics.end[0],
+        "representative LINE handles should still agree on decoded end.x when the start.y divergence is isolated"
+    );
+    assert_ne!(
+        recovered_semantics.end[1], failing_semantics.end[1],
+        "end.y should diverge consistently with the mismatched start.y semantic value"
     );
 }
 
