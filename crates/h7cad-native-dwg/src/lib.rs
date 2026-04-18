@@ -31,7 +31,8 @@ pub use entity_arc::{read_arc_geometry, ArcGeometry};
 pub use entity_circle::{read_circle_geometry, CircleGeometry};
 pub use entity_common::{
     dwg_lineweight_from_index, parse_ac1015_entity_common, parse_ac1015_non_entity_common,
-    skip_ac1015_entity_common_main_stream, Ac1015EntityCommonData, Ac1015NonEntityCommonData,
+    probe_ac1015_entity_common, skip_ac1015_entity_common_main_stream, Ac1015EntityCommonData,
+    Ac1015EntityCommonProbeFailure, Ac1015EntityCommonProbeStage, Ac1015NonEntityCommonData,
 };
 pub use entity_hatch::{read_hatch_geometry, HatchGeometry};
 pub use entity_line::{read_line_geometry, LineGeometry};
@@ -144,6 +145,33 @@ pub struct Ac1015RecoveryFailure {
     pub family: Option<&'static str>,
     pub kind: Ac1015RecoveryFailureKind,
     pub stage: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ac1015TargetedTraceFirstMissingRecord {
+    SplitObjectStreams,
+    CommonEntityDecode,
+    EntityBodyDecode,
+}
+
+impl Ac1015TargetedTraceFirstMissingRecord {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SplitObjectStreams => "split_ac1015_object_streams",
+            Self::CommonEntityDecode => "parse_ac1015_entity_common",
+            Self::EntityBodyDecode => "try_decode_entity_body_with_reason",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ac1015TargetedFailureTrace {
+    pub handle: Handle,
+    pub object_type_hint: Option<i16>,
+    pub family_hint: Option<&'static str>,
+    pub stage_before_fallback: Option<&'static str>,
+    pub first_missing_record: Option<Ac1015TargetedTraceFirstMissingRecord>,
+    pub common_probe_stage: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -379,6 +407,110 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
         );
     }
     diagnostics
+}
+
+pub fn trace_ac1015_targeted_failure_before_fallback(
+    bytes: &[u8],
+    pending: &pending::PendingDocument,
+    handles: &[Handle],
+) -> Vec<Ac1015TargetedFailureTrace> {
+    if pending.handle_offsets.is_empty() {
+        return handles
+            .iter()
+            .copied()
+            .map(|handle| Ac1015TargetedFailureTrace {
+                handle,
+                object_type_hint: None,
+                family_hint: None,
+                stage_before_fallback: None,
+                first_missing_record: Some(Ac1015TargetedTraceFirstMissingRecord::SplitObjectStreams),
+                common_probe_stage: None,
+            })
+            .collect();
+    }
+
+    let cursor = object_stream::ObjectStreamCursor::new(bytes, &pending.handle_offsets);
+    let symbol_names = collect_symbol_name_maps(bytes, pending);
+    let supported_family_hints =
+        collect_supported_family_hints(bytes, pending, &cursor, &symbol_names);
+
+    handles
+        .iter()
+        .copied()
+        .map(|handle| {
+            let hint = supported_family_hints
+                .get(&handle)
+                .copied()
+                .unwrap_or_else(Ac1015FailureAttributionHint::unresolved);
+            let mut trace = Ac1015TargetedFailureTrace {
+                handle,
+                object_type_hint: hint.object_type,
+                family_hint: hint.family,
+                stage_before_fallback: hint.probe_stage,
+                first_missing_record: None,
+                common_probe_stage: None,
+            };
+
+            let Some(slice) = cursor.object_slice_by_handle(handle) else {
+                trace.first_missing_record =
+                    Some(Ac1015TargetedTraceFirstMissingRecord::SplitObjectStreams);
+                return trace;
+            };
+            let Ok((obj_header, mut main_reader, mut handle_reader)) =
+                object_header::split_ac1015_object_streams(slice)
+            else {
+                trace.first_missing_record =
+                    Some(Ac1015TargetedTraceFirstMissingRecord::SplitObjectStreams);
+                return trace;
+            };
+            trace.object_type_hint = trace.object_type_hint.or(Some(obj_header.object_type));
+            trace.family_hint = trace
+                .family_hint
+                .or_else(|| object_type_family(obj_header.object_type));
+            if obj_header.handle != handle {
+                trace.first_missing_record =
+                    Some(Ac1015TargetedTraceFirstMissingRecord::SplitObjectStreams);
+                return trace;
+            }
+
+            let probe_result =
+                probe_ac1015_entity_common(&mut main_reader, &mut handle_reader, handle);
+            let common_probe_failed = match probe_result {
+                Ok(_) => {
+                    trace.common_probe_stage = Some("ok");
+                    false
+                }
+                Err(probe) => {
+                    trace.common_probe_stage = Some(probe.stage.as_str());
+                    true
+                }
+            };
+
+            match try_decode_entity_body_with_reason(
+                obj_header.object_type,
+                obj_header.handle,
+                &mut main_reader,
+                &mut handle_reader,
+                &symbol_names,
+            ) {
+                Ok(_) => {}
+                Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => {
+                    trace.first_missing_record = Some(if common_probe_failed {
+                        Ac1015TargetedTraceFirstMissingRecord::CommonEntityDecode
+                    } else {
+                        Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode
+                    });
+                }
+                Err(Ac1015RecoveryFailureKind::BodyDecodeFail) => {
+                    trace.first_missing_record =
+                        Some(Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode);
+                }
+                Err(_) => {}
+            }
+
+            trace
+        })
+        .collect()
 }
 
 fn ac1015_failure_stage(kind: Ac1015RecoveryFailureKind) -> &'static str {

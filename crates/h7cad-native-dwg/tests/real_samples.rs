@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use h7cad_native_dwg::{
     build_pending_document, collect_ac1015_recovery_diagnostics,
     collect_ac1015_recovery_diagnostics_with_known_successes, collect_ac1015_preheader_object_type_hints,
-    read_ac1015_object_header, read_dwg, sniff_version, Ac1015RecoveryFailureKind, BitReader, DwgFileHeader,
-    DwgReadError, DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
+    read_ac1015_object_header, read_dwg, sniff_version, trace_ac1015_targeted_failure_before_fallback,
+    Ac1015RecoveryFailureKind, Ac1015TargetedTraceFirstMissingRecord, BitReader, DwgFileHeader, DwgReadError,
+    DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
 };
 use h7cad_native_model::Handle;
 
@@ -2509,6 +2510,61 @@ fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage
     eprintln!("AC1015 LINE/POINT post-common/body audit:");
     for line in observed {
         eprintln!("  {line}");
+    }
+}
+
+#[test]
+fn ac1015_line_point_targeted_debug_trace_reports_first_missing_record_point() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    let handles = [
+        Handle::new(0x2C7),
+        Handle::new(0x2CF),
+        Handle::new(0x517),
+        Handle::new(0x28E),
+        Handle::new(0x298),
+        Handle::new(0x299),
+    ];
+    let traces = trace_ac1015_targeted_failure_before_fallback(&bytes, &pending, &handles);
+
+    eprintln!("AC1015 LINE/POINT targeted debug trace:");
+    for trace in &traces {
+        eprintln!(
+            "  handle=0x{:X} family_hint={} object_type_hint={} stage_before_fallback={} first_missing_record={} common_probe_stage={}",
+            trace.handle.value(),
+            trace.family_hint.unwrap_or("none"),
+            trace.object_type_hint.map(|value| value.to_string()).unwrap_or_else(|| "none".to_string()),
+            trace.stage_before_fallback.unwrap_or("none"),
+            trace.first_missing_record.as_ref().map(|value| value.as_str()).unwrap_or("none"),
+            trace.common_probe_stage.unwrap_or("none"),
+        );
+    }
+
+    for trace in traces {
+        let expected = if trace.family_hint == Some("LINE") { 19 } else { 27 };
+        assert_eq!(trace.object_type_hint, Some(expected));
+        assert!(
+            matches!(
+                trace.stage_before_fallback,
+                None | Some("preheader_supported_hint")
+            ),
+            "targeted trace should expose whether a truthful pre-fallback stage exists before the synthetic fallback is appended"
+        );
+        assert_eq!(
+            trace.first_missing_record,
+            Some(Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode)
+        );
+        assert_eq!(trace.common_probe_stage, Some("ok"));
     }
 }
 

@@ -42,6 +42,45 @@ pub struct Ac1015NonEntityCommonData {
     pub owner_handle: Handle,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ac1015EntityCommonProbeStage {
+    SkipExtendedEntityData,
+    GraphicMarker,
+    EntityModeAndOwner,
+    Reactors,
+    XDictionary,
+    NoLinks,
+    Presentation,
+    Linetype,
+    Plotstyle,
+    Visibility,
+    Lineweight,
+}
+
+impl Ac1015EntityCommonProbeStage {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SkipExtendedEntityData => "skip_extended_entity_data",
+            Self::GraphicMarker => "graphic_marker",
+            Self::EntityModeAndOwner => "entity_mode_and_owner",
+            Self::Reactors => "reactors",
+            Self::XDictionary => "xdictionary",
+            Self::NoLinks => "nolinks",
+            Self::Presentation => "presentation",
+            Self::Linetype => "linetype",
+            Self::Plotstyle => "plotstyle",
+            Self::Visibility => "visibility",
+            Self::Lineweight => "lineweight",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ac1015EntityCommonProbeFailure {
+    pub stage: Ac1015EntityCommonProbeStage,
+    pub context: &'static str,
+}
+
 fn skip_extended_entity_data(reader: &mut BitReader<'_>) -> Result<(), DwgReadError> {
     loop {
         let block_start = reader.position_in_bits();
@@ -155,7 +194,30 @@ pub fn parse_ac1015_entity_common(
     object_handle: Handle,
 ) -> Result<Ac1015EntityCommonData, DwgReadError> {
     skip_extended_entity_data(main_reader)?;
+    parse_ac1015_entity_common_after_extended_data(main_reader, handle_reader, object_handle)
+}
 
+pub fn probe_ac1015_entity_common(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+) -> Result<Ac1015EntityCommonData, Ac1015EntityCommonProbeFailure> {
+    skip_extended_entity_data(main_reader).map_err(|_| Ac1015EntityCommonProbeFailure {
+        stage: Ac1015EntityCommonProbeStage::SkipExtendedEntityData,
+        context: "skip_extended_entity_data",
+    })?;
+    parse_ac1015_entity_common_after_extended_data(main_reader, handle_reader, object_handle)
+        .map_err(|_| Ac1015EntityCommonProbeFailure {
+            stage: Ac1015EntityCommonProbeStage::GraphicMarker,
+            context: "entity_common_after_extended_data",
+        })
+}
+
+fn parse_ac1015_entity_common_after_extended_data(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+) -> Result<Ac1015EntityCommonData, DwgReadError> {
     let has_graphic = main_reader.read_bit()? == 1;
     if has_graphic {
         let graphic_size = main_reader.read_raw_u32_le()? as usize;
