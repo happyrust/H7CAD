@@ -334,6 +334,8 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
     let symbol_names = collect_symbol_name_maps(bytes, pending);
     let supported_family_hints =
         collect_supported_family_hints(bytes, pending, &cursor, &symbol_names);
+    let mut traced_fallback_failures =
+        std::collections::BTreeMap::<Handle, Ac1015FallbackFailureStage>::new();
     for entry in pending.handle_offsets.iter() {
         let hint = supported_family_hints
             .get(&entry.handle)
@@ -398,13 +400,37 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
         if has_family_failure {
             continue;
         }
-        diagnostics.record_failure(
+        let fallback_stage = trace_ac1015_supported_family_failure_stage(
             *handle,
             hint.object_type,
-            Some(family),
-            Ac1015RecoveryFailureKind::CommonDecodeFail,
-            hint.probe_stage.or(Some("preheader_supported_hint")),
+            hint.family,
+            &cursor,
+            &symbol_names,
         );
+        traced_fallback_failures.insert(*handle, fallback_stage);
+        diagnostics.record_failure(
+            *handle,
+            fallback_stage.object_type.or(hint.object_type),
+            Some(family),
+            fallback_stage.kind.unwrap_or(Ac1015RecoveryFailureKind::CommonDecodeFail),
+            fallback_stage
+                .stage
+                .or(hint.probe_stage)
+                .or(Some("preheader_supported_hint")),
+        );
+    }
+    for failure in &mut diagnostics.failures {
+        if let Some(traced) = traced_fallback_failures.get(&failure.handle).copied() {
+            if traced.stage.is_some() {
+                failure.stage = traced.stage;
+            }
+            if traced.kind.is_some() {
+                failure.kind = traced.kind.unwrap();
+            }
+            if traced.object_type.is_some() {
+                failure.object_type = traced.object_type;
+            }
+        }
     }
     diagnostics
 }
@@ -446,7 +472,7 @@ pub fn trace_ac1015_targeted_failure_before_fallback(
                 handle,
                 object_type_hint: hint.object_type,
                 family_hint: hint.family,
-                stage_before_fallback: hint.probe_stage,
+                stage_before_fallback: None,
                 first_missing_record: None,
                 common_probe_stage: None,
             };
@@ -494,14 +520,20 @@ pub fn trace_ac1015_targeted_failure_before_fallback(
                 &symbol_names,
             ) {
                 Ok(_) => {}
-                Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => {
-                    trace.first_missing_record = Some(if common_probe_failed {
-                        Ac1015TargetedTraceFirstMissingRecord::CommonEntityDecode
-                    } else {
-                        Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode
-                    });
-                }
+        Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => {
+            trace.stage_before_fallback = Some(if common_probe_failed {
+                "common_entity_decode"
+            } else {
+                "entity_body_decode"
+            });
+            trace.first_missing_record = Some(if common_probe_failed {
+                Ac1015TargetedTraceFirstMissingRecord::CommonEntityDecode
+            } else {
+                Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode
+            });
+        }
                 Err(Ac1015RecoveryFailureKind::BodyDecodeFail) => {
+                    trace.stage_before_fallback = Some("entity_body_decode");
                     trace.first_missing_record =
                         Some(Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode);
                 }
@@ -802,6 +834,9 @@ fn common_body_failure_stage_for_supported_family(
     object_type_family(object_type)?;
     let (_, mut main_reader, mut handle_reader) =
         object_header::split_ac1015_object_streams(slice).ok()?;
+    let probe_result =
+        probe_ac1015_entity_common(&mut main_reader, &mut handle_reader, object_handle);
+    let common_probe_failed = probe_result.is_err();
     match try_decode_entity_body_with_reason(
         object_type,
         object_handle,
@@ -810,9 +845,102 @@ fn common_body_failure_stage_for_supported_family(
         symbol_names,
     ) {
         Ok(_) => None,
-        Err(kind @ Ac1015RecoveryFailureKind::CommonDecodeFail)
-        | Err(kind @ Ac1015RecoveryFailureKind::BodyDecodeFail) => Some(ac1015_failure_stage(kind)),
+        Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => Some(if common_probe_failed {
+            "common_entity_decode"
+        } else {
+            "entity_body_decode"
+        }),
+        Err(kind @ Ac1015RecoveryFailureKind::BodyDecodeFail) => Some(ac1015_failure_stage(kind)),
+        Err(kind @ Ac1015RecoveryFailureKind::UnsupportedType) => Some(ac1015_failure_stage(kind)),
         Err(_) => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ac1015FallbackFailureStage {
+    object_type: Option<i16>,
+    kind: Option<Ac1015RecoveryFailureKind>,
+    stage: Option<&'static str>,
+}
+
+fn trace_ac1015_supported_family_failure_stage(
+    handle: Handle,
+    hinted_object_type: Option<i16>,
+    hinted_family: Option<&'static str>,
+    cursor: &object_stream::ObjectStreamCursor<'_>,
+    symbol_names: &SymbolNameMaps,
+) -> Ac1015FallbackFailureStage {
+    let Some(slice) = cursor.object_slice_by_handle(handle) else {
+        return Ac1015FallbackFailureStage {
+            object_type: hinted_object_type,
+            kind: None,
+            stage: None,
+        };
+    };
+    let Ok((obj_header, mut main_reader, mut handle_reader)) =
+        object_header::split_ac1015_object_streams(slice)
+    else {
+        return Ac1015FallbackFailureStage {
+            object_type: hinted_object_type,
+            kind: None,
+            stage: None,
+        };
+    };
+    if obj_header.handle != handle {
+        return Ac1015FallbackFailureStage {
+            object_type: Some(obj_header.object_type).or(hinted_object_type),
+            kind: None,
+            stage: None,
+        };
+    }
+    let object_type = Some(obj_header.object_type).or(hinted_object_type);
+    let family = hinted_family.or_else(|| object_type_family(obj_header.object_type));
+    if family.is_none() {
+        return Ac1015FallbackFailureStage {
+            object_type,
+            kind: None,
+            stage: None,
+        };
+    }
+    let probe_result =
+        probe_ac1015_entity_common(&mut main_reader, &mut handle_reader, obj_header.handle);
+    let common_probe_failed = probe_result.is_err();
+    match try_decode_entity_body_with_reason(
+        obj_header.object_type,
+        obj_header.handle,
+        &mut main_reader,
+        &mut handle_reader,
+        symbol_names,
+    ) {
+        Ok(_) => Ac1015FallbackFailureStage {
+            object_type,
+            kind: None,
+            stage: None,
+        },
+        Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => Ac1015FallbackFailureStage {
+            object_type,
+            kind: Some(Ac1015RecoveryFailureKind::CommonDecodeFail),
+            stage: Some(if common_probe_failed {
+                "common_entity_decode"
+            } else {
+                "entity_body_decode"
+            }),
+        },
+        Err(kind @ Ac1015RecoveryFailureKind::BodyDecodeFail) => Ac1015FallbackFailureStage {
+            object_type,
+            kind: Some(kind),
+            stage: Some(ac1015_failure_stage(kind)),
+        },
+        Err(kind @ Ac1015RecoveryFailureKind::UnsupportedType) => Ac1015FallbackFailureStage {
+            object_type,
+            kind: Some(kind),
+            stage: Some(ac1015_failure_stage(kind)),
+        },
+        Err(_) => Ac1015FallbackFailureStage {
+            object_type,
+            kind: None,
+            stage: None,
+        },
     }
 }
 

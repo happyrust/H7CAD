@@ -2485,11 +2485,9 @@ fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage
         assert!(
             matches!(
                 common_failure.stage,
-                Some("common_entity_decode")
-                    | Some("entity_body_decode")
-                    | Some("preheader_supported_hint")
+                Some("common_entity_decode") | Some("entity_body_decode")
             ),
-            "representative handle 0x{handle_value:X} should remain on the named audit surface with a truthful current failure stage"
+            "representative handle 0x{handle_value:X} should persist a truthful later-stage failure before the synthetic fallback path"
         );
         assert!(
             matches!(
@@ -2556,9 +2554,9 @@ fn ac1015_line_point_targeted_debug_trace_reports_first_missing_record_point() {
         assert!(
             matches!(
                 trace.stage_before_fallback,
-                None | Some("preheader_supported_hint")
+                Some("common_entity_decode") | Some("entity_body_decode")
             ),
-            "targeted trace should expose whether a truthful pre-fallback stage exists before the synthetic fallback is appended"
+            "targeted trace should persist the truthful pre-fallback common/body failure stage"
         );
         assert_eq!(
             trace.first_missing_record,
