@@ -1650,6 +1650,34 @@ struct Ac1015CommonLayoutComparison {
     blocked_failure_stage: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct Ac1015LineBodyFieldProgress {
+    label: &'static str,
+    position_before_bits: usize,
+    remaining_before_bits: usize,
+    position_after_bits: usize,
+    remaining_after_bits: usize,
+}
+
+#[derive(Debug, Clone)]
+struct Ac1015BodyBoundaryAudit {
+    payload_consumed_bits: usize,
+    payload_remaining_bits: usize,
+    consumed_to_declared_boundary: bool,
+}
+
+#[derive(Debug, Clone)]
+struct Ac1015LineBodyProbe {
+    handle: u64,
+    family: &'static str,
+    object_type: i16,
+    body_bytes: Vec<u8>,
+    body_start_bits: usize,
+    body_remaining_bits_before: usize,
+    fields: Vec<Ac1015LineBodyFieldProgress>,
+    boundary_audit: Ac1015BodyBoundaryAudit,
+}
+
 fn extract_logged_i32(entries: &[String], needle: &str) -> Option<i32> {
     entries.iter().find_map(|entry| {
         if !entry.contains(needle) {
@@ -1791,6 +1819,122 @@ fn ac1015_common_stream_probe_report(
         handle_position_bits_after_common: instrumented_handle.position_in_bits(),
         handle_bits_remaining_after_common: instrumented_handle.bits_remaining(),
         handle_reads,
+    }
+}
+
+fn ac1015_line_body_probe(
+    bytes: &[u8],
+    handle_value: u64,
+    family: &'static str,
+) -> Ac1015LineBodyProbe {
+    let header = DwgFileHeader::parse(bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+    let target = Handle::new(handle_value);
+    let cursor = ObjectStreamCursor::new(bytes, &pending.handle_offsets);
+    let slice = cursor
+        .object_slice_by_handle(target)
+        .unwrap_or_else(|| panic!("expected object slice for 0x{handle_value:X}"));
+    let (obj_header, main_reader, handle_reader) =
+        h7cad_native_dwg::split_ac1015_object_streams(slice).unwrap_or_else(|err| {
+            panic!("split object streams for 0x{handle_value:X} should succeed: {err:?}")
+        });
+
+    let mut common_main = main_reader.clone();
+    let mut common_handle = handle_reader.clone();
+    let mut common_log = Vec::new();
+    parse_ac1015_entity_common_instrumented(
+        &mut common_main,
+        &mut common_handle,
+        target,
+        &mut common_log,
+    )
+    .unwrap_or_else(|err| panic!("common decode for 0x{handle_value:X} should succeed: {err:?}"));
+
+    let body_start_bits = common_main.position_in_bits();
+    let body_remaining_bits_before = common_main.bits_remaining();
+    let mut body_reader = common_main.clone();
+    let mut fields = Vec::new();
+
+    let mut record_field = |label: &'static str, reader: &mut BitReader<'_>, read: &mut dyn FnMut(&mut BitReader<'_>)| {
+        let position_before_bits = reader.position_in_bits();
+        let remaining_before_bits = reader.bits_remaining();
+        read(reader);
+        fields.push(Ac1015LineBodyFieldProgress {
+            label,
+            position_before_bits,
+            remaining_before_bits,
+            position_after_bits: reader.position_in_bits(),
+            remaining_after_bits: reader.bits_remaining(),
+        });
+    };
+
+    let z_are_zero = {
+        let mut value = 0u8;
+        record_field("z_are_zero", &mut body_reader, &mut |reader| {
+            value = reader.read_bit().expect("z_are_zero bit");
+        });
+        value == 1
+    };
+    record_field("start.x", &mut body_reader, &mut |reader| {
+        let _ = reader.read_raw_f64_le().expect("LINE start.x");
+    });
+    record_field("end.x", &mut body_reader, &mut |reader| {
+        let _ = reader
+            .read_bit_double_with_default(0.0)
+            .expect("LINE end.x bit-double");
+    });
+    record_field("start.y", &mut body_reader, &mut |reader| {
+        let _ = reader.read_raw_f64_le().expect("LINE start.y");
+    });
+    record_field("end.y", &mut body_reader, &mut |reader| {
+        let _ = reader
+            .read_bit_double_with_default(0.0)
+            .expect("LINE end.y bit-double");
+    });
+    if !z_are_zero {
+        record_field("start.z", &mut body_reader, &mut |reader| {
+            let _ = reader.read_raw_f64_le().expect("LINE start.z");
+        });
+        record_field("end.z", &mut body_reader, &mut |reader| {
+            let _ = reader
+                .read_bit_double_with_default(0.0)
+                .expect("LINE end.z bit-double");
+        });
+    }
+    record_field("thickness", &mut body_reader, &mut |reader| {
+        let _ = reader
+            .read_bit_thickness_r2000_plus()
+            .expect("LINE thickness");
+    });
+    record_field("extrusion", &mut body_reader, &mut |reader| {
+        let _ = reader
+            .read_bit_extrusion_r2000_plus()
+            .expect("LINE extrusion");
+    });
+
+    let body_start_byte = body_start_bits / 8;
+    let body_end_byte = (obj_header.main_size_bits as usize).div_ceil(8);
+    let body_bytes = slice[body_start_byte..body_end_byte].to_vec();
+    let boundary_audit = Ac1015BodyBoundaryAudit {
+        payload_consumed_bits: body_reader.position_in_bits().saturating_sub(body_start_bits),
+        payload_remaining_bits: body_reader.bits_remaining(),
+        consumed_to_declared_boundary: body_reader.bits_remaining() == 0,
+    };
+
+    Ac1015LineBodyProbe {
+        handle: handle_value,
+        family,
+        object_type: obj_header.object_type,
+        body_bytes,
+        body_start_bits,
+        body_remaining_bits_before,
+        fields,
+        boundary_audit,
     }
 }
 
@@ -2505,6 +2649,108 @@ fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage
 }
 
 #[test]
+fn ac1015_line_body_byte_position_red_test_proves_representative_field_mismatch() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+
+    let recovered = ac1015_line_body_probe(&bytes, 0x2C7, "LINE");
+    let failing = ac1015_line_body_probe(&bytes, 0x2CF, "LINE");
+
+    eprintln!("AC1015 LINE body byte-position red test:");
+    for probe in [&recovered, &failing] {
+        eprintln!(
+            "  handle=0x{:X} family={} object_type={} body_start_bits={} body_remaining_before={} body_bytes={:02X?}",
+            probe.handle,
+            probe.family,
+            probe.object_type,
+            probe.body_start_bits,
+            probe.body_remaining_bits_before,
+            probe.body_bytes,
+        );
+        for field in &probe.fields {
+            eprintln!(
+                "    field={} pos {}->{} rem {}->{}",
+                field.label,
+                field.position_before_bits,
+                field.position_after_bits,
+                field.remaining_before_bits,
+                field.remaining_after_bits,
+            );
+        }
+        eprintln!(
+            "    boundary_audit payload_consumed_bits={} payload_remaining_bits={} consumed_to_declared_boundary={}",
+            probe.boundary_audit.payload_consumed_bits,
+            probe.boundary_audit.payload_remaining_bits,
+            probe.boundary_audit.consumed_to_declared_boundary,
+        );
+    }
+
+    assert_eq!(recovered.family, "LINE");
+    assert_eq!(failing.family, "LINE");
+    assert_eq!(recovered.object_type, 19);
+    assert_eq!(failing.object_type, 19);
+    assert_eq!(
+        recovered
+            .fields
+            .iter()
+            .map(|field| field.label)
+            .collect::<Vec<_>>(),
+        failing
+            .fields
+            .iter()
+            .map(|field| field.label)
+            .collect::<Vec<_>>(),
+        "recovered and failing LINE probes should expose the same body-field boundaries"
+    );
+    assert_ne!(
+        recovered.body_bytes, failing.body_bytes,
+        "audit precondition: representative LINE handles should expose the live post-common body-byte divergence before the semantic fix"
+    );
+    let recovered_relative = recovered
+        .fields
+        .iter()
+        .map(|field| {
+            (
+                field.label,
+                field.position_before_bits - recovered.body_start_bits,
+                field.position_after_bits - recovered.body_start_bits,
+                field.remaining_before_bits,
+                field.remaining_after_bits,
+            )
+        })
+        .collect::<Vec<_>>();
+    let failing_relative = failing
+        .fields
+        .iter()
+        .map(|field| {
+            (
+                field.label,
+                field.position_before_bits - failing.body_start_bits,
+                field.position_after_bits - failing.body_start_bits,
+                field.remaining_before_bits,
+                field.remaining_after_bits,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        recovered_relative, failing_relative,
+        "red test: representative LINE handles should currently show the same relative BitReader field-boundary progression once common decode hands off to the LINE body"
+    );
+    assert!(
+        recovered.boundary_audit.consumed_to_declared_boundary
+            && failing.boundary_audit.consumed_to_declared_boundary,
+        "audit conclusion: representative LINE payload decoders consume exactly to each handle's declared body boundary, so the current mismatch is in payload semantics rather than object-body framing"
+    );
+    assert_eq!(
+        recovered.boundary_audit.payload_remaining_bits,
+        failing.boundary_audit.payload_remaining_bits,
+        "recovered and failing LINE probes should leave the same residual bit count after payload decoding"
+    );
+}
+
+#[test]
 fn ac1015_line_point_targeted_debug_trace_reports_first_missing_record_point() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
         eprintln!("skip: sample_AC1015.dwg not present");
@@ -2558,7 +2804,6 @@ fn ac1015_line_point_targeted_debug_trace_reports_first_missing_record_point() {
         assert_eq!(trace.common_probe_stage, Some("ok"));
     }
 }
-
 
 fn print_supported_geometric_failure_examples(
     diagnostics: &h7cad_native_dwg::Ac1015RecoveryDiagnostics,
