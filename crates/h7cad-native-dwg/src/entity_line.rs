@@ -13,12 +13,12 @@
 //! ```text
 //!   B   z_are_zero            ← 1 bit flag; 1 ⇒ both z coordinates are 0
 //!   RD  sx                    ← raw IEEE 754 double, not a BD
-//!   DD  ex  default = 0.0     ← live AC1015 slices use a zero-rooted DD default
+//!   DD  ex  default = sx      ← AC1015 stores end.x as a delta/default from start.x
 //!   RD  sy
-//!   DD  ey  default = 0.0
+//!   DD  ey  default = sy
 //!   if !z_are_zero:
 //!       RD  sz
-//!       DD  ez  default = 0.0
+//!       DD  ez  default = sz
 //!   BT  thickness             ← bit-thickness
 //!   BE  extrusion (normal)    ← bit-extrusion
 //! ```
@@ -79,14 +79,14 @@ pub struct LineGeometry {
 pub fn read_line_geometry(reader: &mut BitReader<'_>) -> Result<LineGeometry, DwgReadError> {
     let z_are_zero = reader.read_bit()? == 1;
     let sx = reader.read_raw_f64_le()?;
-    let ex = reader.read_bit_double_with_default(0.0)?;
+    let ex = reader.read_bit_double_with_default(sx)?;
     let sy = reader.read_raw_f64_le()?;
-    let ey = reader.read_bit_double_with_default(0.0)?;
+    let ey = reader.read_bit_double_with_default(sy)?;
     let (sz, ez) = if z_are_zero {
         (0.0, 0.0)
     } else {
         let sz = reader.read_raw_f64_le()?;
-        let ez = reader.read_bit_double_with_default(0.0)?;
+        let ez = reader.read_bit_double_with_default(sz)?;
         (sz, ez)
     };
     let thickness = reader.read_bit_thickness_r2000_plus()?;
@@ -169,23 +169,23 @@ mod tests {
     }
 
     #[test]
-    fn line_geometry_uses_zero_default_for_bit_double_prefix_zero() {
-        // Live AC1015 LINE slices show DD prefix 00 reusing a zero default
-        // instead of the preceding start coordinate.
+    fn line_geometry_uses_start_coordinate_default_for_bit_double_prefix_zero() {
+        // AC1015 LINE slices reuse the preceding start coordinate as the
+        // DD default for the paired end coordinate.
         let mut bytes = Vec::new();
         let mut cursor = 0usize;
         emit_bits(&mut bytes, &mut cursor, 1, 1); // z_are_zero
         emit_raw_f64(&mut bytes, &mut cursor, 3.5); // sx
-        emit_bits(&mut bytes, &mut cursor, 0b00, 2); // ex = default (0.0)
+        emit_bits(&mut bytes, &mut cursor, 0b00, 2); // ex = default (sx)
         emit_raw_f64(&mut bytes, &mut cursor, -2.0); // sy
-        emit_bits(&mut bytes, &mut cursor, 0b00, 2); // ey = default (0.0)
+        emit_bits(&mut bytes, &mut cursor, 0b00, 2); // ey = default (sy)
         emit_bits(&mut bytes, &mut cursor, 1, 1); // thickness 0
         emit_bits(&mut bytes, &mut cursor, 1, 1); // extrusion default
 
         let mut reader = BitReader::new(&bytes);
         let geom = read_line_geometry(&mut reader).unwrap();
         assert_eq!(geom.start, [3.5, -2.0, 0.0]);
-        assert_eq!(geom.end, [0.0, 0.0, 0.0]);
+        assert_eq!(geom.end, [3.5, -2.0, 0.0]);
     }
 
     #[test]
@@ -237,6 +237,7 @@ mod tests {
         assert_eq!(geom.thickness, 1.0);
         assert_eq!(geom.extrusion, [1.0, 1.0, 1.0]);
     }
+
 
     #[test]
     fn line_geometry_reports_eof_on_truncated_payload() {
