@@ -917,9 +917,13 @@ fn trace_ac1015_supported_family_failure_stage(
             kind: None,
             stage: None,
         },
-        Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => Ac1015FallbackFailureStage {
+        Err(kind @ Ac1015RecoveryFailureKind::CommonDecodeFail) => Ac1015FallbackFailureStage {
             object_type,
-            kind: Some(Ac1015RecoveryFailureKind::CommonDecodeFail),
+            kind: Some(if common_probe_failed {
+                kind
+            } else {
+                Ac1015RecoveryFailureKind::BodyDecodeFail
+            }),
             stage: Some(if common_probe_failed {
                 "common_entity_decode"
             } else {
@@ -933,8 +937,16 @@ fn trace_ac1015_supported_family_failure_stage(
         },
         Err(kind @ Ac1015RecoveryFailureKind::UnsupportedType) => Ac1015FallbackFailureStage {
             object_type,
-            kind: Some(kind),
-            stage: Some(ac1015_failure_stage(kind)),
+            kind: Some(if common_probe_failed {
+                Ac1015RecoveryFailureKind::CommonDecodeFail
+            } else {
+                kind
+            }),
+            stage: Some(if common_probe_failed {
+                "common_entity_decode"
+            } else {
+                ac1015_failure_stage(kind)
+            }),
         },
         Err(_) => Ac1015FallbackFailureStage {
             object_type,

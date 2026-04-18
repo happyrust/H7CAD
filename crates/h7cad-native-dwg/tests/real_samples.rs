@@ -1542,9 +1542,10 @@ fn representative_supported_geometric_stage_failures(
     std::collections::BTreeMap<Ac1015RecoveryFailureKind, Vec<h7cad_native_dwg::Ac1015RecoveryFailure>>,
 > {
     const FAMILIES: [&str; 5] = ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"];
-    const KINDS: [Ac1015RecoveryFailureKind; 3] = [
+    const KINDS: [Ac1015RecoveryFailureKind; 4] = [
         Ac1015RecoveryFailureKind::HeaderFail,
         Ac1015RecoveryFailureKind::CommonDecodeFail,
+        Ac1015RecoveryFailureKind::BodyDecodeFail,
         Ac1015RecoveryFailureKind::UnsupportedType,
     ];
 
@@ -1582,9 +1583,8 @@ fn representative_supported_geometric_stage_failures(
         };
         let kind = match failure.stage {
             Some("common_entity_decode") => Ac1015RecoveryFailureKind::CommonDecodeFail,
-            Some("entity_body_decode") | Some("body_dispatch") => {
-                Ac1015RecoveryFailureKind::UnsupportedType
-            }
+            Some("entity_body_decode") => Ac1015RecoveryFailureKind::BodyDecodeFail,
+            Some("body_dispatch") => Ac1015RecoveryFailureKind::UnsupportedType,
             _ => continue,
         };
         let bucket = grouped.entry(family).or_default().entry(kind).or_default();
@@ -2579,6 +2579,7 @@ fn print_supported_geometric_failure_examples(
                 for kind in [
                     Ac1015RecoveryFailureKind::HeaderFail,
                     Ac1015RecoveryFailureKind::CommonDecodeFail,
+                    Ac1015RecoveryFailureKind::BodyDecodeFail,
                     Ac1015RecoveryFailureKind::UnsupportedType,
                 ] {
                     let handles = by_kind
