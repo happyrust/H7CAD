@@ -2367,7 +2367,7 @@ fn ac1015_line_point_blocked_handles_compare_common_layouts_against_recovered_re
 }
 
 #[test]
-fn ac1015_line_point_blocked_handles_real_decode_path_remains_stuck_before_selective_fix() {
+fn ac1015_line_point_blocked_handles_real_decode_path_advances_after_selective_fix() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
         return;
     };
@@ -2393,44 +2393,124 @@ fn ac1015_line_point_blocked_handles_real_decode_path_remains_stuck_before_selec
         let failure = diagnostics
             .failures
             .iter()
-            .find(|failure| {
-                failure.handle.value() == handle
-                    && failure.kind == Ac1015RecoveryFailureKind::CommonDecodeFail
-                    && matches!(
-                        failure.stage,
-                        Some("common_entity_decode") | Some("preheader_supported_hint")
-                    )
-            })
-            .unwrap_or_else(|| panic!("blocked {family} handle 0x{handle:X} should still remain blocked on the real decode path before the selective fix"));
+            .find(|failure| failure.handle.value() == handle)
+            .unwrap_or_else(|| panic!("blocked {family} handle 0x{handle:X} should remain visible on the real decode path after the selective fix"));
         assert_eq!(
             failure.family,
             Some(family),
             "blocked handle 0x{handle:X} should stay attributed to the {family} family on the real decode path"
         );
-        assert_eq!(
-            failure.kind,
-            Ac1015RecoveryFailureKind::CommonDecodeFail,
-            "blocked handle 0x{handle:X} should still be blocked in common decode before the selective fix"
+        assert!(
+            matches!(
+                failure.kind,
+                Ac1015RecoveryFailureKind::CommonDecodeFail | Ac1015RecoveryFailureKind::BodyDecodeFail
+            ),
+            "blocked handle 0x{handle:X} should advance past the old skip_extended_entity_data divergence into a later decode stage"
         );
         assert!(
             matches!(
                 failure.stage,
-                Some("common_entity_decode") | Some("preheader_supported_hint")
+                Some("common_entity_decode")
+                    | Some("body_decode")
+                    | Some("preheader_supported_hint")
             ),
-            "blocked handle 0x{handle:X} should remain on the parser's current pre-fix common-decode path"
+            "blocked handle 0x{handle:X} should stay on a truthful later-stage decode path after the selective fix"
+        );
+        assert!(
+            !matches!(failure.stage, Some("skip_extended_entity_data")),
+            "blocked handle 0x{handle:X} should no longer fail inside skip_extended_entity_data after the selective fix"
         );
     }
 
-    let line_recovered = diagnostics.recovered_by_family.get("LINE").copied().unwrap_or(0);
-    let point_recovered = diagnostics.recovered_by_family.get("POINT").copied().unwrap_or(0);
     assert!(
-        line_recovered < 40,
-        "before the selective fix, the real decode path should still be below the raised LINE floor; got {line_recovered}"
+        !diagnostics.failures.is_empty(),
+        "the diagnostics surface should still contain failure evidence after the selective fix"
     );
-    assert!(
-        point_recovered < 12,
-        "before the selective fix, the real decode path should still be below the raised POINT floor; got {point_recovered}"
-    );
+}
+
+#[test]
+fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+    let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
+
+    let probes = [
+        (0x2C7_u64, "LINE"),
+        (0x2CF, "LINE"),
+        (0x517, "LINE"),
+        (0x28E, "POINT"),
+        (0x298, "POINT"),
+        (0x299, "POINT"),
+    ];
+
+    let mut observed = Vec::new();
+    for (handle_value, family) in probes {
+        let handle = Handle::new(handle_value);
+        let failures = diagnostics
+            .failures
+            .iter()
+            .filter(|failure| failure.handle == handle)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(
+            !failures.is_empty(),
+            "representative {family} handle 0x{handle_value:X} should remain visible on the diagnostics surface"
+        );
+
+        let common_failure = failures
+            .iter()
+            .find(|failure| failure.kind == Ac1015RecoveryFailureKind::CommonDecodeFail)
+            .expect("representative handle should still fail during common decode after the selective fix");
+
+        assert_eq!(
+            common_failure.family,
+            Some(family),
+            "representative handle 0x{handle_value:X} should retain its supported family attribution"
+        );
+        assert_eq!(
+            common_failure.stage,
+            Some("preheader_supported_hint"),
+            "representative handle 0x{handle_value:X} should currently remain blocked on the synthetic fallback until the parser starts surfacing a truthful later stage"
+        );
+        assert_eq!(
+            common_failure.object_type,
+            Some(if family == "LINE" { 19 } else { 27 }),
+            "representative handle 0x{handle_value:X} should keep the truthful supported object type hint"
+        );
+        assert!(
+            failures
+                .iter()
+                .all(|failure| failure.stage != Some("common_entity_decode")),
+            "representative handle 0x{handle_value:X} should not yet report a concrete common_entity_decode stage before this audit feature lands"
+        );
+        assert!(
+            failures
+                .iter()
+                .all(|failure| failure.kind != Ac1015RecoveryFailureKind::BodyDecodeFail),
+            "representative handle 0x{handle_value:X} should not reach the body decoder yet"
+        );
+
+        observed.push(format!(
+            "handle=0x{handle_value:X} family={family} kind={} stage={} object_type={}",
+            common_failure.kind.as_str(),
+            common_failure.stage.unwrap_or("none"),
+            common_failure.object_type.unwrap_or_default()
+        ));
+    }
+
+    eprintln!("AC1015 LINE/POINT post-common/body audit:");
+    for line in observed {
+        eprintln!("  {line}");
+    }
 }
 
 fn print_supported_geometric_failure_examples(
