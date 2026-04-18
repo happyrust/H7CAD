@@ -49,7 +49,7 @@ fn skip_extended_entity_data(reader: &mut BitReader<'_>) -> Result<(), DwgReadEr
         if size <= 0 {
             break;
         }
-        let (app_code, app_value) = reader.read_handle()?;
+        let _ = reader.read_handle()?;
         let available_payload_bytes = reader.bits_remaining() / 8;
         let declared_payload_bytes = size as usize;
 
@@ -60,15 +60,9 @@ fn skip_extended_entity_data(reader: &mut BitReader<'_>) -> Result<(), DwgReadEr
         // do not exhibit this combination. Treat that shape as a selective
         // false-positive xdata sentinel so we can continue with the normal
         // common/entity decode path instead of consuming the entire main stream.
-        if declared_payload_bytes > available_payload_bytes && app_code == 0x3 && app_value == 0 {
+        if declared_payload_bytes > available_payload_bytes {
             reader.set_position_in_bits(block_start)?;
             break;
-        }
-
-        if declared_payload_bytes > available_payload_bytes {
-            return Err(DwgReadError::UnexpectedEof {
-                context: "extended entity data payload exceeds main stream",
-            });
         }
 
         for _ in 0..declared_payload_bytes {

@@ -159,6 +159,7 @@ pub struct Ac1015RecoveryDiagnostics {
 struct Ac1015FailureAttributionHint {
     object_type: Option<i16>,
     family: Option<&'static str>,
+    probe_stage: Option<&'static str>,
 }
 
 impl Ac1015FailureAttributionHint {
@@ -166,6 +167,7 @@ impl Ac1015FailureAttributionHint {
         Self {
             object_type: None,
             family: None,
+            probe_stage: None,
         }
     }
 }
@@ -315,7 +317,7 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
                 hint.object_type,
                 hint.family,
                 Ac1015RecoveryFailureKind::SliceMiss,
-                Some("object_stream_split"),
+                hint.probe_stage.or(Some("object_stream_split")),
             );
             continue;
         };
@@ -325,7 +327,7 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
                 hint.object_type,
                 hint.family,
                 Ac1015RecoveryFailureKind::HeaderFail,
-                Some("object_header_decode"),
+                hint.probe_stage.or(Some("object_header_decode")),
             );
             continue;
         };
@@ -335,7 +337,7 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
                 hint.object_type.or(Some(obj_header.object_type)),
                 hint.family.or_else(|| object_type_family(obj_header.object_type)),
                 Ac1015RecoveryFailureKind::HandleMismatch,
-                Some("object_header_decode"),
+                hint.probe_stage.or(Some("object_header_decode")),
             );
             continue;
         }
@@ -352,7 +354,7 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
                 hint.object_type.or(Some(obj_header.object_type)),
                 hint.family.or_else(|| object_type_family(obj_header.object_type)),
                 kind,
-                Some(ac1015_failure_stage(kind)),
+                hint.probe_stage.or(Some(ac1015_failure_stage(kind))),
             ),
         }
     }
@@ -361,12 +363,11 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
         let Some(family) = hint.family else {
             continue;
         };
-        let already_recorded = diagnostics.failures.iter().any(|failure| {
-            failure.handle == *handle
-                && failure.family == Some(family)
-                && failure.stage != Some("preheader_supported_hint")
-        });
-        if already_recorded {
+        let has_family_failure = diagnostics
+            .failures
+            .iter()
+            .any(|failure| failure.handle == *handle && failure.family == Some(family));
+        if has_family_failure {
             continue;
         }
         diagnostics.record_failure(
@@ -374,7 +375,7 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
             hint.object_type,
             Some(family),
             Ac1015RecoveryFailureKind::CommonDecodeFail,
-            Some("preheader_supported_hint"),
+            hint.probe_stage.or(Some("preheader_supported_hint")),
         );
     }
     diagnostics
@@ -611,6 +612,7 @@ fn collect_supported_family_hints(
             .map(|object_type| Ac1015FailureAttributionHint {
                 object_type: Some(object_type),
                 family: object_type_family(object_type),
+                probe_stage: None,
             })
             .unwrap_or_else(Ac1015FailureAttributionHint::unresolved);
         let Some(slice) = cursor.object_slice_by_handle(entry.handle) else {
@@ -645,11 +647,41 @@ fn collect_supported_family_hints(
             Ac1015FailureAttributionHint {
                 object_type: hint.object_type.or(Some(obj_header.object_type)),
                 family: family.or(hint.family),
+                probe_stage: common_body_failure_stage_for_supported_family(
+                    obj_header.object_type,
+                    obj_header.handle,
+                    slice,
+                    symbol_names,
+                )
+                .or(hint.probe_stage),
             },
         );
     }
 
     hinted
+}
+
+fn common_body_failure_stage_for_supported_family(
+    object_type: i16,
+    object_handle: Handle,
+    slice: &[u8],
+    symbol_names: &SymbolNameMaps,
+) -> Option<&'static str> {
+    object_type_family(object_type)?;
+    let (_, mut main_reader, mut handle_reader) =
+        object_header::split_ac1015_object_streams(slice).ok()?;
+    match try_decode_entity_body_with_reason(
+        object_type,
+        object_handle,
+        &mut main_reader,
+        &mut handle_reader,
+        symbol_names,
+    ) {
+        Ok(_) => None,
+        Err(kind @ Ac1015RecoveryFailureKind::CommonDecodeFail)
+        | Err(kind @ Ac1015RecoveryFailureKind::BodyDecodeFail) => Some(ac1015_failure_stage(kind)),
+        Err(_) => None,
+    }
 }
 
 pub fn collect_ac1015_preheader_object_type_hints(
