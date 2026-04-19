@@ -2058,6 +2058,99 @@ fn probe_line_body_field_hypothesis(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Ac1015LineBodyEntryRule {
+    SameBoundary,
+    SelectivePlus8Boundary,
+    NoAdjustment,
+}
+
+impl Ac1015LineBodyEntryRule {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::SameBoundary => "same-boundary",
+            Self::SelectivePlus8Boundary => "selective +8 boundary",
+            Self::NoAdjustment => "no-adjustment",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Ac1015LineBodyEntryDecisionTrace {
+    handle: u64,
+    family: &'static str,
+    object_type: i16,
+    header_main_size_bits: u32,
+    header_end_bits: usize,
+    declared_main_boundary_bits: usize,
+    body_start_bits: usize,
+    main_bits_consumed_by_common: usize,
+    main_bits_remaining_after_common: usize,
+    handle_bits_consumed_by_common: usize,
+    common_result: String,
+    common_probe_stage: Option<&'static str>,
+    body_probe_failure_stage: Option<&'static str>,
+    common_handle_reads: Vec<String>,
+    body_boundary_rule: Ac1015LineBodyEntryRule,
+    rule_reason: &'static str,
+    next_fix_location: &'static str,
+}
+
+fn ac1015_line_body_entry_decision_trace(
+    bytes: &[u8],
+    pending: &h7cad_native_dwg::PendingDocument,
+    handle_value: u64,
+    family: &'static str,
+) -> Ac1015LineBodyEntryDecisionTrace {
+    let common = ac1015_common_stream_probe_report(bytes, handle_value, family);
+    let body = ac1015_line_body_probe(bytes, handle_value, family);
+    let trace = trace_ac1015_targeted_failure_before_fallback(bytes, pending, &[Handle::new(handle_value)])
+        .into_iter()
+        .next()
+        .expect("targeted trace for representative handle");
+
+    let common_bits_consumed = body.body_start_bits - common.main_position_bits_before_common;
+    let absolute_body_start_bits = common.header_end_bits + common_bits_consumed;
+    let absolute_declared_main_boundary_bits = common.header_end_bits + common.header_main_size_bits as usize;
+
+    let (body_boundary_rule, rule_reason) = match handle_value {
+        0x2C7 => (
+            Ac1015LineBodyEntryRule::SameBoundary,
+            "common decode consumes 92 body-bit coordinates from the post-header reader and hands body decoding the recovered boundary without any extra shift",
+        ),
+        0x2CF => (
+            Ac1015LineBodyEntryRule::SelectivePlus8Boundary,
+            "common decode consumes 100 body-bit coordinates here, so this handle uniquely needs the proven +8-bit parser-owned boundary rule before constructing the LINE body reader",
+        ),
+        0x517 => (
+            Ac1015LineBodyEntryRule::NoAdjustment,
+            "common decode already lands on the same 92-bit body-reader boundary as the recovered representative, so adding +8 would be a false adjustment",
+        ),
+        _ => panic!("unexpected representative handle 0x{handle_value:X}"),
+    };
+
+    Ac1015LineBodyEntryDecisionTrace {
+        handle: handle_value,
+        family,
+        object_type: common.object_type,
+        header_main_size_bits: common.header_main_size_bits,
+        header_end_bits: common.header_end_bits,
+        declared_main_boundary_bits: absolute_declared_main_boundary_bits,
+        body_start_bits: absolute_body_start_bits,
+        main_bits_consumed_by_common: absolute_body_start_bits,
+        main_bits_remaining_after_common: common.main_bits_remaining_after_common,
+        handle_bits_consumed_by_common: common.handle_position_bits_after_common
+            - common.handle_position_bits_before_common,
+        common_result: common.common_result,
+        common_probe_stage: trace.common_probe_stage,
+        body_probe_failure_stage: Some("entity_body_decode"),
+        common_handle_reads: common.handle_reads,
+        body_boundary_rule,
+        rule_reason,
+        next_fix_location: "crates/h7cad-native-dwg/src/lib.rs::try_decode_entity_body_with_reason",
+    }
+}
+
 fn parse_ac1015_entity_common_instrumented(
     main_reader: &mut BitReader<'_>,
     handle_reader: &mut BitReader<'_>,
@@ -3224,17 +3317,37 @@ fn ac1015_line_body_recovery_lift_red_test_requires_byte_handoff_correction() {
         return;
     };
 
+    let recovered = ac1015_line_body_probe(&bytes, 0x2C7, "LINE");
     let failing = ac1015_line_body_probe(&bytes, 0x2CF, "LINE");
+    let second_failing = ac1015_line_body_probe(&bytes, 0x517, "LINE");
 
+    assert_eq!(
+        failing.body_start_bits as isize - recovered.body_start_bits as isize,
+        8,
+        "representative failing LINE handle should still start exactly one byte after the recovered body handoff"
+    );
     let shifted = probe_line_body_field_hypothesis(&failing, 0);
 
     assert!(
         shifted.is_none(),
         "diagnostic red guard: directly re-decoding the already-sliced failing LINE body must still fail, proving the required correction lives in the upstream common/body handoff rule rather than as an in-body offset tweak"
     );
+
+    assert_eq!(
+        failing.body_start_bits as isize - recovered.body_start_bits as isize,
+        8,
+        "representative failing LINE handle 0x2CF should still require the proven one-byte body-entry correction"
+    );
+    assert_eq!(
+        second_failing.body_start_bits, recovered.body_start_bits,
+        "handle 0x517 should keep the recovered body-entry boundary, proving the correction is selective rather than a global in-body offset tweak"
+    );
+
     eprintln!(
-        "AC1015 LINE recovery-lift red guard: failing handle 0x{:X} still cannot self-decode from body offset 0; the truthful body start is determined upstream by the common/body boundary rule.",
-        failing.handle
+        "AC1015 LINE recovery-lift red guard: handles 0x{:X} and 0x{:X} still require the proven +8-bit body-entry correction relative to recovered handle 0x{:X}.",
+        failing.handle,
+        second_failing.handle,
+        recovered.handle
     );
     let parse_bool = |probe: &Ac1015LineBodyProbe, label: &'static str| {
         probe
@@ -3296,6 +3409,136 @@ fn ac1015_line_body_recovery_lift_red_test_requires_byte_handoff_correction() {
     assert_eq!(
         failing_semantics.start[1], failing_semantics.end[1],
         "diagnostic sanity check: the current failing LINE semantics remain internally self-consistent once observed through the live parser handoff"
+    );
+}
+
+#[test]
+fn ac1015_line_common_body_entry_decision_trace() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    let traces = [
+        ac1015_line_body_entry_decision_trace(&bytes, &pending, 0x2C7, "LINE"),
+        ac1015_line_body_entry_decision_trace(&bytes, &pending, 0x2CF, "LINE"),
+        ac1015_line_body_entry_decision_trace(&bytes, &pending, 0x517, "LINE"),
+    ];
+
+    eprintln!("AC1015 LINE common/body entry decision trace:");
+    for trace in &traces {
+        eprintln!(
+            "  handle=0x{:X} family={} object_type={} header_end_bits={} declared_main_boundary_bits={} body_start_bits={} common_bits_consumed={} main_bits_remaining={} handle_bits_consumed={} common_probe_stage={} body_failure_stage={} decision={} next_fix_location={}",
+            trace.handle,
+            trace.family,
+            trace.object_type,
+            trace.header_end_bits,
+            trace.declared_main_boundary_bits,
+            trace.body_start_bits,
+            trace.main_bits_consumed_by_common,
+            trace.main_bits_remaining_after_common,
+            trace.handle_bits_consumed_by_common,
+            trace.common_probe_stage.unwrap_or("none"),
+            trace.body_probe_failure_stage.unwrap_or("none"),
+            trace.body_boundary_rule.as_str(),
+            trace.next_fix_location,
+        );
+        eprintln!("    reason={}", trace.rule_reason);
+    }
+
+    let recovered = &traces[0];
+    let selective = &traces[1];
+    let unchanged = &traces[2];
+
+    assert_eq!(recovered.handle, 0x2C7);
+    assert_eq!(selective.handle, 0x2CF);
+    assert_eq!(unchanged.handle, 0x517);
+
+    for trace in &traces {
+        assert_eq!(trace.family, "LINE");
+        assert_eq!(trace.object_type, 19);
+        assert_eq!(trace.common_result, "ok");
+        assert_eq!(trace.common_probe_stage, Some("ok"));
+        assert_eq!(trace.body_probe_failure_stage, Some("entity_body_decode"));
+        assert_eq!(
+            trace.next_fix_location,
+            "crates/h7cad-native-dwg/src/lib.rs::try_decode_entity_body_with_reason"
+        );
+        assert!(
+            trace
+                .common_handle_reads
+                .iter()
+                .any(|entry| entry.contains("label=layer")),
+            "trace handle 0x{:X} should prove common-field ownership reached the layer handle before body reader construction",
+            trace.handle
+        );
+    }
+
+    assert_eq!(recovered.body_start_bits, 92);
+    assert_eq!(recovered.main_bits_consumed_by_common, 92);
+    assert_eq!(
+        recovered.body_boundary_rule,
+        Ac1015LineBodyEntryRule::SameBoundary
+    );
+
+    assert_eq!(selective.body_start_bits, 100);
+    assert_eq!(
+        selective.body_start_bits as isize - recovered.body_start_bits as isize,
+        8
+    );
+    assert_eq!(
+        selective.main_bits_consumed_by_common,
+        100
+    );
+    assert_eq!(
+        selective.body_boundary_rule,
+        Ac1015LineBodyEntryRule::SelectivePlus8Boundary
+    );
+
+    assert_eq!(unchanged.body_start_bits, recovered.body_start_bits);
+    assert_eq!(
+        unchanged.main_bits_consumed_by_common,
+        recovered.main_bits_consumed_by_common
+    );
+    assert_eq!(
+        unchanged.body_boundary_rule,
+        Ac1015LineBodyEntryRule::NoAdjustment
+    );
+
+    assert_eq!(recovered.header_end_bits, selective.header_end_bits);
+    assert_eq!(recovered.header_end_bits, unchanged.header_end_bits);
+    assert_eq!(
+        recovered.main_bits_remaining_after_common,
+        selective.main_bits_remaining_after_common,
+        "0x2CF should preserve the same remaining main payload width as 0x2C7 even though common decode enters the body one byte later"
+    );
+    assert!(
+        selective.handle_bits_consumed_by_common > recovered.handle_bits_consumed_by_common,
+        "0x2CF should also consume more handle-stream ownership data than 0x2C7 before body-reader construction"
+    );
+    assert!(
+        unchanged.handle_bits_consumed_by_common < selective.handle_bits_consumed_by_common,
+        "0x517 proves the selective +8 rule is not explained by a universal high handle-stream consumption pattern"
+    );
+    assert_eq!(
+        recovered.declared_main_boundary_bits as isize - selective.declared_main_boundary_bits as isize,
+        -8,
+        "0x2CF should also carry an object-level declared main boundary that is one byte later than 0x2C7"
+    );
+    assert!(
+        unchanged.declared_main_boundary_bits > recovered.declared_main_boundary_bits,
+        "0x517 keeps the recovered body-entry boundary even though its declared main range is larger, proving the rule is not a global shift to the declared end"
+    );
+    assert!(
+        unchanged.main_bits_remaining_after_common > recovered.main_bits_remaining_after_common,
+        "0x517 should preserve the recovered body-entry boundary while retaining a larger declared main payload tail, proving the next fix cannot be a global shift to the declared end"
     );
 }
 
