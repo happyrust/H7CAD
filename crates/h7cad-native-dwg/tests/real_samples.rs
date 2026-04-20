@@ -3574,6 +3574,77 @@ fn ac1015_line_body_recovery_lift_red_test_requires_byte_handoff_correction() {
 }
 
 #[test]
+fn ac1015_line_2cf_common_body_handoff_rule_trace() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
+    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+    let payloads = sections
+        .read_section_payloads(&bytes)
+        .expect("AC1015 section payloads readable");
+    let pending = build_pending_document(&header, &sections, payloads)
+        .expect("AC1015 pending document builds without error");
+
+    let recovered = ac1015_line_body_entry_decision_trace(&bytes, &pending, 0x2C7, "LINE");
+    let failing = ac1015_line_body_entry_decision_trace(&bytes, &pending, 0x2CF, "LINE");
+    let unchanged = ac1015_line_body_entry_decision_trace(&bytes, &pending, 0x517, "LINE");
+
+    eprintln!("AC1015 LINE 0x2CF common/body handoff rule trace:");
+    for trace in [&recovered, &failing, &unchanged] {
+        eprintln!(
+            "  handle=0x{:X} body_start_bits={} declared_main_boundary_bits={} common_bits_consumed={} main_bits_remaining={} handle_bits_consumed={} rule={} reason={}",
+            trace.handle,
+            trace.body_start_bits,
+            trace.declared_main_boundary_bits,
+            trace.main_bits_consumed_by_common,
+            trace.main_bits_remaining_after_common,
+            trace.handle_bits_consumed_by_common,
+            trace.body_boundary_rule.as_str(),
+            trace.rule_reason,
+        );
+    }
+
+    assert_eq!(recovered.body_start_bits, 92);
+    assert_eq!(failing.body_start_bits, 100);
+    assert_eq!(unchanged.body_start_bits, 92);
+    assert_eq!(
+        failing.body_start_bits as isize - recovered.body_start_bits as isize,
+        8,
+        "representative handle 0x2CF must still enter LINE body decode one byte later than recovered 0x2C7"
+    );
+    assert_eq!(
+        failing.main_bits_remaining_after_common,
+        recovered.main_bits_remaining_after_common,
+        "0x2CF should preserve the same post-common main payload width as recovered 0x2C7"
+    );
+    assert_eq!(
+        failing.declared_main_boundary_bits as isize - recovered.declared_main_boundary_bits as isize,
+        8,
+        "the +8-bit handoff delta must come from the object-level main/body boundary carried into common decode"
+    );
+    assert!(
+        failing.handle_bits_consumed_by_common > recovered.handle_bits_consumed_by_common,
+        "0x2CF should also consume more handle-stream common metadata than recovered 0x2C7"
+    );
+    assert_eq!(
+        failing.body_boundary_rule,
+        Ac1015LineBodyEntryRule::SelectivePlus8Boundary,
+        "0x2CF should isolate to one truthful parser-owned common/body handoff rule"
+    );
+    assert_eq!(
+        unchanged.body_boundary_rule,
+        Ac1015LineBodyEntryRule::NoAdjustment,
+        "0x517 proves the handoff decision is not a universal shift to later main-reader boundaries"
+    );
+    assert!(
+        failing.rule_reason.contains("+8-bit parser-owned boundary rule"),
+        "the trace should conclude that the next production attempt, if any, must change reader state before read_line_geometry rather than retrying an in-body semantic tweak first"
+    );
+}
+
+#[test]
 fn ac1015_line_common_body_entry_decision_trace() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
         eprintln!("skip: sample_AC1015.dwg not present");
