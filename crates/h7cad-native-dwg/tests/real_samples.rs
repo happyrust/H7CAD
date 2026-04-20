@@ -1657,6 +1657,7 @@ struct Ac1015LineBodyFieldProgress {
     remaining_before_bits: usize,
     position_after_bits: usize,
     remaining_after_bits: usize,
+    raw_value: String,
     semantic_value: String,
 }
 
@@ -1708,6 +1709,14 @@ struct Ac1015LineBodySemanticAudit {
     extrusion: [f64; 3],
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct Ac1015LineBodyTraceDivergence {
+    handle: u64,
+    first_divergent_field: &'static str,
+    divergence_kind: &'static str,
+    previous_field: Option<&'static str>,
+}
+
 fn extract_logged_i32(entries: &[String], needle: &str) -> Option<i32> {
     entries.iter().find_map(|entry| {
         if !entry.contains(needle) {
@@ -1726,6 +1735,7 @@ fn record_line_body_field<T>(
     fields: &mut Vec<Ac1015LineBodyFieldProgress>,
     label: &'static str,
     reader: &mut BitReader<'_>,
+    raw_value: impl FnOnce(&T) -> String,
     semantic_value: impl FnOnce(&T) -> String,
     read: impl FnOnce(&mut BitReader<'_>) -> T,
 ) -> T {
@@ -1739,6 +1749,7 @@ fn record_line_body_field<T>(
         remaining_before_bits,
         position_after_bits: reader.position_in_bits(),
         remaining_after_bits: reader.bits_remaining(),
+        raw_value: raw_value(&value),
         semantic_value,
     });
     value
@@ -1916,6 +1927,7 @@ fn ac1015_line_body_probe(
         &mut fields,
         "z_are_zero",
         &mut body_reader,
+        |value: &u8| format!("bit={value}"),
         |value: &u8| format!("{}", *value == 1),
         |reader| reader.read_bit().expect("z_are_zero bit"),
     ) == 1;
@@ -1923,6 +1935,7 @@ fn ac1015_line_body_probe(
         &mut fields,
         "start.x",
         &mut body_reader,
+        |value: &f64| format!("raw_f64={value:?}"),
         |value: &f64| format!("{value:?}"),
         |reader| reader.read_raw_f64_le().expect("LINE start.x"),
     );
@@ -1930,6 +1943,7 @@ fn ac1015_line_body_probe(
         &mut fields,
         "end.x",
         &mut body_reader,
+        |value: &f64| format!("dd(default=start.x)={value:?}"),
         |value: &f64| format!("{value:?}"),
         |reader| {
             reader
@@ -1941,6 +1955,7 @@ fn ac1015_line_body_probe(
         &mut fields,
         "start.y",
         &mut body_reader,
+        |value: &f64| format!("raw_f64={value:?}"),
         |value: &f64| format!("{value:?}"),
         |reader| reader.read_raw_f64_le().expect("LINE start.y"),
     );
@@ -1948,6 +1963,7 @@ fn ac1015_line_body_probe(
         &mut fields,
         "end.y",
         &mut body_reader,
+        |value: &f64| format!("dd(default=start.y)={value:?}"),
         |value: &f64| format!("{value:?}"),
         |reader| {
             reader
@@ -1961,6 +1977,7 @@ fn ac1015_line_body_probe(
                 &mut fields,
                 "start.z",
                 &mut body_reader,
+                |value: &f64| format!("raw_f64={value:?}"),
                 |value: &f64| format!("{value:?}"),
                 |reader| reader.read_raw_f64_le().expect("LINE start.z"),
             )
@@ -1970,6 +1987,7 @@ fn ac1015_line_body_probe(
                 &mut fields,
                 "end.z",
                 &mut body_reader,
+                |value: &f64| format!("dd(default=start.z)={value:?}"),
                 |value: &f64| format!("{value:?}"),
                 |reader| {
                     reader
@@ -1983,6 +2001,13 @@ fn ac1015_line_body_probe(
         &mut fields,
         "thickness",
         &mut body_reader,
+        |value: &f64| {
+            if *value == 0.0 {
+                "bit_thickness(default-zero)".to_string()
+            } else {
+                format!("bit_thickness(explicit)={value:?}")
+            }
+        },
         |value: &f64| format!("{value:?}"),
         |reader| {
             reader
@@ -1994,6 +2019,13 @@ fn ac1015_line_body_probe(
         &mut fields,
         "extrusion",
         &mut body_reader,
+        |value: &[f64; 3]| {
+            if *value == [0.0, 0.0, 1.0] {
+                "bit_extrusion(default-unit-z)".to_string()
+            } else {
+                format!("bit_extrusion(explicit)={value:?}")
+            }
+        },
         |value: &[f64; 3]| format!("{value:?}"),
         |reader| {
             reader
@@ -2056,6 +2088,61 @@ fn probe_line_body_field_hypothesis(
         thickness,
         extrusion,
     })
+}
+
+fn first_line_body_divergence(
+    baseline: &Ac1015LineBodyProbe,
+    candidate: &Ac1015LineBodyProbe,
+) -> Ac1015LineBodyTraceDivergence {
+    let bit_offset = candidate.body_start_bits as isize - baseline.body_start_bits as isize;
+    for (index, (expected, observed)) in baseline
+        .fields
+        .iter()
+        .zip(candidate.fields.iter())
+        .enumerate()
+    {
+        if expected.label != observed.label {
+            return Ac1015LineBodyTraceDivergence {
+                handle: candidate.handle,
+                first_divergent_field: observed.label,
+                divergence_kind: "field_name",
+                previous_field: index.checked_sub(1).map(|prev| baseline.fields[prev].label),
+            };
+        }
+        if expected.position_before_bits as isize + bit_offset != observed.position_before_bits as isize
+            || expected.position_after_bits as isize + bit_offset != observed.position_after_bits as isize
+            || expected.remaining_before_bits != observed.remaining_before_bits
+            || expected.remaining_after_bits != observed.remaining_after_bits
+        {
+            return Ac1015LineBodyTraceDivergence {
+                handle: candidate.handle,
+                first_divergent_field: observed.label,
+                divergence_kind: "bit_consumption",
+                previous_field: index.checked_sub(1).map(|prev| baseline.fields[prev].label),
+            };
+        }
+        if expected.raw_value != observed.raw_value {
+            return Ac1015LineBodyTraceDivergence {
+                handle: candidate.handle,
+                first_divergent_field: observed.label,
+                divergence_kind: "raw_value",
+                previous_field: index.checked_sub(1).map(|prev| baseline.fields[prev].label),
+            };
+        }
+        if expected.semantic_value != observed.semantic_value {
+            return Ac1015LineBodyTraceDivergence {
+                handle: candidate.handle,
+                first_divergent_field: observed.label,
+                divergence_kind: "semantic_value",
+                previous_field: index.checked_sub(1).map(|prev| baseline.fields[prev].label),
+            };
+        }
+    }
+
+    panic!(
+        "expected LINE handle 0x{:X} to diverge from baseline handle 0x{:X}",
+        candidate.handle, baseline.handle
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3133,6 +3220,80 @@ fn ac1015_line_body_byte_position_red_test_proves_representative_field_mismatch(
     assert_ne!(
         recovered_semantics.end[1], failing_semantics.end[1],
         "end.y should diverge consistently with the mismatched start.y semantic value"
+    );
+}
+
+#[test]
+fn ac1015_line_body_field_trace_reports_first_divergence_for_representative_handles() {
+    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
+        eprintln!("skip: sample_AC1015.dwg not present");
+        return;
+    };
+
+    let baseline = ac1015_line_body_probe(&bytes, 0x2C7, "LINE");
+    let failing_2cf = ac1015_line_body_probe(&bytes, 0x2CF, "LINE");
+    let failing_517 = ac1015_line_body_probe(&bytes, 0x517, "LINE");
+
+    eprintln!("AC1015 LINE per-field trace vs baseline handle 0x2C7:");
+    for probe in [&baseline, &failing_2cf, &failing_517] {
+        eprintln!(
+            "  handle=0x{:X} body_start_bits={} remaining_before={}",
+            probe.handle, probe.body_start_bits, probe.body_remaining_bits_before
+        );
+        for field in &probe.fields {
+            eprintln!(
+                "    field={} bits {}->{} rem {}->{} raw={} semantic={}",
+                field.label,
+                field.position_before_bits,
+                field.position_after_bits,
+                field.remaining_before_bits,
+                field.remaining_after_bits,
+                field.raw_value,
+                field.semantic_value,
+            );
+        }
+    }
+
+    let divergence_2cf = first_line_body_divergence(&baseline, &failing_2cf);
+    let divergence_517 = first_line_body_divergence(&baseline, &failing_517);
+
+    eprintln!(
+        "  divergence handle=0x{:X}: first_field={} kind={} previous_field={}",
+        divergence_2cf.handle,
+        divergence_2cf.first_divergent_field,
+        divergence_2cf.divergence_kind,
+        divergence_2cf.previous_field.unwrap_or("none"),
+    );
+    eprintln!(
+        "  divergence handle=0x{:X}: first_field={} kind={} previous_field={}",
+        divergence_517.handle,
+        divergence_517.first_divergent_field,
+        divergence_517.divergence_kind,
+        divergence_517.previous_field.unwrap_or("none"),
+    );
+    eprintln!(
+        "  conclusion: representative LINE handles stay bit-aligned through the full body trace; first truthful divergence is raw/semantic `start.y`, so the next fix belongs in LINE field semantics rather than body-window construction."
+    );
+
+    assert_eq!(
+        divergence_2cf,
+        Ac1015LineBodyTraceDivergence {
+            handle: 0x2CF,
+            first_divergent_field: "start.y",
+            divergence_kind: "raw_value",
+            previous_field: Some("end.x"),
+        },
+        "handle 0x2CF should first diverge at LINE start.y while preserving field order and bit consumption"
+    );
+    assert_eq!(
+        divergence_517,
+        Ac1015LineBodyTraceDivergence {
+            handle: 0x517,
+            first_divergent_field: "z_are_zero",
+            divergence_kind: "bit_consumption",
+            previous_field: None,
+        },
+        "handle 0x517 should first diverge by consuming more bits from the same ordered field trace, which points at body-window construction rather than a later LINE semantic-only mismatch"
     );
 }
 
