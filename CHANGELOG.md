@@ -2,6 +2,31 @@
 
 ## [未发布]
 
+### 2026-04-20：`.pid` Save-As 同迁移 publish sidecar（bug fix）
+
+修复 H7CAD × SPPID 集成分析中识别的 P2 用户体验 bug：`save_pid_native(dst, src)` 写入新 `.pid` 时未同步迁移同目录的 publish sidecar（`{stem}_Data.xml` / `{stem}_Meta.xml`），导致"另存为"到新位置后 sidecar 成为孤儿，re-open 新 `.pid` 时静默丢失 publish 增强的对象图/summary.title 等数据。
+
+**改动**（`src/io/pid_import.rs`）：
+
+- `save_pid_native` 写完 `.pid` 后调用新 helper `copy_publish_sidecars_if_present(src, dst)`
+- 新 helper 实现"both-or-nothing"契约，与 open 侧 `merge_publish_sidecars` 对称：
+  - 两个 sidecar 都缺 → no-op
+  - 两个都在 → 按 `dst` 的 stem 重命名并复制
+  - 只存一个 → 返回 "incomplete publish bundle" 错误，拒绝传播半损坏 bundle
+- 对 `src == dst`（覆盖同文件保存）显式短路，避免 `fs::copy` 自覆盖未定义行为
+
+**不改动**：`save_pid_native` 函数签名；`publish_data_path` / `publish_meta_path` 命名算法；`merge_publish_sidecars` 语义；`export_sppid_publish_bundle` 的 sidecar 生成逻辑。
+
+**测试**：`io::pid_import::tests` 新增 3 条集成测试：
+
+- `save_pid_native_copies_sidecars_when_both_present_with_new_stem`：构造 src + 两个 sidecar → `save_pid_native(dst, src)` → 断言 dst 旁生成同名 sidecar 且字节一致（覆盖"重命名 + 双写"主路径）
+- `save_pid_native_is_noop_when_no_sidecars_present`：直接 open 的 SmartPlant 原生 `.pid` → save 不伪造 sidecar（覆盖原生 `.pid` 无 publish 产物的向后兼容）
+- `save_pid_native_errors_on_incomplete_sidecar_pair`：先 load 再单写 `{stem}_Data.xml` → save 返回含 "incomplete publish bundle" 的错误（覆盖 open / save 两侧契约一致性）
+
+`cargo test --bin H7CAD io::pid_import` 63/63 绿，无既有用例回归。
+
+plan: `docs/plans/2026-04-19-pid-sidecar-migration-plan.md`
+
 ### 2026-04-20：PID 工作台 v2 — layout-first 可读整图预览
 
 在首期 `P&ID Browser / Graph View / Inspector` 三栏工作台与 BRAN 导出闭环基础上，继续把 `.pid` 打开后的图形区从“结构网格预览”推进到“layout-first 可读整图预览”。本轮仍保持只读，不做 SmartPlant 原始图纸高保真复刻。

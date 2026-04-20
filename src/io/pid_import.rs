@@ -1062,6 +1062,54 @@ pub fn save_pid_native(path: &Path, source_path: &Path) -> Result<(), String> {
         }
     }
     PidWriter::write_to(&package, &WritePlan::default(), path).map_err(|e| e.to_string())?;
+    copy_publish_sidecars_if_present(source_path, path)?;
+    Ok(())
+}
+
+/// Mirror publish sidecars (`{stem}_Data.xml` + `{stem}_Meta.xml`) from
+/// the source `.pid` directory to the destination's directory, renamed to
+/// match the destination's stem. A no-op when no sidecars exist next to
+/// the source. Errors when only one of the pair is present — mirrors the
+/// "both or nothing" contract enforced by [`merge_publish_sidecars`] on
+/// open.
+///
+/// Without this copy, a "Save As" that moves a H7CAD-published `.pid` to
+/// a new directory would orphan the sidecars, and re-opening the new
+/// `.pid` would silently drop the publish-enhanced object graph
+/// ([`publish_data_path`] / [`publish_meta_path`] naming is stem-derived
+/// and so cannot find the old files at the new location).
+fn copy_publish_sidecars_if_present(src: &Path, dst: &Path) -> Result<(), String> {
+    let src_data = publish_data_path(src);
+    let src_meta = publish_meta_path(src);
+    let has_data = src_data.exists();
+    let has_meta = src_meta.exists();
+
+    if !has_data && !has_meta {
+        return Ok(());
+    }
+    if has_data != has_meta {
+        return Err(format!(
+            "incomplete publish bundle beside {} (expected both {} and {})",
+            src.display(),
+            src_data.display(),
+            src_meta.display()
+        ));
+    }
+
+    let dst_data = publish_data_path(dst);
+    let dst_meta = publish_meta_path(dst);
+
+    // Same-file save: sidecars already live at the correct names; skip the
+    // copy (fs::copy of a file onto itself is OS-dependent garbage).
+    if src_data == dst_data && src_meta == dst_meta {
+        return Ok(());
+    }
+
+    std::fs::copy(&src_data, &dst_data)
+        .map_err(|e| format!("failed to copy publish Data.xml sidecar: {e}"))?;
+    std::fs::copy(&src_meta, &dst_meta)
+        .map_err(|e| format!("failed to copy publish Meta.xml sidecar: {e}"))?;
+
     Ok(())
 }
 
@@ -4939,6 +4987,108 @@ mod tests {
         pid_package_store::clear_package(&src);
         let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_file(&dst);
+    }
+
+    #[test]
+    fn save_pid_native_copies_sidecars_when_both_present_with_new_stem() {
+        // Reproduces the orphan-sidecar bug: a published .pid carries
+        // {stem}_Data.xml + {stem}_Meta.xml next to it. "Save As" to a
+        // different basename in a different directory must mirror both
+        // sidecars with the new stem so re-open picks them up.
+        let src = unique_pid_path("sidecar-copy-src");
+        let dst = unique_pid_path("sidecar-copy-dst-renamed");
+        build_fixture_pid(&src);
+        let (src_data, src_meta) = write_publish_sidecars(&src, "SIDECAR-SRC");
+        load_pid_native_with_package(&src).expect("load fixture");
+
+        save_pid_native(&dst, &src).expect("save with sidecars");
+
+        let dst_data = dst.with_file_name(format!(
+            "{}_Data.xml",
+            dst.file_stem().and_then(|s| s.to_str()).unwrap()
+        ));
+        let dst_meta = dst.with_file_name(format!(
+            "{}_Meta.xml",
+            dst.file_stem().and_then(|s| s.to_str()).unwrap()
+        ));
+        assert!(dst_data.exists(), "dst sidecar Data.xml must exist at {}", dst_data.display());
+        assert!(dst_meta.exists(), "dst sidecar Meta.xml must exist at {}", dst_meta.display());
+
+        let src_data_bytes = std::fs::read(&src_data).unwrap();
+        let dst_data_bytes = std::fs::read(&dst_data).unwrap();
+        assert_eq!(src_data_bytes, dst_data_bytes, "Data.xml bytes must be identical");
+        let src_meta_bytes = std::fs::read(&src_meta).unwrap();
+        let dst_meta_bytes = std::fs::read(&dst_meta).unwrap();
+        assert_eq!(src_meta_bytes, dst_meta_bytes, "Meta.xml bytes must be identical");
+
+        pid_package_store::clear_package(&src);
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
+        let _ = std::fs::remove_file(&src_data);
+        let _ = std::fs::remove_file(&src_meta);
+        let _ = std::fs::remove_file(&dst_data);
+        let _ = std::fs::remove_file(&dst_meta);
+    }
+
+    #[test]
+    fn save_pid_native_is_noop_when_no_sidecars_present() {
+        // A .pid opened straight from SmartPlant (no H7CAD publish sidecar)
+        // must continue to Save As without fabricating sidecars.
+        let src = unique_pid_path("sidecar-noop-src");
+        let dst = unique_pid_path("sidecar-noop-dst");
+        build_fixture_pid(&src);
+        load_pid_native_with_package(&src).expect("load fixture");
+
+        save_pid_native(&dst, &src).expect("save without sidecars must succeed");
+
+        let dst_data = dst.with_file_name(format!(
+            "{}_Data.xml",
+            dst.file_stem().and_then(|s| s.to_str()).unwrap()
+        ));
+        let dst_meta = dst.with_file_name(format!(
+            "{}_Meta.xml",
+            dst.file_stem().and_then(|s| s.to_str()).unwrap()
+        ));
+        assert!(!dst_data.exists(), "no sidecar should be fabricated at {}", dst_data.display());
+        assert!(!dst_meta.exists(), "no sidecar should be fabricated at {}", dst_meta.display());
+
+        pid_package_store::clear_package(&src);
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
+    }
+
+    #[test]
+    fn save_pid_native_errors_on_incomplete_sidecar_pair() {
+        // If only one of the sidecars exists next to src at save time, Save
+        // As must refuse rather than silently propagate a half-broken
+        // bundle — mirrors merge_publish_sidecars' open-side contract.
+        //
+        // Note on ordering: `open_pid` itself rejects incomplete pairs, so
+        // we load FIRST (no sidecars present yet), then drop just one
+        // sidecar next to src to trigger the save-side check.
+        let src = unique_pid_path("sidecar-partial-src");
+        let dst = unique_pid_path("sidecar-partial-dst");
+        build_fixture_pid(&src);
+        load_pid_native_with_package(&src).expect("load fixture with no sidecars");
+
+        // Drop only the Data.xml half to simulate the corrupt bundle that
+        // the save-side check must reject.
+        let src_data = src.with_file_name(format!(
+            "{}_Data.xml",
+            src.file_stem().and_then(|s| s.to_str()).unwrap()
+        ));
+        std::fs::write(&src_data, b"<dummy/>").expect("write half sidecar");
+
+        let err = save_pid_native(&dst, &src).expect_err("incomplete pair must error");
+        assert!(
+            err.contains("incomplete publish bundle"),
+            "expected 'incomplete publish bundle' hint; got: {err}"
+        );
+
+        pid_package_store::clear_package(&src);
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
+        let _ = std::fs::remove_file(&src_data);
     }
 
     #[test]
