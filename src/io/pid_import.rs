@@ -145,7 +145,17 @@ pub struct PidOpenBundle {
 const SPPID_BRAN_BLOCK_NAME: &str = "SPPID_BRAN";
 const SPPID_DATA_COMPONENT_SCHEMA: &str = "PIDComponent";
 const SPPID_META_COMPONENT_SCHEMA: &str = "DocVersioningComponent";
-const SPPID_TOOL_ID: &str = "H7CAD";
+/// SPPID publish 产物（Data.xml / Meta.xml）里 `ToolID` 字段的值。
+/// 绑 `CARGO_PKG_NAME` 自动跟随 `Cargo.toml [package].name`，避免改名
+/// 时漂移；同步由 `sppid_tool_id_matches_crate_name` 测试守护。
+const SPPID_TOOL_ID: &str = env!("CARGO_PKG_NAME");
+
+/// SPPID publish 产物里 `SoftwareVersion` 字段的值。
+///
+/// **不**绑 `CARGO_PKG_VERSION` —— SPPID 消费方可能按精确字符串匹配该值，
+/// Cargo 升版本会悄悄带到 publish Meta.xml 存在未知兼容风险。改由
+/// `sppid_software_version_tracks_cargo_pkg_version` 测试断言二者一致，
+/// 下次 `cargo release` 忘同步时 CI 显性失败提醒。
 const SPPID_SOFTWARE_VERSION: &str = "0.1.3";
 const SPPID_REL_DRAWING_ITEMS: &str = "DrawingItems";
 const SPPID_REL_REP_COMPOSITION: &str = "DwgRepresentationComposition";
@@ -4987,6 +4997,33 @@ mod tests {
         pid_package_store::clear_package(&src);
         let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_file(&dst);
+    }
+
+    #[test]
+    fn sppid_software_version_tracks_cargo_pkg_version() {
+        // SPPID_SOFTWARE_VERSION is written into publish Data.xml / Meta.xml
+        // as `SoftwareVersion`. SPPID consumers may string-match that field
+        // exactly, so we don't bind the constant to `CARGO_PKG_VERSION` at
+        // compile time. Instead this test asserts the two are identical —
+        // any `cargo release` that bumps Cargo.toml without touching this
+        // constant will fail here, forcing an explicit review.
+        assert_eq!(
+            super::SPPID_SOFTWARE_VERSION,
+            env!("CARGO_PKG_VERSION"),
+            "SPPID_SOFTWARE_VERSION drift: Cargo.toml version changed but \
+             the publish identity constant was not updated. Either bump \
+             SPPID_SOFTWARE_VERSION to match, or (if the SPPID consumer \
+             requires a frozen value) update the doc-comment and relax \
+             this assertion intentionally."
+        );
+    }
+
+    #[test]
+    fn sppid_tool_id_matches_crate_name() {
+        // Guard that `env!("CARGO_PKG_NAME")` binding is in effect and the
+        // crate name remains "H7CAD" (which SPPID consumers rely on).
+        assert_eq!(super::SPPID_TOOL_ID, env!("CARGO_PKG_NAME"));
+        assert_eq!(super::SPPID_TOOL_ID, "H7CAD");
     }
 
     #[test]

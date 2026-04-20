@@ -2,6 +2,24 @@
 
 ## [未发布]
 
+### 2026-04-20：SPPID 身份字符串去硬编码（保守版）
+
+延续同日 H7CAD × SPPID 集成分析改进点 1 的最低风险落地：`SPPID_TOOL_ID` 改由 `env!("CARGO_PKG_NAME")` 注入，自动跟随 Cargo.toml `[package].name`；`SPPID_SOFTWARE_VERSION` **保持手写常量**（因 SPPID 消费方可能按精确字符串匹配版本字段，自动绑 `CARGO_PKG_VERSION` 存在未知兼容风险），改由 drift-detection 单测在 `cargo release` 忘同步时显性失败提醒。
+
+**改动**（`src/io/pid_import.rs`）：
+
+- `const SPPID_TOOL_ID: &str = env!("CARGO_PKG_NAME");` 取代硬编码 `"H7CAD"`
+- `SPPID_SOFTWARE_VERSION` 保留 `"0.1.3"` 字面量，追加 doc comment 说明不自动绑的理由
+
+**测试**（新增 2 条于 `io::pid_import::tests`）：
+
+- `sppid_software_version_tracks_cargo_pkg_version`：断言常量 == `env!("CARGO_PKG_VERSION")`，下次版本 bump 忘同步时 CI 失败
+- `sppid_tool_id_matches_crate_name`：回归守护 `env!` 绑定生效且 crate 名仍为 "H7CAD"
+
+`cargo test --bin H7CAD io::pid_import` 65/65 绿（63 前轮 + 2 新），零回归。
+
+plan: `docs/plans/2026-04-19-sppid-identity-env-plan.md`
+
 ### 2026-04-20：`.pid` Save-As 同迁移 publish sidecar（bug fix）
 
 修复 H7CAD × SPPID 集成分析中识别的 P2 用户体验 bug：`save_pid_native(dst, src)` 写入新 `.pid` 时未同步迁移同目录的 publish sidecar（`{stem}_Data.xml` / `{stem}_Meta.xml`），导致"另存为"到新位置后 sidecar 成为孤儿，re-open 新 `.pid` 时静默丢失 publish 增强的对象图/summary.title 等数据。
