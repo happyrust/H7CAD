@@ -4050,6 +4050,7 @@ mod tests {
     use glam::Vec3;
     use h7cad_native_model as nm;
     use iced::{Point, Rectangle};
+    use pid_parse::{build_import_view, ObjectGraph, PidDocument, PidObject, PidRelationship};
     use std::io::Write as _;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -4097,6 +4098,83 @@ mod tests {
         drop(stream);
 
         cfb.flush().unwrap();
+    }
+
+    fn sample_pid_doc() -> PidDocument {
+        let mut doc = PidDocument::default();
+        doc.object_graph = Some(ObjectGraph {
+            drawing_no: Some("PID-200".into()),
+            project_number: Some("P-02".into()),
+            objects: vec![PidObject {
+                drawing_id: "OBJ_TEST_0001".into(),
+                item_type: "Instrument".into(),
+                drawing_item_type: Some("Symbol".into()),
+                model_id: Some("MODEL-TEST-01".into()),
+                extra: std::collections::BTreeMap::from([("Tag".into(), "FIT-200".into())]),
+                record_id: Some(0x2222),
+                field_x: Some(12),
+            }],
+            relationships: vec![PidRelationship {
+                model_id: "Relationship.TEST".into(),
+                guid: "REL_TEST_01".into(),
+                record_id: Some(0x3333),
+                field_x: Some(14),
+                source_drawing_id: Some("OBJ_TEST_0001".into()),
+                target_drawing_id: None,
+            }],
+            by_drawing_id: std::collections::BTreeMap::new(),
+            counts_by_type: std::collections::BTreeMap::new(),
+        });
+        doc
+    }
+
+    fn sample_pid_summary() -> crate::io::pid_import::PidImportSummary {
+        crate::io::pid_import::PidImportSummary {
+            title: "PID-200".into(),
+            object_count: 1,
+            relationship_count: 1,
+            unresolved_relationship_count: 0,
+            symbol_count: 0,
+            cluster_count: 0,
+            sheet_count: 0,
+            stream_count: 0,
+            attribute_class_count: 0,
+            tagged_text_count: 0,
+            dynamic_attribute_record_count: 0,
+            object_graph_available: true,
+        }
+    }
+
+    fn seed_pid_tab_with_object_handle(app: &mut H7CAD) -> Handle {
+        let object_key = crate::io::pid_import::PidNodeKey::Object {
+            drawing_id: "OBJ_TEST_0001".into(),
+        };
+
+        let mut native_preview = nm::CadDocument::new();
+        let compat_handle = native_preview
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native preview line");
+        let handle = Handle::new(compat_handle.value());
+
+        let mut preview_index = crate::io::pid_import::PidPreviewIndex::default();
+        preview_index.record_for_test(object_key, handle);
+
+        let doc = sample_pid_doc();
+        let compat_preview = crate::io::native_bridge::native_doc_to_acadrust(&native_preview);
+        app.tabs[0].tab_mode = crate::app::document::DocumentTabMode::Pid;
+        app.tabs[0].pid_state = Some(crate::app::document::PidTabState::new(
+            doc.clone(),
+            build_import_view(&doc),
+            sample_pid_summary(),
+            preview_index,
+        ));
+        app.tabs[0].scene.document = compat_preview;
+        app.tabs[0].scene.set_native_doc(Some(native_preview));
+
+        handle
     }
 
     #[test]
@@ -4162,6 +4240,99 @@ mod tests {
             "pid open should still populate the native preview scene"
         );
         assert_eq!(app.tabs[0].properties.title, "P&ID Overview");
+
+        crate::io::pid_package_store::clear_package(&path);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn pid_browser_select_syncs_scene_selection_and_inspector() {
+        let mut app = H7CAD::new();
+        let handle = seed_pid_tab_with_object_handle(&mut app);
+        let key = crate::io::pid_import::PidNodeKey::Object {
+            drawing_id: "OBJ_TEST_0001".into(),
+        };
+
+        let _ = app.update(Message::PidBrowserSelect(key.clone()));
+
+        assert!(app.tabs[0].scene.selected.contains(&handle));
+        assert_eq!(
+            app.tabs[0]
+                .pid_state
+                .as_ref()
+                .and_then(|state| state.selected_key.clone()),
+            Some(key)
+        );
+        assert!(
+            app.tabs[0].properties.title.contains("Object"),
+            "browser selection should refresh pid inspector details"
+        );
+    }
+
+    #[test]
+    fn pid_scene_selection_syncs_back_to_browser_key() {
+        let mut app = H7CAD::new();
+        let handle = seed_pid_tab_with_object_handle(&mut app);
+
+        app.tabs[0].scene.select_entity(handle, true);
+        app.refresh_properties();
+
+        let pid_state = app.tabs[0].pid_state.as_ref().expect("pid state");
+        assert_eq!(
+            pid_state.selected_key,
+            Some(crate::io::pid_import::PidNodeKey::Object {
+                drawing_id: "OBJ_TEST_0001".into()
+            })
+        );
+        assert_eq!(pid_state.active_section, PidBrowserSection::Objects);
+    }
+
+    #[test]
+    fn pid_toggle_messages_flip_meta_and_unresolved_layer_visibility() {
+        let path = unique_pid_path("toggle-layers");
+        build_fixture_pid(&path);
+        let bundle = crate::io::pid_import::open_pid(&path).expect("open pid bundle");
+
+        let mut app = H7CAD::new();
+        let _ = app.update(Message::FileOpened(Ok(crate::io::OpenFileResult {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            path: path.clone(),
+            opened: crate::io::OpenedDocument::Pid(bundle),
+        })));
+
+        let _ = app.update(Message::PidToggleHideMeta);
+        let _ = app.update(Message::PidToggleHideUnresolved);
+
+        let pid_state = app.tabs[0].pid_state.as_ref().expect("pid state");
+        assert!(pid_state.hide_meta);
+        assert!(pid_state.hide_unresolved);
+        assert!(
+            app.tabs[0]
+                .scene
+                .document
+                .layers
+                .get("PID_META")
+                .expect("pid meta layer")
+                .flags
+                .off
+        );
+        assert!(
+            app.tabs[0]
+                .scene
+                .document
+                .layers
+                .get("PID_UNRESOLVED")
+                .expect("pid unresolved layer")
+                .flags
+                .off
+        );
+        let native_doc = app.tabs[0].scene.native_doc().expect("native pid preview");
+        assert!(native_doc.layers["PID_META"].color < 0);
+        assert!(native_doc.layers["PID_UNRESOLVED"].color < 0);
 
         crate::io::pid_package_store::clear_package(&path);
         let _ = std::fs::remove_file(&path);

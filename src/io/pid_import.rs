@@ -72,6 +72,11 @@ impl PidPreviewIndex {
         self.by_key.entry(key.clone()).or_default().push(handle);
         self.by_handle.entry(handle.value()).or_insert(key);
     }
+
+    #[cfg(test)]
+    pub(crate) fn record_for_test(&mut self, key: PidNodeKey, handle: Handle) {
+        self.record_existing_handle(key, handle);
+    }
 }
 
 #[derive(Debug, Clone)]
