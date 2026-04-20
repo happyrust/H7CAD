@@ -91,11 +91,7 @@ mod tests {
                 modified: false,
             },
         );
-        PidPackage {
-            source_path: None,
-            streams,
-            parsed: PidDocument::default(),
-        }
+        PidPackage::new(None, streams, PidDocument::default())
     }
 
     #[test]

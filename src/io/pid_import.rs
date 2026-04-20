@@ -1021,11 +1021,7 @@ pub fn export_sppid_publish_bundle(
         meta_xml.clone(),
         pid_path,
     );
-    let package = PidPackage {
-        source_path: Some(pid_path.to_path_buf()),
-        streams,
-        parsed,
-    };
+    let package = PidPackage::new(Some(pid_path.to_path_buf()), streams, parsed);
     PidWriter::write_to(&package, &WritePlan::default(), pid_path).map_err(|e| e.to_string())?;
 
     let data_xml_path = publish_data_path(pid_path);
@@ -3653,11 +3649,7 @@ mod tests {
                 modified: false,
             },
         );
-        let pkg = PidPackage {
-            source_path: Some(src.clone()),
-            streams,
-            parsed: PidDocument::default(),
-        };
+        let pkg = PidPackage::new(Some(src.clone()), streams, PidDocument::default());
         pid_package_store::cache_package(&src, pkg);
 
         let err = edit_pid_drawing_number(&src, "X").expect_err("non-UTF-8 must error");
@@ -4080,11 +4072,7 @@ mod tests {
             by_drawing_id,
             counts_by_type,
         });
-        let pkg = PidPackage {
-            source_path: Some(path.to_path_buf()),
-            streams: BTreeMap::new(),
-            parsed,
-        };
+        let pkg = PidPackage::new(Some(path.to_path_buf()), BTreeMap::new(), parsed);
         pid_package_store::cache_package(path, pkg);
     }
 
@@ -4480,11 +4468,11 @@ mod tests {
         use pid_parse::model::PidDocument;
         use pid_parse::package::PidPackage;
         use std::collections::BTreeMap;
-        let pkg = PidPackage {
-            source_path: Some(src.clone()),
-            streams: BTreeMap::new(),
-            parsed: PidDocument::default(), // object_graph = None
-        };
+        let pkg = PidPackage::new(
+            Some(src.clone()),
+            BTreeMap::new(),
+            PidDocument::default(), // object_graph = None
+        );
         pid_package_store::cache_package(&src, pkg);
 
         let err = pid_graph_stats(&src)
