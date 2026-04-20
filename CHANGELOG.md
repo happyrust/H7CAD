@@ -55,6 +55,7 @@
 - 这是“真实样例的可读整图预览”，不是 SmartPlant 原始符号几何还原
 - `.sym` 文件的原始几何尚未解析
 - 后续下一步应继续收 `JSite/.sym basename -> object glyph` 的对象级映射，让 `bundle mode` 比 `pid-only mode` 再多一层真实符号语义
+- 同日后续补丁：PID 对象 Inspector 新增 `Symbol Evidence` 只读区，直接显示对象级 `layout` 下沉出来的 `Symbol Name / Symbol Path / Graphic OID / Layout ID`。这让 `pid-only` 场景下来自 `JSite` 的代表性 `.sym` 线索也能在对象面板中被看见，而不再只停留在全局 Symbols 列表
 
 ### 2026-04-18：DWG M3-B 深化调试 — AC1015 LINE/POINT body 解码链路诊断与修复
 

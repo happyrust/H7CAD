@@ -697,7 +697,37 @@ fn pid_sections_for_key(
             if attrs.is_empty() {
                 attrs.push(ro_prop("Attributes", "None".into()));
             }
-            (title, vec![ro_section("Object", details), ro_section("Attributes", attrs)])
+            let mut sections = vec![ro_section("Object", details), ro_section("Attributes", attrs)];
+            if let Some(layout_item) = pid_layout_item_for_object(pid_state, drawing_id) {
+                let mut symbol_props = Vec::new();
+                symbol_props.push(ro_prop(
+                    "Layout ID",
+                    layout_item.layout_id.clone(),
+                ));
+                symbol_props.push(ro_prop(
+                    "Symbol Name",
+                    layout_item
+                        .symbol_name
+                        .clone()
+                        .unwrap_or_else(|| "-".into()),
+                ));
+                symbol_props.push(ro_prop(
+                    "Symbol Path",
+                    layout_item
+                        .symbol_path
+                        .clone()
+                        .unwrap_or_else(|| "-".into()),
+                ));
+                symbol_props.push(ro_prop(
+                    "Graphic OID",
+                    layout_item
+                        .graphic_oid
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".into()),
+                ));
+                sections.push(ro_section("Symbol Evidence", symbol_props));
+            }
+            (title, sections)
         }
         PidNodeKey::Relationship { guid } => {
             let title = format!("Relationship {}", short_id(guid));
@@ -1072,6 +1102,22 @@ fn pid_sections_for_key(
     }
 }
 
+fn pid_layout_item_for_object<'a>(
+    pid_state: &'a super::document::PidTabState,
+    drawing_id: &str,
+) -> Option<&'a pid_parse::PidLayoutItem> {
+    pid_state
+        .document
+        .layout
+        .as_ref()
+        .and_then(|layout| {
+            layout
+                .items
+                .iter()
+                .find(|item| item.drawing_id.as_deref() == Some(drawing_id))
+        })
+}
+
 fn pid_overview_sections(pid_state: &super::document::PidTabState) -> Vec<PropSection> {
     let summary = &pid_state.summary;
     let mut document_props = vec![
@@ -1271,7 +1317,10 @@ mod tests {
     use crate::app::document::{DocumentTabMode, PidTabState};
     use crate::io::pid_import::{PidImportSummary, PidNodeKey, PidPreviewIndex};
     use h7cad_native_model as nm;
-    use pid_parse::{build_import_view, ObjectGraph, PidDocument, PidObject, PidRelationship};
+    use pid_parse::{
+        build_import_view, ObjectGraph, PidDocument, PidLayoutItem, PidLayoutModel, PidObject,
+        PidRelationship,
+    };
 
     #[test]
     fn refresh_properties_uses_native_entity_when_compat_missing() {
@@ -1445,6 +1494,24 @@ mod tests {
             by_drawing_id: std::collections::BTreeMap::new(),
             counts_by_type: std::collections::BTreeMap::new(),
         });
+        doc.layout = Some(PidLayoutModel {
+            items: vec![PidLayoutItem {
+                layout_id: "item:OBJ_AAAA1111".into(),
+                drawing_id: Some("OBJ_AAAA1111".into()),
+                graphic_oid: Some(3406),
+                kind: "Instrument".into(),
+                anchor: [120.0, 80.0],
+                bounds: None,
+                symbol_name: Some("Instrument".into()),
+                symbol_path: Some(
+                    r"\\srv\sym\Instrumentation\System Functions\D C S\DCS Field Mounted.sym"
+                        .into(),
+                ),
+                label: Some("FIT-001".into()),
+                model_id: Some("MODEL-01".into()),
+            }],
+            ..Default::default()
+        });
         doc
     }
 
@@ -1523,6 +1590,44 @@ mod tests {
                 .flat_map(|section| section.props.iter())
                 .any(|prop| prop.label == "Drawing ID"),
             "pid object selection should expose drawing identifier"
+        );
+    }
+
+    #[test]
+    fn refresh_properties_shows_pid_layout_symbol_evidence_when_available() {
+        let mut app = H7CAD::new();
+        let doc = sample_pid_doc();
+        let mut pid_state = PidTabState::new(
+            doc.clone(),
+            build_import_view(&doc),
+            sample_pid_summary(),
+            PidPreviewIndex::default(),
+        );
+        pid_state.selected_key = Some(PidNodeKey::Object {
+            drawing_id: "OBJ_AAAA1111".into(),
+        });
+
+        app.tabs[0].tab_mode = DocumentTabMode::Pid;
+        app.tabs[0].pid_state = Some(pid_state);
+
+        app.refresh_properties();
+
+        assert!(
+            app.tabs[0]
+                .properties
+                .sections
+                .iter()
+                .any(|section| section.title == "Symbol Evidence"),
+            "pid object inspector should surface layout-backed symbol evidence"
+        );
+        assert!(
+            app.tabs[0]
+                .properties
+                .sections
+                .iter()
+                .flat_map(|section| section.props.iter())
+                .any(|prop| prop.label == "Symbol Path"),
+            "symbol evidence should expose the representative .sym path"
         );
     }
 }
