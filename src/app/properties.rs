@@ -3,7 +3,9 @@ use super::helpers::{
     entity_type_key, entity_type_key_native, entity_type_label, entity_type_label_native,
     title_case_word,
 };
+use crate::io::pid_import::PidNodeKey;
 use crate::scene::dispatch;
+use crate::scene::object::{PropSection, PropValue, Property};
 use crate::ui;
 use crate::linetypes;
 use acadrust::{EntityType, Handle};
@@ -82,6 +84,17 @@ impl H7CAD {
     /// Preserves UI state (open pickers, edit buffer) across refreshes.
     pub(super) fn refresh_properties(&mut self) {
         let i = self.active_tab;
+        if self.tabs[i].is_pid() {
+            self.sync_pid_selection_from_scene(i);
+            let panel = {
+                let tab = &self.tabs[i];
+                build_pid_properties_panel(tab)
+            };
+            self.tabs[i].properties = panel;
+            self.refresh_selected_grips();
+            return;
+        }
+
         let color_picker_open = self.tabs[i].properties.color_picker_open;
         let color_palette_open = self.tabs[i].properties.color_palette_open;
         let edit_buf = std::mem::take(&mut self.tabs[i].properties.edit_buf);
@@ -349,6 +362,11 @@ impl H7CAD {
     /// Rebuild the cached selected_grips from the current entity selection.
     pub(super) fn refresh_selected_grips(&mut self) {
         let i = self.active_tab;
+        if self.tabs[i].is_pid() {
+            self.tabs[i].selected_handle = None;
+            self.tabs[i].selected_grips.clear();
+            return;
+        }
         let (new_handle, new_grips) = {
             let selected = selected_entity_refs(&self.tabs[i].scene);
             if selected.len() == 1 {
@@ -369,6 +387,9 @@ impl H7CAD {
     }
 
     pub(super) fn property_target_handles(&self, i: usize) -> Vec<Handle> {
+        if self.tabs[i].is_pid() {
+            return vec![];
+        }
         let handles = self.tabs[i].properties.selected_handles();
         if !handles.is_empty() {
             handles
@@ -425,6 +446,33 @@ impl H7CAD {
             }
         } else {
             self.tabs[i].scene.add_entity(entity);
+        }
+    }
+
+    fn sync_pid_selection_from_scene(&mut self, i: usize) {
+        let scene_selection: Vec<Handle> = self.tabs[i].scene.selected.iter().copied().collect();
+        let Some(pid_state) = self.tabs[i].pid_state.as_mut() else {
+            return;
+        };
+
+        if scene_selection.is_empty() {
+            let keep_non_graphic = pid_state
+                .selected_key
+                .as_ref()
+                .map(|key| pid_state.preview_index.handles_for(key).is_empty())
+                .unwrap_or(false);
+            if !keep_non_graphic {
+                pid_state.selected_key = None;
+            }
+            return;
+        }
+
+        let next_key = scene_selection
+            .iter()
+            .find_map(|handle| pid_state.preview_index.key_for_handle(*handle).cloned());
+        if let Some(key) = next_key {
+            pid_state.active_section = pid_section_for_key(&key);
+            pid_state.selected_key = Some(key);
         }
     }
 }
@@ -563,10 +611,667 @@ fn merge_prop_value(
     }
 }
 
+fn build_pid_properties_panel(tab: &super::document::DocumentTab) -> ui::PropertiesPanel {
+    let Some(pid_state) = tab.pid_state.as_ref() else {
+        return ui::PropertiesPanel::empty().with_width(300.0);
+    };
+
+    let (title, sections) = match pid_state.selected_key.as_ref() {
+        Some(key) => pid_sections_for_key(pid_state, key),
+        None => ("P&ID Overview".to_string(), pid_overview_sections(pid_state)),
+    };
+
+    ui::PropertiesPanel {
+        title,
+        sections,
+        ..Default::default()
+    }
+    .with_width(300.0)
+}
+
+fn pid_section_for_key(key: &PidNodeKey) -> crate::ui::PidBrowserSection {
+    match key {
+        PidNodeKey::Overview => crate::ui::PidBrowserSection::Overview,
+        PidNodeKey::Object { .. } => crate::ui::PidBrowserSection::Objects,
+        PidNodeKey::Relationship { .. } => crate::ui::PidBrowserSection::Relationships,
+        PidNodeKey::Sheet { .. } => crate::ui::PidBrowserSection::Sheets,
+        PidNodeKey::Stream { .. }
+        | PidNodeKey::TaggedStorage { .. }
+        | PidNodeKey::DynamicAttributes
+        | PidNodeKey::ClusterCoverage => crate::ui::PidBrowserSection::Streams,
+        PidNodeKey::Cluster { .. } => crate::ui::PidBrowserSection::Sheets,
+        PidNodeKey::Symbol { .. }
+        | PidNodeKey::AttributeClass { .. }
+        | PidNodeKey::Root { .. }
+        | PidNodeKey::Unresolved { .. } => crate::ui::PidBrowserSection::CrossRef,
+    }
+}
+
+fn pid_sections_for_key(
+    pid_state: &super::document::PidTabState,
+    key: &PidNodeKey,
+) -> (String, Vec<PropSection>) {
+    match key {
+        PidNodeKey::Overview => ("P&ID Overview".into(), pid_overview_sections(pid_state)),
+        PidNodeKey::Object { drawing_id } => {
+            let title = format!("Object {}", short_id(drawing_id));
+            let Some(object) = pid_state
+                .document
+                .object_graph
+                .as_ref()
+                .and_then(|graph| graph.objects.iter().find(|item| item.drawing_id == *drawing_id))
+            else {
+                return (title, vec![ro_section("Object", vec![ro_prop("Drawing ID", drawing_id.clone())])]);
+            };
+
+            let details = vec![
+                ro_prop("Drawing ID", object.drawing_id.clone()),
+                ro_prop("Item Type", object.item_type.clone()),
+                ro_prop(
+                    "Drawing Item Type",
+                    object
+                        .drawing_item_type
+                        .clone()
+                        .unwrap_or_else(|| "-".into()),
+                ),
+                ro_prop("Model ID", object.model_id.clone().unwrap_or_else(|| "-".into())),
+                ro_prop(
+                    "Record ID",
+                    object
+                        .record_id
+                        .map(|id| format!("0x{id:08X}"))
+                        .unwrap_or_else(|| "-".into()),
+                ),
+                ro_prop(
+                    "Field X",
+                    object
+                        .field_x
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".into()),
+                ),
+            ];
+            let mut attrs = Vec::new();
+            for (name, value) in &object.extra {
+                attrs.push(ro_prop(name, value.clone()));
+            }
+            if attrs.is_empty() {
+                attrs.push(ro_prop("Attributes", "None".into()));
+            }
+            (title, vec![ro_section("Object", details), ro_section("Attributes", attrs)])
+        }
+        PidNodeKey::Relationship { guid } => {
+            let title = format!("Relationship {}", short_id(guid));
+            let Some(relationship) = pid_state
+                .document
+                .object_graph
+                .as_ref()
+                .and_then(|graph| graph.relationships.iter().find(|item| item.guid == *guid))
+            else {
+                return (
+                    title,
+                    vec![ro_section("Relationship", vec![ro_prop("GUID", guid.clone())])],
+                );
+            };
+            (
+                title,
+                vec![ro_section(
+                    "Relationship",
+                    vec![
+                        ro_prop("GUID", relationship.guid.clone()),
+                        ro_prop("Model ID", relationship.model_id.clone()),
+                        ro_prop(
+                            "Record ID",
+                            relationship
+                                .record_id
+                                .map(|id| format!("0x{id:08X}"))
+                                .unwrap_or_else(|| "-".into()),
+                        ),
+                        ro_prop(
+                            "Field X",
+                            relationship
+                                .field_x
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".into()),
+                        ),
+                        ro_prop(
+                            "Source",
+                            relationship
+                                .source_drawing_id
+                                .clone()
+                                .unwrap_or_else(|| "-".into()),
+                        ),
+                        ro_prop(
+                            "Target",
+                            relationship
+                                .target_drawing_id
+                                .clone()
+                                .unwrap_or_else(|| "-".into()),
+                        ),
+                    ],
+                )],
+            )
+        }
+        PidNodeKey::Sheet { name } => {
+            let title = format!("Sheet {name}");
+            let Some(sheet) = pid_state
+                .document
+                .sheet_streams
+                .iter()
+                .find(|sheet| sheet.name == *name)
+            else {
+                return (title, vec![ro_section("Sheet", vec![ro_prop("Name", name.clone())])]);
+            };
+            (
+                title,
+                vec![ro_section(
+                    "Sheet",
+                    vec![
+                        ro_prop("Name", sheet.name.clone()),
+                        ro_prop("Path", sheet.path.clone()),
+                        ro_prop("Size", sheet.size.to_string()),
+                        ro_prop(
+                            "Magic",
+                            sheet
+                                .magic_tag
+                                .clone()
+                                .or_else(|| sheet.magic_u32_le.map(|tag| format!("0x{tag:08X}")))
+                                .unwrap_or_else(|| "-".into()),
+                        ),
+                        ro_prop("Endpoints", sheet.endpoint_records.len().to_string()),
+                        ro_prop("Attributes", sheet.attribute_records.len().to_string()),
+                    ],
+                )],
+            )
+        }
+        PidNodeKey::Stream { name } => {
+            let title = format!("Stream {name}");
+            if let Some(sheet) = pid_state
+                .document
+                .sheet_streams
+                .iter()
+                .find(|sheet| sheet.name == *name)
+            {
+                return (
+                    title,
+                    vec![ro_section(
+                        "Stream",
+                        vec![
+                            ro_prop("Name", sheet.name.clone()),
+                            ro_prop("Path", sheet.path.clone()),
+                            ro_prop("Size", sheet.size.to_string()),
+                            ro_prop("Endpoint Records", sheet.endpoint_records.len().to_string()),
+                            ro_prop("Attribute Records", sheet.attribute_records.len().to_string()),
+                            ro_prop("Preview Text Count", sheet.extracted_texts.len().to_string()),
+                        ],
+                    )],
+                );
+            }
+            (title, vec![ro_section("Stream", vec![ro_prop("Name", name.clone())])])
+        }
+        PidNodeKey::Cluster { name } => {
+            let title = format!("Cluster {name}");
+            let Some(cluster) = pid_state
+                .document
+                .clusters
+                .iter()
+                .find(|cluster| cluster.name == *name)
+            else {
+                return (
+                    title,
+                    vec![ro_section("Cluster", vec![ro_prop("Name", name.clone())])],
+                );
+            };
+            (
+                title,
+                vec![ro_section(
+                    "Cluster",
+                    vec![
+                        ro_prop("Name", cluster.name.clone()),
+                        ro_prop("Path", cluster.path.clone()),
+                        ro_prop("Kind", format!("{:?}", cluster.kind)),
+                        ro_prop("Size", cluster.size.to_string()),
+                        ro_prop(
+                            "Header",
+                            cluster
+                                .header
+                                .as_ref()
+                                .map(|header| format!("type=0x{:04X}", header.stream_type))
+                                .unwrap_or_else(|| "None".into()),
+                        ),
+                        ro_prop(
+                            "Strings",
+                            cluster
+                                .string_table
+                                .as_ref()
+                                .map(|table| table.len())
+                                .unwrap_or(cluster.extracted_strings.len())
+                                .to_string(),
+                        ),
+                    ],
+                )],
+            )
+        }
+        PidNodeKey::Symbol { symbol_path } => {
+            let title = format!("Symbol {}", short_id(symbol_path));
+            let Some(symbol) = pid_state
+                .document
+                .cross_reference
+                .as_ref()
+                .and_then(|cross| {
+                    cross
+                        .symbol_usage
+                        .iter()
+                        .find(|usage| usage.symbol_path == *symbol_path)
+                })
+            else {
+                return (
+                    title,
+                    vec![ro_section("Symbol", vec![ro_prop("Path", symbol_path.clone())])],
+                );
+            };
+
+            let mut jsites = symbol
+                .jsite_names
+                .iter()
+                .take(8)
+                .cloned()
+                .map(|name| ro_prop("JSite", name))
+                .collect::<Vec<_>>();
+            if jsites.is_empty() {
+                jsites.push(ro_prop("JSite", "None".into()));
+            }
+            (
+                title,
+                vec![
+                    ro_section(
+                        "Symbol",
+                        vec![
+                            ro_prop(
+                                "Name",
+                                symbol.symbol_name.clone().unwrap_or_else(|| "-".into()),
+                            ),
+                            ro_prop("Path", symbol.symbol_path.clone()),
+                            ro_prop("Usage Count", symbol.usage_count.to_string()),
+                        ],
+                    ),
+                    ro_section("JSites", jsites),
+                ],
+            )
+        }
+        PidNodeKey::AttributeClass { class_name } => {
+            let title = format!("Class {class_name}");
+            let Some(class) = pid_state
+                .document
+                .cross_reference
+                .as_ref()
+                .and_then(|cross| {
+                    cross
+                        .attribute_classes
+                        .iter()
+                        .find(|class| class.class_name == *class_name)
+                })
+            else {
+                return (
+                    title,
+                    vec![ro_section("Class", vec![ro_prop("Name", class_name.clone())])],
+                );
+            };
+
+            (
+                title,
+                vec![
+                    ro_section(
+                        "Class",
+                        vec![
+                            ro_prop("Name", class.class_name.clone()),
+                            ro_prop("Record Count", class.record_count.to_string()),
+                            ro_prop("Drawing IDs", class.drawing_ids.len().to_string()),
+                            ro_prop("Model IDs", class.model_ids.len().to_string()),
+                        ],
+                    ),
+                    ro_section(
+                        "Attributes",
+                        if class.unique_attribute_names.is_empty() {
+                            vec![ro_prop("Attribute", "None".into())]
+                        } else {
+                            class
+                                .unique_attribute_names
+                                .iter()
+                                .take(10)
+                                .cloned()
+                                .map(|name| ro_prop("Attribute", name))
+                                .collect()
+                        },
+                    ),
+                ],
+            )
+        }
+        PidNodeKey::Root { name } => {
+            let title = format!("Root {name}");
+            let Some(root) = pid_state
+                .document
+                .cross_reference
+                .as_ref()
+                .and_then(|cross| cross.root_presence.iter().find(|root| root.name == *name))
+            else {
+                return (title, vec![ro_section("Root", vec![ro_prop("Name", name.clone())])]);
+            };
+            (
+                title,
+                vec![ro_section(
+                    "Root",
+                    vec![
+                        ro_prop("Name", root.name.clone()),
+                        ro_prop("ID", format!("0x{:08X}", root.id)),
+                        ro_prop("Found As Storage", yes_no(root.found_as_storage)),
+                        ro_prop("Found As Stream", yes_no(root.found_as_stream)),
+                    ],
+                )],
+            )
+        }
+        PidNodeKey::TaggedStorage { storage_name } => {
+            let title = format!("TaggedText {storage_name}");
+            let Some(tagged) = pid_state.document.tagged_storages.as_ref() else {
+                return (
+                    title,
+                    vec![ro_section("TaggedText", vec![ro_prop("Storage", storage_name.clone())])],
+                );
+            };
+            (
+                title,
+                vec![ro_section(
+                    "TaggedText",
+                    vec![
+                        ro_prop("List", tagged.list_name.clone()),
+                        ro_prop("Storage", storage_name.clone()),
+                        ro_prop("Entry Count", tagged.entries.len().to_string()),
+                    ],
+                )],
+            )
+        }
+        PidNodeKey::DynamicAttributes => {
+            let Some(dynamic) = pid_state.document.dynamic_attributes.as_ref() else {
+                return (
+                    "Dynamic Attributes".into(),
+                    vec![ro_section("Dynamic Attributes", vec![ro_prop("Status", "Unavailable".into())])],
+                );
+            };
+            (
+                "Dynamic Attributes".into(),
+                vec![
+                    ro_section(
+                        "Dynamic Attributes",
+                        vec![
+                            ro_prop("Path", dynamic.path.clone()),
+                            ro_prop("Size", dynamic.size.to_string()),
+                            ro_prop("Class Names", dynamic.class_names.len().to_string()),
+                            ro_prop("Attribute Records", dynamic.attribute_records.len().to_string()),
+                            ro_prop("Record Trailers", dynamic.record_trailers.len().to_string()),
+                            ro_prop("Relationship Probes", dynamic.relationship_probes.len().to_string()),
+                        ],
+                    ),
+                    ro_section(
+                        "Class Names",
+                        if dynamic.class_names.is_empty() {
+                            vec![ro_prop("Class", "None".into())]
+                        } else {
+                            dynamic.class_names.iter().take(12).map(|name| ro_prop("Class", name.clone())).collect()
+                        },
+                    ),
+                ],
+            )
+        }
+        PidNodeKey::ClusterCoverage => {
+            let Some(cross) = pid_state.document.cross_reference.as_ref() else {
+                return (
+                    "Cluster Coverage".into(),
+                    vec![ro_section("Coverage", vec![ro_prop("Status", "Unavailable".into())])],
+                );
+            };
+            (
+                "Cluster Coverage".into(),
+                vec![
+                    ro_section(
+                        "Coverage",
+                        vec![
+                            ro_prop("Declared", cross.cluster_coverage.declared.len().to_string()),
+                            ro_prop("Found", cross.cluster_coverage.found.len().to_string()),
+                            ro_prop("Matched", cross.cluster_coverage.matched.len().to_string()),
+                            ro_prop(
+                                "Declared Missing",
+                                cross.cluster_coverage.declared_missing.len().to_string(),
+                            ),
+                            ro_prop("Found Extra", cross.cluster_coverage.found_extra.len().to_string()),
+                        ],
+                    ),
+                    ro_section(
+                        "Names",
+                        if cross.cluster_coverage.declared_missing.is_empty()
+                            && cross.cluster_coverage.found_extra.is_empty()
+                        {
+                            vec![ro_prop("Status", "No mismatch".into())]
+                        } else {
+                            cross
+                                .cluster_coverage
+                                .declared_missing
+                                .iter()
+                                .chain(cross.cluster_coverage.found_extra.iter())
+                                .take(10)
+                                .cloned()
+                                .map(|name| ro_prop("Entry", name))
+                                .collect()
+                        },
+                    ),
+                ],
+            )
+        }
+        PidNodeKey::Unresolved { label } => (
+            "Unresolved".into(),
+            vec![ro_section("Evidence", vec![ro_prop("Message", label.clone())])],
+        ),
+    }
+}
+
+fn pid_overview_sections(pid_state: &super::document::PidTabState) -> Vec<PropSection> {
+    let summary = &pid_state.summary;
+    let mut document_props = vec![
+        ro_prop("Title", summary.title.clone()),
+        ro_prop("Object Graph", yes_no(summary.object_graph_available)),
+        ro_prop(
+            "Drawing Number",
+            pid_state
+                .document
+                .drawing_meta
+                .as_ref()
+                .and_then(|meta| meta.drawing_number.clone())
+                .unwrap_or_else(|| "-".into()),
+        ),
+        ro_prop(
+            "Project Number",
+            pid_state
+                .import_view
+                .project_number
+                .clone()
+                .unwrap_or_else(|| "-".into()),
+        ),
+    ];
+
+    if let Some(summary_info) = &pid_state.document.summary {
+        if let Some(created) = &summary_info.created_time {
+            document_props.push(ro_prop("Created", created.clone()));
+        }
+        if let Some(modified) = &summary_info.modified_time {
+            document_props.push(ro_prop("Modified", modified.clone()));
+        }
+    }
+
+    let mut sections = vec![
+        ro_section("Document", document_props),
+        ro_section(
+            "Counts",
+            vec![
+                ro_prop("Objects", summary.object_count.to_string()),
+                ro_prop("Relationships", summary.relationship_count.to_string()),
+                ro_prop("Symbols", summary.symbol_count.to_string()),
+                ro_prop("Clusters", summary.cluster_count.to_string()),
+                ro_prop("Sheets", summary.sheet_count.to_string()),
+                ro_prop("Streams", summary.stream_count.to_string()),
+                ro_prop("Attribute Classes", summary.attribute_class_count.to_string()),
+                ro_prop("TaggedText", summary.tagged_text_count.to_string()),
+                ro_prop(
+                    "Dynamic Attribute Records",
+                    summary.dynamic_attribute_record_count.to_string(),
+                ),
+                ro_prop(
+                    "Unresolved",
+                    summary.unresolved_relationship_count.to_string(),
+                ),
+            ],
+        ),
+    ];
+
+    if let Some(drawing_meta) = &pid_state.document.drawing_meta {
+        let mut meta_props = Vec::new();
+        if let Some(category) = &drawing_meta.document_category {
+            meta_props.push(ro_prop("Category", category.clone()));
+        }
+        if let Some(template) = &drawing_meta.template_name {
+            meta_props.push(ro_prop("Template", template.clone()));
+        }
+        if let Some(symbology) = &drawing_meta.symbology_uid {
+            meta_props.push(ro_prop("Symbology UID", symbology.clone()));
+        }
+        if !meta_props.is_empty() {
+            sections.push(ro_section("Drawing Meta", meta_props));
+        }
+    }
+
+    if let Some(general_meta) = &pid_state.document.general_meta {
+        let mut general_props = Vec::new();
+        if let Some(path) = &general_meta.file_path {
+            general_props.push(ro_prop("File Path", path.clone()));
+        }
+        if let Some(size) = &general_meta.file_size {
+            general_props.push(ro_prop("File Size", size.clone()));
+        }
+        if !general_props.is_empty() {
+            sections.push(ro_section("General Meta", general_props));
+        }
+    }
+
+    // Version History
+    if let Some(history) = &pid_state.document.version_history {
+        let mut history_props = vec![];
+        for record in history.records.iter().take(6) {
+            history_props.push(ro_prop(
+                &record.operation,
+                format!("{} {} {}", record.timestamp, record.product, record.version),
+            ));
+        }
+        if !history_props.is_empty() {
+            sections.push(ro_section("Version History", history_props));
+        }
+    }
+
+    // PSM Roots
+    if let Some(roots) = &pid_state.document.psm_roots {
+        let root_props: Vec<Property> = roots
+            .entries
+            .iter()
+            .take(8)
+            .map(|entry| ro_prop(&entry.name, format!("id=0x{:08X}", entry.id)))
+            .collect();
+        if !root_props.is_empty() {
+            sections.push(ro_section("PSM Roots", root_props));
+        }
+    }
+
+    // PSM Cluster Table
+    if let Some(table) = &pid_state.document.psm_cluster_table {
+        let cluster_props: Vec<Property> = table
+            .entries
+            .iter()
+            .take(8)
+            .map(|entry| ro_prop("Cluster", entry.name.clone()))
+            .collect();
+        if !cluster_props.is_empty() {
+            sections.push(ro_section("PSM Cluster Table", cluster_props));
+        }
+    }
+
+    // Drawing Metadata tags
+    if let Some(meta) = &pid_state.document.drawing_meta {
+        let mut meta_props = vec![];
+        for (key, value) in meta.tags.iter().take(10) {
+            meta_props.push(ro_prop(key, value.clone()));
+        }
+        if !meta_props.is_empty() {
+            sections.push(ro_section("Drawing Metadata", meta_props));
+        }
+    }
+
+    // General Metadata tags
+    if let Some(meta) = &pid_state.document.general_meta {
+        let mut meta_props = vec![];
+        for (key, value) in meta.tags.iter().take(10) {
+            meta_props.push(ro_prop(key, value.clone()));
+        }
+        if !meta_props.is_empty() {
+            sections.push(ro_section("General Metadata", meta_props));
+        }
+    }
+
+    // App Object Registry
+    if let Some(registry) = &pid_state.document.app_object_registry {
+        let mut reg_props = vec![];
+        for entry in registry.entries.iter().take(6) {
+            reg_props.push(ro_prop(
+                &entry.clsid[..8.min(entry.clsid.len())],
+                entry.path.clone(),
+            ));
+        }
+        if !reg_props.is_empty() {
+            sections.push(ro_section("App Object Registry", reg_props));
+        }
+    }
+
+    sections
+}
+
+fn ro_section(title: &str, props: Vec<Property>) -> PropSection {
+    PropSection {
+        title: title.to_string(),
+        props,
+    }
+}
+
+fn ro_prop(label: impl Into<String>, value: String) -> Property {
+    Property {
+        label: label.into(),
+        field: "pid_readonly",
+        value: PropValue::ReadOnly(value),
+    }
+}
+
+fn yes_no(value: bool) -> String {
+    if value {
+        "Yes".into()
+    } else {
+        "No".into()
+    }
+}
+
+fn short_id(value: &str) -> String {
+    value.chars().take(12).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::document::{DocumentTabMode, PidTabState};
+    use crate::io::pid_import::{PidImportSummary, PidNodeKey, PidPreviewIndex};
     use h7cad_native_model as nm;
+    use pid_parse::{build_import_view, ObjectGraph, PidDocument, PidObject, PidRelationship};
 
     #[test]
     fn refresh_properties_uses_native_entity_when_compat_missing() {
@@ -712,6 +1417,112 @@ mod tests {
                 .count(),
             1,
             "paper-space viewport commit should mirror into native document"
+        );
+    }
+
+    fn sample_pid_doc() -> PidDocument {
+        let mut doc = PidDocument::default();
+        doc.object_graph = Some(ObjectGraph {
+            drawing_no: Some("PID-100".into()),
+            project_number: Some("P-01".into()),
+            objects: vec![PidObject {
+                drawing_id: "OBJ_AAAA1111".into(),
+                item_type: "Instrument".into(),
+                drawing_item_type: Some("Symbol".into()),
+                model_id: Some("MODEL-01".into()),
+                extra: std::collections::BTreeMap::from([("Tag".into(), "FIT-001".into())]),
+                record_id: Some(0x6001),
+                field_x: Some(10),
+            }],
+            relationships: vec![PidRelationship {
+                model_id: "Relationship.R1".into(),
+                guid: "R1".into(),
+                record_id: Some(0x7001),
+                field_x: Some(11),
+                source_drawing_id: Some("OBJ_AAAA1111".into()),
+                target_drawing_id: None,
+            }],
+            by_drawing_id: std::collections::BTreeMap::new(),
+            counts_by_type: std::collections::BTreeMap::new(),
+        });
+        doc
+    }
+
+    fn sample_pid_summary() -> PidImportSummary {
+        PidImportSummary {
+            title: "PID-100".into(),
+            object_count: 1,
+            relationship_count: 1,
+            unresolved_relationship_count: 1,
+            symbol_count: 0,
+            cluster_count: 0,
+            sheet_count: 0,
+            stream_count: 0,
+            attribute_class_count: 0,
+            tagged_text_count: 0,
+            dynamic_attribute_record_count: 0,
+            object_graph_available: true,
+        }
+    }
+
+    #[test]
+    fn refresh_properties_shows_pid_overview_without_selection() {
+        let mut app = H7CAD::new();
+        let doc = sample_pid_doc();
+        let pid_state = PidTabState::new(
+            doc.clone(),
+            build_import_view(&doc),
+            sample_pid_summary(),
+            PidPreviewIndex::default(),
+        );
+
+        app.tabs[0].tab_mode = DocumentTabMode::Pid;
+        app.tabs[0].pid_state = Some(pid_state);
+
+        app.refresh_properties();
+
+        assert_eq!(app.tabs[0].properties.title, "P&ID Overview");
+        assert!(
+            app.tabs[0]
+                .properties
+                .sections
+                .iter()
+                .any(|section| section.title == "Counts"),
+            "pid overview should expose counts section"
+        );
+    }
+
+    #[test]
+    fn refresh_properties_shows_pid_object_details_when_selected_key_exists() {
+        let mut app = H7CAD::new();
+        let doc = sample_pid_doc();
+        let mut pid_state = PidTabState::new(
+            doc.clone(),
+            build_import_view(&doc),
+            sample_pid_summary(),
+            PidPreviewIndex::default(),
+        );
+        pid_state.selected_key = Some(PidNodeKey::Object {
+            drawing_id: "OBJ_AAAA1111".into(),
+        });
+
+        app.tabs[0].tab_mode = DocumentTabMode::Pid;
+        app.tabs[0].pid_state = Some(pid_state);
+
+        app.refresh_properties();
+
+        assert!(
+            app.tabs[0].properties.title.contains("Object"),
+            "pid object selection should switch inspector title"
+        );
+        assert!(
+            app.tabs[0]
+                .properties
+                .sections
+                .iter()
+                .flat_map(|section| section.props.iter())
+                .any(|prop| prop.label == "Drawing ID"),
+            "pid object selection should expose drawing identifier"
         );
     }
 }

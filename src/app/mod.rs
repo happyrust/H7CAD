@@ -12,8 +12,6 @@ pub(crate) mod workspace;
 use document::DocumentTab;
 
 use crate::types::{Color as AcadColor, LineWeight};
-use acadrust::CadDocument;
-use h7cad_native_model as nm;
 use crate::modules::ModuleEvent;
 use crate::scene::CubeRegion;
 use crate::snap::Snapper;
@@ -199,10 +197,17 @@ pub enum DsField {
 pub enum Message {
     Tick(Instant),
     OpenFile,
-    FileOpened(Result<(String, PathBuf, CadDocument, Option<nm::CadDocument>), String>),
+    FileOpened(Result<crate::io::OpenFileResult, String>),
     SaveFile,
     SaveAs,
     PickedSavePath(Option<PathBuf>),
+    PidBrowserSectionSelect(crate::ui::pid_browser::PidBrowserSection),
+    PidSearchChanged(String),
+    PidBrowserSelect(crate::io::pid_import::PidNodeKey),
+    PidFitAll,
+    PidLocateSelection,
+    PidToggleHideMeta,
+    PidToggleHideUnresolved,
     ClearScene,
     SetWireframe(bool),
     /// Switch camera projection: true = Orthographic, false = Perspective.

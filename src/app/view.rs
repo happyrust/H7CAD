@@ -295,7 +295,53 @@ impl H7CAD {
             None
         };
 
-        let center_row: Element<'_, Message> = if let Some(wp) = ws_panel {
+        let center_row: Element<'_, Message> = if tab.is_pid() {
+            let pid_state = tab.pid_state.as_ref().expect("pid tab should carry pid_state");
+            let browser = crate::ui::pid_browser::view_panel(
+                pid_state.active_section,
+                &pid_state.search_text,
+                pid_state.selected_key.clone(),
+                pid_state.browser_items(),
+                pid_state.empty_hint(),
+            );
+
+            let toolbar = container(
+                row![
+                    button(text("Fit All").size(11)).on_press(Message::PidFitAll),
+                    button(text("Locate Selection").size(11)).on_press(Message::PidLocateSelection),
+                    button(text(if pid_state.hide_meta { "Show Meta" } else { "Hide Meta" }).size(11))
+                        .on_press(Message::PidToggleHideMeta),
+                    button(
+                        text(
+                            if pid_state.hide_unresolved {
+                                "Show Unresolved"
+                            } else {
+                                "Hide Unresolved"
+                            }
+                        )
+                        .size(11)
+                    )
+                    .on_press(Message::PidToggleHideUnresolved),
+                ]
+                .spacing(8),
+            )
+            .padding([6, 8]);
+
+            let graph_column: Element<'_, Message> =
+                column![toolbar, viewport_stack].width(Fill).height(Fill).into();
+
+            if let Some(wp) = ws_panel {
+                row![wp, browser, graph_column, tab.properties.view()]
+                    .width(Fill)
+                    .height(Fill)
+                    .into()
+            } else {
+                row![browser, graph_column, tab.properties.view()]
+                    .width(Fill)
+                    .height(Fill)
+                    .into()
+            }
+        } else if let Some(wp) = ws_panel {
             row![wp, tab.properties.view(), viewport_stack]
                 .width(Fill)
                 .height(Fill)

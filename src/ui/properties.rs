@@ -115,6 +115,7 @@ pub fn lw_options() -> Vec<LwItem> {
 pub struct PropertiesPanel {
     pub sections: Vec<PropSection>,
     pub title: String,
+    pub preferred_width: f32,
     pub selection_groups: Vec<SelectionGroup>,
     pub selected_group: Option<SelectionGroup>,
     /// Linetype items (name + ASCII art) from the document — used for combo_box options.
@@ -138,6 +139,7 @@ impl Default for PropertiesPanel {
         Self {
             sections: vec![],
             title: String::new(),
+            preferred_width: 250.0,
             selection_groups: vec![],
             selected_group: None,
             linetype_items: vec![],
@@ -160,6 +162,11 @@ impl PropertiesPanel {
             title: "No Selection".into(),
             ..Default::default()
         }
+    }
+
+    pub fn with_width(mut self, preferred_width: f32) -> Self {
+        self.preferred_width = preferred_width;
+        self
     }
 
     pub fn selected_handles(&self) -> Vec<Handle> {
@@ -236,7 +243,7 @@ impl PropertiesPanel {
                 },
                 ..Default::default()
             })
-            .width(250)
+            .width(self.preferred_width)
             .height(Length::Fill)
             .into()
     }

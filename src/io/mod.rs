@@ -18,17 +18,36 @@ use h7cad_native_model::CadDocument as NativeCadDocument;
 use std::path::{Path, PathBuf};
 
 pub mod native_bridge;
+pub mod pid_import;
+pub mod pid_package_store;
+
+#[derive(Debug, Clone)]
+pub enum OpenedDocument {
+    Cad {
+        compat_doc: CadDocument,
+        native_doc: Option<NativeCadDocument>,
+    },
+    Pid(pid_import::PidOpenBundle),
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenFileResult {
+    pub name: String,
+    pub path: PathBuf,
+    pub opened: OpenedDocument,
+}
 
 // ── Open ──────────────────────────────────────────────────────────────────
 
 /// Show a file-open dialog and load the selected DWG or DXF file.
-/// Returns `(filename, path, document)` or an error string.
-pub async fn pick_and_open() -> Result<(String, PathBuf, CadDocument, Option<NativeCadDocument>), String> {
+/// Returns `(filename, path, opened)` or an error string.
+pub async fn pick_and_open() -> Result<OpenFileResult, String> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("Open CAD file")
-        .add_filter("CAD Files", &["dwg", "dxf", "DWG", "DXF"])
+        .add_filter("CAD Files", &["dwg", "dxf", "pid", "DWG", "DXF", "PID"])
         .add_filter("DWG Files", &["dwg", "DWG"])
         .add_filter("DXF Files", &["dxf", "DXF"])
+        .add_filter("PID Files", &["pid", "PID"])
         .add_filter("All Files", &["*"])
         .pick_file()
         .await;
@@ -42,14 +61,14 @@ pub async fn pick_and_open() -> Result<(String, PathBuf, CadDocument, Option<Nat
     open_path(path).await
 }
 
-/// Load a CAD file from a known path (used by recent files).
-pub async fn open_path(path: PathBuf) -> Result<(String, PathBuf, CadDocument, Option<NativeCadDocument>), String> {
+/// Load a CAD or PID file from a known path (used by recent files).
+pub async fn open_path(path: PathBuf) -> Result<OpenFileResult, String> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "unknown".into());
-    let (doc, native_doc) = load_file_with_native(&path)?;
-    Ok((name, path, doc, native_doc))
+    let opened = open_document(&path)?;
+    Ok(OpenFileResult { name, path, opened })
 }
 
 /// Load a DWG or DXF file directly from a path (auto-detect by extension).
@@ -66,6 +85,24 @@ pub fn load_file_with_native(
     Ok((compat, Some(native)))
 }
 
+pub fn open_document(path: &Path) -> Result<OpenedDocument, String> {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "pid" => Ok(OpenedDocument::Pid(pid_import::open_pid(path)?)),
+        _ => {
+            let (compat_doc, native_doc) = load_file_with_native(path)?;
+            Ok(OpenedDocument::Cad {
+                compat_doc,
+                native_doc,
+            })
+        }
+    }
+}
+
 /// Native-first load path used by the ongoing runtime migration.
 pub fn load_file_native(path: &Path) -> Result<NativeCadDocument, String> {
     let ext = path
@@ -80,6 +117,7 @@ pub fn load_file_native(path: &Path) -> Result<NativeCadDocument, String> {
             Ok(native_bridge::acadrust_doc_to_native(&acad_doc))
         }
         "dxf" => load_dxf_native(path),
+        "pid" => pid_import::load_pid_native(path),
         _ => Err(format!("Unsupported file format: .{ext}")),
     }
 }
@@ -110,10 +148,16 @@ pub async fn pick_save_path() -> Option<PathBuf> {
         ("DXF Files (R13)", &["dxf"]),
     ];
 
+    let pid_filters: &[(&str, &[&str])] = &[("PID Files (Smart P&ID)", &["pid"])];
+
     let mut dlg = rfd::AsyncFileDialog::new()
         .set_title("Save As")
         .set_file_name("drawing.dwg");
-    for (label, exts) in dwg_filters.iter().chain(dxf_filters.iter()) {
+    for (label, exts) in dwg_filters
+        .iter()
+        .chain(dxf_filters.iter())
+        .chain(pid_filters.iter())
+    {
         dlg = dlg.add_filter(*label, *exts);
     }
     dlg.save_file().await.map(|h| h.path().to_path_buf())
@@ -203,6 +247,13 @@ pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
 }
 
 /// Native-first save path used by the ongoing runtime migration.
+///
+/// `.pid` is intentionally rejected here: PID round-trip needs the
+/// original `PidPackage` (raw CFB stream bytes captured at open time)
+/// which `NativeCadDocument` does not carry. UI code should detect the
+/// `.pid` extension *before* reaching this point and dispatch to
+/// [`pid_import::save_pid_native`] with the source path; see
+/// `app::helpers::save_active_tab_to_path`.
 pub fn save_native(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let ext = path
         .extension()
@@ -210,6 +261,10 @@ pub fn save_native(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
         .unwrap_or_default();
     match ext.as_str() {
         "dxf" => save_dxf(doc, path),
+        "pid" => Err(
+            "PID save must go through pid_import::save_pid_native (raw stream bytes are needed)"
+                .to_string(),
+        ),
         _ => save_dwg(doc, path),
     }
 }

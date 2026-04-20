@@ -9,6 +9,16 @@ use std::path::Path;
 impl H7CAD {
     pub(super) fn save_active_tab_to_path(&self, i: usize, path: &Path) -> Result<(), String> {
         use crate::store::CadStore;
+        let is_pid = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("pid"));
+        if is_pid {
+            let source = self.tabs[i].current_path.as_deref().ok_or_else(|| {
+                "PID save requires the active tab to have an opened .pid source path".to_string()
+            })?;
+            return crate::io::pid_import::save_pid_native(path, source);
+        }
         if let Some(store) = self.tabs[i].scene.native_store.as_ref() {
             store.save(path)
         } else {

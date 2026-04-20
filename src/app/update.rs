@@ -3,9 +3,11 @@ use super::helpers::{parse_coord, angle_close, ortho_constrain, polar_constrain,
 use crate::scene::{self, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX};
 use crate::scene::grip::{find_hit_grip, GripEdit};
 use crate::scene::object::GripApply;
+use crate::ui::PidBrowserSection;
 use crate::modules::ModuleEvent;
 use crate::ui::PropertiesPanel;
 use crate::types::Color as AcadColor;
+use crate::io::pid_import::PidNodeKey;
 use acadrust::{EntityType as AcadEntityType, Handle};
 use h7cad_native_model as nm;
 use iced::time::Instant;
@@ -108,8 +110,173 @@ impl H7CAD {
         }
     }
 
+    fn pid_section_for_key(key: &PidNodeKey) -> PidBrowserSection {
+        match key {
+            PidNodeKey::Overview => PidBrowserSection::Overview,
+            PidNodeKey::Object { .. } => PidBrowserSection::Objects,
+            PidNodeKey::Relationship { .. } => PidBrowserSection::Relationships,
+            PidNodeKey::Sheet { .. } | PidNodeKey::Cluster { .. } => PidBrowserSection::Sheets,
+            PidNodeKey::Stream { .. }
+            | PidNodeKey::TaggedStorage { .. }
+            | PidNodeKey::DynamicAttributes
+            | PidNodeKey::ClusterCoverage => PidBrowserSection::Streams,
+            PidNodeKey::Symbol { .. }
+            | PidNodeKey::AttributeClass { .. }
+            | PidNodeKey::Root { .. }
+            | PidNodeKey::Unresolved { .. } => PidBrowserSection::CrossRef,
+        }
+    }
+
+    fn pid_update_layer_visibility(&mut self, i: usize, layer_name: &str, visible: bool) {
+        if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(layer_name) {
+            layer.flags.off = !visible;
+        }
+        if let Some(native_doc) = self.tabs[i].scene.native_doc_mut() {
+            if let Some(layer) = native_doc.layers.get_mut(layer_name) {
+                let color = layer.color.abs().max(1);
+                layer.color = if visible { color } else { -color };
+            }
+        }
+        if let Some(layer_row) = self.tabs[i]
+            .layers
+            .layers
+            .iter_mut()
+            .find(|layer| layer.name == layer_name)
+        {
+            layer_row.visible = visible;
+        }
+    }
+
+    fn pid_locate_handles(&mut self, i: usize, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let wanted: std::collections::HashSet<String> =
+            handles.iter().map(|handle| handle.value().to_string()).collect();
+        let wires = self.tabs[i].scene.hit_test_wires();
+        let mut min = glam::Vec3::splat(f32::INFINITY);
+        let mut max = glam::Vec3::splat(f32::NEG_INFINITY);
+        let mut found = false;
+
+        for wire in wires.iter().filter(|wire| wanted.contains(&wire.name)) {
+            for point in &wire.points {
+                let point = glam::Vec3::from(*point);
+                min = min.min(point);
+                max = max.max(point);
+                found = true;
+            }
+        }
+
+        if found {
+            if min.distance(max) < 1e-4 {
+                min -= glam::Vec3::splat(24.0);
+                max += glam::Vec3::splat(24.0);
+            }
+            self.tabs[i]
+                .scene
+                .camera
+                .borrow_mut()
+                .fit_to_bounds(min, max);
+            self.tabs[i].scene.camera_generation += 1;
+        }
+    }
+
+    fn pid_select_key(&mut self, i: usize, key: PidNodeKey, locate: bool) {
+        let handles = self.tabs[i]
+            .pid_state
+            .as_ref()
+            .map(|state| state.preview_index.handles_for(&key))
+            .unwrap_or_default();
+
+        self.tabs[i].scene.deselect_all();
+        for handle in &handles {
+            self.tabs[i].scene.select_entity(*handle, false);
+        }
+        if !handles.is_empty() {
+            self.tabs[i].scene.expand_selection_for_groups(&handles);
+        }
+
+        if let Some(pid_state) = self.tabs[i].pid_state.as_mut() {
+            pid_state.active_section = Self::pid_section_for_key(&key);
+            pid_state.selected_key = Some(key.clone());
+            pid_state.last_located_handle = handles.first().copied();
+        }
+
+        if locate {
+            self.pid_locate_handles(i, &handles);
+        }
+
+        self.refresh_properties();
+    }
+
     pub fn update(&mut self, msg: Message) -> Task<Message> {
         match msg {
+            Message::PidBrowserSectionSelect(section) => {
+                let i = self.active_tab;
+                if let Some(pid_state) = self.tabs[i].pid_state.as_mut() {
+                    pid_state.active_section = section;
+                }
+                Task::none()
+            }
+
+            Message::PidSearchChanged(value) => {
+                let i = self.active_tab;
+                if let Some(pid_state) = self.tabs[i].pid_state.as_mut() {
+                    pid_state.search_text = value;
+                }
+                Task::none()
+            }
+
+            Message::PidBrowserSelect(key) => {
+                let i = self.active_tab;
+                if self.tabs[i].is_pid() {
+                    self.pid_select_key(i, key, true);
+                }
+                Task::none()
+            }
+
+            Message::PidFitAll => {
+                let i = self.active_tab;
+                if self.tabs[i].is_pid() {
+                    self.tabs[i].scene.fit_all();
+                }
+                Task::none()
+            }
+
+            Message::PidLocateSelection => {
+                let i = self.active_tab;
+                if let Some(handles) = self.tabs[i]
+                    .pid_state
+                    .as_ref()
+                    .map(|state| state.selected_handles())
+                {
+                    self.pid_locate_handles(i, &handles);
+                }
+                Task::none()
+            }
+
+            Message::PidToggleHideMeta => {
+                let i = self.active_tab;
+                if let Some(pid_state) = self.tabs[i].pid_state.as_mut() {
+                    pid_state.hide_meta = !pid_state.hide_meta;
+                    let visible = !pid_state.hide_meta;
+                    self.pid_update_layer_visibility(i, "PID_META", visible);
+                    self.sync_ribbon_layers();
+                }
+                Task::none()
+            }
+
+            Message::PidToggleHideUnresolved => {
+                let i = self.active_tab;
+                if let Some(pid_state) = self.tabs[i].pid_state.as_mut() {
+                    pid_state.hide_unresolved = !pid_state.hide_unresolved;
+                    let visible = !pid_state.hide_unresolved;
+                    self.pid_update_layer_visibility(i, "PID_UNRESOLVED", visible);
+                    self.sync_ribbon_layers();
+                }
+                Task::none()
+            }
+
             Message::Tick(t) => {
                 self.tabs[self.active_tab].scene.update(t - self.start);
                 Task::none()
@@ -117,12 +284,8 @@ impl H7CAD {
 
             Message::OpenFile => Task::perform(crate::io::pick_and_open(), Message::FileOpened),
 
-            Message::FileOpened(Ok((name, path, doc, native_doc))) => {
-                let entity_count = doc.entities().count();
-                self.command_line
-                    .push_output(&format!("Opened \"{name}\" — {entity_count} entities"));
-                self.app_menu.push_recent(path.clone());
-
+            Message::FileOpened(Ok(open_result)) => {
+                let crate::io::OpenFileResult { name, path, opened } = open_result;
                 let current_is_empty = {
                     let t = &self.tabs[self.active_tab];
                     t.current_path.is_none()
@@ -141,40 +304,84 @@ impl H7CAD {
                 };
 
                 self.tabs[i].current_path = Some(path.clone());
-                self.tabs[i].scene.document = doc;
-                self.tabs[i].scene.set_native_doc(native_doc);
-                self.tabs[i].scene.native_render_enabled = self.tabs[i].native_render_enabled;
-
-                // Auto-resolve XREFs relative to the opened file's directory.
-                if let Some(base_dir) = path.parent() {
-                    let xrefs = crate::io::xref::resolve_xrefs(
-                        &mut self.tabs[i].scene.document,
-                        base_dir,
-                    );
-                    for info in &xrefs {
-                        match info.status {
-                            crate::io::xref::XrefStatus::Loaded => {
-                                self.command_line.push_output(&format!(
-                                    "XREF  Loaded \"{}\"",
-                                    info.name
-                                ));
-                            }
-                            crate::io::xref::XrefStatus::NotFound => {
-                                self.command_line.push_error(&format!(
-                                    "XREF  Not found: \"{}\" ({})",
-                                    info.name, info.path
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                self.tabs[i].scene.populate_hatches_from_document();
-                self.tabs[i].scene.populate_images_from_document();
-                self.tabs[i].scene.populate_meshes_from_document();
                 self.tabs[i].scene.selected = std::collections::HashSet::new();
                 self.tabs[i].scene.preview_wires = vec![];
                 self.tabs[i].scene.current_layout = "Model".to_string();
+                self.tabs[i].history = super::document::HistoryState::default();
+                self.tabs[i].dirty = false;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].active_grip = None;
+                self.tabs[i].selected_grips.clear();
+                self.tabs[i].selected_handle = None;
+
+                let open_message = match opened {
+                    crate::io::OpenedDocument::Cad {
+                        compat_doc,
+                        native_doc,
+                    } => {
+                        let entity_count = compat_doc.entities().count();
+                        self.tabs[i].tab_mode = super::document::DocumentTabMode::Cad;
+                        self.tabs[i].pid_state = None;
+                        self.tabs[i].scene.document = compat_doc;
+                        self.tabs[i].scene.set_native_doc(native_doc);
+                        self.tabs[i].scene.native_render_enabled = self.tabs[i].native_render_enabled;
+
+                        if let Some(base_dir) = path.parent() {
+                            let xrefs = crate::io::xref::resolve_xrefs(
+                                &mut self.tabs[i].scene.document,
+                                base_dir,
+                            );
+                            for info in &xrefs {
+                                match info.status {
+                                    crate::io::xref::XrefStatus::Loaded => {
+                                        self.command_line.push_output(&format!(
+                                            "XREF  Loaded \"{}\"",
+                                            info.name
+                                        ));
+                                    }
+                                    crate::io::xref::XrefStatus::NotFound => {
+                                        self.command_line.push_error(&format!(
+                                            "XREF  Not found: \"{}\" ({})",
+                                            info.name, info.path
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+
+                        format!("Opened \"{name}\" — {entity_count} entities")
+                    }
+                    crate::io::OpenedDocument::Pid(bundle) => {
+                        let summary = bundle.summary.clone();
+                        let import_view = pid_parse::build_import_view(&bundle.pid_doc);
+                        let compat_preview =
+                            crate::io::native_bridge::native_doc_to_acadrust(&bundle.native_preview);
+
+                        self.tabs[i].tab_mode = super::document::DocumentTabMode::Pid;
+                        self.tabs[i].pid_state = Some(super::document::PidTabState::new(
+                            bundle.pid_doc,
+                            import_view,
+                            summary.clone(),
+                            bundle.preview_index,
+                        ));
+                        self.tabs[i].scene.document = compat_preview;
+                        self.tabs[i].scene.set_native_doc(Some(bundle.native_preview));
+                        self.tabs[i].scene.native_render_enabled = self.tabs[i].native_render_enabled;
+
+                        format!(
+                            "Opened \"{name}\" — {} objects, {} relationships ({} unresolved)",
+                            summary.object_count,
+                            summary.relationship_count,
+                            summary.unresolved_relationship_count
+                        )
+                    }
+                };
+
+                self.command_line.push_output(&open_message);
+                self.app_menu.push_recent(path.clone());
+                self.tabs[i].scene.populate_hatches_from_document();
+                self.tabs[i].scene.populate_images_from_document();
+                self.tabs[i].scene.populate_meshes_from_document();
                 crate::linetypes::populate_document(&mut self.tabs[i].scene.document);
                 self.tabs[i].properties = PropertiesPanel::empty();
                 let doc_layers = self.tabs[i].scene.document.layers.clone();
@@ -182,8 +389,7 @@ impl H7CAD {
                 self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                 self.sync_ribbon_layers();
                 self.tabs[i].scene.fit_all();
-                self.tabs[i].dirty = false;
-                self.tabs[i].history = super::document::HistoryState::default();
+                self.refresh_properties();
                 self.refresh_selected_grips();
                 Task::none()
             }
@@ -2507,30 +2713,60 @@ impl H7CAD {
                                     vp.frozen_layers = layer_handles.clone();
                                 }
                             }
-                            self.tabs[i].dirty = true;
-                            self.refresh_properties();
-                            return Task::none();
-                        }
-                        let summary = self.apply_store_edit(i, "CHPROP", |store, handle| {
-                            let entity = store.inner_mut().get_entity_mut(handle).unwrap();
-                            match field {
-                                "transparency" => {
-                                    crate::scene::dispatch::apply_common_prop_native(
-                                        entity, field, &val,
-                                    );
-                                }
-                                _ => {
-                                    crate::scene::dispatch::apply_geom_prop_native(
-                                        entity, field, &val,
-                                    );
-                                }
-                            }
-                        });
-                        self.finish_property_edit(i, summary);
-                    }
-                }
-                Task::none()
-            }
+                              self.tabs[i].dirty = true;
+                              self.refresh_properties();
+                              return Task::none();
+                          }
+                          let mut summary = EditSummary::default();
+                          let mut snapshot_pushed = false;
+                          for handle in handles {
+                              match self.classify_edit_target(i, handle) {
+                                  EditTargetKind::NativeUnsupported => {
+                                      summary.unsupported = true;
+                                  }
+                                  EditTargetKind::Missing => {}
+                                  EditTargetKind::Compat | EditTargetKind::NativeSupported => {
+                                      let nh = nm::Handle::new(handle.value());
+                                      let entity_exists = self.tabs[i]
+                                          .scene
+                                          .native_store
+                                          .as_ref()
+                                          .and_then(|store| store.inner().get_entity(nh))
+                                          .is_some();
+                                      if !entity_exists {
+                                          summary.unsupported = true;
+                                          continue;
+                                      }
+                                      if !snapshot_pushed {
+                                          self.push_undo_snapshot(i, "CHPROP");
+                                          snapshot_pushed = true;
+                                      }
+                                      if let Some(store) = self.tabs[i].scene.native_store.as_mut() {
+                                          if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
+                                              match field {
+                                                  "transparency" => {
+                                                      crate::scene::dispatch::apply_common_prop_native(
+                                                          entity, field, &val,
+                                                      );
+                                                  }
+                                                  _ => {
+                                                      crate::scene::dispatch::apply_geom_prop_native(
+                                                          entity, field, &val,
+                                                      );
+                                                  }
+                                              }
+                                              summary.changed = true;
+                                          }
+                                      }
+                                      self.sync_compat_from_native(i, handle);
+                                  }
+                              }
+                          }
+                          self.finish_property_edit(i, summary);
+                      }
+                  }
+                  Task::none()
+              }
 
             Message::PropColorPickerToggle => {
                 let i = self.active_tab;
@@ -3814,6 +4050,54 @@ mod tests {
     use glam::Vec3;
     use h7cad_native_model as nm;
     use iced::{Point, Rectangle};
+    use std::io::Write as _;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static PID_FIXTURE_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn unique_pid_path(name: &str) -> PathBuf {
+        let n = PID_FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        std::env::temp_dir().join(format!("h7cad-update-pid-{pid}-{n}-{name}.pid"))
+    }
+
+    fn build_fixture_pid(path: &Path) {
+        if path.exists() {
+            std::fs::remove_file(path).expect("clean fixture path");
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("ensure tmp parent");
+        }
+
+        let mut cfb = ::cfb::create(path).expect("create fixture cfb");
+        cfb.create_storage("/TaggedTxtData").unwrap();
+        cfb.create_storage("/PlainSheet").unwrap();
+        cfb.create_storage("/UnknownStorage").unwrap();
+
+        let drawing = b"<?xml version=\"1.0\"?><Drawing><Tag SP_DRAWINGNUMBER=\"FX-OPEN\"/></Drawing>";
+        let mut stream = cfb.create_stream("/TaggedTxtData/Drawing").unwrap();
+        stream.write_all(drawing).unwrap();
+        drop(stream);
+
+        let general =
+            b"<?xml version=\"1.0\"?><General><FilePath>C:/fixture-open.pid</FilePath></General>";
+        let mut stream = cfb.create_stream("/TaggedTxtData/General").unwrap();
+        stream.write_all(general).unwrap();
+        drop(stream);
+
+        let mut stream = cfb.create_stream("/PlainSheet/Sheet1").unwrap();
+        stream.write_all(&(0u8..16).collect::<Vec<_>>()).unwrap();
+        drop(stream);
+
+        let mut stream = cfb.create_stream("/UnknownStorage/Blob").unwrap();
+        stream
+            .write_all(&(0u8..32).map(|i| i.wrapping_mul(5).wrapping_add(1)).collect::<Vec<_>>())
+            .unwrap();
+        drop(stream);
+
+        cfb.flush().unwrap();
+    }
 
     #[test]
     fn prop_geom_commit_updates_native_line_when_compat_missing() {
@@ -3848,6 +4132,67 @@ mod tests {
             other => panic!("expected native line, got {other:?}"),
         }
         assert!(app.tabs[0].dirty, "native geometry commit should mark the tab dirty");
+    }
+
+    #[test]
+    fn file_opened_pid_bundle_populates_pid_tab_state_and_preview_scene() {
+        let path = unique_pid_path("file-opened");
+        build_fixture_pid(&path);
+        let bundle = crate::io::pid_import::open_pid(&path).expect("open pid bundle");
+
+        let mut app = H7CAD::new();
+        let _ = app.update(Message::FileOpened(Ok(crate::io::OpenFileResult {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            path: path.clone(),
+            opened: crate::io::OpenedDocument::Pid(bundle),
+        })));
+
+        assert!(app.tabs[0].is_pid(), "pid file should switch the active tab into pid mode");
+        assert_eq!(app.tabs[0].current_path.as_deref(), Some(path.as_path()));
+        assert!(
+            app.tabs[0].pid_state.is_some(),
+            "pid tab should retain parsed pid state for browser and inspector"
+        );
+        assert!(
+            app.tabs[0].scene.native_doc().is_some(),
+            "pid open should still populate the native preview scene"
+        );
+        assert_eq!(app.tabs[0].properties.title, "P&ID Overview");
+
+        crate::io::pid_package_store::clear_package(&path);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn workspace_file_click_switches_to_existing_pid_tab_without_duplicate() {
+        let path = unique_pid_path("workspace-switch");
+        build_fixture_pid(&path);
+
+        let mut app = H7CAD::new();
+        app.tabs.push(crate::app::document::DocumentTab::new_drawing(2));
+        app.tabs[1].tab_mode = crate::app::document::DocumentTabMode::Pid;
+        app.tabs[1].current_path = Some(path.clone());
+        app.active_tab = 0;
+
+        let tab_count_before = app.tabs.len();
+        let _ = app.update(Message::WorkspaceFileClick(path.clone()));
+
+        assert_eq!(app.tabs.len(), tab_count_before);
+        assert_eq!(app.active_tab, 1);
+        assert!(
+            app.command_line
+                .history
+                .last()
+                .map(|entry| entry.text.contains("switched to existing tab"))
+                .unwrap_or(false),
+            "workspace second click should switch to the existing pid tab instead of opening a duplicate"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
