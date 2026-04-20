@@ -4863,6 +4863,86 @@ impl H7CAD {
                 }
             }
 
+            // ── PIDDIFF: byte-level diff between two .pid files
+            // Usage:
+            //   PIDDIFF <a.pid> <b.pid>
+            cmd if cmd == "PIDDIFF" || cmd.starts_with("PIDDIFF ") => {
+                let raw = cmd.strip_prefix("PIDDIFF").unwrap_or("").trim();
+                let parts: Vec<&str> = raw.split_whitespace().collect();
+                if parts.len() != 2 {
+                    self.command_line
+                        .push_error("PIDDIFF: usage: PIDDIFF <a.pid> <b.pid>");
+                    return Task::none();
+                }
+                let pa = std::path::PathBuf::from(parts[0]);
+                let pb = std::path::PathBuf::from(parts[1]);
+                match crate::io::pid_import::diff_pid_files(&pa, &pb) {
+                    Ok((has_diff, text)) => {
+                        let verdict = if has_diff { "differ" } else { "match" };
+                        self.command_line.push_output(&format!(
+                            "PIDDIFF  {} — {} vs {}",
+                            verdict,
+                            pa.display(),
+                            pb.display()
+                        ));
+                        for line in text.lines() {
+                            self.command_line.push_info(&format!("    {}", line));
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDDIFF: {e}")),
+                }
+            }
+
+            // ── PIDVERSION: show DocVersion2 structured save history
+            // Usage:
+            //   PIDVERSION
+            cmd if cmd == "PIDVERSION" => {
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDVERSION: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDVERSION: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::list_pid_versions(&source) {
+                    Ok(Some(log)) => {
+                        self.command_line.push_output(&format!(
+                            "PIDVERSION  {} version record(s) in {} (magic=0x{:08X}, reserved_zero={})",
+                            log.records.len(),
+                            source.display(),
+                            log.magic_u32_le,
+                            log.reserved_all_zero
+                        ));
+                        for (idx, r) in log.records.iter().enumerate() {
+                            self.command_line.push_info(&format!(
+                                "    [{}] {:>6} v{}",
+                                idx + 1,
+                                r.op_label,
+                                r.version
+                            ));
+                        }
+                    }
+                    Ok(None) => {
+                        self.command_line.push_output(&format!(
+                            "PIDVERSION  no structured DocVersion2 decoded for {} (raw stream may still be present)",
+                            source.display()
+                        ));
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDVERSION: {e}")),
+                }
+            }
+
             // ── PIDRAWSTREAMS: list top-level CFB streams pid-parse doesn't yet decode
             // Usage:
             //   PIDRAWSTREAMS            (active tab's cached PidPackage)
@@ -5132,7 +5212,7 @@ impl H7CAD {
             //   PIDHELP
             cmd if cmd == "PIDHELP" => {
                 self.command_line
-                    .push_output("PIDHELP  PID metadata + graph commands (14 available)");
+                    .push_output("PIDHELP  PID metadata + graph commands (16 available)");
                 self.command_line.push_info("    Write:");
                 self.command_line.push_info(
                     "        PIDSETDRAWNO <new>                   shortcut for SP_DRAWINGNUMBER",
@@ -5181,6 +5261,12 @@ impl H7CAD {
                 );
                 self.command_line.push_info(
                     "        PIDRAWSTREAMS [<path>]               list top-level streams not yet decoded by pid-parse",
+                );
+                self.command_line.push_info(
+                    "        PIDDIFF <a.pid> <b.pid>              byte-level diff between two PID packages",
+                );
+                self.command_line.push_info(
+                    "        PIDVERSION                           DocVersion2 structured save history",
                 );
                 self.command_line.push_info("    Notes:");
                 self.command_line
