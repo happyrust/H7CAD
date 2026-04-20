@@ -4982,6 +4982,35 @@ impl H7CAD {
                 }
             }
 
+            // ── PIDCACHESTATS: process-wide PidPackage cache occupancy
+            // Usage:
+            //   PIDCACHESTATS
+            //
+            // Unlike the other PID commands this one does **not** require
+            // an active .pid tab — it reports the global in-memory cache
+            // (keyed by canonical path) across every .pid opened in this
+            // H7CAD process since start-up.
+            cmd if cmd == "PIDCACHESTATS" => {
+                let stats = crate::io::pid_package_store::cache_stats();
+                self.command_line.push_output(&format!(
+                    "PIDCACHESTATS  {} entry/entries, {} B total stream bytes (~{:.2} MB)",
+                    stats.entry_count,
+                    stats.total_stream_bytes,
+                    stats.total_stream_bytes as f64 / 1_048_576.0,
+                ));
+                for (idx, entry) in crate::io::pid_package_store::cached_entry_summaries()
+                    .into_iter()
+                    .enumerate()
+                {
+                    self.command_line.push_info(&format!(
+                        "    [{idx:>3}]  {}  {} stream(s)  {} B",
+                        entry.path.display(),
+                        entry.stream_count,
+                        entry.stream_bytes,
+                    ));
+                }
+            }
+
             // ── PIDREPORT: one-shot PID health check
             // Usage:
             //   PIDREPORT
@@ -5380,7 +5409,7 @@ impl H7CAD {
             //   PIDHELP
             cmd if cmd == "PIDHELP" => {
                 self.command_line
-                    .push_output("PIDHELP  PID metadata + graph commands (18 available)");
+                    .push_output("PIDHELP  PID metadata + graph commands (19 available)");
                 self.command_line.push_info("    Write:");
                 self.command_line.push_info(
                     "        PIDSETDRAWNO <new>                   shortcut for SP_DRAWINGNUMBER",
@@ -5438,6 +5467,10 @@ impl H7CAD {
                 );
                 self.command_line.push_info(
                     "        PIDCLSID                             root + non-root storage CLSID diagnostic",
+                );
+                self.command_line.push_info("    Observability:");
+                self.command_line.push_info(
+                    "        PIDCACHESTATS                        process-wide PidPackage cache occupancy (no active-tab required)",
                 );
                 self.command_line.push_info("    Report:");
                 self.command_line.push_info(

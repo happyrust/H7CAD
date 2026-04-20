@@ -2,6 +2,33 @@
 
 ## [未发布]
 
+### 2026-04-20：`pid_package_store` 可观察性 + `PIDCACHESTATS` 命令
+
+承接同日 H7CAD × SPPID 集成分析改进点 3 ("pid_package_store 无 LRU 上限") 的**观察性子集**：不实现完整 eviction policy，先让用户/调试者在运行时能看到缓存占用，为将来的 LRU 决策铺设基线数据。
+
+**改动**（`src/io/pid_package_store.rs` + `src/app/commands.rs`）：
+
+- 新增 `PidPackageCacheStats { entry_count, total_stream_bytes }` 结构
+- 新增 `pub fn cache_stats() -> PidPackageCacheStats`：条目数 + 全部 `RawStream.data.len()` 求和，order-of-magnitude 级精度
+- 新增 `pub fn cached_entry_summaries() -> Vec<PidPackageCacheEntrySummary>`：每条 `{path, stream_count, stream_bytes}`，按 path 字典序
+- 新增 `pub fn cached_paths() -> Vec<PathBuf>`（预留未来 `PIDCACHELIST` 命令）
+- 新增 CLI 命令 `PIDCACHESTATS`：**不要求 active tab 是 .pid**（它汇报全局缓存），显示总条目数、总 stream 字节数（B + MB）、每条的 path / stream 数 / 字节数
+- `PIDHELP` 新增 "Observability" 段，命令总数 18 → **19**
+
+**不改动**：`cache_package` / `get_package` / `clear_package` 签名；LRU 策略；eviction 自动化。
+
+**字节计量语义**：只累加 `RawStream.data.len()`，不算 Arc 头 / HashMap bucket / PathBuf / struct padding。精度 ±5% 级，识别 MB vs GB 量级足够；需要精确 RSS 请走 OS 级 probe。
+
+**测试**（`io::pid_package_store::tests` 新增 3 条，总数 4 → 7）：
+
+- `cache_stats_reflects_insert_and_clear_via_tagged_filter`：用 tag 前缀过滤自己插入的条目，免疫并行测试干扰（之前用绝对 delta 断言会因 parallel test 插入而 flaky）
+- `cached_paths_returns_lexicographic_order`：乱序插 3 条 → 过滤自己的条目 → 断言升序
+- `cached_entry_summaries_counts_streams_and_bytes`：5 个 100-字节 stream → summary 报 (5, 500)
+
+`cargo test --bin H7CAD io::pid` 72/72 绿（65 前轮 + 7 新），零回归。
+
+plan: `docs/plans/2026-04-19-pid-cache-stats-plan.md`
+
 ### 2026-04-20：SPPID 身份字符串去硬编码（保守版）
 
 延续同日 H7CAD × SPPID 集成分析改进点 1 的最低风险落地：`SPPID_TOOL_ID` 改由 `env!("CARGO_PKG_NAME")` 注入，自动跟随 Cargo.toml `[package].name`；`SPPID_SOFTWARE_VERSION` **保持手写常量**（因 SPPID 消费方可能按精确字符串匹配版本字段，自动绑 `CARGO_PKG_VERSION` 存在未知兼容风险），改由 drift-detection 单测在 `cargo release` 忘同步时显性失败提醒。
