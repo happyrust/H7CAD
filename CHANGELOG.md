@@ -2,6 +2,60 @@
 
 ## [未发布]
 
+### 2026-04-20：PID 工作台 v2 — layout-first 可读整图预览
+
+在首期 `P&ID Browser / Graph View / Inspector` 三栏工作台与 BRAN 导出闭环基础上，继续把 `.pid` 打开后的图形区从“结构网格预览”推进到“layout-first 可读整图预览”。本轮仍保持只读，不做 SmartPlant 原始图纸高保真复刻。
+
+**本轮完成：**
+
+- **layout-first 打开链**
+  - `open_pid()` 在合流 sidecar `_Data.xml / _Meta.xml` 后，会主动调用 `pid_parse::derive_layout()`
+  - `pid_document_to_preview()` 优先消费 `PidDocument.layout`
+  - 旧的 grid/object 预览保留为 fallback 兜底，而不再主导整图显示
+
+- **Preview 索引增强**
+  - `PidPreviewIndex` 新增：
+    - `by_drawing_id`
+    - `by_graphic_oid`
+  - 让 layout-backed 图元仍能维持 Browser / 视口 / Inspector 三向联动
+
+- **layout glyph 最小语义集**
+  - 主管线：`Pipeline`
+  - 分支点：`Branch`
+  - 连接点：`Connector`
+  - 过程点：`ProcessPoint`
+  - 仪表：`Instrument`
+  - 设备：`Equipment`
+  - 容器：`Vessel`
+  - 注释：`Note`
+  - 喷嘴 / Port：`Nozzle`
+  - 离页连接符：`OffPageConnector`
+  - 管件：`PipingComponent`
+  - 未知项仍显示带标签占位框，但不再静默退化成无语义圆点
+
+- **fallback rail 显式化**
+  - 无法定位到主图的对象进入 `PID_FALLBACK`
+  - 不再混入主图布局，便于区分“已定位对象”和“仅结构存在的对象”
+
+**新增测试：**
+
+- `pid_preview_prefers_layout_anchor_when_layout_exists`
+- `pid_preview_places_unplaced_objects_on_fallback_layer`
+- `pid_preview_index_tracks_graphic_oid_for_layout_items`
+- `pid_preview_renders_process_point_as_circle_when_layout_kind_known`
+- `open_pid_real_sample_builds_layout_when_sample_present`
+
+**验证：**
+
+- `cargo test -p H7CAD -- --test-threads=1`
+- 结果：`215/215` 全绿
+
+**当前边界：**
+
+- 这是“真实样例的可读整图预览”，不是 SmartPlant 原始符号几何还原
+- `.sym` 文件的原始几何尚未解析
+- 后续下一步应继续收 `JSite/.sym basename -> object glyph` 的对象级映射，让 `bundle mode` 比 `pid-only mode` 再多一层真实符号语义
+
 ### 2026-04-18：DWG M3-B 深化调试 — AC1015 LINE/POINT body 解码链路诊断与修复
 
 在 M3-B 收口（7 种实体 84 个 entity，163/163 全绿）基础上，对 AC1015 对象体解码
