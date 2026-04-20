@@ -560,6 +560,93 @@ pub fn verify_pid_cached(source: &Path) -> Result<PidVerifyReport, String> {
     Ok(compare_streams(&arc, &roundtrip))
 }
 
+/// Owned view of a PID's CFB CLSID metadata, projected from the cached
+/// PidPackage. Strings are the canonical `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`
+/// form so the command-line layer can print them directly without a
+/// uuid dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PidClsidInfo {
+    pub root_clsid: Option<String>,
+    /// `(storage_path, clsid_string)` pairs for non-root storages whose
+    /// CLSID is **not** the nil UUID. Empty Vec is common (most real
+    /// SmartPlant samples leave these unset).
+    pub non_root: Vec<(String, String)>,
+}
+
+/// Read CLSID metadata from the cached PidPackage. Errors only when the
+/// cache is missing for `source`.
+pub fn read_pid_clsid(source: &Path) -> Result<PidClsidInfo, String> {
+    let arc = pid_package_store::get_package(source).ok_or_else(|| {
+        format!(
+            "no cached PidPackage for {} (open the file in H7CAD first)",
+            source.display()
+        )
+    })?;
+    Ok(PidClsidInfo {
+        root_clsid: arc.root_clsid.map(|u| format!("{{{}}}", u)),
+        non_root: arc
+            .storage_clsids
+            .iter()
+            .map(|(path, uuid)| (path.clone(), format!("{{{}}}", uuid)))
+            .collect(),
+    })
+}
+
+/// Aggregate "health check" of the cached PidPackage. Sub-sections fail
+/// gracefully: if e.g. `pid_graph_stats` errors (no object_graph), the
+/// corresponding field is `None` but the overall `build_pid_health_report`
+/// still returns `Ok`. Only missing-cache fails hard.
+#[derive(Debug, Clone)]
+pub struct PidHealthReport {
+    pub source_path: std::path::PathBuf,
+    pub stream_count: usize,
+    pub graph_stats: Option<PidGraphStats>,
+    pub drawing_attributes: Vec<(String, String)>,
+    pub general_elements: Vec<(String, String)>,
+    pub verify: Option<PidVerifyReport>,
+    pub unidentified: Vec<UnidentifiedStreamInfo>,
+    pub version_log: Option<PidVersionLog>,
+    pub root_clsid: Option<String>,
+    pub non_root_clsid_count: usize,
+}
+
+/// Build a [`PidHealthReport`] for the cached package at `source`.
+/// Aggregates from existing helpers with graceful sub-section failure.
+pub fn build_pid_health_report(source: &Path) -> Result<PidHealthReport, String> {
+    let arc = pid_package_store::get_package(source).ok_or_else(|| {
+        format!(
+            "no cached PidPackage for {} (open the file in H7CAD first)",
+            source.display()
+        )
+    })?;
+    let stream_count = arc.streams.len();
+    let root_clsid = arc.root_clsid.map(|u| format!("{{{}}}", u));
+    let non_root_clsid_count = arc.storage_clsids.len();
+    drop(arc);
+
+    let graph_stats = pid_graph_stats(source).ok();
+    let listing = list_pid_metadata(source).ok();
+    let (drawing_attributes, general_elements) = listing
+        .map(|l| (l.drawing_attributes, l.general_elements))
+        .unwrap_or_default();
+    let verify = verify_pid_cached(source).ok();
+    let unidentified = list_pid_unidentified_cached(source).unwrap_or_default();
+    let version_log = list_pid_versions(source).ok().flatten();
+
+    Ok(PidHealthReport {
+        source_path: source.to_path_buf(),
+        stream_count,
+        graph_stats,
+        drawing_attributes,
+        general_elements,
+        verify,
+        unidentified,
+        version_log,
+        root_clsid,
+        non_root_clsid_count,
+    })
+}
+
 /// One structured record from the `/DocVersion2` save log, in a
 /// command-line-friendly owned form.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4434,6 +4521,88 @@ mod tests {
         );
 
         pid_package_store::clear_package(&src);
+    }
+
+    #[test]
+    fn read_pid_clsid_returns_none_for_default_package() {
+        let src = unique_pid_path("clsid-default");
+        use pid_parse::model::PidDocument;
+        use pid_parse::package::PidPackage;
+        use std::collections::BTreeMap;
+        // PidPackage::new initializes root_clsid=None, storage_clsids=empty.
+        let pkg = PidPackage::new(Some(src.clone()), BTreeMap::new(), PidDocument::default());
+        pid_package_store::cache_package(&src, pkg);
+
+        let info = read_pid_clsid(&src).expect("clsid read");
+        assert_eq!(info.root_clsid, None);
+        assert!(info.non_root.is_empty());
+
+        pid_package_store::clear_package(&src);
+    }
+
+    #[test]
+    fn read_pid_clsid_returns_populated_fields() {
+        let src = unique_pid_path("clsid-populated");
+        use pid_parse::model::PidDocument;
+        use pid_parse::package::PidPackage;
+        use std::collections::BTreeMap;
+
+        let root =
+            pid_parse::Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap();
+        let sub =
+            pid_parse::Uuid::parse_str("abcdef01-2345-6789-abcd-ef0123456789").unwrap();
+        let mut storage = BTreeMap::new();
+        storage.insert("/JSite0".to_string(), sub);
+        storage.insert("/JSite1".to_string(), sub);
+
+        let pkg = PidPackage::new(Some(src.clone()), BTreeMap::new(), PidDocument::default())
+            .with_root_clsid(Some(root))
+            .with_storage_clsids(storage);
+        pid_package_store::cache_package(&src, pkg);
+
+        let info = read_pid_clsid(&src).expect("clsid read");
+        assert_eq!(
+            info.root_clsid.as_deref(),
+            Some("{12345678-1234-1234-1234-123456789abc}")
+        );
+        assert_eq!(info.non_root.len(), 2);
+        // BTreeMap sorted iteration → /JSite0 before /JSite1
+        assert_eq!(info.non_root[0].0, "/JSite0");
+        assert_eq!(
+            info.non_root[0].1,
+            "{abcdef01-2345-6789-abcd-ef0123456789}"
+        );
+        assert_eq!(info.non_root[1].0, "/JSite1");
+
+        pid_package_store::clear_package(&src);
+    }
+
+    #[test]
+    fn build_pid_health_report_aggregates_from_cached_package() {
+        let src = unique_pid_path("report-aggregate");
+        build_fixture_pid(&src);
+        load_pid_native_with_package(&src).expect("load fixture");
+
+        let r = build_pid_health_report(&src).expect("report");
+        // Fixture has 4 streams (Drawing/General/Sheet/Blob).
+        assert_eq!(r.stream_count, 4);
+        // Fixture has no P&IDAttributes records → graph_stats gracefully None.
+        assert!(r.graph_stats.is_none());
+        // Drawing XML includes SP_DRAWINGNUMBER, so list_drawing_attributes non-empty.
+        assert!(
+            r.drawing_attributes
+                .iter()
+                .any(|(k, _)| k == "SP_DRAWINGNUMBER"),
+            "drawing attrs should include SP_DRAWINGNUMBER"
+        );
+        // Fixture has /UnknownStorage/Blob nested → not top-level → 0 unidentified.
+        assert!(r.unidentified.is_empty());
+        // round-trip on this synthetic fixture must PASS.
+        let v = r.verify.as_ref().expect("verify present");
+        assert!(v.ok(), "fixture must round-trip clean");
+
+        pid_package_store::clear_package(&src);
+        let _ = std::fs::remove_file(&src);
     }
 
     #[test]

@@ -4943,6 +4943,174 @@ impl H7CAD {
                 }
             }
 
+            // ── PIDCLSID: root + non-root storage CLSID diagnostic
+            // Usage:
+            //   PIDCLSID
+            cmd if cmd == "PIDCLSID" => {
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDCLSID: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDCLSID: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::read_pid_clsid(&source) {
+                    Ok(info) => {
+                        let root_text = info.root_clsid.as_deref().unwrap_or("(none)");
+                        self.command_line.push_output(&format!(
+                            "PIDCLSID  root={}  {} non-root storage(s) with CLSID",
+                            root_text,
+                            info.non_root.len()
+                        ));
+                        for (path, clsid) in &info.non_root {
+                            self.command_line
+                                .push_info(&format!("    {}  {}", path, clsid));
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDCLSID: {e}")),
+                }
+            }
+
+            // ── PIDREPORT: one-shot PID health check
+            // Usage:
+            //   PIDREPORT
+            cmd if cmd == "PIDREPORT" => {
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDREPORT: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDREPORT: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::build_pid_health_report(&source) {
+                    Ok(r) => {
+                        self.command_line.push_output(&format!(
+                            "=== PIDREPORT  {} ===",
+                            r.source_path.display()
+                        ));
+                        // Basic
+                        self.command_line.push_info("[Basic]");
+                        self.command_line
+                            .push_info(&format!("    Streams:         {}", r.stream_count));
+                        let graph_txt = match &r.graph_stats {
+                            Some(g) => format!(
+                                "yes ({} objects, {} relationships)",
+                                g.object_count, g.relationship_count
+                            ),
+                            None => "(no object_graph)".to_string(),
+                        };
+                        self.command_line
+                            .push_info(&format!("    Object graph:    {}", graph_txt));
+                        self.command_line.push_info(&format!(
+                            "    CLSID root:      {}  ({} non-root)",
+                            r.root_clsid.as_deref().unwrap_or("(none)"),
+                            r.non_root_clsid_count
+                        ));
+                        let version_txt = match &r.version_log {
+                            Some(v) => format!("decoded, {} record(s)", v.records.len()),
+                            None => "(not decoded)".to_string(),
+                        };
+                        self.command_line
+                            .push_info(&format!("    DocVersion2:     {}", version_txt));
+                        // Metadata (first few)
+                        self.command_line.push_info("[Metadata]");
+                        let interesting = ["SP_DRAWINGNUMBER", "SP_PROJECTNUMBER", "SP_REVISION"];
+                        for name in interesting {
+                            let value = r
+                                .drawing_attributes
+                                .iter()
+                                .find(|(k, _)| k == name)
+                                .map(|(_, v)| v.as_str())
+                                .unwrap_or("(absent)");
+                            self.command_line
+                                .push_info(&format!("    {:<18} {}", name, value));
+                        }
+                        if !r.general_elements.is_empty() {
+                            let extra = r
+                                .general_elements
+                                .iter()
+                                .take(3)
+                                .map(|(k, v)| format!("{}='{}'", k, v))
+                                .collect::<Vec<_>>()
+                                .join("  ");
+                            self.command_line
+                                .push_info(&format!("    General top-3:     {}", extra));
+                        }
+                        // Graph
+                        if let Some(g) = &r.graph_stats {
+                            self.command_line.push_info("[Graph]");
+                            self.command_line.push_info(&format!(
+                                "    Objects / Rels:  {} / {}",
+                                g.object_count, g.relationship_count
+                            ));
+                            self.command_line.push_info(&format!(
+                                "    Resolution:      {} fully / {} partially / {} unresolved",
+                                g.fully_resolved, g.partially_resolved, g.unresolved
+                            ));
+                        }
+                        // Integrity
+                        self.command_line.push_info("[Integrity]");
+                        if let Some(v) = &r.verify {
+                            if v.ok() {
+                                self.command_line.push_info(&format!(
+                                    "    Round-trip:      PASS  {} streams matched",
+                                    v.matched
+                                ));
+                            } else {
+                                self.command_line.push_info(&format!(
+                                    "    Round-trip:      FAIL  {} mismatch(es) (matched {}/{})",
+                                    v.mismatches.len(),
+                                    v.matched,
+                                    v.stream_count
+                                ));
+                            }
+                        } else {
+                            self.command_line
+                                .push_info("    Round-trip:      (verify skipped)");
+                        }
+                        self.command_line.push_info(&format!(
+                            "    Unidentified:    {} top-level stream(s)",
+                            r.unidentified.len()
+                        ));
+                        // Version history (compact)
+                        if let Some(v) = &r.version_log {
+                            self.command_line.push_info("[Version history]");
+                            for (idx, rec) in v.records.iter().enumerate() {
+                                self.command_line.push_info(&format!(
+                                    "    [{}] {:>6} v{}",
+                                    idx + 1,
+                                    rec.op_label,
+                                    rec.version
+                                ));
+                            }
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDREPORT: {e}")),
+                }
+            }
+
             // ── PIDRAWSTREAMS: list top-level CFB streams pid-parse doesn't yet decode
             // Usage:
             //   PIDRAWSTREAMS            (active tab's cached PidPackage)
@@ -5212,7 +5380,7 @@ impl H7CAD {
             //   PIDHELP
             cmd if cmd == "PIDHELP" => {
                 self.command_line
-                    .push_output("PIDHELP  PID metadata + graph commands (16 available)");
+                    .push_output("PIDHELP  PID metadata + graph commands (18 available)");
                 self.command_line.push_info("    Write:");
                 self.command_line.push_info(
                     "        PIDSETDRAWNO <new>                   shortcut for SP_DRAWINGNUMBER",
@@ -5267,6 +5435,13 @@ impl H7CAD {
                 );
                 self.command_line.push_info(
                     "        PIDVERSION                           DocVersion2 structured save history",
+                );
+                self.command_line.push_info(
+                    "        PIDCLSID                             root + non-root storage CLSID diagnostic",
+                );
+                self.command_line.push_info("    Report:");
+                self.command_line.push_info(
+                    "        PIDREPORT                            one-shot health check (Basic+Metadata+Graph+Integrity)",
                 );
                 self.command_line.push_info("    Notes:");
                 self.command_line
