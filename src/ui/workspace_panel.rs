@@ -143,6 +143,7 @@ fn row_element<'a>(
         }
         EntryKind::DxfFile => ("📐", false, false),
         EntryKind::DwgFile => ("📏", false, false),
+        EntryKind::PidFile => ("🧩", false, false),
         EntryKind::Truncated => ("⋯", false, false),
     };
     let _ = expanded; // reserved for future tooltip variations

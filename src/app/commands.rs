@@ -4157,6 +4157,1108 @@ impl H7CAD {
                 }
             }
 
+            // ── PIDSETDRAWNO: edit SP_DRAWINGNUMBER on a cached PID ───────
+            // Usage:
+            //   PIDSETDRAWNO <new-drawing-number>
+            //
+            // Active tab must be a `.pid` opened earlier in this session;
+            // edits land on the cached `PidPackage` and become visible on
+            // the next SAVE / SAVEAS. Native scene changes are NOT flushed
+            // — this is metadata-only (see docs/plans/2026-04-19-pid-edit-cli-plan.md).
+            cmd if cmd == "PIDSETDRAWNO" || cmd.starts_with("PIDSETDRAWNO ") => {
+                let new_value = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim().to_string())
+                    .unwrap_or_default();
+                if new_value.is_empty() {
+                    self.command_line.push_error(
+                        "PIDSETDRAWNO: missing argument; usage: PIDSETDRAWNO <new-drawing-number>",
+                    );
+                    return Task::none();
+                }
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDSETDRAWNO: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDSETDRAWNO: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::edit_pid_drawing_number(&source, &new_value) {
+                    Ok(report) => {
+                        let prev = report
+                            .previous
+                            .as_deref()
+                            .map(|s| format!("'{}'", s))
+                            .unwrap_or_else(|| "(absent)".to_string());
+                        self.command_line.push_output(&format!(
+                            "PIDSETDRAWNO  {} → '{}' ({} bytes Drawing XML; metadata-only edit)",
+                            prev, report.next, report.new_xml_len
+                        ));
+                        self.tabs[i].dirty = true;
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDSETDRAWNO: {e}")),
+                }
+            }
+
+            // ── PIDSETPROP: generic SP_* attribute editor on Drawing XML ──
+            // Usage:
+            //   PIDSETPROP <attr> <value...>
+            //
+            // `value` keeps embedded whitespace verbatim (no quote
+            // escaping). Same active-tab and metadata-only constraints
+            // as PIDSETDRAWNO; see docs/plans/2026-04-19-pid-setprop-generalization-plan.md.
+            cmd if cmd == "PIDSETPROP" || cmd.starts_with("PIDSETPROP ") => {
+                let mut tokens = cmd.splitn(3, ' ');
+                tokens.next(); // skip command name
+                let attr = tokens.next().map(str::trim).unwrap_or("").to_string();
+                let value = tokens.next().map(str::trim).unwrap_or("").to_string();
+                if attr.is_empty() || value.is_empty() {
+                    self.command_line
+                        .push_error("PIDSETPROP: usage: PIDSETPROP <attr> <value>");
+                    return Task::none();
+                }
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDSETPROP: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDSETPROP: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::edit_pid_drawing_attribute(&source, &attr, &value) {
+                    Ok(report) => {
+                        let prev = report
+                            .previous
+                            .as_deref()
+                            .map(|s| format!("'{}'", s))
+                            .unwrap_or_else(|| "(absent)".to_string());
+                        self.command_line.push_output(&format!(
+                            "PIDSETPROP  {} {} → '{}' ({} bytes Drawing XML; metadata-only edit)",
+                            report.attr, prev, report.next, report.new_xml_len
+                        ));
+                        self.tabs[i].dirty = true;
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDSETPROP: {e}")),
+                }
+            }
+
+            // ── PIDGETPROP: read-only lookup of an SP_* attribute ────────
+            // Usage:
+            //   PIDGETPROP <attr>
+            //
+            // Prints "PIDGETPROP  <attr> = '<value>'" on a single match;
+            // explicit error otherwise (no cache / not found / duplicates).
+            cmd if cmd == "PIDGETPROP" || cmd.starts_with("PIDGETPROP ") => {
+                let attr = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim())
+                    .unwrap_or("")
+                    .to_string();
+                if attr.is_empty() {
+                    self.command_line
+                        .push_error("PIDGETPROP: usage: PIDGETPROP <attr>");
+                    return Task::none();
+                }
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDGETPROP: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDGETPROP: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::read_pid_drawing_attribute(&source, &attr) {
+                    Some(value) => self.command_line.push_output(&format!(
+                        "PIDGETPROP  {} = '{}'",
+                        attr, value
+                    )),
+                    None => self.command_line.push_error(&format!(
+                        "PIDGETPROP: {} not found, appears multiple times, or PID stream is unavailable",
+                        attr
+                    )),
+                }
+            }
+
+            // ── PIDSETGENERAL: edit `<element>text</element>` in General XML
+            // Usage:
+            //   PIDSETGENERAL <element> <value...>
+            //
+            // Same active-tab + metadata-only constraints as PIDSETPROP,
+            // but targets `/TaggedTxtData/General` element text content
+            // (e.g. <FilePath>) rather than Drawing attribute values.
+            cmd if cmd == "PIDSETGENERAL" || cmd.starts_with("PIDSETGENERAL ") => {
+                let mut tokens = cmd.splitn(3, ' ');
+                tokens.next();
+                let element = tokens.next().map(str::trim).unwrap_or("").to_string();
+                let value = tokens.next().map(str::trim).unwrap_or("").to_string();
+                if element.is_empty() || value.is_empty() {
+                    self.command_line.push_error(
+                        "PIDSETGENERAL: usage: PIDSETGENERAL <element> <value>",
+                    );
+                    return Task::none();
+                }
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDSETGENERAL: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDSETGENERAL: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::edit_pid_general_element(&source, &element, &value) {
+                    Ok(report) => {
+                        let prev = report
+                            .previous
+                            .as_deref()
+                            .map(|s| format!("'{}'", s))
+                            .unwrap_or_else(|| "(absent)".to_string());
+                        self.command_line.push_output(&format!(
+                            "PIDSETGENERAL  {} {} → '{}' ({} bytes General XML; metadata-only edit)",
+                            report.element, prev, report.next, report.new_xml_len
+                        ));
+                        self.tabs[i].dirty = true;
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDSETGENERAL: {e}")),
+                }
+            }
+
+            // ── PIDGETGENERAL: read-only lookup of a General element text
+            // Usage:
+            //   PIDGETGENERAL <element>
+            cmd if cmd == "PIDGETGENERAL" || cmd.starts_with("PIDGETGENERAL ") => {
+                let element = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim())
+                    .unwrap_or("")
+                    .to_string();
+                if element.is_empty() {
+                    self.command_line
+                        .push_error("PIDGETGENERAL: usage: PIDGETGENERAL <element>");
+                    return Task::none();
+                }
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDGETGENERAL: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDGETGENERAL: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::read_pid_general_element(&source, &element) {
+                    Some(value) => self.command_line.push_output(&format!(
+                        "PIDGETGENERAL  {} = '{}'",
+                        element, value
+                    )),
+                    None => self.command_line.push_error(&format!(
+                        "PIDGETGENERAL: {} not found, appears multiple times, is self-closing, or PID stream is unavailable",
+                        element
+                    )),
+                }
+            }
+
+            // ── PIDLISTPROPS: dump every readable metadata field ──────────
+            // Usage:
+            //   PIDLISTPROPS    (no arguments — first version always lists both streams)
+            cmd if cmd == "PIDLISTPROPS" => {
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDLISTPROPS: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDLISTPROPS: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::list_pid_metadata(&source) {
+                    Ok(listing) => {
+                        let drawing_width = listing
+                            .drawing_attributes
+                            .iter()
+                            .map(|(k, _)| k.len())
+                            .max()
+                            .unwrap_or(0)
+                            .max(20);
+                        let general_width = listing
+                            .general_elements
+                            .iter()
+                            .map(|(k, _)| k.len())
+                            .max()
+                            .unwrap_or(0)
+                            .max(20);
+                        self.command_line.push_output(&format!(
+                            "PIDLISTPROPS  Drawing /TaggedTxtData/Drawing  ({} attribute(s))",
+                            listing.drawing_attributes.len()
+                        ));
+                        for (k, v) in &listing.drawing_attributes {
+                            self.command_line.push_info(&format!(
+                                "    {:width$} = {}",
+                                k,
+                                v,
+                                width = drawing_width
+                            ));
+                        }
+                        self.command_line.push_output(&format!(
+                            "PIDLISTPROPS  General /TaggedTxtData/General ({} element(s))",
+                            listing.general_elements.len()
+                        ));
+                        for (k, v) in &listing.general_elements {
+                            self.command_line.push_info(&format!(
+                                "    {:width$} = {}",
+                                k,
+                                v,
+                                width = general_width
+                            ));
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDLISTPROPS: {e}")),
+                }
+            }
+
+            // ── PIDNEIGHBORS: list neighbors of a drawing_id via ObjectGraph
+            // Usage:
+            //   PIDNEIGHBORS <drawing-id-or-prefix> [--depth N]
+            //
+            // Default depth=1 (direct neighbors). depth=0 returns only the
+            // resolved self info. Prefix accepted (≥1 char unique).
+            cmd if cmd == "PIDNEIGHBORS" || cmd.starts_with("PIDNEIGHBORS ") => {
+                let raw = cmd.strip_prefix("PIDNEIGHBORS").unwrap_or("").trim();
+                let mut id_arg: Option<String> = None;
+                let mut depth: usize = 1;
+                let mut bad_flag: Option<String> = None;
+                let tokens: Vec<&str> = raw.split_whitespace().collect();
+                let mut t_idx = 0;
+                while t_idx < tokens.len() {
+                    match tokens[t_idx] {
+                        "--depth" => {
+                            let val = match tokens.get(t_idx + 1) {
+                                Some(v) => *v,
+                                None => {
+                                    self.command_line.push_error(
+                                        "PIDNEIGHBORS: --depth requires a number",
+                                    );
+                                    return Task::none();
+                                }
+                            };
+                            match val.parse::<usize>() {
+                                Ok(d) if d <= 1000 => depth = d,
+                                Ok(_) => {
+                                    self.command_line.push_error(
+                                        "PIDNEIGHBORS: --depth must be ≤ 1000",
+                                    );
+                                    return Task::none();
+                                }
+                                Err(e) => {
+                                    self.command_line.push_error(&format!(
+                                        "PIDNEIGHBORS: --depth parse: {e}"
+                                    ));
+                                    return Task::none();
+                                }
+                            }
+                            t_idx += 2;
+                        }
+                        t if t.starts_with("--") => {
+                            bad_flag = Some(t.to_string());
+                            break;
+                        }
+                        t if id_arg.is_none() => {
+                            id_arg = Some(t.to_string());
+                            t_idx += 1;
+                        }
+                        _ => {
+                            t_idx += 1; // extra positional token ignored
+                        }
+                    }
+                }
+                if let Some(flag) = bad_flag {
+                    self.command_line
+                        .push_error(&format!("PIDNEIGHBORS: unknown flag '{}'", flag));
+                    return Task::none();
+                }
+                let did = match id_arg {
+                    Some(s) => s,
+                    None => {
+                        self.command_line.push_error(
+                            "PIDNEIGHBORS: usage: PIDNEIGHBORS <drawing-id-or-prefix> [--depth N]",
+                        );
+                        return Task::none();
+                    }
+                };
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDNEIGHBORS: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDNEIGHBORS: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::list_pid_neighbors(&source, &did, depth) {
+                    Ok((self_info, neighbors)) => {
+                        let short = self_info.drawing_id.get(..8).unwrap_or(&self_info.drawing_id);
+                        let depth_text = if depth == 1 {
+                            String::new()
+                        } else {
+                            format!(" within {} hop(s)", depth)
+                        };
+                        self.command_line.push_output(&format!(
+                            "PIDNEIGHBORS  {} neighbor(s){} of {}… ({})",
+                            neighbors.len(),
+                            depth_text,
+                            short,
+                            self_info.item_type
+                        ));
+                        for n in &neighbors {
+                            let short_n = n.drawing_id.get(..8).unwrap_or(&n.drawing_id);
+                            let tag = n
+                                .tag_label
+                                .as_deref()
+                                .map(|t| format!("  {}", t))
+                                .unwrap_or_default();
+                            self.command_line.push_info(&format!(
+                                "    {}…  {}{}",
+                                short_n, n.item_type, tag
+                            ));
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDNEIGHBORS: {e}")),
+                }
+            }
+
+            // ── PIDSTATS: object graph & endpoint resolution one-liner ────
+            // Usage:
+            //   PIDSTATS
+            cmd if cmd == "PIDSTATS" => {
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDSTATS: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDSTATS: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::pid_graph_stats(&source) {
+                    Ok(s) => {
+                        self.command_line.push_output(&format!(
+                            "PIDSTATS  {} objects, {} relationships in {}",
+                            s.object_count,
+                            s.relationship_count,
+                            source.display()
+                        ));
+                        self.command_line.push_info(&format!(
+                            "    endpoint resolution: {} fully / {} partially / {} unresolved",
+                            s.fully_resolved, s.partially_resolved, s.unresolved
+                        ));
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDSTATS: {e}")),
+                }
+            }
+
+            // ── PIDPATH: shortest path between two objects via ObjectGraph
+            // Usage:
+            //   PIDPATH <from-id-or-prefix> <to-id-or-prefix>
+            cmd if cmd == "PIDPATH" || cmd.starts_with("PIDPATH ") => {
+                let raw = cmd.strip_prefix("PIDPATH").unwrap_or("").trim();
+                let parts: Vec<&str> = raw.split_whitespace().collect();
+                if parts.len() != 2 {
+                    self.command_line.push_error(
+                        "PIDPATH: usage: PIDPATH <from-id-or-prefix> <to-id-or-prefix>",
+                    );
+                    return Task::none();
+                }
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDPATH: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDPATH: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::list_pid_path(&source, parts[0], parts[1]) {
+                    Ok((from_info, to_info, path)) => {
+                        let hops = path.len().saturating_sub(1);
+                        let from_short =
+                            from_info.drawing_id.get(..8).unwrap_or(&from_info.drawing_id);
+                        let to_short =
+                            to_info.drawing_id.get(..8).unwrap_or(&to_info.drawing_id);
+                        self.command_line.push_output(&format!(
+                            "PIDPATH  {} hop(s) from {}… ({}) to {}… ({})",
+                            hops, from_short, from_info.item_type, to_short, to_info.item_type
+                        ));
+                        for n in &path {
+                            let short = n.drawing_id.get(..8).unwrap_or(&n.drawing_id);
+                            let tag = n
+                                .tag_label
+                                .as_deref()
+                                .map(|t| format!("  {}", t))
+                                .unwrap_or_default();
+                            self.command_line.push_info(&format!(
+                                "    {}…  {}{}",
+                                short, n.item_type, tag
+                            ));
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDPATH: {e}")),
+                }
+            }
+
+            // ── PIDFIND: search ObjectGraph by item_type or extra field
+            // Usage:
+            //   PIDFIND <item-type>      (e.g. PIDFIND PipeRun)
+            //   PIDFIND <key>=<value>    (e.g. PIDFIND Tag=FIT-001)
+            cmd if cmd == "PIDFIND" || cmd.starts_with("PIDFIND ") => {
+                let arg = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim())
+                    .unwrap_or("");
+                if arg.is_empty() {
+                    self.command_line.push_error(
+                        "PIDFIND: usage: PIDFIND <item-type> | PIDFIND <key>=<value>",
+                    );
+                    return Task::none();
+                }
+                let (criterion, label) = if let Some((k, v)) = arg.split_once('=') {
+                    let key = k.trim();
+                    let value = v;
+                    if key.is_empty() || value.is_empty() {
+                        self.command_line.push_error(
+                            "PIDFIND: <key>=<value> form requires non-empty key and value",
+                        );
+                        return Task::none();
+                    }
+                    (
+                        crate::io::pid_import::PidFindCriterion::ExtraEquals {
+                            key: key.to_string(),
+                            value: value.to_string(),
+                        },
+                        format!("where {}='{}'", key, value),
+                    )
+                } else {
+                    (
+                        crate::io::pid_import::PidFindCriterion::ItemType(arg.to_string()),
+                        format!("of type '{}'", arg),
+                    )
+                };
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDFIND: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid {
+                    self.command_line
+                        .push_error("PIDFIND: active tab is not a PID file");
+                    return Task::none();
+                }
+                match crate::io::pid_import::list_pid_objects_matching(&source, &criterion) {
+                    Ok(matches) => {
+                        self.command_line.push_output(&format!(
+                            "PIDFIND  {} object(s) {} in {}",
+                            matches.len(),
+                            label,
+                            source.display()
+                        ));
+                        for m in &matches {
+                            let short_id = m.drawing_id.get(..8).unwrap_or(&m.drawing_id);
+                            let tag = m
+                                .tag_label
+                                .as_deref()
+                                .map(|t| format!("  {}", t))
+                                .unwrap_or_default();
+                            self.command_line.push_info(&format!(
+                                "    {}…  {}{}",
+                                short_id, m.item_type, tag
+                            ));
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDFIND: {e}")),
+                }
+            }
+
+            // ── PIDVERIFY: round-trip the PID and confirm byte-level fidelity
+            // Usage:
+            //   PIDVERIFY            (verifies the active tab's cached package)
+            //   PIDVERIFY <path.pid> (verifies an arbitrary file on disk; no cache touched)
+            cmd if cmd == "PIDVERIFY" || cmd.starts_with("PIDVERIFY ") => {
+                let arg = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim())
+                    .unwrap_or("")
+                    .to_string();
+
+                let report_result;
+                let target_label;
+
+                if arg.is_empty() {
+                    let i = self.active_tab;
+                    let source = match self.tabs[i].current_path.clone() {
+                        Some(p) => p,
+                        None => {
+                            self.command_line
+                                .push_error("PIDVERIFY: active tab has no PID source path");
+                            return Task::none();
+                        }
+                    };
+                    let is_pid = source
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                    if !is_pid {
+                        self.command_line
+                            .push_error("PIDVERIFY: active tab is not a PID file");
+                        return Task::none();
+                    }
+                    target_label = format!("cached package {}", source.display());
+                    report_result = crate::io::pid_import::verify_pid_cached(&source);
+                } else {
+                    let path = std::path::PathBuf::from(&arg);
+                    let is_pid = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                    if !is_pid {
+                        self.command_line.push_error(&format!(
+                            "PIDVERIFY: '{}' is not a .pid file",
+                            arg
+                        ));
+                        return Task::none();
+                    }
+                    target_label = path.display().to_string();
+                    report_result = crate::io::pid_import::verify_pid_file(&path);
+                }
+
+                match report_result {
+                    Ok(report) => {
+                        if report.ok() {
+                            self.command_line.push_output(&format!(
+                                "PIDVERIFY  PASS  {} streams matched in {}",
+                                report.matched, target_label
+                            ));
+                        } else {
+                            self.command_line.push_error(&format!(
+                                "PIDVERIFY  FAIL  {} mismatch(es) in {} (matched {} of {})",
+                                report.mismatches.len(),
+                                target_label,
+                                report.matched,
+                                report.stream_count
+                            ));
+                            for m in report.mismatches.iter().take(3) {
+                                self.command_line.push_info(&format!(
+                                    "    {}  source={} B  roundtrip={} B  first diff @ {}",
+                                    m.path, m.source_len, m.roundtrip_len, m.first_diff_offset
+                                ));
+                            }
+                            if report.mismatches.len() > 3 {
+                                self.command_line.push_info(&format!(
+                                    "    ... ({} more)",
+                                    report.mismatches.len() - 3
+                                ));
+                            }
+                            for k in &report.only_in_source {
+                                self.command_line
+                                    .push_info(&format!("    only in source: {}", k));
+                            }
+                            for k in &report.only_in_roundtrip {
+                                self.command_line
+                                    .push_info(&format!("    only in roundtrip: {}", k));
+                            }
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDVERIFY: {e}")),
+                }
+            }
+
+            // ── PIDRAWSTREAMS: list top-level CFB streams pid-parse doesn't yet decode
+            // Usage:
+            //   PIDRAWSTREAMS            (active tab's cached PidPackage)
+            //   PIDRAWSTREAMS <path.pid> (any .pid on disk; no cache touched)
+            cmd if cmd == "PIDRAWSTREAMS" || cmd.starts_with("PIDRAWSTREAMS ") => {
+                let arg = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim())
+                    .unwrap_or("")
+                    .to_string();
+
+                let result;
+                let target_label;
+                if arg.is_empty() {
+                    let i = self.active_tab;
+                    let source = match self.tabs[i].current_path.clone() {
+                        Some(p) => p,
+                        None => {
+                            self.command_line
+                                .push_error("PIDRAWSTREAMS: active tab has no PID source path");
+                            return Task::none();
+                        }
+                    };
+                    let is_pid = source
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                    if !is_pid {
+                        self.command_line
+                            .push_error("PIDRAWSTREAMS: active tab is not a PID file");
+                        return Task::none();
+                    }
+                    target_label = format!("cached {}", source.display());
+                    result = crate::io::pid_import::list_pid_unidentified_cached(&source);
+                } else {
+                    let path = std::path::PathBuf::from(&arg);
+                    let is_pid = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                    if !is_pid {
+                        self.command_line.push_error(&format!(
+                            "PIDRAWSTREAMS: '{}' is not a .pid file",
+                            arg
+                        ));
+                        return Task::none();
+                    }
+                    target_label = path.display().to_string();
+                    result = crate::io::pid_import::list_pid_unidentified_file(&path);
+                }
+
+                match result {
+                    Ok(list) => {
+                        self.command_line.push_output(&format!(
+                            "PIDRAWSTREAMS  {} unidentified top-level stream(s) in {}",
+                            list.len(),
+                            target_label
+                        ));
+                        for info in &list {
+                            let magic_text = match (info.magic_u32_le, info.magic_tag.as_deref()) {
+                                (Some(m), Some(tag)) => {
+                                    format!("  magic=0x{:08X} '{}'", m, tag)
+                                }
+                                (Some(m), None) => format!("  magic=0x{:08X}", m),
+                                (None, _) => String::new(),
+                            };
+                            self.command_line.push_info(&format!(
+                                "    {}  {} B{}",
+                                info.path, info.size, magic_text
+                            ));
+                        }
+                    }
+                    Err(e) => self.command_line.push_error(&format!("PIDRAWSTREAMS: {e}")),
+                }
+            }
+
+            // ── PIDSAVEAS: dedicated PID save-as with optional inline verify
+            // Usage:
+            //   PIDSAVEAS <path> [--verify] [--force] [--dry-run]
+            //
+            // Flags:
+            //   --verify    round-trip the written file and report byte equality
+            //   --force     overwrite an existing destination file
+            //   --dry-run   do not touch <path>; write to a temp file and verify
+            cmd if cmd == "PIDSAVEAS" || cmd.starts_with("PIDSAVEAS ") => {
+                let raw = cmd.strip_prefix("PIDSAVEAS").unwrap_or("").trim();
+                let mut path_opt: Option<String> = None;
+                let mut verify_flag = false;
+                let mut force_flag = false;
+                let mut dry_run_flag = false;
+                let mut bad_flag: Option<String> = None;
+                for token in raw.split_whitespace() {
+                    match token {
+                        "--verify" => verify_flag = true,
+                        "--force" => force_flag = true,
+                        "--dry-run" => dry_run_flag = true,
+                        t if t.starts_with("--") => {
+                            bad_flag = Some(t.to_string());
+                            break;
+                        }
+                        t if path_opt.is_none() => path_opt = Some(t.to_string()),
+                        _ => { /* extra positional tokens silently ignored */ }
+                    }
+                }
+                if let Some(flag) = bad_flag {
+                    self.command_line
+                        .push_error(&format!("PIDSAVEAS: unknown flag '{}'", flag));
+                    return Task::none();
+                }
+                let path_str = match path_opt {
+                    Some(s) => s,
+                    None => {
+                        self.command_line.push_error(
+                            "PIDSAVEAS: usage: PIDSAVEAS <path.pid> [--verify] [--force] [--dry-run]",
+                        );
+                        return Task::none();
+                    }
+                };
+                let out_path = std::path::PathBuf::from(&path_str);
+                let is_pid_out = out_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid_out {
+                    self.command_line.push_error(&format!(
+                        "PIDSAVEAS: destination must end in .pid; got '{}'",
+                        path_str
+                    ));
+                    return Task::none();
+                }
+
+                let i = self.active_tab;
+                let source = match self.tabs[i].current_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        self.command_line
+                            .push_error("PIDSAVEAS: active tab has no PID source path");
+                        return Task::none();
+                    }
+                };
+                let is_pid_src = source
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
+                if !is_pid_src {
+                    self.command_line
+                        .push_error("PIDSAVEAS: active tab is not a PID file");
+                    return Task::none();
+                }
+
+                let stream_count = crate::io::pid_package_store::get_package(&source)
+                    .map(|pkg| pkg.streams.len())
+                    .unwrap_or(0);
+
+                if dry_run_flag {
+                    // Build a unique temp path; we ignore the user's
+                    // destination entirely to keep --dry-run safe.
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let nanos = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_nanos())
+                        .unwrap_or(0);
+                    let temp = std::env::temp_dir().join(format!(
+                        "h7cad-pidsaveas-dryrun-{}-{}.pid",
+                        std::process::id(),
+                        nanos
+                    ));
+                    if let Err(e) = crate::io::pid_import::save_pid_native(&temp, &source) {
+                        self.command_line
+                            .push_error(&format!("PIDSAVEAS: {e}"));
+                        let _ = std::fs::remove_file(&temp);
+                        return Task::none();
+                    }
+                    self.command_line.push_output(&format!(
+                        "PIDSAVEAS  DRY-RUN  saved {} stream(s) to {} (not persisted to {})",
+                        stream_count,
+                        temp.display(),
+                        out_path.display()
+                    ));
+                    match crate::io::pid_import::verify_pid_file(&temp) {
+                        Ok(report) => {
+                            if report.ok() {
+                                self.command_line.push_output(&format!(
+                                    "PIDSAVEAS  DRY-RUN  PASS  {} streams matched",
+                                    report.matched
+                                ));
+                            } else {
+                                self.command_line.push_error(&format!(
+                                    "PIDSAVEAS  DRY-RUN  FAIL  {} mismatch(es) (matched {} of {})",
+                                    report.mismatches.len(),
+                                    report.matched,
+                                    report.stream_count
+                                ));
+                                for m in report.mismatches.iter().take(3) {
+                                    self.command_line.push_info(&format!(
+                                        "    {}  source={} B  roundtrip={} B  first diff @ {}",
+                                        m.path,
+                                        m.source_len,
+                                        m.roundtrip_len,
+                                        m.first_diff_offset
+                                    ));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.command_line
+                                .push_error(&format!("PIDSAVEAS  DRY-RUN  verify: {e}"));
+                        }
+                    }
+                    let _ = std::fs::remove_file(&temp);
+                    return Task::none();
+                }
+
+                if out_path.exists() && !force_flag {
+                    self.command_line.push_error(&format!(
+                        "PIDSAVEAS: destination '{}' already exists; pass --force to overwrite",
+                        out_path.display()
+                    ));
+                    return Task::none();
+                }
+
+                if let Err(e) = crate::io::pid_import::save_pid_native(&out_path, &source) {
+                    self.command_line.push_error(&format!("PIDSAVEAS: {e}"));
+                    return Task::none();
+                }
+                self.command_line.push_output(&format!(
+                    "PIDSAVEAS  saved {} stream(s) to {}",
+                    stream_count,
+                    out_path.display()
+                ));
+                self.tabs[i].dirty = false;
+
+                if verify_flag {
+                    match crate::io::pid_import::verify_pid_file(&out_path) {
+                        Ok(report) => {
+                            if report.ok() {
+                                self.command_line.push_output(&format!(
+                                    "PIDVERIFY  PASS  {} streams matched in {}",
+                                    report.matched,
+                                    out_path.display()
+                                ));
+                            } else {
+                                self.command_line.push_error(&format!(
+                                    "PIDVERIFY  FAIL  {} mismatch(es) in {} (matched {} of {})",
+                                    report.mismatches.len(),
+                                    out_path.display(),
+                                    report.matched,
+                                    report.stream_count
+                                ));
+                                for m in report.mismatches.iter().take(3) {
+                                    self.command_line.push_info(&format!(
+                                        "    {}  source={} B  roundtrip={} B  first diff @ {}",
+                                        m.path, m.source_len, m.roundtrip_len, m.first_diff_offset
+                                    ));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.command_line.push_error(&format!("PIDVERIFY: {e}"));
+                        }
+                    }
+                }
+            }
+
+            // ── PIDHELP: index of every PID* command ──────────────────────
+            // Usage:
+            //   PIDHELP
+            cmd if cmd == "PIDHELP" => {
+                self.command_line
+                    .push_output("PIDHELP  PID metadata + graph commands (14 available)");
+                self.command_line.push_info("    Write:");
+                self.command_line.push_info(
+                    "        PIDSETDRAWNO <new>                   shortcut for SP_DRAWINGNUMBER",
+                );
+                self.command_line.push_info(
+                    "        PIDSETPROP    <attr> <value...>      any Drawing-stream SP_* attribute",
+                );
+                self.command_line.push_info(
+                    "        PIDSETGENERAL <element> <value...>   General stream element text",
+                );
+                self.command_line.push_info("    Read:");
+                self.command_line.push_info(
+                    "        PIDGETPROP    <attr>                 read Drawing attribute",
+                );
+                self.command_line.push_info(
+                    "        PIDGETGENERAL <element>              read General element text",
+                );
+                self.command_line.push_info(
+                    "        PIDLISTPROPS                         dump every Drawing attr + General element",
+                );
+                self.command_line.push_info("    Graph:");
+                self.command_line.push_info(
+                    "        PIDNEIGHBORS <drawing-id-or-prefix> [--depth N]   neighbors via ObjectGraph; default depth=1",
+                );
+                self.command_line.push_info(
+                    "        PIDSTATS                             object graph & endpoint resolution one-liner",
+                );
+                self.command_line.push_info(
+                    "        PIDFIND <item-type>                  search by item_type (PipeRun / Instrument / ...)",
+                );
+                self.command_line.push_info(
+                    "        PIDFIND <key>=<value>                search by extra-field exact match (e.g. Tag=FIT-001)",
+                );
+                self.command_line.push_info(
+                    "        PIDPATH <from> <to>                  shortest path through ObjectGraph (prefix accepted)",
+                );
+                self.command_line.push_info("    Integrity:");
+                self.command_line.push_info(
+                    "        PIDVERIFY [<path>]                   round-trip byte-level fidelity check",
+                );
+                self.command_line.push_info(
+                    "        PIDSAVEAS <path> [--verify] [--force] [--dry-run]",
+                );
+                self.command_line.push_info(
+                    "                                             save current PID; --force overwrites, --dry-run writes to temp only",
+                );
+                self.command_line.push_info(
+                    "        PIDRAWSTREAMS [<path>]               list top-level streams not yet decoded by pid-parse",
+                );
+                self.command_line.push_info("    Notes:");
+                self.command_line
+                    .push_info("        - All commands require an opened .pid file in the active tab.");
+                self.command_line
+                    .push_info("        - Edits are metadata-only; native scene changes are not flushed.");
+            }
+
+            cmd if cmd == "SPPIDLOADLIB" || cmd.starts_with("SPPIDLOADLIB ") => {
+                if self.tabs[i].is_pid() {
+                    self.command_line
+                        .push_error("SPPIDLOADLIB: active tab must be a CAD drawing");
+                    return Task::none();
+                }
+                match crate::io::pid_import::ensure_sppid_bran_block_library(
+                    &mut self.tabs[i].scene.document,
+                ) {
+                    Ok(()) => {
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            "SPPIDLOADLIB: seeded block \"SPPID_BRAN\" with authoring attributes.",
+                        );
+                    }
+                    Err(e) => self.command_line.push_error(&format!("SPPIDLOADLIB: {e}")),
+                }
+            }
+
+            cmd if cmd == "SPPIDBRANDEMO" || cmd.starts_with("SPPIDBRANDEMO ") => {
+                if self.tabs[i].is_pid() {
+                    self.command_line
+                        .push_error("SPPIDBRANDEMO: active tab must be a CAD drawing");
+                    return Task::none();
+                }
+                match crate::io::pid_import::populate_sppid_bran_demo(
+                    &mut self.tabs[i].scene.document,
+                ) {
+                    Ok(()) => {
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            "SPPIDBRANDEMO: placed one BRAN demo insert and guide lines.",
+                        );
+                    }
+                    Err(e) => self.command_line.push_error(&format!("SPPIDBRANDEMO: {e}")),
+                }
+            }
+
+            cmd if cmd == "SPPIDEXPORT" || cmd.starts_with("SPPIDEXPORT ") => {
+                if self.tabs[i].is_pid() {
+                    self.command_line
+                        .push_error("SPPIDEXPORT: active tab must be a CAD drawing");
+                    return Task::none();
+                }
+                let raw_path = cmd
+                    .split_once(' ')
+                    .map(|(_, rest)| rest.trim().to_string())
+                    .unwrap_or_default();
+                if raw_path.is_empty() {
+                    self.command_line
+                        .push_error("SPPIDEXPORT: usage: SPPIDEXPORT <output.pid>");
+                    return Task::none();
+                }
+                let path = PathBuf::from(raw_path);
+                match crate::io::pid_import::export_sppid_publish_bundle(
+                    &self.tabs[i].scene.document,
+                    &path,
+                ) {
+                    Ok(bundle) => self.command_line.push_output(&format!(
+                        "SPPIDEXPORT: wrote {} + {} + {} ({} objects / {} rels)",
+                        bundle.pid_path.display(),
+                        bundle.data_xml_path.display(),
+                        bundle.meta_xml_path.display(),
+                        bundle.report.object_count,
+                        bundle.report.relationship_count
+                    )),
+                    Err(e) => self.command_line.push_error(&format!("SPPIDEXPORT: {e}")),
+                }
+            }
+
             // ── ALIASEDIT: manage user-defined command aliases ─────────────
             // Usage:
             //   ALIASEDIT LIST              — show all aliases
@@ -5774,6 +6876,16 @@ mod tests {
     use crate::command::CmdResult;
     use h7cad_native_model as nm;
     use glam::Vec3;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static TEST_PATH_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn unique_publish_path(name: &str) -> PathBuf {
+        let n = TEST_PATH_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        std::env::temp_dir().join(format!("h7cad-sppid-{pid}-{n}-{name}.pid"))
+    }
 
     #[test]
     fn nativerender_on_requires_native_document() {
@@ -6085,5 +7197,71 @@ mod tests {
             resolve_command_alias("   LL 1 2", &aliases).as_deref(),
             Some("LINE 1 2")
         );
+    }
+
+    #[test]
+    fn sppid_commands_seed_demo_and_export_publish_bundle() {
+        let mut app = H7CAD::new();
+        let out = unique_publish_path("bran-export");
+        let data = out.with_file_name(format!(
+            "{}_Data.xml",
+            out.file_stem().unwrap().to_string_lossy()
+        ));
+        let meta = out.with_file_name(format!(
+            "{}_Meta.xml",
+            out.file_stem().unwrap().to_string_lossy()
+        ));
+
+        let _ = app.dispatch_command("SPPIDLOADLIB");
+        assert!(
+            app.tabs[0].scene.document.block_records.get("SPPID_BRAN").is_some(),
+            "SPPIDLOADLIB should seed the BRAN authoring block"
+        );
+
+        let _ = app.dispatch_command("SPPIDBRANDEMO");
+        let insert_count = app.tabs[0]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(
+                entity,
+                acadrust::EntityType::Insert(insert) if insert.block_name.eq_ignore_ascii_case("SPPID_BRAN")
+            ))
+            .count();
+        assert_eq!(insert_count, 1, "demo command should place exactly one BRAN insert");
+
+        let _ = app.dispatch_command(&format!("SPPIDEXPORT {}", out.display()));
+        assert!(out.exists(), "export should write the .pid package");
+        assert!(data.exists(), "export should write the Data.xml sidecar");
+        assert!(meta.exists(), "export should write the Meta.xml sidecar");
+
+        let bundle = crate::io::pid_import::open_pid(&out).expect("reopen exported bundle");
+        assert!(bundle.summary.object_graph_available);
+        assert!(
+            bundle
+                .pid_doc
+                .object_graph
+                .as_ref()
+                .and_then(|graph| graph.counts_by_type.get("PIDPipingBranchPoint"))
+                .copied()
+                .unwrap_or_default()
+                >= 1,
+            "exported bundle should materialize BRAN as PIDPipingBranchPoint semantics"
+        );
+        assert!(
+            bundle
+                .pid_doc
+                .object_graph
+                .as_ref()
+                .and_then(|graph| graph.counts_by_type.get("PIDBranchPoint"))
+                .copied()
+                .unwrap_or_default()
+                >= 1,
+            "exported bundle should also include the paired PIDBranchPoint semantics"
+        );
+
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&data);
+        let _ = std::fs::remove_file(&meta);
     }
 }

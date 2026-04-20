@@ -199,6 +199,20 @@ Status of every standard CAD command in H7CAD:
 
 ---
 
+## PID & SPPID
+
+| Command | Alias | Description | Status |
+|---|---|---|---|
+| `PIDSETDRAWNO` | — | Edit `SP_DRAWINGNUMBER` in PID Drawing XML | ✅ |
+| `PIDSETPROP` | — | Edit arbitrary `SP_*` attribute in PID Drawing XML | ✅ |
+| `PIDGETPROP` | — | Read current `SP_*` attribute from cached PID package | ✅ |
+| `PIDSETGENERAL` | — | Edit `<element>text</element>` in PID General XML | ✅ |
+| `SPPIDLOADLIB` | — | Seed the first-phase `SPPID_BRAN` authoring block library | ✅ |
+| `SPPIDBRANDEMO` | — | Place one simple BRAN demo insert and guide lines | ✅ |
+| `SPPIDEXPORT` | — | Export first-phase BRAN publish bundle: `.pid + _Data.xml + _Meta.xml` | ✅ |
+
+---
+
 ## 3D Modeling
 
 | Command | Alias | Description | Status |

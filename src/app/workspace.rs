@@ -61,6 +61,7 @@ pub enum EntryKind {
     Directory,
     DxfFile,
     DwgFile,
+    PidFile,
     /// Placeholder row appended when a scan is truncated.
     Truncated,
 }
@@ -85,7 +86,7 @@ impl Workspace {
     }
 }
 
-/// Scan a workspace root, returning all nested directories + `.dxf` / `.dwg`
+/// Scan a workspace root, returning all nested directories + `.dxf` / `.dwg` / `.pid`
 /// files up to `max_depth`, capped at `max_entries` rows.
 ///
 /// Filesystem errors (permission denied, symlink loops, etc.) on a sub-
@@ -205,6 +206,7 @@ fn scan_recursive(
             {
                 Some("dxf") => EntryKind::DxfFile,
                 Some("dwg") => EntryKind::DwgFile,
+                Some("pid") => EntryKind::PidFile,
                 _ => continue, // silently skip unrelated files
             };
             out.push(WorkspaceEntry {
@@ -255,12 +257,15 @@ mod tests {
         let root = tmp_dir("top");
         fs::write(root.join("foo.dxf"), "").unwrap();
         fs::write(root.join("bar.DWG"), "").unwrap();
+        fs::write(root.join("diagram.pid"), "").unwrap();
         fs::write(root.join("ignore.txt"), "").unwrap();
 
         let ws = scan_workspace(&root, 3, 2000).unwrap();
         let names: Vec<&str> = ws.entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"foo.dxf"));
         assert!(names.contains(&"bar.DWG"));
+        assert!(names.contains(&"diagram.pid"));
+        assert!(ws.entries.iter().any(|e| e.name == "diagram.pid" && matches!(e.kind, EntryKind::PidFile)));
         assert!(!names.contains(&"ignore.txt"), "non-CAD files must be filtered");
     }
 

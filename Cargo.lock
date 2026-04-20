@@ -19,6 +19,7 @@ dependencies = [
  "pid-parse",
  "printpdf",
  "rfd",
+ "roxmltree 0.20.0",
  "truck-meshalgo",
  "truck-modeling",
  "truck-polymesh",

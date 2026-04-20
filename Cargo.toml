@@ -28,6 +28,7 @@ acadrust = "0.3.3"
 h7cad-native-dxf = { path = "crates/h7cad-native-dxf" }
 h7cad-native-model = { path = "crates/h7cad-native-model" }
 pid-parse = { path = "../pid-parse" }
+roxmltree = "0.20"
 open = "5"
 printpdf = "0.9.1"
 flate2 = "1"
