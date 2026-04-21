@@ -4982,6 +4982,61 @@ impl H7CAD {
                 }
             }
 
+            // ── PIDSHOT: export the active PID tab's preview as a PNG
+            // Usage:
+            //   PIDSHOT <path.png>
+            //
+            // Deterministic rasterisation (Bresenham + midpoint circle +
+            // text-anchor cross) of the `native_preview` document in the
+            // active .pid tab. See `src/io/pid_screenshot.rs` for what
+            // entity kinds are rendered and the layer-filtering policy.
+            // First-version implementation — does NOT read back from GPU
+            // so it works in headless / test environments.
+            cmd if cmd == "PIDSHOT" || cmd.starts_with("PIDSHOT ") => {
+                let i = self.active_tab;
+                if !matches!(
+                    self.tabs[i].tab_mode,
+                    super::document::DocumentTabMode::Pid
+                ) {
+                    self.command_line
+                        .push_error("PIDSHOT: active tab is not a PID tab");
+                    return Task::none();
+                }
+                let arg = cmd.split_whitespace().nth(1);
+                let Some(arg) = arg else {
+                    self.command_line
+                        .push_error("PIDSHOT: usage PIDSHOT <path.png>");
+                    return Task::none();
+                };
+                let out_path = std::path::PathBuf::from(arg);
+                let is_png = out_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+                if !is_png {
+                    self.command_line
+                        .push_error("PIDSHOT: output path must end in .png");
+                    return Task::none();
+                }
+                let Some(native_doc) = self.tabs[i].scene.native_doc() else {
+                    self.command_line
+                        .push_error("PIDSHOT: active PID tab has no native preview to export");
+                    return Task::none();
+                };
+                match crate::io::pid_screenshot::export_pid_preview_png(native_doc, &out_path)
+                {
+                    Ok(()) => {
+                        self.command_line.push_output(&format!(
+                            "PIDSHOT  saved screenshot to {}",
+                            out_path.display()
+                        ));
+                    }
+                    Err(e) => {
+                        self.command_line.push_error(&format!("PIDSHOT: {e}"));
+                    }
+                }
+            }
+
             // ── PIDCACHESTATS: process-wide PidPackage cache occupancy
             // Usage:
             //   PIDCACHESTATS

@@ -1,4 +1,4 @@
-use h7cad_native_model::EntityData;
+use h7cad_native_model::{EntityData, Handle};
 
 pub(crate) fn parse_line(codes: &[(i16, String)]) -> EntityData {
     let (mut sx, mut sy, mut sz) = (0.0, 0.0, 0.0);
@@ -278,14 +278,23 @@ pub(crate) fn parse_image(codes: &[(i16, String)]) -> EntityData {
     let (mut vx, mut vy, mut vz) = (0.0, 1.0, 0.0);
     let (mut sx, mut sy) = (1.0, 1.0);
     let mut file_path = String::new();
+    let mut image_def_handle = Handle::NULL;
     let mut display_flags: i32 = 0;
     for &(code, ref val) in codes {
         match code {
-            // Non-standard: file_path stored directly on IMAGE entity via
-            // code 1 for native round-trip (D4 series); standard DXF stores
-            // this on a linked IMAGEDEF object.
+            // Legacy fallback: H7CAD pre-D5 wrote file_path directly on
+            // IMAGE entity via code 1. Standard AutoCAD DXF does NOT use
+            // code 1 on IMAGE; file name lives on the linked IMAGEDEF
+            // object. Kept for backward compatibility with older files
+            // we wrote ourselves; resolve_image_def_links overrides this
+            // when code 340 resolves successfully.
             1 => file_path = val.clone(),
             70 => display_flags = val.parse::<i32>().unwrap_or(0),
+            // Hard-pointer to linked IMAGEDEF object.
+            340 => {
+                image_def_handle =
+                    Handle::new(u64::from_str_radix(val.trim(), 16).unwrap_or(0));
+            }
             _ => {
                 let v: f64 = val.parse().unwrap_or(0.0);
                 match code {
@@ -310,6 +319,7 @@ pub(crate) fn parse_image(codes: &[(i16, String)]) -> EntityData {
         u_vector: [ux, uy, uz],
         v_vector: [vx, vy, vz],
         image_size: [sx, sy],
+        image_def_handle,
         file_path,
         display_flags,
     }

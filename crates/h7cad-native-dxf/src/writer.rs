@@ -72,6 +72,20 @@ fn format_f64(v: f64) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn write_dxf_string(doc: &CadDocument) -> Result<String, String> {
+    // Pre-pass: auto-create IMAGEDEF objects for any IMAGE entities that
+    // arrived via UI / bridge with only an inline file_path and no handle
+    // link. Done on a clone so the public API stays `&CadDocument`
+    // (downstream `save_dxf` passes &NativeCadDocument by shared ref).
+    if needs_ensure_image_defs(doc) {
+        let mut owned = doc.clone();
+        ensure_image_defs(&mut owned);
+        write_dxf_string_impl(&owned)
+    } else {
+        write_dxf_string_impl(doc)
+    }
+}
+
+fn write_dxf_string_impl(doc: &CadDocument) -> Result<String, String> {
     let mut w = DxfWriter::new();
 
     write_header(&mut w, doc);
@@ -83,6 +97,140 @@ pub fn write_dxf_string(doc: &CadDocument) -> Result<String, String> {
 
     w.pair_str(0, "EOF");
     Ok(w.finish())
+}
+
+// ---------------------------------------------------------------------------
+// IMAGEDEF auto-create pre-pass
+// ---------------------------------------------------------------------------
+
+/// Address of an IMAGE entity inside a CadDocument — either at the top
+/// level (doc.entities) or nested in a block record's entity list.
+enum ImageLoc {
+    TopLevel(usize),
+    Block(Handle, usize),
+}
+
+/// Scan pass: return true iff the document has at least one IMAGE entity
+/// whose `image_def_handle == Handle::NULL` **and** whose `file_path` is
+/// non-empty — that's the exact precondition for `ensure_image_defs` to
+/// do any work. Used by `write_dxf_string` to avoid a gratuitous
+/// `CadDocument::clone()` when the doc is already in standard form
+/// (e.g. straight out of `read_dxf` on an AutoCAD-authored file).
+fn needs_ensure_image_defs(doc: &CadDocument) -> bool {
+    let is_pending = |e: &Entity| {
+        matches!(
+            &e.data,
+            EntityData::Image {
+                image_def_handle,
+                file_path,
+                ..
+            } if *image_def_handle == Handle::NULL && !file_path.is_empty()
+        )
+    };
+    doc.entities.iter().any(is_pending)
+        || doc
+            .block_records
+            .values()
+            .any(|br| br.entities.iter().any(is_pending))
+}
+
+/// For every IMAGE entity whose `image_def_handle == Handle::NULL` and
+/// whose `file_path` is non-empty (i.e. an IMAGE constructed via bridge
+/// / UI that never got linked to a proper IMAGEDEF object), allocate a
+/// fresh handle, insert a matching `ObjectData::ImageDef` into
+/// `doc.objects`, and backfill the handle onto the entity in place.
+///
+/// Three passes to dance around Rust's borrow rules:
+///   1. Gather `(ImageLoc, file_path.clone(), image_size)` tuples while
+///      holding only shared borrows on `doc.entities` and
+///      `doc.block_records`.
+///   2. With exclusive `&mut doc`, allocate handles + push IMAGEDEF
+///      objects, recording the resulting `(ImageLoc, Handle)` pairs.
+///   3. Walk the pairs and backfill `image_def_handle` on each IMAGE,
+///      using the saved `ImageLoc` to index back into the correct
+///      collection (top-level `doc.entities` vs. a specific block).
+///
+/// Idempotent: on a doc that already has all its IMAGEs linked, the
+/// gather pass yields an empty `pending` vec and the function returns
+/// without side effects.
+fn ensure_image_defs(doc: &mut CadDocument) {
+    let mut pending: Vec<(ImageLoc, String, [f64; 2])> = Vec::new();
+
+    for (i, e) in doc.entities.iter().enumerate() {
+        if let EntityData::Image {
+            image_def_handle,
+            file_path,
+            image_size,
+            ..
+        } = &e.data
+        {
+            if *image_def_handle == Handle::NULL && !file_path.is_empty() {
+                pending.push((ImageLoc::TopLevel(i), file_path.clone(), *image_size));
+            }
+        }
+    }
+    for (br_handle, br) in &doc.block_records {
+        for (i, e) in br.entities.iter().enumerate() {
+            if let EntityData::Image {
+                image_def_handle,
+                file_path,
+                image_size,
+                ..
+            } = &e.data
+            {
+                if *image_def_handle == Handle::NULL && !file_path.is_empty() {
+                    pending.push((
+                        ImageLoc::Block(*br_handle, i),
+                        file_path.clone(),
+                        *image_size,
+                    ));
+                }
+            }
+        }
+    }
+
+    if pending.is_empty() {
+        return;
+    }
+
+    let mut allocated: Vec<(ImageLoc, Handle)> = Vec::with_capacity(pending.len());
+    for (loc, file_name, image_size) in pending {
+        let new_handle = doc.allocate_handle();
+        doc.objects.push(CadObject {
+            handle: new_handle,
+            owner_handle: Handle::NULL,
+            data: ObjectData::ImageDef {
+                file_name,
+                image_size,
+                // AutoCAD-spec defaults matching what `read_image_def`
+                // returns when a legacy DXF omits the extension codes.
+                pixel_size: [1.0, 1.0],
+                class_version: 0,
+                image_is_loaded: true,
+                resolution_unit: 0,
+            },
+        });
+        allocated.push((loc, new_handle));
+    }
+
+    for (loc, new_handle) in allocated {
+        let ent_data = match loc {
+            ImageLoc::TopLevel(i) => &mut doc.entities[i].data,
+            ImageLoc::Block(br_handle, i) => {
+                let br = doc
+                    .block_records
+                    .get_mut(&br_handle)
+                    .expect("block_record handle disappeared between gather and backfill passes");
+                &mut br.entities[i].data
+            }
+        };
+        if let EntityData::Image {
+            image_def_handle, ..
+        } = ent_data
+        {
+            *image_def_handle = new_handle;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +285,94 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
 
     w.pair_str(9, "$AUPREC");
     w.pair_i16(70, doc.header.auprec);
+
+    // ── Drawing mode flags ────────────────────────────────────────────────
+    w.pair_str(9, "$ORTHOMODE");
+    w.pair_i16(70, if doc.header.orthomode { 1 } else { 0 });
+
+    w.pair_str(9, "$GRIDMODE");
+    w.pair_i16(70, if doc.header.gridmode { 1 } else { 0 });
+
+    w.pair_str(9, "$SNAPMODE");
+    w.pair_i16(70, if doc.header.snapmode { 1 } else { 0 });
+
+    w.pair_str(9, "$FILLMODE");
+    w.pair_i16(70, if doc.header.fillmode { 1 } else { 0 });
+
+    w.pair_str(9, "$MIRRTEXT");
+    w.pair_i16(70, if doc.header.mirrtext { 1 } else { 0 });
+
+    w.pair_str(9, "$ATTMODE");
+    w.pair_i16(70, doc.header.attmode);
+
+    // ── Current drawing attributes ────────────────────────────────────────
+    w.pair_str(9, "$CLAYER");
+    w.pair_str(8, &doc.header.clayer);
+
+    w.pair_str(9, "$CECOLOR");
+    w.pair_i16(62, doc.header.cecolor);
+
+    w.pair_str(9, "$CELTYPE");
+    w.pair_str(6, &doc.header.celtype);
+
+    w.pair_str(9, "$CELWEIGHT");
+    w.pair_i16(370, doc.header.celweight);
+
+    w.pair_str(9, "$CELTSCALE");
+    w.pair_f64(40, doc.header.celtscale);
+
+    w.pair_str(9, "$CETRANSPARENCY");
+    w.pair_i32(440, doc.header.cetransparency);
+
+    // ── Angular conventions ───────────────────────────────────────────────
+    w.pair_str(9, "$ANGBASE");
+    w.pair_f64(50, doc.header.angbase);
+
+    w.pair_str(9, "$ANGDIR");
+    w.pair_i16(70, if doc.header.angdir { 1 } else { 0 });
+
+    // ── Linetype-space scaling ────────────────────────────────────────────
+    w.pair_str(9, "$PSLTSCALE");
+    w.pair_i16(70, if doc.header.psltscale { 1 } else { 0 });
+
+    // ── UCS (User Coordinate System) family ───────────────────────────────
+    w.pair_str(9, "$UCSBASE");
+    w.pair_str(2, &doc.header.ucsbase);
+
+    w.pair_str(9, "$UCSNAME");
+    w.pair_str(2, &doc.header.ucsname);
+
+    w.pair_str(9, "$UCSORG");
+    w.point3d(10, doc.header.ucsorg);
+
+    w.pair_str(9, "$UCSXDIR");
+    w.point3d(10, doc.header.ucsxdir);
+
+    w.pair_str(9, "$UCSYDIR");
+    w.point3d(10, doc.header.ucsydir);
+
+    // ── Timestamp metadata ────────────────────────────────────────────────
+    w.pair_str(9, "$TDCREATE");
+    w.pair_f64(40, doc.header.tdcreate);
+
+    w.pair_str(9, "$TDUPDATE");
+    w.pair_f64(40, doc.header.tdupdate);
+
+    w.pair_str(9, "$TDINDWG");
+    w.pair_f64(40, doc.header.tdindwg);
+
+    w.pair_str(9, "$TDUSRTIMER");
+    w.pair_f64(40, doc.header.tdusrtimer);
+
+    // ── Active-view metadata ──────────────────────────────────────────────
+    w.pair_str(9, "$VIEWCTR");
+    w.point2d(10, doc.header.viewctr);
+
+    w.pair_str(9, "$VIEWSIZE");
+    w.pair_f64(40, doc.header.viewsize);
+
+    w.pair_str(9, "$VIEWDIR");
+    w.point3d(10, doc.header.viewdir);
 
     w.pair_str(9, "$HANDSEED");
     w.pair_str(5, &format!("{:X}", doc.next_handle()));
@@ -865,6 +1101,7 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             u_vector,
             v_vector,
             image_size,
+            image_def_handle,
             file_path,
             display_flags,
         } => {
@@ -873,9 +1110,19 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             w.point3d(12, *v_vector);
             w.pair_f64(13, image_size[0]);
             w.pair_f64(23, image_size[1]);
-            // Code 1 used as non-standard inline file path for native
-            // round-trip (D4). Standard DXF stores this on IMAGEDEF.
-            if !file_path.is_empty() {
+            if *image_def_handle != Handle::NULL {
+                // Standard DXF: code 340 hard-pointer to the linked
+                // IMAGEDEF object. The IMAGEDEF object itself is emitted
+                // from the OBJECTS section (see `write_object`) and owns
+                // the authoritative file name via its own code 1.
+                w.pair_handle(340, *image_def_handle);
+            } else if !file_path.is_empty() {
+                // Legacy H7CAD pre-D5 fallback: when the IMAGE entity has
+                // no IMAGEDEF link (e.g. IMAGE was constructed directly by
+                // H7CAD rather than parsed from a standard DXF), emit the
+                // file path inline as code 1 so the native round-trip
+                // survives even without a dedicated IMAGEDEF object.
+                // parse_image recognises this form as a fallback.
                 w.pair_str(1, file_path);
             }
             if *display_flags != 0 {
@@ -1371,6 +1618,10 @@ fn write_object(w: &mut DxfWriter, obj: &CadObject) {
         ObjectData::ImageDef {
             file_name,
             image_size,
+            pixel_size,
+            class_version,
+            image_is_loaded,
+            resolution_unit,
         } => {
             w.pair_str(0, "IMAGEDEF");
             w.pair_handle(5, obj.handle);
@@ -1378,6 +1629,11 @@ fn write_object(w: &mut DxfWriter, obj: &CadObject) {
             w.pair_str(1, file_name);
             w.pair_f64(10, image_size[0]);
             w.pair_f64(20, image_size[1]);
+            w.pair_f64(11, pixel_size[0]);
+            w.pair_f64(21, pixel_size[1]);
+            w.pair_i32(90, *class_version);
+            w.pair_i16(71, if *image_is_loaded { 1 } else { 0 });
+            w.pair_i16(281, *resolution_unit as i16);
         }
         ObjectData::ImageDefReactor { image_handle } => {
             w.pair_str(0, "IMAGEDEF_REACTOR");

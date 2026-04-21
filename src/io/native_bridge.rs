@@ -375,6 +375,7 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             image_size,
             file_path,
             display_flags,
+            ..
         } => {
             let mut e =
                 ar::RasterImage::new(file_path, v3(insertion), image_size[0], image_size[1]);
@@ -855,6 +856,7 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 u_vector: [image.u_vector.x, image.u_vector.y, image.u_vector.z],
                 v_vector: [image.v_vector.x, image.v_vector.y, image.v_vector.z],
                 image_size: [image.size.x, image.size.y],
+                image_def_handle: nm::Handle::NULL,
                 file_path: image.file_path.clone(),
                 display_flags: image.flags.bits() as i32,
             },
@@ -2903,6 +2905,7 @@ mod tests {
                     u_vector: [0.5, 0.0, 0.0],
                     v_vector: [0.0, 0.25, 0.0],
                     image_size: [640.0, 480.0],
+                    image_def_handle: nm::Handle::NULL,
                     file_path: String::new(),
                     display_flags: 0,
                 },
@@ -3009,6 +3012,7 @@ mod tests {
                 u_vector: [0.5, 0.0, 0.0],
                 v_vector: [0.0, 0.25, 0.0],
                 image_size: [640.0, 480.0],
+                image_def_handle: nm::Handle::NULL,
                 file_path: String::new(),
                 display_flags: 0,
             },
@@ -3077,6 +3081,7 @@ mod tests {
             u_vector: [0.5, 0.0, 0.0],
             v_vector: [0.0, 0.25, 0.0],
             image_size: [640.0, 480.0],
+            image_def_handle: nm::Handle::NULL,
             file_path: String::new(),
             display_flags: 0,
         };

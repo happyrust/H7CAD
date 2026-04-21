@@ -2,6 +2,455 @@
 
 ## [未发布]
 
+### 2026-04-21（九）：DXF HEADER 当前视图 3 变量扩充
+
+继 HEADER 绘图环境 / 时间戳 / UCS 家族后继续补齐"活动视图"3 变量。真实 AutoCAD DXF 的 HEADER 段普遍携带 `$VIEWCTR / $VIEWSIZE / $VIEWDIR`，保留用户 pan/zoom 后的视口状态。H7CAD reader/writer 原先忽略，read → write 后这些设置归零。
+
+**model 扩字段**（`DocumentHeader`，插在 timestamp 之后 / `handseed` 之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default |
+|---|---|---|---|---|
+| `viewctr` | `[f64; 2]` | `$VIEWCTR` | 10/20 | `[0, 0]` |
+| `viewsize` | `f64` | `$VIEWSIZE` | 40 | `1.0` |
+| `viewdir` | `[f64; 3]` | `$VIEWDIR` | 10/20/30 | `[0, 0, 1]` |
+
+Default 对齐 **top-down plan view**（视线沿 +Z，看向 XY 平面），与 AutoCAD 默认 World view 一致。
+
+**reader 扩派发**（`read_header_section` 加 3 arm）  
+**writer 对称输出**（`write_header` 在 timestamp 和 `$HANDSEED` 之间按 AutoCAD 顺序输出 3 对 pair 块）
+
+**测试**（新增 `tests/header_view_vars.rs`，4 条）：
+
+- `header_reads_all_3_view_vars`：非默认视图（`viewctr=[100, 200], viewsize=42.5, viewdir=[1,1,1]` 未归一化）→ 精确读取
+- `header_writes_all_3_view_vars`：负坐标 + 大尺寸构造 → write → 3 个 `$VIEW*` 字符串都在
+- `header_roundtrip_preserves_all_3_view_vars`：read → write → read 1e-9 容忍
+- `header_legacy_file_without_view_fields_loads_with_defaults`：legacy HEADER → default 值并显式断言匹配 top-down plan view 默认
+
+**暂不接入 `Scene::camera`**：接入需要 UCS → camera view-transform 矩阵运算（`glam::Mat4` 构建），scope 过大。当前 header 只做透传保留数据，视图恢复由 UI 层后续工作接入。
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **113 / 113 全绿**（109 前轮 + **4** 新 view vars）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 4 个文件零 lint 错误
+
+**DXF HEADER 覆盖增量**：39 → **42** 个变量（15 原有 + 15 绘图环境 + 4 时间戳 + 5 UCS + 3 视图）。
+
+plan：`docs/plans/2026-04-21-header-view-vars-plan.md`
+
+---
+
+### 2026-04-21（八）：DXF HEADER UCS 家族 5 变量扩充
+
+继 2026-04-21（三、七）HEADER 扩充后继续完善覆盖面，本轮补齐 UCS（User Coordinate System）家族 5 变量，覆盖任何 AutoCAD 图纸的"当前用户坐标系"定义。本轮只动 HEADER 段；TABLES.UCS 表（by-name 字典）未动，留作独立工作。
+
+**model 扩字段**（`DocumentHeader`，在 `psltscale` 和 timestamp 之间）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default |
+|---|---|---|---|---|
+| `ucsbase` | `String` | `$UCSBASE` | 2 | `""` |
+| `ucsname` | `String` | `$UCSNAME` | 2 | `""` |
+| `ucsorg` | `[f64; 3]` | `$UCSORG` | 10/20/30 | `[0, 0, 0]` |
+| `ucsxdir` | `[f64; 3]` | `$UCSXDIR` | 10/20/30 | `[1, 0, 0]` |
+| `ucsydir` | `[f64; 3]` | `$UCSYDIR` | 10/20/30 | `[0, 1, 0]` |
+
+Defaults 与 **WCS 等同**（origin = 原点、X = +X、Y = +Y），让 `CadDocument::new()` 产出的文档在 `$UCSNAME == ""` 情况下与 AutoCAD "当前 UCS = World" 语义一致。
+
+**reader 扩派发**（`read_header_section` 加 5 arm，紧跟既有 `$PSLTSCALE`）
+
+**writer 对称输出**（`write_header` 在 `$PSLTSCALE` 之后、timestamp 之前按 AutoCAD 惯例顺序输出 5 对 pair 块）
+
+**测试**（新增 `tests/header_ucs_family.rs`，4 条）：
+
+- `header_reads_all_5_ucs_vars`：非默认 UCS（90° CW 旋转示例：`ucsxdir=[0,-1,0], ucsydir=[1,0,0]`）→ 精确读取
+- `header_writes_all_5_ucs_vars`：构造 → write → 扫 5 个 `$UCS*` 和 non-default 字符串
+- `header_roundtrip_preserves_all_5_ucs_vars`：read → write → read 全字段 1e-9 容忍
+- `header_legacy_file_without_ucs_fields_loads_with_defaults`：legacy 无 `$UCS*` → 字段为 default + 显式断言 WCS-equivalent 三元组
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **109 / 109 全绿**（105 前轮 + **4** 新 UCS）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 4 个文件零 lint 错误
+
+**DXF HEADER 覆盖增量**：34 → **39** 个变量（15 原有 + 15 绘图环境 + 4 时间戳 + 5 UCS）。
+
+plan：`docs/plans/2026-04-21-header-ucs-family-plan.md`
+
+---
+
+### 2026-04-21（七）：DXF HEADER 时间戳 4 变量扩充（Julian date 透传）
+
+继 2026-04-21（三）HEADER 15 绘图环境变量后继续扩容。真实 AutoCAD 输出的 DXF HEADER 普遍携带 `$TDCREATE / $TDUPDATE / $TDINDWG / $TDUSRTIMER` 四个时间戳，用于保留"创建时间 / 最近编辑时间 / 总编辑时长 / 用户计时器"。H7CAD reader 此前忽略，writer 不写 → 读 AutoCAD .dxf 写回后时间戳全归零。本轮扩 4 个 `f64` 字段做 **透传**（不引入 `chrono` / `time` crate 做 Julian-date → DateTime 转换，留给 UI 层按需格式化）。
+
+**model 扩字段**（`crates/h7cad-native-model/src/lib.rs::DocumentHeader`，插在 `psltscale` 和 `handseed` 之间）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `tdcreate` | f64 | `$TDCREATE` | 40 | 0.0 | Julian date: drawing creation time |
+| `tdupdate` | f64 | `$TDUPDATE` | 40 | 0.0 | Julian date: last update time |
+| `tdindwg` | f64 | `$TDINDWG` | 40 | 0.0 | Fractional days: cumulative editing time |
+| `tdusrtimer` | f64 | `$TDUSRTIMER` | 40 | 0.0 | Fractional days: user elapsed timer |
+
+**reader 扩派发**（`crates/h7cad-native-dxf/src/lib.rs::read_header_section`）：
+
+- `match var_name` 加 4 arm，复用既有 `f(40)` helper
+- 缺失时走 `Default` 0.0
+
+**writer 扩输出**（`crates/h7cad-native-dxf/src/writer.rs::write_header`）：
+
+- 按 AutoCAD 惯例顺序在 `$PSLTSCALE` 之后 / `$HANDSEED` 之前插入 4 对 `pair_str(9) + pair_f64(40)`
+
+**测试**（新增 `tests/header_timestamps.rs`，4 条）：
+
+- `header_reads_all_4_timestamps`：AutoCAD 2018 DXF Reference 标准样例值（Julian `2458849.82939815` ≈ 2020-01-01 07:54:19 UTC）→ 精确读取，容忍度 1e-9
+- `header_writes_all_4_timestamps`：构造非零 timestamps → write → 断言四个 `$TD*` 在输出 text 中存在
+- `header_roundtrip_preserves_all_4_timestamps`：read → write → read：
+  - Julian-date 字段（magnitude ~2.4e6）→ `format_f64` 10 位小数精度 ⇒ 实际精度 ~2.4e-4 日 ≈ 20 秒，容忍度 1e-3（AutoCAD 官方时间戳本身只精确到秒）
+  - Fractional-day 字段（值 ≤ 1）→ 精度 ~1e-10，容忍度 1e-9
+- `header_legacy_file_without_td_fields_loads_with_zero`：legacy HEADER 不含 `$TD*` → 4 字段全为 0.0
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **105 / 105 全绿**（101 前轮 + **4** 新 timestamps）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 4 个修改 / 新增文件零 lint 错误
+
+**Julian-date 转换留待后续**：UI 如需显示人类可读时间，加 `pub fn julian_to_iso_8601(jd: f64) -> String` helper（Julian date epoch = 4713 BC Jan 1 noon UTC，公式已有若干开源参考实现；30 行以内可自写，不必引入 chrono）。本轮 scope 外。
+
+plan：`docs/plans/2026-04-21-header-timestamps-plan.md`
+
+---
+
+### 2026-04-21（六）：`ObjectData::ImageDef` 扩字段到完整 DXF 标准
+
+闭合同日前两轮（一、二）IMAGE/IMAGEDEF 工作留下的最后遗留：`ObjectData::ImageDef` 原只存 `file_name` + `image_size`，真实 AutoCAD DXF 的 IMAGEDEF 还会写 `code 11/21 pixel_size / code 90 class_version / code 71 image_is_loaded / code 281 resolution_unit`。DWG 原生侧（`vendor_tmp/acadrust::read_image_definition`）早已读全 6 字段，H7CAD DXF 侧漏读漏写导致这些信息在 "读 AutoCAD .dxf → 写出" 的 round-trip 里丢失。
+
+**model 扩字段**（`crates/h7cad-native-model/src/lib.rs::ObjectData::ImageDef`）：
+
+| 字段 | 类型 | DXF code | Default | 语义 |
+|---|---|---|---|---|
+| `pixel_size` | `[f64; 2]` | 11 / 21 | `[1.0, 1.0]` | 单像素在绘图单位中的 U/V 尺寸 |
+| `class_version` | `i32` | 90 | 0 | Class version |
+| `image_is_loaded` | `bool` | 71 | true | 保存时文件是否已加载 |
+| `resolution_unit` | `u8` | 281 | 0 | 0 = None / 2 = cm / 5 = inches |
+
+Defaults 严格对齐 AutoCAD DWG 原生路径的"未设值"语义，确保 legacy DXF 读入和 `ensure_image_defs` auto-create 两条路径落在同一个 in-memory 状态上。
+
+**reader 扩读**（`crates/h7cad-native-dxf/src/lib.rs::read_objects_section`）：
+
+- IMAGEDEF 分支扩 4 个 group code 分派（11 / 21 / 90 / 71 / 281）
+- 缺失字段走 `DocumentHeader`-风格的 inline 默认初始化，旧 DXF 文件（只带 1/10/20）reader 自动 fallback 到 AutoCAD 默认而非 `Default::default` 的零值
+
+**writer 对称输出**（`crates/h7cad-native-dxf/src/writer.rs::write_object`）：
+
+- IMAGEDEF 分支按 AutoCAD 常用顺序 emit `1 → 10/20 → 11/21 → 90 → 71 → 281` 六对
+- bool → i16 走 `if b { 1 } else { 0 }`；`u8` `resolution_unit` cast 成 i16 写 code 281
+
+**auto-create 同步**（`writer.rs::ensure_image_defs`）：
+
+- `ObjectData::ImageDef` 构造点补齐新字段的 AutoCAD 默认值（`pixel_size: [1.0, 1.0], class_version: 0, image_is_loaded: true, resolution_unit: 0`）
+- 附带更新前轮 2 处测试 fixture 的 `ObjectData::ImageDef` 构造（`tests/imagedef_roundtrip.rs`, `tests/imagedef_ensure.rs`）— 前者继续用默认值，后者故意设 `pixel_size: [0.5, 0.5], resolution_unit: 2` 验证非默认值也能 roundtrip
+
+**测试**（新增 3 条到 `tests/imagedef_roundtrip.rs`）：
+
+- `imagedef_reads_extended_fields`：手写完整 IMAGEDEF（含 11/21/90/71/281，故意取 `pixel_size=[0.25, 0.5], class_version=1, image_is_loaded=false, resolution_unit=5`）→ 断言每个字段精确读取
+- `imagedef_legacy_file_uses_defaults_for_missing_extension_fields`：只带 1/10/20 的 legacy IMAGEDEF → 新字段走 AutoCAD 默认（`[1.0, 1.0] / 0 / true / 0`）
+- `imagedef_extended_fields_survive_full_roundtrip`：read → write → read，4 个新字段逐个 `assert_eq!`
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **101 / 101 全绿**（81 单元 + 5 imagedef_ensure + **9** imagedef_roundtrip（6 前轮 + 3 新）+ 5 header_drawing_vars + 1 fixture）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 5 个修改 / 新增文件零 lint 错误
+
+**影响面**：IMAGEDEF 在 H7CAD DXF 读写链路上已全字段对齐 AutoCAD 规范。前两轮 + 本轮累计让 IMAGE ↔ IMAGEDEF 的标准化链路完整闭合：
+
+- 标准 DXF 读 340 + 解 IMAGEDEF 7 字段（含新 4 字段）✓
+- 写 IMAGE 输出 340 + 输出 IMAGEDEF 7 字段 ✓
+- Auto-create IMAGEDEF 补全标准默认值 ✓
+- 与 DWG native reader 字段覆盖面对齐 ✓
+
+plan：`docs/plans/2026-04-21-imagedef-extend-fields-plan.md`
+
+---
+
+### 2026-04-21（五）：PID 打开后 fit 优先聚焦主绘图层
+
+同日第四轮（PID 真实样本显示）Task 2 留下的诊断问题：装饰 panel（42 entities，位于 `SIDE_PANEL_X` / `BOTTOM_PANEL_Y` 等远坐标）挤压主绘图层（12 entities）的视口占比 — `Scene::fit_all` 把所有 wires 的 bbox 全算进去，装饰 panel 把 bbox 拉得很大，主绘图被缩到视口一小块角落。本轮在不动装饰 panel 布局的前提下，给 PID tab 的打开路径引入"只看主绘图层"的 fit 策略。
+
+**scene 改动**（`src/scene/mod.rs`）：
+
+- 新增 `Scene::fit_layers_matching(layer_prefixes: &[&str]) -> bool`：
+  - 从 `native_doc()` 迭代实体（`doc.entities`），按 `layer_name.starts_with(p)` 对每个 prefix 取 OR 语义判断匹配
+  - 匹配的实体经 `entity_bbox_points` 提取特征点（`Line` 端点、`Circle` / `Arc` / `Ellipse` 的 bbox 角、`Text` / `MText` / `Insert` 的 insertion、`Point` position、`LwPolyline` / `Polyline` 顶点）
+  - 聚合 min/max → `camera.fit_to_bounds` + `camera_generation += 1`
+  - **返回 bool**：true = 至少一个实体匹配且已 fit；false = 无 native_doc 或无匹配实体（camera 不变）
+- 新增私有 `fn entity_bbox_points(entity) -> Vec<[f64; 3]>` 作为 kind 特征点提取的单一事实来源
+
+**入口整合**（`src/app/update.rs::Message::FileOpened`）：
+
+- 原 PID / CAD 共用的 `self.tabs[i].scene.fit_all()` 改为：
+  - PID tab：先试 `fit_layers_matching(&["PID_OBJECTS_", "PID_LAYOUT_TEXT", "PID_RELATIONSHIPS"])`；若返回 false（例如 preview 确实无主图层实体）fallback 到 `fit_all`
+  - CAD / DXF / DWG tab：继续走 `fit_all`（主图层无 `PID_` 前缀命名，prefix 匹配会自动 false → fallback；但为避免无谓的 `fit_layers_matching` 调用，用 `matches!(tab_mode, DocumentTabMode::Pid)` 显式门闩）
+
+**测试**（`src/scene/mod.rs::tests` + `src/io/pid_import.rs::tests`）：
+
+- 新增 `fit_layers_matching_returns_true_and_advances_camera_generation_for_matching_layer`：主图层 + 装饰层（far offset）并存时只匹配主图层，camera_generation 恰 +1
+- 新增 `fit_layers_matching_returns_false_without_touching_camera_when_no_layer_matches`：实体仅在 CAD "0" 层时返回 false 且 camera_generation 不变（保证 fallback 契约）
+- 新增 `fit_layers_matching_returns_false_without_native_doc`：新建无 native_doc 的 scene 不 panic、返回 false
+- 新增 `fit_layers_matching_prefix_semantics_match_any_of_the_prefixes`：OR-of-prefixes 语义验证（首 prefix 不匹配、第二 prefix 命中仍可成功 fit）
+- 新增 `target_pid_sample_fit_layers_matching_succeeds_for_main_drawing_layers`：真实样本 `工艺管道及仪表流程-1.pid` 打开后主图层 fit 必须 true（防回退）
+
+**修改 / 新增文件**：
+
+- 修改：`src/scene/mod.rs`（+ fit_layers_matching / entity_bbox_points / 4 单元测试）
+- 修改：`src/app/update.rs`（FileOpened PID 分支 fit 策略切换）
+- 修改：`src/io/pid_import.rs`（+ 1 目标样本集成测试 + 顺带修 `AttributeClassSummary.records: Vec::new()` pid-parse 模型演进后留下的 pre-existing 测试夹具编译错误）
+
+**验证**：
+
+- `cargo test --bin H7CAD scene` **45 / 45 全绿**（41 前轮 + 4 新 fit_layers_matching）
+- `cargo test --bin H7CAD io::pid` **79 / 79 全绿**（78 前轮 + 1 新 target_pid 目标样本集成）
+- `cargo check` 零新 warning
+- `ReadLints` 3 个修改文件零 lint 错误
+
+**效果**：打开 target PID 时视口直接聚焦到 `PID_OBJECTS_PipeRun / PID_OBJECTS_PIDProcessPoint / PID_LAYOUT_TEXT / PID_RELATIONSHIPS` 覆盖的主绘图区；装饰面板（cross-ref / unresolved / stream / cluster / fallback）仍在原坐标，用户 pan / zoom 到右侧 / 底部仍可访问 — 但不再"一打开就挤成一团"。
+
+plan：`docs/plans/2026-04-21-pid-fit-main-drawing-plan.md`
+
+---
+
+### 2026-04-21（四）：PID 真实样本显示改进 + `PIDSHOT` 命令 + 截图回归
+
+落地 `docs/plans/2026-04-21-pid-real-sample-display-and-screenshot-plan.md`。验收样本固定为 `D:\work\plant-code\cad\pid-parse\test-file\工艺管道及仪表流程-1.pid`（450 KB，2 objects / 0 relationships，无 publish sidecar，打开后 native_preview 有 57 entities）。覆盖计划 Task 1-5（Task 6 UI-level 自动化因仓库无 headless UI 基础明确跳过）。
+
+**Task 1 — 真实样本基线测试**（`src/io/pid_import.rs::tests`）：
+
+- 新增 `target_sample_pid_path()` helper 指向目标 .pid（找不到时测试 skip，不阻塞 CI）
+- 新增 `open_target_pid_sample_builds_dense_preview`：反映当前解析结果的务实 anchor（layout.items ≥ 2、object_count ≥ 2、native_entities ≥ 30），防止退化到"空预览"。测试输出行里 dump object/layout/segment/entities count 做诊断记录
+
+**Task 2 — 显示质量 focused test + layout 标签修复**（`src/io/pid_import.rs`）：
+
+- 新增 `target_pid_preview_layout_is_primary_visual_focus`：拉开主绘图层（`PID_OBJECTS_*`）、layout 文字层、装饰层（meta/fallback/crossref/unresolved/streams/clusters/symbols）的实体数量，确保主绘图有至少 1 个实体 anchor（即使装饰层占主导也不被完全压过）
+- **bug 修复**：`add_layout_glyph` 之前只为 `LayoutGlyphKind::Generic` 画 label text，其余 10 种（Pipeline / Branch / Connector / ProcessPoint / Instrument / Equipment / Vessel / Note / Nozzle / OffPageConnector / PipingComponent）都没有可见标签 → 真实 P&ID 每个对象都有 tag，这直接导致样本"看起来稀疏"。把 label 绘制抽到 match 之后统一处理（label 非空时在 glyph 下方 34 单位处画 20 字节内缩的 MText）。效果：primary_objects 从 10 → **12**、native_entities 从 55 → **57**
+
+**Task 3 — 场景 fit 回归保护**（`src/io/pid_import.rs::tests`）：
+
+- 新增 `target_pid_sample_scene_has_fittable_geometry_and_native_doc`：offline 走一遍 `open_pid → set_native_doc → entity_wires → fit_all` 链路，断言三项 `fit_all` 前提条件（scene 有 native doc / compat 文档非空 / entity_wires 至少 1 条）；`fit_all` 本身断言不 panic
+- 现有 `Message::FileOpened → scene.fit_all()` 流程经此测试验证对目标样本已经工作，未做代码改动
+
+**Task 4 — `PIDSHOT <path.png>` 命令 + 确定性 PNG helper**：
+
+- **新增文件**：`src/io/pid_screenshot.rs`（~320 行，含 2 单测）
+  - `export_pid_preview_png(doc: &CadDocument, path: &Path)` 纯 CPU rasteriser：Bresenham 画线 + midpoint 画圆 + 采样画弧 + 3×3 十字画文字锚点 + 单像素画点
+  - `SCREENSHOT_WIDTH = 1600, SCREENSHOT_HEIGHT = 900`（plan 指定）
+  - 世界 bbox → 像素坐标自动 fit，保留 40px margin + Y 轴翻转
+  - 支持 Line / Circle / Arc / Text / MText / Point；其余 entity kind 静默 skip
+  - 首版**不**做 GPU 读回（可 headless，便于 Task 5 回归 + test 环境）
+- **新增命令**（`src/app/commands.rs`）：`PIDSHOT <path.png>`
+  - 只允许活动 PID tab；非 PID tab 输出 `PIDSHOT: active tab is not a PID tab`
+  - 目标路径必须 `.png` 后缀；不符 → 错误输出
+  - 成功：`PIDSHOT  saved screenshot to <path>`；失败：`PIDSHOT: <error>`
+- **helper 单测**：`export_pid_preview_png_writes_file`（真实样本 → PNG > 1KB）、`export_rejects_empty_document`（空 doc 显式错误）
+
+**Task 5 — 截图回归基线**（`src/io/pid_screenshot.rs::tests`）：
+
+- 新增 `target_pid_sample_screenshot_matches_baseline`：**不提交** binary baseline PNG（避免 repo 膨胀 / 不透明 diff），改用**统计签名 pinning**：
+  - 文件大小 > 1 KB
+  - 尺寸严格 == 1600 × 900
+  - 非白像素数落在 `[100, 500_000]` 容忍区间（当前观测值 **824**，足以防御 "blank canvas" / "filled canvas" 两种危险回归，又能吸收 label / icon 尺寸微调）
+
+**Task 6 — UI-level 自动化**（跳过，按计划原文）：
+
+- H7CAD 使用 iced + wgpu 构建，仓库无现成 headless UI 自动化基础；强行实现 scope 风险远高于 Task 1-5 总和
+- Plan 原文明确"只在仓库现有自动化基础存在时做"→ 本轮不纳入，作为后续阶段
+
+**修改 / 新增文件**：
+
+- 新增：`src/io/pid_screenshot.rs`
+- 修改：`src/io/mod.rs`（`pub mod pid_screenshot;`）
+- 修改：`src/io/pid_import.rs`（+ 3 tests，+ add_layout_glyph label 统一绘制）
+- 修改：`src/app/commands.rs`（+ PIDSHOT 命令分支）
+
+**验证**（plan validator sequence）：
+
+- `cargo test --bin H7CAD io::pid` **78 / 78 全绿**（pid_import 67 + pid_package_store + pid_screenshot 3 新 + 原有）
+- `cargo check` 零新 warning
+- `ReadLints` 4 个文件零 lint 错误
+
+plan：`docs/plans/2026-04-21-pid-real-sample-display-and-screenshot-plan.md`
+
+---
+
+### 2026-04-21（三）：DXF HEADER 绘图环境变量扩充（15 → 30）
+
+承接同日前两轮 IMAGE/IMAGEDEF 工作后，换战场转向 HEADER section。前期盘点识别的"HEADER 仅 15 个变量，AutoCAD 300+"缺口对 round-trip 保真度影响广 — 每个 DXF 都有 HEADER，且真实 AutoCAD 输出几乎都携带绘图模式 / 当前属性 / 角度配置。本轮按"最常见 / 最高 ROI" 的筛选，扩 **15 个绘图环境变量**。
+
+**model 扩字段**（`crates/h7cad-native-model/src/lib.rs::DocumentHeader`）：
+
+| 类别 | 变量 | 字段 / 类型 | DXF code | AutoCAD 默认值 |
+|---|---|---|---|---|
+| 绘图模式 | `$ORTHOMODE` | `orthomode: bool` | 70 | false |
+| 绘图模式 | `$GRIDMODE` | `gridmode: bool` | 70 | false |
+| 绘图模式 | `$SNAPMODE` | `snapmode: bool` | 70 | false |
+| 绘图模式 | `$FILLMODE` | `fillmode: bool` | 70 | **true** |
+| 绘图模式 | `$MIRRTEXT` | `mirrtext: bool` | 70 | false |
+| 绘图模式 | `$ATTMODE` | `attmode: i16` (0/1/2) | 70 | **1** |
+| 当前属性 | `$CLAYER` | `clayer: String` | **8** | `"0"` |
+| 当前属性 | `$CECOLOR` | `cecolor: i16` | **62** | **256** (BYLAYER) |
+| 当前属性 | `$CELTYPE` | `celtype: String` | **6** | `"ByLayer"` |
+| 当前属性 | `$CELWEIGHT` | `celweight: i16` (1/100mm) | **370** | **-1** (ByLayer) |
+| 当前属性 | `$CELTSCALE` | `celtscale: f64` | 40 | 1.0 |
+| 当前属性 | `$CETRANSPARENCY` | `cetransparency: i32` | **440** | 0 |
+| 角度 | `$ANGBASE` | `angbase: f64` (rad) | **50** | 0.0 |
+| 角度 | `$ANGDIR` | `angdir: bool` (0=逆/1=顺) | 70 | false |
+| 空间 | `$PSLTSCALE` | `psltscale: bool` | 70 | **true** |
+
+`Default` impl 严格对齐 AutoCAD 语义（`fillmode/psltscale=true`, `cecolor=256`, `celweight=-1`, `attmode=1`），避免默认值意外覆盖真实配置。
+
+**reader 扩派发**（`crates/h7cad-native-dxf/src/lib.rs::read_header_section`）：
+
+- `match var_name` 追加 15 个 arm
+- 新增内联 helper `i32v(c)` 用于 `$CETRANSPARENCY` 这类 i32 变量（既有 `f / i16v / sv` 不覆盖 i32）
+- 非标准代码值（例如 `$CLAYER` 用 code 8，`$CELTYPE` 用 code 6）显式处理，避免误用泛化 helper
+
+**writer 扩输出**（`crates/h7cad-native-dxf/src/writer.rs::write_header`）：
+
+- 按 "绘图模式 → 当前属性 → 角度 → 空间" 顺序追加 15 个 `pair_str(9, "$VAR") + pair_xxx(<code>, value)` 块
+- bool → i16 转换固定按 `if b { 1 } else { 0 }` 惯例
+
+**测试**（新增 `crates/h7cad-native-dxf/tests/header_drawing_vars.rs`，5 条集成测试）：
+
+- `header_reads_all_15_drawing_vars`：手写完整 HEADER → 逐字段断言（涵盖 bool / i16 / i32 / f64 / String 五种类型）
+- `header_writes_all_15_drawing_vars`：构造 doc → write → 用 `find_var_pair` / `assert_var_i16 / i32 / f64_approx / str` 辅助逐变量断言输出的 `group_code + value` 正确
+- `header_roundtrip_preserves_all_15_drawing_vars`：read → write → read，15 个字段全部对齐（f64 容忍度 1e-9，匹配 `format_f64` 10 位精度天花板）
+- `header_default_values_survive_roundtrip`：fresh `CadDocument::new()` → write → read，逐字段对齐 `DocumentHeader::default()`
+- `header_legacy_file_without_new_vars_loads_with_defaults`：legacy DXF 不含 15 个新变量 → reader fallback 到 Default → 不炸
+
+辅助测试函数：
+- `find_var_pair(text, var_name)` 扫 `"  9\n<var>\n"` 模式取随后的 code + value 对
+- 4 个类型化断言 helper (`assert_var_i16 / i32 / f64_approx / str`) 都做 group code + value 双校验，避免 writer 把 `$CLAYER` 误写成 code 2（规范是 8）被漏检
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **98 / 98 全绿**（81 单元 + 5 新 header + 5 imagedef_ensure + 6 imagedef_roundtrip + 1 fixture）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `cargo check -p H7CAD` 无新 warning
+
+**未纳入本轮**（留待后续）：
+
+- DIMxxx 家族（100+ 尺寸标注变量）— 独立大工作
+- 时间戳变量（`$TDCREATE / $TDUPDATE / $TDINDWG / $TDUSRTIMER` — Julian 日期编解码）
+- UCS 家族（`$UCSBASE / $UCSORG / $UCSXDIR / $UCSYDIR` — 与 TABLES.UCS 联动）
+- 3D / 渲染变量（`$SHADEDGE / $LIGHTGLYPHDISPLAY` 等）
+- 视口几何变量（`$VIEWCTR / $VIEWSIZE / $VIEWDIR` — 与 VPORT 表联动）
+
+plan：`docs/plans/2026-04-21-header-drawing-vars-plan.md`
+
+---
+
+### 2026-04-21（续）：Writer `ensure_image_defs` 自动建 IMAGEDEF
+
+闭合同日前一轮 "DXF IMAGE 实体走标准 IMAGEDEF 链接" 留下的 "未纳入" 首项。前轮 writer 在 IMAGE 实体 `image_def_handle == Handle::NULL` 时仍会 fallback 输出非标准 `code 1`（仅为了自循环 round-trip），导致 UI/bridge 构造的 IMAGE（只填 `file_path`）写出的 DXF 对 AutoCAD 等第三方工具而言是"孤儿" — IMAGEDEF 从未被创建。本轮让 writer 在序列化前主动补齐缺失的 IMAGEDEF。
+
+**writer 改动**（`crates/h7cad-native-dxf/src/writer.rs`）：
+
+- 新增 `ensure_image_defs(doc: &mut CadDocument)` 函数，三趟算法绕开 Rust 借用冲突：
+  1. **收集趟**（只读借用）：扫描 `doc.entities` + `doc.block_records[*].entities`，登记所有 `image_def_handle == NULL && !file_path.is_empty()` 的 IMAGE，连同 `file_path` / `image_size` 一起入 `pending: Vec<(ImageLoc, String, [f64; 2])>`
+  2. **分配趟**（`&mut doc`）：为每个 pending 项 `allocate_handle` → 构造 `ObjectData::ImageDef` → push 到 `doc.objects` → 记录 `(ImageLoc, Handle)`
+  3. **回填趟**：按 `ImageLoc::TopLevel(i)` / `ImageLoc::Block(br_handle, i)` 精准索引回写 IMAGE 实体的 `image_def_handle`
+- 新增私有 `enum ImageLoc { TopLevel(usize), Block(Handle, usize) }` 承载"IMAGE 在 doc 里的精确位置"
+- `needs_ensure_image_defs(doc: &CadDocument) -> bool` 只读预筛：95%+ 的 "read AutoCAD → write" 路径零 pending → 避免无谓 `CadDocument::clone()`
+
+**入口改造**：
+
+- `write_dxf_string(doc: &CadDocument)` 签名保持不变（下游 `save_dxf(&NativeCadDocument)` 不受影响）
+- 内部按需 clone-on-demand：`if needs_ensure_image_defs(doc) { clone → ensure → impl } else { impl }`
+- 原 body 抽出为 `write_dxf_string_impl(doc: &CadDocument)`
+
+**Idempotency**：
+
+- 对已经走过 `ensure_image_defs` 的 doc 再次 write：所有 IMAGE 的 `image_def_handle` 非 NULL → `needs_ensure_image_defs` 返回 false → 零副作用
+- 测试 `ensure_auto_created_imagedef_is_readable_after_roundtrip` 显式两次 write/read 交替断言 IMAGEDEF count 稳定为 1、IMAGE handle 在两次 read 后一致
+
+**测试**（新增 `crates/h7cad-native-dxf/tests/imagedef_ensure.rs`，5 条集成测试）：
+
+- `ensure_creates_imagedef_for_top_level_image_with_file_path_only`：只填 `file_path` 的 top-level IMAGE → write → read 回来 IMAGEDEF 存在 + IMAGE 的 340 对齐
+- `ensure_skips_image_with_empty_file_path`：空 `file_path` + NULL handle → 不 auto-create（避免凭空产生 "空字符串 IMAGEDEF"）
+- `ensure_skips_image_that_already_has_handle`：预置 IMAGE↔IMAGEDEF 已配对 → write → IMAGEDEF 个数保持 1（无重复）、handle 值不变
+- `ensure_handles_image_inside_block_record`：IMAGE 埋在 `doc.block_records["TestBlock"].entities` → write → block-scope IMAGE 正确拿到 auto-created IMAGEDEF 的 handle
+- `ensure_auto_created_imagedef_is_readable_after_roundtrip`：两次 write/read 交替验证 idempotency + handle 稳定
+
+**附带测试调整**：`writer_falls_back_to_code_1_when_handle_null`（前轮加的 legacy fallback 测试）原期望"handle=NULL + file_path 非空 → writer 写 code 1"，现在被 `ensure_image_defs` 截胡 → 改名为 `writer_ensure_prepass_promotes_null_handle_image_to_standard_340_link`，断言 writer 输出的 IMAGE 已升级到标准 340 链接（代码 1 消失、IMAGEDEF 在 OBJECTS 里、file_path 迁到 IMAGEDEF.file_name）。这是 **期望的新默认行为** — legacy code 1 fallback 仅在 writer 输入本身就无 `file_path` 且无 handle 的"纯空 IMAGE"极端场景下才触发。
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **93 / 93 全绿**（81 单元 + 6 前轮 imagedef_roundtrip + **5 新** imagedef_ensure + 1 fixture）
+- `cargo test --bin H7CAD io::native_bridge` 20/20 无回归
+- `cargo check -p h7cad-native-dxf` 零 warning
+
+plan：`docs/plans/2026-04-21-imagedef-auto-create-plan.md`
+
+---
+
+### 2026-04-21：DXF `IMAGE` 实体走标准 `IMAGEDEF` 链接（code 340）
+
+承接同日 H7CAD DXF 解析进度盘点中识别的首号待办项。此前 `EntityData::Image` 通过**非标准的 `code 1`** 直接携带 `file_path`（pre-D5 的 hack），导致读取真实 AutoCAD 输出的 DXF 时 IMAGE 实体 `file_path` 恒为空（AutoCAD 标准不写 code 1 到 IMAGE，而是通过 `code 340` 链接到 OBJECTS 段中的 IMAGEDEF 对象）。本轮让 IMAGE ↔ IMAGEDEF 链接走 DXF 标准路径，同时保留 code 1 为**遗留 fallback** 维持旧文件向后兼容。
+
+**model 改动**（`crates/h7cad-native-model/src/lib.rs`）：
+
+- `EntityData::Image` 新增字段 `image_def_handle: Handle`，承载标准 DXF `code 340` hard-pointer
+- 原 `file_path` 字段保留，doc-comment 标注为"cached mirror"语义：当 `image_def_handle == Handle::NULL` 时是权威值，否则是 IMAGEDEF.file_name 的镜像（由 reader 的 post-resolve 填充）
+
+**reader 改动**（`crates/h7cad-native-dxf/src/{lib,entity_parsers}.rs`）：
+
+- `parse_image` 新增 `code 340` 解析 → `image_def_handle`；保留 `code 1` 作为遗留 fallback 读 `file_path`
+- `read_dxf` 流程末尾新增 `resolve_image_def_links` 阶段：
+  - 扫描 `doc.objects` 建立 `Handle → IMAGEDEF.file_name` 索引
+  - 遍历 `doc.entities` 及 `doc.block_records[*].entities`
+  - 若某 IMAGE 的 `image_def_handle != NULL` 且 `file_path.is_empty()` → 从索引取 file_name 镜像回 `file_path`
+  - 若 `file_path` 已被 legacy code 1 填充，不覆盖（原因：信任已有值）
+
+**writer 改动**（`crates/h7cad-native-dxf/src/writer.rs`）：
+
+- IMAGE 输出根据 `image_def_handle` 分两路：
+  - `!= NULL` → 写 `code 340`，**不写 code 1**（纯标准）
+  - `== NULL` 且 `file_path` 非空 → 写 `code 1` fallback（保留遗留链路，便于自循环 round-trip）
+- IMAGEDEF object 的读写对称路径此前已实现（2026-04-17 OBJECTS 层补齐），本轮未动
+
+**bridge 改动**（`src/io/native_bridge.rs`，5 处）：
+
+- 所有构造 `nm::EntityData::Image { ... }` 的地方追加 `image_def_handle: nm::Handle::NULL`
+- 1 处 destructure（acadrust `RasterImage` ← native）改为用 `..` 忽略新字段（acadrust 端当前不承载 IMAGEDEF handle）
+- `src/modules/home/draw/raster_image.rs`：绘图命令构造 IMAGE 时同步追加 `image_def_handle: nm::Handle::NULL`
+
+**测试**（新增 `crates/h7cad-native-dxf/tests/imagedef_roundtrip.rs`，6 条集成测试）：
+
+- `standard_dxf_resolves_file_path_from_linked_imagedef`：标准 DXF（IMAGE 只有 code 340，IMAGEDEF 在 OBJECTS 段）→ file_path 通过 resolve 正确回填
+- `legacy_dxf_reads_code_1_as_fallback`：legacy DXF（IMAGE 只有 code 1，无 IMAGEDEF）→ file_path 正确读取
+- `mixed_dxf_imagedef_wins_over_inline_code_1`：IMAGE 既有 code 340 又有 code 1 → legacy code 1 先到位后不被 resolve 覆盖（trust-first-fill 语义）
+- `writer_emits_code_340_when_handle_set_and_omits_code_1`：`image_def_handle != NULL` 时 writer 写 340 且不写 code 1
+- `writer_falls_back_to_code_1_when_handle_null`：`image_def_handle == NULL` 且 `file_path` 非空时 writer 写 code 1 fallback（引入 `extract_first_entity_body` 辅助：按 DXF code/value pair 对齐解析，避免 layer_name=`"0"` 被误识为 entity 分隔符）
+- `image_imagedef_link_survives_full_roundtrip`：读 → 写 → 读，`image_def_handle` 与 IMAGEDEF `handle` 严格保持（0x4AF）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` 88/88 全绿（81 单元 + 6 新集成 + 1 fixture）
+- `cargo test --bin H7CAD io::native_bridge` 20/20 全绿，`image_and_wipeout_bridge_survive_document_roundtrip_with_geometry` 无回归
+- `cargo check -p H7CAD` 主 crate 无新 warning
+
+**未纳入本轮**（留待后续）：
+
+- Writer 侧 `ensure_image_defs` 自动建 IMAGEDEF（当前 writer 在 `image_def_handle == NULL` 时走 code 1 fallback 而非 auto-create；需要 mut doc 或 clone，scope 更大）
+- `ObjectData::ImageDef` 扩充 `resolution_unit` / `pixel_size` / `class_version` 字段（DWG 原生解析器已支持但 DXF reader/writer 尚未穿透）
+- `IMAGEDEF_REACTOR` 的自动双向链接（当前能独立读写，未联动 IMAGE.handle ↔ reactor.image_handle）
+- DWG reader（`acadrust::DwgReader` / `h7cad-native-dwg`）的对称改造
+
+**顺带修复**：`src/io/pid_import.rs:5294` 测试夹具补 `SymbolUsage.references: Vec::new()`（pid-parse 模型演进后 H7CAD 侧测试代码未同步的 pre-existing 编译错误），否则 `cargo test --bin H7CAD` 无法 compile。
+
+plan：`docs/plans/2026-04-21-imagedef-object-plan.md`
+
 ### 2026-04-20：`pid_package_store` 可观察性 + `PIDCACHESTATS` 命令
 
 承接同日 H7CAD × SPPID 集成分析改进点 3 ("pid_package_store 无 LRU 上限") 的**观察性子集**：不实现完整 eviction policy，先让用户/调试者在运行时能看到缓存占用，为将来的 LRU 决策铺设基线数据。

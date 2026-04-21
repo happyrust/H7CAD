@@ -2711,18 +2711,28 @@ fn add_layout_glyph(
                 52.0,
                 30.0,
             );
-            let _ = add_panel_line(
-                doc,
-                preview_index,
-                layer,
-                [item.anchor[0] - 24.0, item.anchor[1] - 34.0, 0.0],
-                120.0,
-                short_text(label, 20),
-                Some(PidNodeKey::Object {
-                    drawing_id: drawing_id.to_string(),
-                }),
-            );
         }
+    }
+
+    // All layout items, regardless of kind, get a visible label so the
+    // rendered preview reads closer to a real P&ID (where every tag /
+    // pipeline / instrument has an adjacent identifier). Previously only
+    // `Generic` placed a label, leaving every other shape unlabelled —
+    // the 2026-04-21 pid-real-sample plan Task 2 identified this as the
+    // main reason the target sample looked visually sparse compared to
+    // the original P&ID.
+    if !label.is_empty() {
+        let _ = add_panel_line(
+            doc,
+            preview_index,
+            layer,
+            [item.anchor[0] - 24.0, item.anchor[1] - 34.0, 0.0],
+            120.0,
+            short_text(label, 20),
+            Some(PidNodeKey::Object {
+                drawing_id: drawing_id.to_string(),
+            }),
+        );
     }
 }
 
@@ -3634,6 +3644,200 @@ mod tests {
             "C:/Users/Administrator/Documents/xwechat_files/happydpc_b2ec/msg/file/2026-04/XML文件(1)/DWG-0202GP06-01.pid",
         );
         path.exists().then_some(path)
+    }
+
+    /// Target acceptance sample fixed by the 2026-04-21 pid-real-sample
+    /// display-and-screenshot plan. Lives in the sibling `pid-parse` repo
+    /// so this test is skipped when the repo isn't checked out alongside
+    /// H7CAD.
+    fn target_sample_pid_path() -> Option<PathBuf> {
+        let path = PathBuf::from(
+            r"D:\work\plant-code\cad\pid-parse\test-file\工艺管道及仪表流程-1.pid",
+        );
+        path.exists().then_some(path)
+    }
+
+    #[test]
+    fn target_pid_preview_layout_is_primary_visual_focus() {
+        // Task 2 focused test (plan docs/plans/2026-04-21-pid-real-sample-
+        // display-and-screenshot-plan.md): the target sample has a sparse
+        // object graph (parse yields 2 objects, 0 relationships because
+        // the `.pid` ships without publish sidecars). Without a focused
+        // check the wide set of decorative side panels (meta / cross-ref
+        // / unresolved / streams / fallback / clusters) dominate the
+        // viewport after fit_all, making the real layout items invisible
+        // amongst panel text. Assert the document still carries at least
+        // one entity on the primary-object layer so decorative layers
+        // never fully eclipse real geometry.
+        let Some(path) = target_sample_pid_path() else {
+            eprintln!("SKIP: target pid sample not found");
+            return;
+        };
+        let bundle = open_pid(&path).expect("open target pid sample");
+
+        let primary_layer_count = bundle
+            .native_preview
+            .entities
+            .iter()
+            .filter(|e| e.layer_name.starts_with("PID_OBJECTS_"))
+            .count();
+        let layout_text_count = bundle
+            .native_preview
+            .entities
+            .iter()
+            .filter(|e| e.layer_name == "PID_LAYOUT_TEXT")
+            .count();
+        let decorative_count = bundle
+            .native_preview
+            .entities
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.layer_name.as_str(),
+                    "PID_META"
+                        | "PID_FALLBACK"
+                        | "PID_CROSSREF"
+                        | "PID_UNRESOLVED"
+                        | "PID_STREAMS"
+                        | "PID_CLUSTERS"
+                        | "PID_SYMBOLS"
+                )
+            })
+            .count();
+
+        eprintln!(
+            "target pid layout focus: primary_objects={}, layout_text={}, decorative={}",
+            primary_layer_count, layout_text_count, decorative_count
+        );
+
+        assert!(
+            primary_layer_count >= 1,
+            "at least one entity must live on PID_OBJECTS_* so the main drawing has a real anchor; \
+             got primary={} decorative={}",
+            primary_layer_count,
+            decorative_count
+        );
+    }
+
+    #[test]
+    fn target_pid_sample_fit_layers_matching_succeeds_for_main_drawing_layers() {
+        // M3 / plan docs/plans/2026-04-21-pid-fit-main-drawing-plan.md:
+        // the FileOpened PID branch first asks the scene to fit only
+        // the main-drawing layers and falls back to `fit_all` when that
+        // returns false. Verify the target sample's preview carries
+        // enough primary geometry to satisfy the first call — if this
+        // flips to false, we'd silently regress back to the pre-plan
+        // behaviour where side panels dominate the viewport.
+        let Some(path) = target_sample_pid_path() else {
+            eprintln!("SKIP: target pid sample not found");
+            return;
+        };
+        let bundle = open_pid(&path).expect("open target pid sample");
+        let compat = crate::io::native_bridge::native_doc_to_acadrust(&bundle.native_preview);
+        let mut scene = crate::scene::Scene::new();
+        scene.document = compat;
+        scene.set_native_doc(Some(bundle.native_preview));
+        scene.native_render_enabled = true;
+
+        let fitted = scene.fit_layers_matching(&[
+            "PID_OBJECTS_",
+            "PID_LAYOUT_TEXT",
+            "PID_RELATIONSHIPS",
+        ]);
+        assert!(
+            fitted,
+            "target pid sample must carry primary-layer geometry so the PID FileOpened \
+             branch's fit_layers_matching call succeeds without falling back to fit_all"
+        );
+    }
+
+    #[test]
+    fn target_pid_sample_scene_has_fittable_geometry_and_native_doc() {
+        // Task 3 (plan docs/plans/2026-04-21-pid-real-sample-display-and-
+        // screenshot-plan.md): wire the opened PID through Scene so we
+        // detect regressions where the document is parsed correctly but
+        // the scene view lands in an empty / mis-fit state. This is an
+        // offline equivalent of the full `Message::FileOpened` path:
+        // open_pid → set_native_doc → entity_wires → fit_all. The test
+        // asserts the three `fit_all` preconditions: scene carries a
+        // native doc, compat doc has entities, and entity_wires yields
+        // at least one fittable wire (empty wires cause fit_all to no-op
+        // and leave the camera on its startup view).
+        let Some(path) = target_sample_pid_path() else {
+            eprintln!("SKIP: target pid sample not found");
+            return;
+        };
+        let bundle = open_pid(&path).expect("open target pid sample");
+        let compat = crate::io::native_bridge::native_doc_to_acadrust(&bundle.native_preview);
+        let mut scene = crate::scene::Scene::new();
+        scene.document = compat;
+        scene.set_native_doc(Some(bundle.native_preview.clone()));
+        scene.native_render_enabled = true;
+
+        assert!(
+            scene.native_doc().is_some(),
+            "scene must retain native document after set_native_doc"
+        );
+        assert!(
+            !scene.document.entities().collect::<Vec<_>>().is_empty(),
+            "scene.document (compat projection) must expose non-empty entities"
+        );
+
+        let wires = scene.entity_wires();
+        assert!(
+            !wires.is_empty(),
+            "target pid scene must yield at least one fittable wire; otherwise \
+             fit_all silently no-ops and the camera never converges"
+        );
+
+        // fit_all must not panic even on the sparse target sample.
+        scene.fit_all();
+    }
+
+    #[test]
+    fn open_target_pid_sample_builds_dense_preview() {
+        let Some(path) = target_sample_pid_path() else {
+            eprintln!("SKIP: target pid sample not found");
+            return;
+        };
+        let bundle = open_pid(&path).expect("open target pid sample");
+        let layout = bundle
+            .pid_doc
+            .layout
+            .as_ref()
+            .expect("target sample should derive layout");
+
+        eprintln!(
+            "target pid sample baseline: object_count={}, relationship_count={}, \
+             layout.items={}, layout.segments={}, native_entities={}",
+            bundle.summary.object_count,
+            bundle.summary.relationship_count,
+            layout.items.len(),
+            layout.segments.len(),
+            bundle.native_preview.entities.len(),
+        );
+
+        // Anchor thresholds reflect the **current** parsed shape of this
+        // specific `.pid` sample (which ships without publish sidecars, so
+        // object graph enrichment is limited). They exist to detect
+        // regression to "empty preview", not to upper-bound display
+        // quality — Task 2's dedicated test owns the density dimension.
+        assert!(
+            layout.items.len() >= 2,
+            "target sample should place >= 2 layout items, got {}",
+            layout.items.len()
+        );
+        assert!(
+            bundle.summary.object_count >= 2,
+            "target sample should expose >= 2 objects via summary, got {}",
+            bundle.summary.object_count
+        );
+        assert!(
+            bundle.native_preview.entities.len() >= 30,
+            "target sample preview should produce >= 30 native entities \
+             (panels + grid + layout items), got {}",
+            bundle.native_preview.entities.len()
+        );
     }
 
     #[test]
@@ -5296,6 +5500,7 @@ mod tests {
                 symbol_name: Some("Valve".into()),
                 jsite_names: vec!["JSite0".into()],
                 usage_count: 1,
+                references: Vec::new(),
             }],
             attribute_classes: vec![AttributeClassSummary {
                 class_name: "Instrument".into(),
@@ -5303,6 +5508,7 @@ mod tests {
                 drawing_ids: vec!["OBJ_AAAA1111".into()],
                 model_ids: vec!["MODEL-INST-001".into()],
                 unique_attribute_names: vec!["Tag".into()],
+                records: Vec::new(),
             }],
             root_presence: vec![],
         });

@@ -2990,7 +2990,108 @@ impl Scene {
         self.camera_generation += 1;
     }
 
+    /// Fit the camera to the bounding box of every entity whose
+    /// `layer_name` starts with any of `layer_prefixes`. Returns `true`
+    /// when at least one matching entity contributes to the bbox and
+    /// the camera was updated; returns `false` (leaving the camera
+    /// untouched) when there is no native document or no entity matches.
+    ///
+    /// Motivation: the PID preview pipeline (`src/io/pid_import.rs`)
+    /// emits **real** drawing geometry on layers prefixed with
+    /// `PID_OBJECTS_`, `PID_LAYOUT_TEXT`, and `PID_RELATIONSHIPS`, plus
+    /// a large ring of **decorative** side panels on `PID_META` /
+    /// `PID_FALLBACK` / `PID_CROSSREF` / `PID_UNRESOLVED` /
+    /// `PID_STREAMS` / `PID_CLUSTERS` / `PID_SYMBOLS`. `fit_all`
+    /// over-weights the panels because they live at far-offset world
+    /// coordinates (`SIDE_PANEL_X`, `BOTTOM_PANEL_Y`, …), shrinking
+    /// the real drawing to a viewport corner. `fit_layers_matching`
+    /// lets `Message::FileOpened`'s PID branch target the main
+    /// drawing first and fall back to `fit_all` only when the
+    /// preview really has no main geometry.
+    pub fn fit_layers_matching(&mut self, layer_prefixes: &[&str]) -> bool {
+        let Some(native) = self.native_doc() else {
+            return false;
+        };
+
+        let mut min = glam::Vec3::splat(f32::MAX);
+        let mut max = glam::Vec3::splat(f32::MIN);
+        let mut found = false;
+
+        for entity in &native.entities {
+            if !layer_prefixes
+                .iter()
+                .any(|p| entity.layer_name.starts_with(p))
+            {
+                continue;
+            }
+            for point in entity_bbox_points(entity) {
+                let v = glam::Vec3::new(
+                    point[0] as f32,
+                    point[1] as f32,
+                    point[2] as f32,
+                );
+                min = min.min(v);
+                max = max.max(v);
+                found = true;
+            }
+        }
+
+        if !found {
+            return false;
+        }
+        if min == max {
+            max += glam::Vec3::splat(1.0);
+        }
+        self.camera.borrow_mut().fit_to_bounds(min, max);
+        self.camera_generation += 1;
+        true
+    }
+
     pub fn update(&mut self, _dt: Duration) {}
+}
+
+/// Extract the bbox-contributing points of an entity for
+/// `fit_layers_matching`. Covers every entity kind the PID preview
+/// pipeline emits plus a few CAD-side kinds so the helper is general
+/// enough to reuse outside of PID flows. Entities that return an empty
+/// vec are silently ignored (they don't affect the bbox).
+fn entity_bbox_points(entity: &nm::Entity) -> Vec<[f64; 3]> {
+    use h7cad_native_model::EntityData;
+    match &entity.data {
+        EntityData::Line { start, end } => vec![*start, *end],
+        EntityData::Circle { center, radius } => vec![
+            [center[0] - radius, center[1] - radius, center[2]],
+            [center[0] + radius, center[1] + radius, center[2]],
+        ],
+        EntityData::Arc {
+            center, radius, ..
+        } => vec![
+            [center[0] - radius, center[1] - radius, center[2]],
+            [center[0] + radius, center[1] + radius, center[2]],
+        ],
+        EntityData::Ellipse {
+            center, major_axis, ..
+        } => {
+            let r = (major_axis[0].powi(2) + major_axis[1].powi(2) + major_axis[2].powi(2))
+                .sqrt();
+            vec![
+                [center[0] - r, center[1] - r, center[2]],
+                [center[0] + r, center[1] + r, center[2]],
+            ]
+        }
+        EntityData::Text { insertion, .. } | EntityData::MText { insertion, .. } => {
+            vec![*insertion]
+        }
+        EntityData::Point { position } => vec![*position],
+        EntityData::LwPolyline { vertices, .. } => {
+            vertices.iter().map(|v| [v.x, v.y, 0.0]).collect()
+        }
+        EntityData::Polyline { vertices, .. } => {
+            vertices.iter().map(|v| v.position).collect()
+        }
+        EntityData::Insert { insertion, .. } => vec![*insertion],
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -3009,6 +3110,98 @@ mod tests {
         scene.set_native_doc(Some(native));
         scene.native_render_enabled = true;
         scene
+    }
+
+    fn line_on_layer(layer: &str, start: [f64; 3], end: [f64; 3]) -> nm::Entity {
+        let mut e = nm::Entity::new(nm::EntityData::Line { start, end });
+        e.layer_name = layer.into();
+        e
+    }
+
+    #[test]
+    fn fit_layers_matching_returns_true_and_advances_camera_generation_for_matching_layer() {
+        let mut native = nm::CadDocument::new();
+        native
+            .add_entity(line_on_layer(
+                "PID_OBJECTS_PipeRun",
+                [0.0, 0.0, 0.0],
+                [100.0, 0.0, 0.0],
+            ))
+            .expect("primary line");
+        native
+            .add_entity(line_on_layer(
+                "PID_META",
+                [5000.0, 5000.0, 0.0],
+                [5100.0, 5100.0, 0.0],
+            ))
+            .expect("decorative line at far offset");
+
+        let mut scene = scene_with_native(native);
+        let before = scene.camera_generation;
+        let fitted = scene.fit_layers_matching(&["PID_OBJECTS_"]);
+
+        assert!(
+            fitted,
+            "fit_layers_matching must report success when the primary layer has entities"
+        );
+        assert_eq!(
+            scene.camera_generation,
+            before + 1,
+            "camera_generation must tick exactly once after a successful fit"
+        );
+    }
+
+    #[test]
+    fn fit_layers_matching_returns_false_without_touching_camera_when_no_layer_matches() {
+        let mut native = nm::CadDocument::new();
+        native
+            .add_entity(line_on_layer("0", [0.0, 0.0, 0.0], [1.0, 1.0, 0.0]))
+            .expect("cad-layer line");
+
+        let mut scene = scene_with_native(native);
+        let before = scene.camera_generation;
+        let fitted = scene.fit_layers_matching(&["PID_OBJECTS_"]);
+
+        assert!(
+            !fitted,
+            "fit_layers_matching must return false when no entity layer matches the prefixes"
+        );
+        assert_eq!(
+            scene.camera_generation, before,
+            "camera_generation must NOT tick when fit_layers_matching returns false"
+        );
+    }
+
+    #[test]
+    fn fit_layers_matching_returns_false_without_native_doc() {
+        let mut scene = Scene::new();
+        let before = scene.camera_generation;
+        let fitted = scene.fit_layers_matching(&["PID_OBJECTS_"]);
+
+        assert!(!fitted, "fit_layers_matching must no-op on a scene without a native doc");
+        assert_eq!(scene.camera_generation, before);
+    }
+
+    #[test]
+    fn fit_layers_matching_prefix_semantics_match_any_of_the_prefixes() {
+        let mut native = nm::CadDocument::new();
+        native
+            .add_entity(line_on_layer(
+                "PID_LAYOUT_TEXT",
+                [10.0, 20.0, 0.0],
+                [30.0, 40.0, 0.0],
+            ))
+            .expect("layout-text line");
+
+        let mut scene = scene_with_native(native);
+        // First prefix doesn't match; second prefix does. The OR-of-
+        // prefixes semantics should let the second one fit.
+        let fitted = scene
+            .fit_layers_matching(&["PID_OBJECTS_", "PID_LAYOUT_TEXT"]);
+        assert!(
+            fitted,
+            "OR-of-prefixes: second prefix must still trigger a successful fit"
+        );
     }
 
     fn block_with_entities(

@@ -714,6 +714,85 @@ pub struct DocumentHeader {
     pub luprec: i16,
     pub aunits: i16,
     pub auprec: i16,
+
+    // Drawing mode flags (DXF code 70 / bool)
+    /// `$ORTHOMODE`: orthogonal mode on/off.
+    pub orthomode: bool,
+    /// `$GRIDMODE`: grid display on/off.
+    pub gridmode: bool,
+    /// `$SNAPMODE`: snap mode on/off.
+    pub snapmode: bool,
+    /// `$FILLMODE`: fill solid geometry on/off. Default true.
+    pub fillmode: bool,
+    /// `$MIRRTEXT`: mirror text when mirrored. Default false.
+    pub mirrtext: bool,
+    /// `$ATTMODE`: attribute visibility tri-state (0=off, 1=normal, 2=on).
+    pub attmode: i16,
+
+    // Current drawing attributes
+    /// `$CLAYER` (code 8): current layer name.
+    pub clayer: String,
+    /// `$CECOLOR` (code 62): current ACI color; 256 = BYLAYER, 0 = BYBLOCK.
+    pub cecolor: i16,
+    /// `$CELTYPE` (code 6): current linetype name.
+    pub celtype: String,
+    /// `$CELWEIGHT` (code 370): current lineweight in 1/100 mm. -1 = ByLayer,
+    /// -2 = ByBlock, -3 = Default.
+    pub celweight: i16,
+    /// `$CELTSCALE` (code 40): current linetype scale factor.
+    pub celtscale: f64,
+    /// `$CETRANSPARENCY` (code 440): current transparency (0 = opaque).
+    pub cetransparency: i32,
+
+    // Angular conventions
+    /// `$ANGBASE` (code 50): angle zero-direction, radians.
+    pub angbase: f64,
+    /// `$ANGDIR` (code 70): angle direction; false = counter-clockwise
+    /// (default), true = clockwise.
+    pub angdir: bool,
+
+    // Linetype-space scaling
+    /// `$PSLTSCALE` (code 70): paper-space linetype scaling on/off.
+    /// Default true.
+    pub psltscale: bool,
+
+    // UCS (User Coordinate System) metadata.
+    /// `$UCSBASE` (code 2): name of UCS defining origin/orientation of
+    /// orthographic UCS settings. Default empty.
+    pub ucsbase: String,
+    /// `$UCSNAME` (code 2): name of the current UCS. Default empty
+    /// (i.e. current UCS equals WCS).
+    pub ucsname: String,
+    /// `$UCSORG` (codes 10/20/30): UCS origin point in WCS coords.
+    pub ucsorg: [f64; 3],
+    /// `$UCSXDIR` (codes 10/20/30): UCS X-axis direction in WCS.
+    pub ucsxdir: [f64; 3],
+    /// `$UCSYDIR` (codes 10/20/30): UCS Y-axis direction in WCS.
+    pub ucsydir: [f64; 3],
+
+    // Timestamp metadata. All four values are raw f64 Julian dates or
+    // fractional days; H7CAD does not do a Julian-date → `DateTime`
+    // conversion in-core (keeps `chrono` out of the dependency tree)
+    // and expects the UI layer to format for display.
+    /// `$TDCREATE` (code 40): drawing creation time as Julian date.
+    pub tdcreate: f64,
+    /// `$TDUPDATE` (code 40): drawing last-update time as Julian date.
+    pub tdupdate: f64,
+    /// `$TDINDWG` (code 40): cumulative editing time in fractional days.
+    pub tdindwg: f64,
+    /// `$TDUSRTIMER` (code 40): user-elapsed timer in fractional days.
+    pub tdusrtimer: f64,
+
+    // Active-view metadata.
+    /// `$VIEWCTR` (codes 10/20): current view center point (WCS).
+    pub viewctr: [f64; 2],
+    /// `$VIEWSIZE` (code 40): current view height in world units.
+    /// Default 1.0.
+    pub viewsize: f64,
+    /// `$VIEWDIR` (codes 10/20/30): current view direction, from view
+    /// target toward the eye (WCS). Default `[0, 0, 1]` (top-down plan).
+    pub viewdir: [f64; 3],
+
     pub handseed: u64,
 }
 
@@ -735,6 +814,41 @@ impl Default for DocumentHeader {
             luprec: 4,
             aunits: 0,
             auprec: 0,
+
+            orthomode: false,
+            gridmode: false,
+            snapmode: false,
+            fillmode: true,
+            mirrtext: false,
+            attmode: 1,
+
+            clayer: "0".to_string(),
+            cecolor: 256,
+            celtype: "ByLayer".to_string(),
+            celweight: -1,
+            celtscale: 1.0,
+            cetransparency: 0,
+
+            angbase: 0.0,
+            angdir: false,
+
+            psltscale: true,
+
+            ucsbase: String::new(),
+            ucsname: String::new(),
+            ucsorg: [0.0, 0.0, 0.0],
+            ucsxdir: [1.0, 0.0, 0.0],
+            ucsydir: [0.0, 1.0, 0.0],
+
+            tdcreate: 0.0,
+            tdupdate: 0.0,
+            tdindwg: 0.0,
+            tdusrtimer: 0.0,
+
+            viewctr: [0.0, 0.0],
+            viewsize: 1.0,
+            viewdir: [0.0, 0.0, 1.0],
+
             handseed: 0,
         }
     }
@@ -1140,10 +1254,20 @@ pub enum EntityData {
         u_vector: [f64; 3],
         v_vector: [f64; 3],
         image_size: [f64; 2],
-        /// File path to the raster image. Native-model addition (D4 series);
-        /// DXF IMAGE standard stores this in a linked IMAGEDEF object (code
-        /// 340 -> IMAGEDEF; code 1 on IMAGEDEF), but the native-dxf writer
-        /// currently round-trips it as a direct code 1 on the IMAGE entity.
+        /// DXF code 340: Hard-pointer to the linked IMAGEDEF object.
+        /// `Handle::NULL` means the IMAGE entity is unlinked. When writing
+        /// DXF, if this is NULL and `file_path` is non-empty, the writer's
+        /// `ensure_image_defs` pre-pass will allocate a new handle, insert
+        /// a matching `ObjectData::ImageDef` into `doc.objects`, and fill
+        /// this field in-place.
+        image_def_handle: Handle,
+        /// File path to the raster image. Authoritative when
+        /// `image_def_handle` is `Handle::NULL`; otherwise this is a
+        /// **cached mirror** of the linked `ImageDef.file_name` populated
+        /// by `resolve_image_def_links` after DXF read. Kept as a first-
+        /// class field so UI / bridge code can read it directly without
+        /// chasing the handle. Writers prefer the IMAGEDEF object as the
+        /// source of truth and emit code 340 on IMAGE (not code 1).
         file_path: String,
         /// DXF code 70 image display flags bitfield
         /// (bit 1=SHOW_IMAGE, bit 2=SHOW_WHEN_NOT_ALIGNED_WITH_SCREEN,
@@ -1505,8 +1629,22 @@ pub enum ObjectData {
         name: String,
     },
     ImageDef {
+        /// DXF code 1: Raster image absolute path.
         file_name: String,
+        /// DXF codes 10/20: image size in pixels (U, V).
         image_size: [f64; 2],
+        /// DXF codes 11/21: default size of one pixel in AutoCAD
+        /// drawing units (U, V). Defaults to [1.0, 1.0] so a freshly
+        /// auto-created IMAGEDEF treats 1 pixel = 1 drawing unit.
+        pixel_size: [f64; 2],
+        /// DXF code 90: class version. Defaults to 0.
+        class_version: i32,
+        /// DXF code 71: whether the referenced file was loaded at save
+        /// time. Defaults to true.
+        image_is_loaded: bool,
+        /// DXF code 281: resolution unit — 0 = None, 2 = centimeters,
+        /// 5 = inches. Defaults to 0 = None.
+        resolution_unit: u8,
     },
     ImageDefReactor {
         image_handle: Handle,

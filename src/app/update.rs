@@ -388,7 +388,31 @@ impl H7CAD {
                 let vp_info = self.tabs[i].scene.viewport_list();
                 self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
                 self.sync_ribbon_layers();
-                self.tabs[i].scene.fit_all();
+
+                // PID tabs contain a narrow main drawing surrounded by a
+                // wide ring of decorative side panels (PID_META /
+                // PID_FALLBACK / PID_CROSSREF / …). Running plain
+                // `fit_all` would let the far-offset panel coordinates
+                // dominate the bbox and push the real drawing into a
+                // tiny corner of the viewport. Target the main drawing
+                // layers first and only fall back to `fit_all` when the
+                // preview genuinely carries no primary geometry. CAD /
+                // DXF / DWG tabs stay on `fit_all` (main drawing lives
+                // on whatever layers the source file used, not on
+                // H7CAD's PID_* prefixes).
+                let pid_main_layers: &[&str] =
+                    &["PID_OBJECTS_", "PID_LAYOUT_TEXT", "PID_RELATIONSHIPS"];
+                let use_pid_fit = matches!(
+                    self.tabs[i].tab_mode,
+                    super::document::DocumentTabMode::Pid
+                );
+                let fitted = use_pid_fit
+                    && self.tabs[i]
+                        .scene
+                        .fit_layers_matching(pid_main_layers);
+                if !fitted {
+                    self.tabs[i].scene.fit_all();
+                }
                 self.refresh_properties();
                 self.refresh_selected_grips();
                 Task::none()

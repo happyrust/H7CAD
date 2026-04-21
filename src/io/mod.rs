@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 pub mod native_bridge;
 pub mod pid_import;
 pub mod pid_package_store;
+pub mod pid_screenshot;
 
 #[derive(Debug, Clone)]
 pub enum OpenedDocument {

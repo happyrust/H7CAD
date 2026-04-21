@@ -224,6 +224,14 @@ fn read_header_section(
                 .unwrap_or("")
         };
 
+        let i32v = |c: i16| -> i32 {
+            codes
+                .iter()
+                .find(|(code, _)| *code == c)
+                .and_then(|(_, v)| v.parse().ok())
+                .unwrap_or(0)
+        };
+
         match var_name.as_str() {
             "$ACADVER" => doc.header.version = DxfVersion::from_acadver(sv(1)),
             "$INSBASE" => doc.header.insbase = [f(10), f(20), f(30)],
@@ -240,6 +248,49 @@ fn read_header_section(
             "$LUPREC" => doc.header.luprec = i16v(70),
             "$AUNITS" => doc.header.aunits = i16v(70),
             "$AUPREC" => doc.header.auprec = i16v(70),
+
+            // Drawing mode flags (all code 70 / i16 bool).
+            "$ORTHOMODE" => doc.header.orthomode = i16v(70) != 0,
+            "$GRIDMODE" => doc.header.gridmode = i16v(70) != 0,
+            "$SNAPMODE" => doc.header.snapmode = i16v(70) != 0,
+            "$FILLMODE" => doc.header.fillmode = i16v(70) != 0,
+            "$MIRRTEXT" => doc.header.mirrtext = i16v(70) != 0,
+            "$ATTMODE" => doc.header.attmode = i16v(70),
+
+            // Current drawing attributes.
+            "$CLAYER" => doc.header.clayer = sv(8).to_string(),
+            "$CECOLOR" => doc.header.cecolor = i16v(62),
+            "$CELTYPE" => doc.header.celtype = sv(6).to_string(),
+            "$CELWEIGHT" => doc.header.celweight = i16v(370),
+            "$CELTSCALE" => doc.header.celtscale = f(40),
+            "$CETRANSPARENCY" => doc.header.cetransparency = i32v(440),
+
+            // Angular conventions.
+            "$ANGBASE" => doc.header.angbase = f(50),
+            "$ANGDIR" => doc.header.angdir = i16v(70) != 0,
+
+            // Linetype-space scaling.
+            "$PSLTSCALE" => doc.header.psltscale = i16v(70) != 0,
+
+            // UCS (User Coordinate System) family.
+            "$UCSBASE" => doc.header.ucsbase = sv(2).to_string(),
+            "$UCSNAME" => doc.header.ucsname = sv(2).to_string(),
+            "$UCSORG" => doc.header.ucsorg = [f(10), f(20), f(30)],
+            "$UCSXDIR" => doc.header.ucsxdir = [f(10), f(20), f(30)],
+            "$UCSYDIR" => doc.header.ucsydir = [f(10), f(20), f(30)],
+
+            // Timestamp metadata — raw f64 passthrough (see
+            // DocumentHeader doc comments).
+            "$TDCREATE" => doc.header.tdcreate = f(40),
+            "$TDUPDATE" => doc.header.tdupdate = f(40),
+            "$TDINDWG" => doc.header.tdindwg = f(40),
+            "$TDUSRTIMER" => doc.header.tdusrtimer = f(40),
+
+            // Active-view metadata.
+            "$VIEWCTR" => doc.header.viewctr = [f(10), f(20)],
+            "$VIEWSIZE" => doc.header.viewsize = f(40),
+            "$VIEWDIR" => doc.header.viewdir = [f(10), f(20), f(30)],
+
             "$HANDSEED" => {
                 doc.header.handseed = u64::from_str_radix(sv(5), 16).unwrap_or(0);
             }
@@ -1136,17 +1187,36 @@ fn read_objects_section(
             "IMAGEDEF" => {
                 let mut file_name = String::new();
                 let (mut w, mut h) = (0.0, 0.0);
+                // AutoCAD defaults for IMAGEDEF extension fields when
+                // the DXF file was written by a legacy tool that omits
+                // the post-1/10/20 codes. These match the same defaults
+                // used by `ensure_image_defs` auto-create so that a
+                // legacy-file reader and a fresh-write round trip land
+                // on the same semantic shape.
+                let mut pixel_size = [1.0, 1.0];
+                let mut class_version: i32 = 0;
+                let mut image_is_loaded = true;
+                let mut resolution_unit: u8 = 0;
                 for &(code, ref val) in &codes {
                     match code {
                         1 => file_name = val.clone(),
                         10 => w = val.parse().unwrap_or(0.0),
                         20 => h = val.parse().unwrap_or(0.0),
+                        11 => pixel_size[0] = val.parse().unwrap_or(1.0),
+                        21 => pixel_size[1] = val.parse().unwrap_or(1.0),
+                        90 => class_version = val.parse().unwrap_or(0),
+                        71 => image_is_loaded = val.trim() != "0",
+                        281 => resolution_unit = val.trim().parse().unwrap_or(0),
                         _ => {}
                     }
                 }
                 ObjectData::ImageDef {
                     file_name,
                     image_size: [w, h],
+                    pixel_size,
+                    class_version,
+                    image_is_loaded,
+                    resolution_unit,
                 }
             }
             "IMAGEDEF_REACTOR" => {
@@ -1558,7 +1628,55 @@ pub fn read_dxf(input: &str) -> Result<CadDocument, DxfReadError> {
     }
 
     post_process(&mut doc);
+    resolve_image_def_links(&mut doc);
     Ok(doc)
+}
+
+/// Post-read pass: for every IMAGE entity that carries a non-null code 340
+/// pointer but an empty `file_path`, look up the matching IMAGEDEF object
+/// in `doc.objects` and mirror its `file_name` back onto the entity so
+/// downstream UI / bridge code can keep reading `file_path` directly.
+///
+/// Legacy DXF files that only use the pre-standard `code 1 on IMAGE` form
+/// are untouched (their `file_path` is already set by `parse_image`).
+fn resolve_image_def_links(doc: &mut CadDocument) {
+    use h7cad_native_model::{EntityData, Handle, ObjectData};
+    use std::collections::HashMap;
+
+    let imagedef_by_handle: HashMap<Handle, String> = doc
+        .objects
+        .iter()
+        .filter_map(|o| match &o.data {
+            ObjectData::ImageDef { file_name, .. } => Some((o.handle, file_name.clone())),
+            _ => None,
+        })
+        .collect();
+
+    if imagedef_by_handle.is_empty() {
+        return;
+    }
+
+    let fill = |entities: &mut [h7cad_native_model::Entity]| {
+        for e in entities.iter_mut() {
+            if let EntityData::Image {
+                image_def_handle,
+                file_path,
+                ..
+            } = &mut e.data
+            {
+                if *image_def_handle != Handle::NULL && file_path.is_empty() {
+                    if let Some(name) = imagedef_by_handle.get(image_def_handle) {
+                        *file_path = name.clone();
+                    }
+                }
+            }
+        }
+    };
+
+    fill(&mut doc.entities);
+    for br in doc.block_records.values_mut() {
+        fill(&mut br.entities);
+    }
 }
 
 fn post_process(doc: &mut CadDocument) {

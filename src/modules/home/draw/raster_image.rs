@@ -50,6 +50,7 @@ impl ImageCommand {
             u_vector: [u_scale, 0.0, 0.0],
             v_vector: [0.0, v_scale, 0.0],
             image_size: [self.pixel_width as f64, self.pixel_height as f64],
+            image_def_handle: nm::Handle::NULL,
             file_path: self.file_path.clone(),
             display_flags: DISPLAY_FLAGS,
         })
