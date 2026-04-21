@@ -1,183 +1,182 @@
 # Architecture
 
-High-level architecture for the `PLAN-4-18` DWG mission.
+High-level architecture for the PID real-sample display and screenshot mission.
 
-This document is worker-facing guidance for how the AC1015 parser lane currently works, where this mission is allowed to change it, and which seams must stay untouched. It is intentionally high-level. Use `validation-contract.md` for the exact observable definition of done.
+This document is worker-facing guidance for how the approved PID sample moves through the system, where this mission is allowed to change behavior, and which seams are the main truth surfaces. It is intentionally high-level; use the mission validation contract for the exact observable definition of done.
 
 ## Mission Scope
 
-This mission is intentionally bounded to the parser side of the native DWG lane:
+This mission is intentionally bounded to the PID runtime lane for:
 
-- `crates/h7cad-native-dwg`
-- `crates/h7cad-native-model`
-- `crates/h7cad-native-facade` only as a compile/fail-closed boundary
-- `CHANGELOG.md` for phase/status wording
+- opening the approved sample PID file
+- building a credible preview document
+- fitting and presenting that preview inside the H7CAD app
+- exporting a deterministic PNG screenshot
+- validating the result through targeted tests and regression checks
+
+Primary implementation surfaces:
+
+- `src/io/pid_import.rs`
+- `src/io/pid_screenshot.rs`
+- `src/io/mod.rs`
+- `src/app/update.rs`
+- `src/app/commands.rs`
+- `src/scene/*` only where directly needed for PID fit/display correctness
 
 Out of scope:
 
-- runtime DWG rollout in `src/io/mod.rs`
-- switching desktop/app DWG load/save to native
-- DWG writer work
-- AC1018+ parser expansion
-- modifying `acadrust`
-- GUI/browser/TUI validation
+- unrelated DWG parser work
+- unrelated DXF writer/header work
+- broad generic rendering redesign
+- generic screenshot/export framework beyond what PID needs
+- GUI editor work for PID metadata
 
 ## Current System Shape
 
-There are two DWG tracks in the repository today:
+There are four relevant layers for this mission:
 
-1. **Native parser track**  
-   `crates/h7cad-native-dwg::read_dwg(bytes)` reads bytes, builds a pending AC1015 document, resolves document structure, and then best-effort enriches real entities into `h7cad_native_model::CadDocument`.
+1. **PID package ingest layer**  
+   `src/io/pid_import.rs::open_pid(path)` parses the `.pid`, merges publish sidecars when present, derives layout, builds a `PidOpenBundle`, and caches the raw `PidPackage` for later PID command usage.
 
-2. **Runtime compatibility track**  
-   `src/io/mod.rs` contains broader native-first helper wrappers from ongoing repo migration work, but the `.dwg` branches still route open/save through `acadrust::io::dwg::DwgReader` and `DwgWriter`. For this mission, that compat-backed `.dwg` behavior is the invariant that must remain unchanged.
+2. **Preview construction layer**  
+   `pid_document_to_bundle(...)` / related PID preview helpers turn parsed PID/layout truth into:
+   - `pid_doc`
+   - `native_preview: h7cad_native_model::CadDocument`
+   - preview index and summary data
 
-The mission therefore improves native parser truth without changing product runtime truth.
+3. **Runtime tab/display layer**  
+   `src/app/update.rs::Message::FileOpened` receives `OpenedDocument::Pid(bundle)`, installs PID tab state, sets the compat/native preview into the scene, and fits the view. This is the user-visible open path.
 
-## Canonical DWG Flow
+4. **Deterministic screenshot layer**  
+   `src/io/pid_screenshot.rs` rasterises the PID preview document to a PNG without GPU readback so it remains stable in tests and headless environments. `src/app/commands.rs` exposes this through `PIDSHOT`.
 
-### Native parser flow
-`DWG bytes -> sniff_version -> DwgFileHeader::parse -> SectionMap::parse -> build_pending_document -> resolve_document -> enrich_with_real_entities -> native CadDocument`
+## Canonical PID Flow
 
-This is the flow the mission is allowed to deepen.
+### Open flow
+`pick/open path -> io::open_path -> pid_import::open_pid -> PidOpenBundle -> Message::FileOpened -> PID tab + scene preview + fit`
 
-### Structural AC1015 observation flow
-`sample_AC1015.dwg -> section locator / handle map / object stream cursor / object header diagnostics`
+This is the core user-visible path that must remain intact and become more reliable for the approved sample.
 
-This flow is not just debugging output. It is the ground truth that explains why recovery counts move. Today the visible structural diagnostics already expose `slice_miss`, `header_fail`, and `handle_mismatch`; this mission extends that into named supported-family recovery diagnostics instead of silent skips.
+### Preview truth flow
+`PidPackage -> parsed PidDocument -> derive_layout -> preview construction -> native_preview entities/layers`
 
-### Native model consumption flow
-`native CadDocument -> entity/block/layout/owner queries -> resolve_insert_block(entity)`
+This is where display fidelity lives. If the approved sample looks sparse, visually wrong, or dominated by decorative panels, the root cause is usually here.
 
-This is the downstream contract for recovered entities. Recovery is not complete unless entities survive into this resolved document surface with usable metadata and relationships.
+### Scene-fit flow
+`native_preview + compat projection -> scene.set_native_doc(...) -> fit primary PID layers first -> fallback fit_all only when needed`
 
-### Runtime boundary flow
-`src/io/mod.rs -> compat DwgReader/DwgWriter`
+This mission must preserve the notion that the main drawing should dominate the viewport over distant decorative layers.
 
-This path is intentionally unchanged. The native facade must stay fail-closed for DWG so parser progress cannot be mistaken for runtime availability.
+### Screenshot/export flow
+`active PID tab -> PIDSHOT command -> deterministic PNG export -> regression checks`
+
+This is the canonical non-GPU confirmation path for the mission.
 
 ## Mission Focus Areas
 
-### 1. Recovery closure for already-supported AC1015 entities
-Current native recovery already handles these families on the mission-start baseline:
+### 1. Approved sample fidelity
+The mission is anchored to the real sample:
 
-- `TEXT`
-- `ARC`
-- `CIRCLE`
-- `LINE`
-- `POINT`
-- `LWPOLYLINE`
-- `HATCH`
+- `D:\\work\\plant-code\\cad\\pid-parse\\test-file\\工艺管道及仪表流程-1.pid`
 
-The mission is not mainly about adding more unrelated types. It is about:
+Completion is not generic “PID support exists”; it is specifically that this sample:
 
-- raising recovery floors on the AC1015 real sample
-- making regression floors explicit in tests
-- surfacing why supported objects fail to recover
-- preserving non-default common metadata on recovered entities
+- opens
+- produces a credible preview
+- is visually centered around the main drawing
+- remains exportable and regressible
 
-`INSERT` is the new family entering this mission; it is not part of the pre-mission recovered-family baseline above.
+### 2. Main drawing visual priority
+The current PID preview can include decorative layers such as metadata, fallback, cross-ref, unresolved, streams, clusters, and symbols. These are useful diagnostics but must not overpower the main drawing in the user-visible viewport.
 
-### 2. Recovery diagnostics
-The highest-risk current behavior is silent loss inside enrichment. The mission needs a named diagnostics surface that explains:
+### 3. Deterministic screenshot evidence
+This mission prefers a deterministic export pipeline over GPU/window capture as the primary truth source. The PNG output must be stable enough for regression testing and useful enough for human confirmation.
 
-- handle-map misses
-- object-header decode failures
-- supported-family decode failures
-- unsupported-type skips
-
-Diagnostics are part of the product of this mission, not just temporary debugging.
-
-### 3. INSERT entry into the AC1015 read-path
-`h7cad-native-model` already has `EntityData::Insert`, and DXF/bridge layers already know how to carry it. The missing link is the DWG parser lane:
-
-- object type dispatch
-- INSERT body decode
-- common metadata attachment
-- block resolution in the resolved native document
-
-This mission treats `INSERT` as the first new entity family because the model surface already exists and the value is high.
-
-### 4. Boundary preservation
-Even while the parser grows, these truths must remain stable:
-
-- `h7cad-native-facade` DWG load/save stays unavailable
-- `src/io/mod.rs` keeps `.dwg` behavior on the compat DWG runtime
-- no new services, ports, or credentials appear
-- no GUI/runtime rollout is implied
+### 4. UI confirmation as a second layer
+After deterministic export is solid, the mission should attempt a second-layer confirmation path closer to real user behavior. If the environment lacks a reliable automation harness, workers must surface a concrete blocker rather than silently skipping it.
 
 ## Canonical Observable Surfaces
 
 Workers should treat these as the authoritative observable surfaces:
 
-- **Parser truth:** `crates/h7cad-native-dwg::read_dwg`
-- **Structural truth:** `crates/h7cad-native-dwg/tests/real_samples.rs` for both recovery-baseline assertions and handle-map/object-header diagnostics
-- **Resolved document truth:** `h7cad_native_model::CadDocument`
-- **Boundary truth:** `crates/h7cad-native-facade` plus `src/io/mod.rs`
-- **Phase/status truth:** `CHANGELOG.md`
+- **Open/parse truth:** `src/io/pid_import.rs`
+- **Runtime open/tab truth:** `src/app/update.rs`
+- **PID command truth:** `src/app/commands.rs`
+- **Deterministic screenshot truth:** `src/io/pid_screenshot.rs`
+- **Scene fit/display truth:** `src/scene/*`
 
-If a change only exists inside a helper function but cannot be observed through tests, cargo output, or boundary inspection, it is not complete.
+If a change cannot be observed through these surfaces plus targeted tests, it is not complete.
 
 ## Invariants To Preserve
 
-- **AC1015 remains the only active version target for this mission.**
-- **Supported-family recovery must never regress silently.**
-- **Recovery gains must be explainable by named diagnostics, not just higher counts.**
-- **Recovered entities must carry usable common metadata, not only geometry payloads.**
-- **INSERT is not complete until it resolves to block records on the native model surface.**
-- **Facade/runtime DWG boundaries remain fail-closed and compat-based.**
-- **The mission must remain cargo-only and parser-only.**
+- The approved sample path remains the primary acceptance target.
+- PID open must continue through the normal `open_path` / `Message::FileOpened` workflow.
+- Decorative PID layers must not silently displace the main drawing from the user-visible fit.
+- `PIDSHOT` remains deterministic enough for regression use.
+- Screenshot/export work must stay PID-scoped; no broad screenshot platform redesign.
+- Unrelated dirty-tree work must not be reverted or reformatted.
 
 ## Risk Concentration
 
-### `crates/h7cad-native-dwg/src/lib.rs`
-This is the highest-risk seam because it owns:
+### `src/io/pid_import.rs`
+Highest-risk seam for:
 
-- the `read_dwg()` orchestration path
-- supported-type dispatch
-- enrichment
-- silent loss behavior during best-effort recovery
+- sample parsing and sidecar merge behavior
+- layout derivation
+- preview density / layer balance
+- target-sample regression tests
 
-### `crates/h7cad-native-dwg/tests/real_samples.rs`
-This is the main regression truth surface. If counts rise or fall here, the mission has materially changed behavior.
+### `src/app/update.rs`
+Highest-risk seam for:
 
-### `crates/h7cad-native-model/src/lib.rs`
-This is where recovered entities become usable document state. `INSERT` must be validated here through `resolve_insert_block(...)` and ownership/block relationships.
+- PID tab activation
+- scene state installation
+- main-layer-first fit behavior
 
-### `crates/h7cad-native-facade/src/lib.rs` and `src/io/mod.rs`
-These two files define the user-visible DWG boundary. They are not implementation targets for rollout in this mission, but they are mandatory validation boundaries.
+### `src/io/pid_screenshot.rs`
+Highest-risk seam for:
+
+- deterministic PNG generation
+- baseline stability
+- helper-level screenshot regression signal quality
+
+### `src/app/commands.rs`
+Highest-risk seam for:
+
+- `PIDSHOT` command UX
+- active-tab validation
+- argument and output-path error handling
 
 ## Validation Surface Mapping
 
-### Real sample regression
-Use `sample_AC1015.dwg` and `tests/real_samples.rs` for:
+### Target-sample open/display regression
+Use target-sample tests in `src/io/pid_import.rs` and app/open-path tests to verify:
 
-- total and per-family recovery floors
-- metadata checks
-- structural diagnostics
-- AC1015-specific regressions
+- sample opens
+- preview remains non-trivial
+- main layers remain visually dominant
+- scene fit remains usable
 
-### Focused parser tests
-Use crate-local tests for:
+### Screenshot regression
+Use `src/io/pid_screenshot.rs` helper tests to verify:
 
-- failure classification
-- object/body decode rules
-- INSERT payload decoding
-- resolver/document invariants
+- PNG export succeeds
+- exported image dimensions remain fixed
+- image remains non-empty and within baseline/tolerance bounds
 
-### Boundary checks
-Use cargo tests and source inspection for:
+### Command-path checks
+Use command-focused tests or command-path assertions to verify:
 
-- facade fail-closed behavior
-- compat runtime DWG routing
-- changelog wording consistency
+- `PIDSHOT` success from active PID tab
+- clear errors for invalid context/arguments
+
+### Optional UI confirmation
+If a reliable automation surface exists, use it to prove the app can open the approved sample and trigger screenshot export through a real user-style flow.
 
 ## Relationship Summary
 
 The architecture relationship for workers is:
 
-`AC1015 DWG bytes -> native parser pipeline -> resolved native document -> recovery diagnostics and entity assertions`
+`approved PID sample -> pid_import/open path -> PID preview document -> PID tab scene fit -> PIDSHOT deterministic PNG -> regression evidence`
 
-while
-
-`facade DWG APIs` and `src/io/mod.rs` continue to assert that runtime rollout has not happened yet.
+Everything in this mission should strengthen or verify that chain.

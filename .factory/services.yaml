@@ -1,14 +1,15 @@
 commands:
   install: cargo fetch --locked
-  check: cargo check -p h7cad-native-dwg
-  check_model: cargo check -p h7cad-native-model
-  check_facade: cargo check -p h7cad-native-facade
   check_app: cargo check -p H7CAD
-  lint: cargo check -p h7cad-native-dwg
-  test: cargo test -p h7cad-native-dwg -- --test-threads=1
-  test_real_samples: cargo test -p h7cad-native-dwg --test real_samples -- --nocapture --test-threads=1
-  test_facade: cargo test -p h7cad-native-facade -- --test-threads=1
-  test_read_headers: cargo test -p h7cad-native-dwg --test read_headers -- --test-threads=1
-  build: cargo build
+  lint: cargo check -p H7CAD
+  test: cargo test pid_import -- --nocapture
+  test_pid_import: cargo test pid_import -- --nocapture
+  test_pidshot: cargo test pid_screenshot -- --nocapture
+  test_target_open: cargo test open_target_pid_sample_builds_dense_preview -- --nocapture
+  test_target_fit: cargo test target_pid_sample_fit_layers_matching_succeeds_for_main_drawing_layers -- --nocapture
+  test_target_scene: cargo test target_pid_sample_scene_has_fittable_geometry_and_native_doc -- --nocapture
+  test_target_focus: cargo test target_pid_preview_layout_is_primary_visual_focus -- --nocapture
+  test_target_regression: cargo test target_pid_sample_screenshot_matches_baseline -- --nocapture
+  build: cargo build -p H7CAD
 
 services: {}

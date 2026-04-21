@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
-# No-op init for the PLAN-4-18 DWG parser mission.
-# Cargo-only mission; no extra bootstrap is required.
+# PID real-sample display/screenshot mission bootstrap.
+# Idempotent: ensure Cargo deps are fetchable; no long-running services.
+cargo fetch --locked >/dev/null 2>&1 || true
 exit 0
