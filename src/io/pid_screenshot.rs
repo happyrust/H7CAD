@@ -370,8 +370,25 @@ mod tests {
             std::fs::remove_file(&actual).ok();
         }
 
-        let bundle = crate::io::pid_import::open_pid(&sample).expect("open target pid");
-        export_pid_preview_png(&bundle.native_preview, &actual).expect("export png");
+        let bundle = crate::io::pid_import::open_pid(&sample).unwrap_or_else(|e| {
+            panic!(
+                "approved PID sample failed to open before screenshot regression could run: {e}"
+            )
+        });
+        assert!(
+            bundle.summary.object_count >= 1,
+            "approved PID sample opened but reported zero objects; display-stage regression likely collapsed the semantic import"
+        );
+        assert!(
+            bundle.native_preview.entities.len() >= 20,
+            "approved PID sample opened but preview is too sparse ({} native entities); display/focus regression likely removed renderable content",
+            bundle.native_preview.entities.len()
+        );
+        export_pid_preview_png(&bundle.native_preview, &actual).unwrap_or_else(|e| {
+            panic!(
+                "approved PID sample opened and rendered, but PNG export failed before baseline comparison: {e}"
+            )
+        });
 
         let meta = std::fs::metadata(&actual).expect("stat actual png");
         assert!(
