@@ -2,6 +2,54 @@
 
 ## [未发布]
 
+### 2026-04-22（二十一）：DXF HEADER `$CHAMMODE` 扩充（chamfer 模式联动）
+
+上一轮（二十）落地了 chamfer 四个距离（`$CHAMFERA/B/C/D`）和 fillet 半径，
+但漏了**模式开关** `$CHAMMODE`（code 70）。本轮补这一个整数，让 chamfer
+家族形成闭环：
+
+- 0 = **Distance-Distance** 模式，使用 `$CHAMFERA` / `$CHAMFERB`（默认）
+- 1 = **Length-Angle** 模式，使用 `$CHAMFERC` / `$CHAMFERD`
+
+不补的话，任何用户切到 Length-Angle 模式的 AutoCAD .dxf 被 H7CAD 读写
+roundtrip 后都会静默退回 Distance-Distance。
+
+**model 扩字段**（`DocumentHeader`，插在 `chamferd` 之后 / `filletrad`
+之前，遵循 AutoCAD HEADER 官方输出顺序）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default |
+|---|---|---|---|---|
+| `chammode` | `i16` | `$CHAMMODE` | 70 | `0` |
+
+类型选 `i16` 而非 `bool`，与同族 `$CMLJUST` / `$ATTMODE` 等 code 70 整数
+保持一致，并为 AutoCAD 未来可能的 tri-state 扩展留出空间（目前官方
+仅定义 0 / 1）。
+
+**reader / writer 同步**：1 arm + 1 对 pair（writer 严格插在 `$CHAMFERD`
+pair 之后、`$FILLETRAD` pair 之前，保持 chamfer 家族内部顺序不变）。
+
+**测试**（新增 `tests/header_chammode.rs`，4 条）：
+
+- `header_reads_chammode`：`$CHAMMODE=1` 和 `$CHAMMODE=0` 双向读
+- `header_writes_chammode`：构造 `chammode=1` → write → `$CHAMMODE` 字符串
+  存在、紧随的 `70` 值精确为 `1`（防止错写成 code 40 float pair）
+- `header_roundtrip_preserves_chammode`：read(1) → write → read 仍为 1
+- `header_legacy_file_without_chammode_loads_with_zero`：缺省 → `chammode == 0`
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **137 / 137 全绿**（133 前轮 + **4** 新 chammode）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `ReadLints` 改动的 4 个文件（model/lib、dxf/lib、writer、新测试）零 lint
+
+**DXF HEADER 覆盖增量**：70 → **71** 个变量（~23%）。chamfer 家族完成
+闭环：4 距离 + 1 模式 + 1 fillet 半径 = 6 变量全齐。
+
+plan：`docs/plans/2026-04-22-chammode-plan.md`
+
+---
+
 ### 2026-04-22（二十）：DXF HEADER Chamfer / Fillet / 3D 默认值 7 变量扩充
 
 继 HEADER 系列扩字段（三→十五 共 48 变量），本轮再补 7 个 code 40 f64

@@ -333,6 +333,7 @@ fn read_header_section(
             "$CHAMFERB" => doc.header.chamferb = f(40),
             "$CHAMFERC" => doc.header.chamferc = f(40),
             "$CHAMFERD" => doc.header.chamferd = f(40),
+            "$CHAMMODE" => doc.header.chammode = i16v(70),
             "$FILLETRAD" => doc.header.filletrad = f(40),
 
             // 2.5-D default attachment.

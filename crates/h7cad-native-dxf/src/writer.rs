@@ -348,6 +348,9 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(9, "$CHAMFERD");
     w.pair_f64(40, doc.header.chamferd);
 
+    w.pair_str(9, "$CHAMMODE");
+    w.pair_i16(70, doc.header.chammode);
+
     w.pair_str(9, "$FILLETRAD");
     w.pair_f64(40, doc.header.filletrad);
 

@@ -873,6 +873,12 @@ pub struct DocumentHeader {
     /// `$CHAMFERD` (code 40): chamfer angle (distance-angle mode).
     /// Stored as AutoCAD stores it (raw f64 passthrough). Default 0.0.
     pub chamferd: f64,
+    /// `$CHAMMODE` (code 70): interactive chamfer input mode.
+    /// 0 = distance-distance (uses `$CHAMFERA` / `$CHAMFERB`).
+    /// 1 = length-angle (uses `$CHAMFERC` / `$CHAMFERD`).
+    /// Stored as `i16` (not `bool`) to leave room for future AutoCAD
+    /// tri-state extensions; current spec defines 0 / 1 only. Default 0.
+    pub chammode: i16,
     /// `$FILLETRAD` (code 40): default fillet radius. Default 0.0.
     pub filletrad: f64,
 
@@ -971,6 +977,7 @@ impl Default for DocumentHeader {
             chamferb: 0.0,
             chamferc: 0.0,
             chamferd: 0.0,
+            chammode: 0,
             filletrad: 0.0,
 
             elevation: 0.0,
