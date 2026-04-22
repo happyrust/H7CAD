@@ -6680,6 +6680,9 @@ impl H7CAD {
             "PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
             }
+            "SVGEXPORT"|"EXPORTSVG" => {
+                return Task::done(Message::SvgExport);
+            }
             // PRINT — send current layout to the system default printer.
             "PRINT" => {
                 return Task::done(Message::PrintToPrinter);

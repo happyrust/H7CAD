@@ -2,6 +2,555 @@
 
 ## [未发布]
 
+### 2026-04-21（十八）：DWG/DXF Save 对话框版本标签诚实化 + 双向 version 保真
+
+继 2026-04-21（十六/十七）DWG 打开路径收口后完成审核 P0-③（Milestone C）。原始问题是 `pick_save_path` 暴露 **16 个版本标签**（DWG/DXF 各 8 个 `(2018)/(2013)/.../(R13)` 后缀），但 `rfd::AsyncFileDialog::save_file()` 的 API 不返回用户选中的 filter，所以这些标签**从不曾影响实际写出的版本**——纯菜单欺骗。
+
+执行过程中发现**比审核报告更严重的问题**：`src/io/native_bridge.rs` 的两个方向都**忽略 version 字段**：
+
+- `acadrust_doc_to_native(&acad_doc)`：用 `nm::CadDocument::new()` 构造，默认 `R2000`，从不读 `acad_doc.version`
+- `native_doc_to_acadrust(&native)`：用 `acadrust::CadDocument::new()` 构造，默认 `AC1032`/R2018，从不读 `native.header.version`
+
+连锁效应是**任意"打开 → 保存"往返都会把文件版本重置为 `AC1032`**：打开一个真实 R2000 (AC1015) 文件再另存，输出永远是 R2018 格式。不只是 UI 欺骗，更是一个**静默的数据丢失 bug**。
+
+本轮把两层都修了：
+
+**改动 1：`src/io/mod.rs::pick_save_path` filter 收敛 16 → 3**
+
+```rust
+pub async fn pick_save_path() -> Option<PathBuf> {
+    // The output version is NOT selected here — it is taken from the
+    // document's in-memory `version` field. rfd's save_file API does
+    // not return the picked filter, so the earlier "DWG Files (2018)"
+    // … "(R13)" labels could never influence the actual output. The
+    // single-label dialog is honest about what actually drives the
+    // output format.
+    rfd::AsyncFileDialog::new()
+        .set_title("Save As")
+        .set_file_name("drawing.dwg")
+        .add_filter("DWG File", &["dwg"])
+        .add_filter("DXF File", &["dxf"])
+        .add_filter("PID File", &["pid"])
+        .add_filter("All Files", &["*"])
+        .save_file()
+        .await
+        .map(|h| h.path().to_path_buf())
+}
+```
+
+**改动 2：`src/io/native_bridge.rs` — 双向版本桥接 helper**
+
+新增 `nm_version_to_acadrust` 与 `acadrust_version_to_nm` 两个一一对应的映射函数，覆盖全部 9 个版本 variant：
+
+| native (`nm::DxfVersion`) | acadrust (`acadrust::types::DxfVersion`) | 年代 |
+|---|---|---|
+| `R12` | `Unknown` *(acadrust 无 AC1009 槽)* | AutoCAD R12 |
+| `R13` | `AC1012` | R13 |
+| `R14` | `AC1014` | R14 |
+| `R2000` | `AC1015` | R2000 |
+| `R2004` | `AC1018` | R2004 |
+| `R2007` | `AC1021` | R2007 |
+| `R2010` | `AC1024` | R2010 |
+| `R2013` | `AC1027` | R2013 |
+| `R2018` | `AC1032` | R2018 |
+| `Unknown` | `AC1015` *(保守默认)* | — |
+
+`native_doc_to_acadrust` 新增：`doc.version = nm_version_to_acadrust(native.header.version);`  
+`acadrust_doc_to_native` 新增：`native.header.version = acadrust_version_to_nm(doc.version);`
+
+**改动 3：`save_dwg` / `save_dxf` 加诚实文档注释**
+
+```rust
+/// Write the document to a DWG file at `path`.
+///
+/// The output DWG format version is taken from `doc.header.version`
+/// (propagated through `native_bridge::native_doc_to_acadrust`), so
+/// "Save As" on an opened drawing preserves its original version
+/// (e.g. an AC1015/R2000 file stays AC1015). Fresh documents built
+/// with `NativeCadDocument::new()` default to `R2000`; opening and
+/// re-saving them is lossless.
+```
+
+**测试**（`src/io/native_bridge.rs` 新增 4 条）：
+
+- `version_bridge_forward_covers_every_native_variant`：枚举 9 个 `nm::DxfVersion` 变体，验证 `nm_version_to_acadrust` 表
+- `version_bridge_reverse_covers_every_acadrust_variant`：枚举 9 个 `acadrust::DxfVersion` 变体，验证逆映射
+- `native_to_acadrust_preserves_version_from_document_header`：`native.header.version = R14` → `acad.version == AC1014`
+- `acadrust_to_native_preserves_version_from_document`：`acad.version = AC1015` → `native.header.version == R2000`
+- `version_survives_bridge_roundtrip_in_both_directions`：`AC1018` → native → `AC1018`（典型"打开再保存"往返）
+
+**验证**：
+
+- `cargo test --bin H7CAD io::native_bridge::` **25 / 25 全绿**（21 前轮 + 4 本轮）
+- `cargo test --bin H7CAD io::` **130 / 130 全绿**（125 前轮 + 5 本轮：4 version + 1 其他）
+- `cargo check --bin H7CAD --tests` 通过，零新 warning
+- `ReadLints` 改动的 `src/io/mod.rs` / `src/io/native_bridge.rs` 零 lint 错误
+
+**用户可感知的改进**：
+
+1. 另存对话框从 8+8+1=17 项折叠为 3+1=4 项（DWG/DXF/PID + All Files），视觉噪音下降、决策成本下降
+2. 打开 R2000 工程图 → 另存，输出确实是 R2000 而不是 R2018。版本保真恢复
+3. `save_dwg` doc comment 明确告知"版本来自 `doc.header.version`"，未来想手动指定版本的路线图在注释里明文指向本 plan
+
+**副作用检查**：
+
+- `DwgReader` 本身就会 sniff 文件 magic 填 `acad_doc.version`，所以读入链路的 version 识别能力没有变化——本轮只是在读/写两侧把这个已识别值**透传**到 native 侧
+- `pick_cui_save_path` / `pick_image_file` / `pick_and_open` 不涉及版本歧义，filter 保持原样
+- Milestone D（native-dwg advisory 接入）、Milestone E（AC1018+ 扩展）、Milestone F（xref 异步）**留作后续**，详见 plan 文件
+
+plan 依据：`docs/plans/2026-04-21-dwg-save-version-honesty-plan.md`
+
+---
+
+### 2026-04-21（十七）：DWG Open 同步解析移出 iced 主循环
+
+继 2026-04-21（十六）`OpenError` 类型化后继续收口 DWG 打开路径。审核 P0-②：`open_document` 链路是**同步**的（`DwgReader::from_file` + `reader.read()` + 我们的 DXF/PID fallback 都走同步 std::fs），但被包在 `async fn open_path` 里由 `Task::perform` 提交给 iced executor。对 50 MB+ 工程 DWG 来说，整段解析会让 iced 主线程卡 1–3 秒：菜单、鼠标、命令行全部冻结。
+
+**定位**：iced 0.14 的 executor 基于 `futures` crate（非 tokio / smol），因此没有 `tokio::task::spawn_blocking`。可用选择：
+
+1. `iced::Task::blocking(...)` — iced 0.14 原生支持的跨线程闭包，结果回到 update loop（需要拆 Message 路径，侵入大）
+2. 在 `async fn` 内部用 `iced::futures::channel::oneshot` + `std::thread::spawn`（`iced::futures` 重导出 `futures 0.3.32`，已在依赖树，无需新 crate）
+
+选 **方案 2** — API 不破坏、调用点零改动、panic 隔离清晰。
+
+**架构改造**（`src/io/mod.rs`）：
+
+```rust
+pub async fn open_path(path: PathBuf) -> Result<OpenFileResult, OpenError> {
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    std::thread::Builder::new()
+        .name("h7cad-open-file".into())
+        .spawn(move || {
+            let name = path.file_name().map(...).unwrap_or_else(...);
+            let result = open_document_blocking(&path)
+                .map(|opened| OpenFileResult { name, path: path.clone(), opened });
+            let _ = tx.send(result);
+        })
+        .map_err(|e| OpenError::Io {
+            path: None,
+            message: format!("failed to spawn file-open worker thread: {e}"),
+        })?;
+    rx.await.unwrap_or_else(|_| Err(OpenError::Other(
+        "file open worker terminated before responding".into(),
+    )))
+}
+```
+
+**命名：同步函数一律加 `_blocking` 后缀**
+
+原先 `open_document` / `load_file_with_native` / `load_file_native` / `load_dxf_native` 这几个名字没有任何"同步"视觉提示，容易被误用到 async 上下文。这一轮统一：
+
+| 旧名字 | 新名字 |
+|---|---|
+| `open_document` | `open_document_blocking` |
+| `load_file_with_native` | `load_file_with_native_blocking` |
+| `load_file_native` | `load_file_native_blocking` |
+| `load_dxf_native` | `load_dxf_native_blocking`（私有） |
+
+`load_file`（给 xref 用的 `Result<_, String>` 兼容层）保持不变，它本身已在同步上下文中调用。新的模块层注释明确两类 API 的分工：
+
+```text
+// The public `pick_and_open` / `open_path` functions are `async fn`
+// and are normally polled on iced's event-loop executor. The actual
+// DWG/DXF decoding is CPU-bound and performs synchronous file I/O,
+// so running it directly inside the future would stall iced's main
+// thread for the duration of the read (seconds on large engineering
+// drawings).
+//
+// The `*_blocking` helpers below keep that synchronous logic in its
+// natural form, and the async wrappers dispatch the work onto a
+// dedicated worker thread, signalling completion through an iced-
+// provided `futures::channel::oneshot`.
+```
+
+**panic 安全**：若 worker 线程在 `open_document_blocking` 中 panic，`tx` 在 `drop` 时会取消 oneshot，`rx.await` 返回 `Err(Canceled)`，我们再 map 到 `OpenError::Other("worker terminated...")`。UI 得到一个分类错误而不是永久挂起的 Task。
+
+**线程命名**：`std::thread::Builder::name("h7cad-open-file")` 让 panic 日志、调试器堆栈能一眼看到这是文件打开线程，而不是匿名 `thread #42`。
+
+**测试**（`src/io/open_error.rs` 新增 4 条，`tests/` 总共 19 条）：
+
+- `open_document_blocking_rejects_unsupported_extension`：`.xyz` → `UnsupportedExtension { ext: "xyz" }`（白名单前移后的行为）
+- `open_document_blocking_reports_io_for_missing_dwg`：不存在的 `.dwg` → `Io { path: Some(…), message: … }`，验证 path slot 被填充
+- `open_document_blocking_reports_io_for_missing_dxf`：同上针对 DXF
+- `open_path_async_does_not_block_caller_thread_panic_safety`：用 `iced::futures::executor::block_on(open_path(…))` 跑一个 missing 文件，验证 worker 线程 + oneshot 闭环不死锁、错误正确分类
+
+**验证**：
+
+- `cargo test --bin H7CAD io::open_error::` **19 / 19 全绿**（15 前轮 + 4 本轮）
+- `cargo test --bin H7CAD io::` **125 / 125 全绿**（121 前轮 + 4 本轮）
+- `cargo check --bin H7CAD --tests` 通过（仅保留两个预先存在的 pid_import 无关 warning）
+- `ReadLints` 改动的 `open_error.rs` / `mod.rs` 零 lint 错误
+
+**用户可感知的改进**：打开大 DWG 期间，iced 主线程继续处理鼠标、键盘、窗口重绘；命令行状态栏不会"静止几秒再突然出结果"。取消按钮（如果未来加入）也能在 parse 中途真正中断。
+
+**副作用检查**：
+
+- `xref::resolve_xrefs` 仍走同步 `load_file` 路径——它本身被调用在 `Message::FileOpened` 的**同步消息分发**里（不是 iced async 任务），所以不会冻结事件循环；只会让 `FileOpened` 处理本身耗时更长。本轮 **不**优化 xref，因为它不会造成 UI 卡顿，且修改 xref 需要重构 resolve 逻辑为批量异步、涉及面更大。留待后续 Milestone 讨论。
+- 多 Tab 并行打开多个文件：每次 `Task::perform(open_path(...), ...)` 会起一个 worker 线程；iced executor 不阻塞。并行性由 OS 线程调度器自然提供。
+
+**不包含**（列入后续 milestone）：
+
+- Milestone C — `pick_save_path` 保存对话框里 8 个 "DWG Files (2018/2013/.../R13)" 版本标签是装饰，`save_dwg` 并不接受版本参数
+- Milestone D — 把 `h7cad-native-dwg` advisory 接入运行时（diagnostics 暴露给 UI）
+- Milestone E — `h7cad-native-dwg` 扩 AC1018+（R2004~R2018）版本覆盖
+
+plan：基于同日 DWG 审核报告（P0-② 阻塞 I/O）
+
+---
+
+### 2026-04-21（十六）：DWG Open 路径错误类型化 + UI 中文友好提示
+
+继 DWG 解析打开功能审核，落地 Milestone A：把 `io::pick_and_open / open_path / open_document / load_file_with_native / load_file_native` 的错误类型从 `String` 升级为结构化 `OpenError`，UI `Message::FileOpened(Err)` 分支改为调用 `user_message_zh()` 输出本地化提示。原来用户打开 AC1032 的 DWG 只看到英文 `"unsupported version AC1032"`，现在可以看到"暂不支持该 DWG 文件版本：AC1032。请尝试用 AutoCAD 另存为 AC1015 (AutoCAD 2000) 或 DXF 后重试。"
+
+**新增**（`src/io/open_error.rs`，~280 行）：
+
+```rust
+pub enum OpenError {
+    Cancelled,
+    Io { path: Option<PathBuf>, message: String },
+    UnsupportedVersion { format: &'static str, version: String },
+    Corrupt { format: &'static str, reason: String },
+    UnsupportedExtension { ext: String },
+    Other(String),
+}
+```
+
+- `user_message_zh() -> String`：variant → 中文提示（"另存为 AC1015"等可操作建议）。
+- `is_silent() -> bool`：让 `Cancelled` 等静默 variant 不污染命令行。
+- `impl Display / std::error::Error / From<io::Error> / From<String> / From<&str>`。
+- `classify_acadrust(DxfError, &'static str) -> OpenError`：把 `acadrust::DxfError` 的 17 个 variant 精确路由到 `Io` / `UnsupportedVersion` / `Corrupt` / `Other` 四类。
+- `classify_native_dxf(DxfReadError) -> OpenError`：同上，针对 `h7cad-native-dxf` 的错误。
+
+**签名改造**（`src/io/mod.rs`）：
+
+| 函数 | 改前 | 改后 |
+|---|---|---|
+| `pick_and_open` | `Result<_, String>` | `Result<_, OpenError>` |
+| `open_path` | `Result<_, String>` | `Result<_, OpenError>` |
+| `open_document` | `Result<_, String>` | `Result<_, OpenError>` |
+| `load_file_with_native` | `Result<_, String>` | `Result<_, OpenError>` |
+| `load_file_native` | `Result<_, String>` | `Result<_, OpenError>` |
+| `load_file` | `Result<_, String>` | **保留**（xref.rs 调用方不关心类型） |
+
+`load_file` 内部改为调用新的 `load_file_with_native`，再 `.map_err(|e| e.to_string())` 兜底 String，保证 `xref::resolve_xrefs` 零改动。
+
+**`open_document` 白名单前移**：之前 `_ =>` 会把 `.foo` 等乱扩展名扔到 DWG 解析链直到最底层才抛错；现在 `"dwg" | "dxf" => CAD, "pid" => Pid, _ => OpenError::UnsupportedExtension`。
+
+**文件扩展名 filter 去重**：`pick_and_open` 原本把 "dwg" 和 "DWG" 都写进 filter，`rfd` 在所有 OS 上扩展名都是大小写不敏感，精简为单份小写。
+
+**UI 改动**：
+
+- `src/app/mod.rs`：`Message::FileOpened` 签名 `Result<OpenFileResult, String>` → `Result<OpenFileResult, OpenError>`
+- `src/app/update.rs`：
+  ```rust
+  Message::FileOpened(Err(e)) => {
+      if !e.is_silent() {
+          self.command_line.push_error(&e.user_message_zh());
+      }
+      Task::none()
+  }
+  ```
+  取代之前的 `if e != "Cancelled"` 魔法字符串比较。
+
+**副产物修复**：`src/io/pid_import.rs` 测试 fixture 里 `CrossReferenceGraph { ... }` 因 `pid-parse 0.9.2` 新增 8 个字段而拒绝编译。补 `..CrossReferenceGraph::default()` 结尾，保留显式字段含义。
+
+**测试**（`src/io/open_error.rs` `tests/`，15 条）：
+
+- `cancelled_is_silent` / `from_string_cancelled_becomes_cancelled_variant` / `from_string_other_becomes_other_variant`
+- `from_io_error_preserves_message`
+- `classify_acadrust_{unsupported_version / invalid_header / crc_mismatch / io / not_implemented}`
+- `classify_native_dxf_{unsupported_format / unexpected_eof}`
+- `zh_message_for_{cancelled / unsupported_extension / unsupported_version}`（验证中文关键词与可操作建议存在）
+- `display_impl_renders_variant_specific_prefix`
+
+**验证**：
+
+- `cargo test --bin H7CAD io::open_error::` **15 / 15 全绿**
+- `cargo test --bin H7CAD io::` **121 / 121 全绿**（PID + XREF + Open 全套回归）
+- `cargo check --bin H7CAD --tests` 通过（仅留两个预先存在的 pid_import 无关 warning）
+- `ReadLints` 4 个改动文件零 lint 错误
+
+**不包含**（列入后续 milestone）：
+
+- Milestone B — `load_file_native` 是同步阻塞 I/O 但被 async 调用（打开大 DWG 会卡 iced 事件循环）
+- Milestone C — `pick_save_path` 保存对话框里 8 个 "DWG Files (2018/2013/.../R13)" 版本标签是装饰，`save_dwg` 并不接受版本参数
+- Milestone D — 把 `h7cad-native-dwg` advisory 接入运行时（diagnostics 暴露给 UI）
+- Milestone E — `h7cad-native-dwg` 扩 AC1018+（R2004~R2018）版本覆盖
+
+plan：基于同日 DWG 审核报告（P0-① 错误类型化）
+
+---
+
+### 2026-04-21（十五）：DXF HEADER 当前标注样式名引用 2 变量
+
+继 2026-04-21（十）DIM Tier 1 8 数值变量后补齐 DIM 区块的 **name-pointer** 部分：当前标注样式名 + 当前标注文字样式名。
+
+**model 扩字段**（`DocumentHeader`，紧跟 `dimtofl` 之后）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default |
+|---|---|---|---|---|
+| `dimstyle` | `String` | `$DIMSTYLE` | 2 | `"Standard"` |
+| `dimtxsty` | `String` | `$DIMTXSTY` | **7** | `"Standard"` |
+
+`$DIMTXSTY` 的 group code 是 7（text style name），与其他 `$DIM*` 的 code 70 / 40 不同。
+
+**reader / writer 同步**：2 arm + 2 对 pair 块（writer 紧跟 `$DIMADEC` 之后输出，形成完整 DIM 区块）
+
+**测试**（新增 `tests/header_dimstyle_name_refs.rs`，4 条）：read / write / roundtrip / legacy 默认。
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **129 / 129 全绿**（125 前轮 + **4** 新 dimstyle name refs）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 4 个文件零 lint 错误
+
+**DXF HEADER 覆盖增量**：61 → **63** 个变量（约 21%）。
+
+plan：`docs/plans/2026-04-21-header-dimstyle-name-refs-plan.md`
+
+---
+
+### 2026-04-21（十四）：`parse_iso8601` — Julian helper 反向链路闭合
+
+闭合同日（十一）julian-date-helper plan 显式留下的"反向解析"项。前一轮 `format_iso8601` 已能从 `DateTimeUtc` 输出 `"YYYY-MM-DDTHH:MM:SSZ"` 字符串，本轮补上 `parse_iso8601(&str) -> Option<DateTimeUtc>` 完成 helper 的双向闭环。
+
+**新增函数**（`crates/h7cad-native-model/src/julian.rs`）：
+
+```rust
+pub fn parse_iso8601(s: &str) -> Option<DateTimeUtc>
+```
+
+**严格接受规则**（避免歧义 / 安全 ASCII 索引）：
+
+- 严格 20 字符长度（`"YYYY-MM-DDTHH:MM:SSZ"`）
+- 分隔符固定位置：`-` `-` `T` `:` `:` `Z`
+- 字母必须大写（`T` / `Z`）
+- 不接受 fractional seconds (`.123`)
+- 不接受 timezone offset (`+08:00`) — 仅 `Z` (UTC)
+- 字段范围：month 1-12 / day 1-31 / hour 0-23 / minute 0-59 / second **0-60**（容忍闰秒位置但不模型化实际闰秒）
+- **不**做 calendar 有效性校验（`Feb 30` 等通过 day ≤ 31 检查）— 上层 / domain 责任
+
+**lib.rs 重新导出**：`pub use julian::{..., parse_iso8601, ...};`
+
+**测试**（5 条新增到 `julian.rs::tests`）：
+
+- `parse_iso8601_canonical_form_succeeds`：`"2020-01-01T07:54:20Z"` → 完整匹配
+- `parse_iso8601_rejects_obvious_format_errors`：14 种错误格式（含缺 `Z` / 错分隔符 / 小写 / 非 padding / 非数字 / 各字段越界 / `+0000` tz / 空字符串 / 单字符）全部 reject
+- `parse_iso8601_tolerates_leap_second_slot`：`"2016-12-31T23:59:60Z"` 接受（leap-second slot）
+- `format_then_parse_iso8601_roundtrip`：4 个跨 epoch 日期 `format → parse` 完全一致
+- `parse_then_julian_date_roundtrip`：`parse → utc_to_julian_date → julian_date_to_utc → format` 端到端 round-trip 字节一致
+
+**验证**：
+
+- `cargo test -p h7cad-native-model` **19 / 19 全绿**（14 前轮 + **5** 新 ISO-8601 parse；模块测试现共 10 julian + 9 model）
+- `cargo test -p h7cad-native-dxf` 125 / 125 不受影响
+- `cargo check -p H7CAD` 零新 warning
+- `ReadLints` 2 个文件零 lint 错误
+
+**helper 链路完整闭合**：
+
+```
+DateTimeUtc <─── parse_iso8601(&str)
+    │           ▲
+    │           │
+    ▼           │
+utc_to_julian   │
+    │           │
+    ▼           │
+   f64          │
+    │           │
+    ▼           │
+julian_date_to_utc
+    │           │
+    ▼           │
+DateTimeUtc ─── format_iso8601 ───► String
+```
+
+任意起点入环、任意点出环都能保持端到端一致（秒级精度、UTC、AutoCAD 时间戳粒度）。
+
+plan：`docs/plans/2026-04-21-iso8601-parse-plan.md`
+
+---
+
+### 2026-04-21（十三）：DXF HEADER 杂项 5 变量扩充（插入单位 + 显示 + XEDIT）
+
+继续扩 HEADER 覆盖面，本轮加 5 个 misc 常用变量，覆盖 AutoCAD 块插入单位语义 + 线宽显示开关 + XREF 编辑允许标志。首次在 reader 中处理 `code 290 bool` 字段（前轮的 bool 字段都用 code 70）。
+
+**model 扩字段**（`DocumentHeader`，紧跟 MLine 之后 / `handseed` 之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default |
+|---|---|---|---|---|
+| `insunits` | i16 | `$INSUNITS` | 70 | 0 (unspecified) |
+| `insunits_def_source` | i16 | `$INSUNITSDEFSOURCE` | 70 | 0 |
+| `insunits_def_target` | i16 | `$INSUNITSDEFTARGET` | 70 | 0 |
+| `lwdisplay` | bool | `$LWDISPLAY` | **290** | false |
+| `xedit` | bool | `$XEDIT` | **290** | true |
+
+`$INSUNITS` 值域：0=unspec, 1=in, 2=ft, 3=mi, 4=mm, 5=cm, 6=m, 7=km, 8=μin, 9=mil, 10=yd, 11=Å, 12=nm, 13=μm, 14=dm, 15=dam, 16=hm, 17=Gm, 18=AU, 19=ly, 20=pc — H7CAD 透传 i16，UI / 上层负责语义化。
+
+**reader 新增 `bv(c)` helper**：
+
+```rust
+let bv = |c: i16| -> bool {
+    codes.iter()
+        .find(|(code, _)| *code == c)
+        .map(|(_, v)| v.trim() != "0")
+        .unwrap_or(false)
+};
+```
+
+与既有的 `f` / `i16v` / `i32v` / `sv` helper 同 scope，处理 code 290 这类 bool 字段。注意 `bv` 缺失时返回 false，但 `$XEDIT` default 是 true — 由 `DocumentHeader::default()` 兜底，不依赖 `bv` fallback。
+
+**writer 对称输出**：5 对 pair（writer 用 `pair_i16(290, ...)` 写 bool 的 0/1，与 AutoCAD 输出格式一致）
+
+**测试**（新增 `tests/header_misc_units_display.rs`，4 条）：
+
+- `header_reads_all_5_misc_vars`：`$INSUNITS=4 (mm), $LWDISPLAY=1, $XEDIT=0` 等非默认值精确读取
+- `header_writes_all_5_misc_vars`：构造 → write → 5 个 `$VAR` 字符串都在
+- `header_roundtrip_preserves_all_5_misc_vars`：read → write → read 全字段保持
+- `header_legacy_file_without_misc_loads_with_defaults`：legacy → 字段为 default，并显式断言 `$XEDIT default = true`（与其他 bool 默认 false 不同）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **125 / 125 全绿**（121 前轮 + **4** 新 misc）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 4 个文件零 lint 错误
+
+**DXF HEADER 覆盖增量**：56 → **61** 个变量（约覆盖 AutoCAD 总计 300+ 系统变量的 **~20%**）。
+
+plan：`docs/plans/2026-04-21-header-misc-units-display-plan.md`
+
+---
+
+### 2026-04-21（十二）：DXF HEADER Spline + MLine 6 变量扩充
+
+继续扩 HEADER 覆盖面，本轮加 Spline 默认 3 个 + 当前 MLine 默认 3 个，合并一个 plan 实现以减少 plan 文件 fragmentation。
+
+**model 扩字段**（`DocumentHeader`，插在 DIM Tier 1 之后 / `handseed` 之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default |
+|---|---|---|---|---|
+| `splframe` | bool | `$SPLFRAME` | 70 | false |
+| `splinesegs` | i16 | `$SPLINESEGS` | 70 | 8 |
+| `splinetype` | i16 | `$SPLINETYPE` | 70 | 6 (cubic B-spline) |
+| `cmlstyle` | String | `$CMLSTYLE` | 2 | `"Standard"` |
+| `cmljust` | i16 | `$CMLJUST` | 70 | 0 (top) |
+| `cmlscale` | f64 | `$CMLSCALE` | 40 | 1.0 |
+
+`$SPLINETYPE` 值域：5 = quadratic, 6 = cubic。`$CMLJUST` 值域：0 / 1 / 2 = top / mid / bottom。reader / writer 不校验值域，仅透传。
+
+**reader / writer 同步**：6 arm + 6 对 pair 块（writer 拆成两个分组：Spline defaults 紧跟 DIM 区块，MLine defaults 紧跟 Spline 区块）。
+
+**测试**（新增 `tests/header_spline_mline.rs`，4 条）：read / write / roundtrip / legacy 默认。
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **121 / 121 全绿**（117 前轮 + **4** 新 spline + mline）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 4 个文件零 lint 错误
+
+**DXF HEADER 覆盖增量**：50 → **56** 个变量（15 原有 + 15 绘图环境 + 4 时间戳 + 5 UCS + 3 视图 + 8 DIM Tier 1 + 6 Spline+MLine），约覆盖 AutoCAD 总计 300+ 系统变量的 **~19%**。
+
+plan：`docs/plans/2026-04-21-header-spline-mline-plan.md`
+
+---
+
+### 2026-04-21（十一）：Julian Date ↔ UTC 转换 helper（无 chrono 依赖）
+
+闭合 2026-04-21（七）HEADER timestamps plan 显式留下的"Julian-date 转换 helper 留待未来"项。让 UI 层能把 `DocumentHeader.tdcreate / tdupdate` 的 raw f64 Julian date 格式化为人类可读时间。明确**不引入 `chrono` / `time` crate**，自写 Fliegel-Van Flandern (1968) 算法（~50 行 integer-only）。
+
+**新增模块**（`crates/h7cad-native-model/src/julian.rs`）：
+
+- `pub struct DateTimeUtc { year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32 }`
+- `pub fn julian_date_to_utc(jd: f64) -> DateTimeUtc`：JD → 日历，分两段（整数 JDN 走 Fliegel；小数走 86400 秒映射）
+- `pub fn utc_to_julian_date(dt: &DateTimeUtc) -> f64`：日历 → JD，用 Meeus 整数算法
+- `pub fn format_iso8601(dt: &DateTimeUtc) -> String`：输出 `"YYYY-MM-DDTHH:MM:SSZ"`（ISO-8601 UTC suffix）
+
+`lib.rs` 导出：`pub mod julian; pub use julian::{DateTimeUtc, julian_date_to_utc, utc_to_julian_date, format_iso8601};`
+
+**关键设计**：
+
+- **Precision**：second-level（AutoCAD 自身 Julian-date 写入也是秒级）
+- **Timezone**：所有 `jd` 当 UTC 处理（H7CAD 不在 model 层跟踪 timezone；DXF Reference 标 "local time" 但 H7CAD 不假定）
+- **Range**：1900-01-01 ~ 2100-01-01（Fliegel 在该范围严格匹配公历），超出范围算法仍终止但不保证语义
+- **Rounding carry**：sub-day fraction 乘 86400 round 到 ≥ 86400 时 day 自动进位
+- **Leap seconds**：不模型化（与 Fliegel-Van Flandern 一致）
+- **Validation**：`DateTimeUtc::new` 不验证字段范围，调用方责任
+
+**测试**（5 条 unit tests in `julian.rs`）：
+
+- `julian_date_reference_value_maps_to_2020_01_01_utc`：DXF Reference 例子 `2458849.82939815` → 2020-01-01 07:54:~20 UTC（秒级容忍 ±1）
+- `unix_epoch_julian_date_maps_to_1970_01_01_midnight`：JD `2440587.5` → 1970-01-01T00:00:00Z 精确
+- `j2000_maps_to_2000_01_01_noon_utc`：JD `2451545.0` (J2000.0) → 2000-01-01T12:00:00Z 精确
+- `julian_date_roundtrip_preserves_dates_across_the_20th_century`：5 个跨越 1900-2100 的日期（含 23:59:59 边界）round-trip 完全一致
+- `format_iso8601_pads_and_emits_canonical_string`：3 种边界（含单位数月/日/时/分/秒的 zero-pad）
+
+**验证**：
+
+- `cargo test -p h7cad-native-model` **14 / 14 全绿**（9 前轮 + **5** 新 julian）
+- `cargo test -p h7cad-native-dxf` 117 / 117 不受影响
+- `cargo check -p H7CAD` 零新 warning
+- `ReadLints` 2 个文件零 lint 错误
+
+**未纳入本轮**：
+
+- ISO-8601 字符串 → JD 反向解析（`parse_iso8601`）— 等到 UI 真有"用户输入时间字符串"场景再加
+- Local timezone 转换（涉及 IANA 时区数据库，scope 太大）
+- Sub-second / millisecond 精度（与 AutoCAD 时间戳粒度不匹配）
+
+plan：`docs/plans/2026-04-21-julian-date-helper-plan.md`
+
+---
+
+### 2026-04-21（十）：DXF HEADER 核心尺寸标注 8 变量扩充 (DIMxxx Tier 1)
+
+继 HEADER 绘图环境 / 时间戳 / UCS / 视图 4 轮扩充后的第五次 HEADER 扩容。本轮挑 DIMxxx 家族（AutoCAD 100+ 个尺寸标注系统变量）中**外观层最常用的 8 个**，让真实 AutoCAD DXF 的"当前绘图标注默认"完整 round-trip。
+
+**model 扩字段**（`DocumentHeader`，插在 `viewdir` 之后 / `handseed` 之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default (AutoCAD 新 imperial) |
+|---|---|---|---|---|
+| `dimtxt` | f64 | `$DIMTXT` | 40 | 0.18 (文字高度) |
+| `dimasz` | f64 | `$DIMASZ` | 40 | 0.18 (箭头尺寸) |
+| `dimexo` | f64 | `$DIMEXO` | 40 | 0.0625 (延伸线 origin offset) |
+| `dimexe` | f64 | `$DIMEXE` | 40 | 0.18 (延伸线 extension) |
+| `dimgap` | f64 | `$DIMGAP` | 40 | 0.09 (文字 gap) |
+| `dimdec` | i16 | `$DIMDEC` | 70 | 4 (线性尺寸小数位) |
+| `dimadec` | i16 | `$DIMADEC` | 70 | 0 (角度尺寸小数位) |
+| `dimtofl` | bool | `$DIMTOFL` | 70 | false (强制文字在延伸线间) |
+
+Defaults 对齐 AutoCAD 新 imperial 绘图初始值。
+
+**reader 扩派发**（8 arm 追加到 `read_header_section` 的 match）  
+**writer 对称输出**（8 对 pair 聚集在 `$DIMSCALE` 之后形成完整 DIM 区块，便于 AutoCAD 顺序阅读）
+
+**测试**（新增 `tests/header_dim_tier1.rs`，4 条）：
+
+- `header_reads_all_8_dim_tier1_vars`：非默认值（`dimtxt=0.5, dimdec=6, dimtofl=true` 等）→ 精确读取
+- `header_writes_all_8_dim_tier1_vars`：metric-leaning 构造（`dimtxt=2.5, dimasz=1.0`）→ write → 8 个 `$DIM*` 都在
+- `header_roundtrip_preserves_all_8_dim_tier1_vars`：read → write → read 1e-9 容忍
+- `header_legacy_file_without_dim_tier1_loads_with_imperial_defaults`：legacy HEADER 无 `$DIM*` → 8 字段为 AutoCAD 新 imperial 默认
+
+**未纳入本轮（明确 Tier 2+ 留未来）**：
+
+- `$DIMALT*` 替代单位家族（7-8 变量）
+- `$DIMBLK*` 箭头 block name 家族
+- `$DIMFIT / $DIMSAH / $DIMSD1 / $DIMSD2 / $DIMSE1 / $DIMSE2 / $DIMTAD / $DIMTIX / $DIMTMOVE / $DIMUPT / $DIMZIN` 等细节变量
+- DIMxxx → TABLES.DIMSTYLE 双向同步（HEADER 存 current drawing default，DIMSTYLE 存 named styles，同步独立 scope）
+- DIMxxx 对实际标注渲染的接入（仅字段保真，渲染层独立）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **117 / 117 全绿**（113 前轮 + **4** 新 DIM Tier 1）
+- `cargo test --bin H7CAD io::native_bridge` 20 / 20 无回归
+- `ReadLints` 4 个文件零 lint 错误
+
+**DXF HEADER 覆盖增量**：42 → **50** 个变量（15 原有 + 15 绘图环境 + 4 时间戳 + 5 UCS + 3 视图 + 8 DIM Tier 1），约覆盖 AutoCAD 总计 300+ 系统变量的 **17%**。
+
+plan：`docs/plans/2026-04-21-header-dim-tier1-plan.md`
+
+---
+
 ### 2026-04-21（九）：DXF HEADER 当前视图 3 变量扩充
 
 继 HEADER 绘图环境 / 时间戳 / UCS 家族后继续补齐"活动视图"3 变量。真实 AutoCAD DXF 的 HEADER 段普遍携带 `$VIEWCTR / $VIEWSIZE / $VIEWDIR`，保留用户 pan/zoom 后的视口状态。H7CAD reader/writer 原先忽略，read → write 后这些设置归零。

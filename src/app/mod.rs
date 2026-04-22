@@ -197,7 +197,7 @@ pub enum DsField {
 pub enum Message {
     Tick(Instant),
     OpenFile,
-    FileOpened(Result<crate::io::OpenFileResult, String>),
+    FileOpened(Result<crate::io::OpenFileResult, crate::io::OpenError>),
     SaveFile,
     SaveAs,
     PickedSavePath(Option<PathBuf>),
@@ -436,10 +436,14 @@ pub enum Message {
     /// Apply the changes entered in Page Setup.
     PageSetupCommit,
     // ── Plot / Export ─────────────────────────────────────────────────────
-    /// Show the SVG save-file dialog and trigger export.
+    /// Show the PDF save-file dialog and trigger export.
     PlotExport,
-    /// Callback after the user picks (or cancels) the export path.
+    /// Callback after the user picks (or cancels) the PDF export path.
     PlotExportPath(Option<std::path::PathBuf>),
+    /// Show the SVG save-file dialog and trigger SVG export.
+    SvgExport,
+    /// Callback after the user picks (or cancels) the SVG export path.
+    SvgExportPath(Option<std::path::PathBuf>),
     /// Send current layout to the system printer (via lp / lpr).
     PrintToPrinter,
     /// Callback from the async printer job.

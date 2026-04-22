@@ -1,5 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod julian;
+pub use julian::{
+    format_iso8601, julian_date_to_utc, parse_iso8601, utc_to_julian_date, DateTimeUtc,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct Handle(pub u64);
 
@@ -793,6 +798,70 @@ pub struct DocumentHeader {
     /// target toward the eye (WCS). Default `[0, 0, 1]` (top-down plan).
     pub viewdir: [f64; 3],
 
+    // Default dimension style — Tier 1 subset (most common 8 of 100+
+    // AutoCAD `$DIM*` HEADER variables). Defaults match AutoCAD new
+    // imperial drawings.
+    /// `$DIMTXT` (code 40): dimension text height. Default 0.18.
+    pub dimtxt: f64,
+    /// `$DIMASZ` (code 40): arrow size. Default 0.18.
+    pub dimasz: f64,
+    /// `$DIMEXO` (code 40): extension-line origin offset. Default 0.0625.
+    pub dimexo: f64,
+    /// `$DIMEXE` (code 40): extension-line extension. Default 0.18.
+    pub dimexe: f64,
+    /// `$DIMGAP` (code 40): dimension-text gap. Default 0.09.
+    pub dimgap: f64,
+    /// `$DIMDEC` (code 70): decimal places for linear dims. Default 4.
+    pub dimdec: i16,
+    /// `$DIMADEC` (code 70): decimal places for angular dims. Default 0.
+    pub dimadec: i16,
+    /// `$DIMTOFL` (code 70): force dim text inside extension lines.
+    /// Default false.
+    pub dimtofl: bool,
+    /// `$DIMSTYLE` (code 2): current dimension style name.
+    /// Default `"Standard"`.
+    pub dimstyle: String,
+    /// `$DIMTXSTY` (code 7): current dimension text style name.
+    /// Default `"Standard"`.
+    pub dimtxsty: String,
+
+    // Spline defaults.
+    /// `$SPLFRAME` (code 70): show spline control polygon. Default false.
+    pub splframe: bool,
+    /// `$SPLINESEGS` (code 70): line segments per spline patch.
+    /// Default 8.
+    pub splinesegs: i16,
+    /// `$SPLINETYPE` (code 70): default spline curve type
+    /// (5 = quadratic B-spline, 6 = cubic B-spline). Default 6.
+    pub splinetype: i16,
+
+    // Multi-line (MLINE) defaults.
+    /// `$CMLSTYLE` (code 2): current MLine style name. Default `"Standard"`.
+    pub cmlstyle: String,
+    /// `$CMLJUST` (code 70): current MLine justification
+    /// (0 = top, 1 = middle, 2 = bottom). Default 0.
+    pub cmljust: i16,
+    /// `$CMLSCALE` (code 40): current MLine scale factor. Default 1.0.
+    pub cmlscale: f64,
+
+    // Insertion / display / edit miscellany.
+    /// `$INSUNITS` (code 70): default insertion units for blocks.
+    /// AutoCAD values: 0=unspec, 1=in, 2=ft, 3=mi, 4=mm, 5=cm, 6=m,
+    /// 7=km, 8=μin, 9=mil, 10=yd, 11=Å, 12=nm, 13=μm, 14=dm, 15=dam,
+    /// 16=hm, 17=Gm, 18=AU, 19=ly, 20=pc. Default 0 (unspecified).
+    pub insunits: i16,
+    /// `$INSUNITSDEFSOURCE` (code 70): source content units when source
+    /// drawing unit is "unspecified". Default 0.
+    pub insunits_def_source: i16,
+    /// `$INSUNITSDEFTARGET` (code 70): target drawing units when target
+    /// is "unspecified". Default 0.
+    pub insunits_def_target: i16,
+    /// `$LWDISPLAY` (code 290): lineweight display on/off. Default false.
+    pub lwdisplay: bool,
+    /// `$XEDIT` (code 290): allow external edits to this drawing when
+    /// referenced as XREF. Default true.
+    pub xedit: bool,
+
     pub handseed: u64,
 }
 
@@ -848,6 +917,31 @@ impl Default for DocumentHeader {
             viewctr: [0.0, 0.0],
             viewsize: 1.0,
             viewdir: [0.0, 0.0, 1.0],
+
+            dimtxt: 0.18,
+            dimasz: 0.18,
+            dimexo: 0.0625,
+            dimexe: 0.18,
+            dimgap: 0.09,
+            dimdec: 4,
+            dimadec: 0,
+            dimtofl: false,
+            dimstyle: "Standard".to_string(),
+            dimtxsty: "Standard".to_string(),
+
+            splframe: false,
+            splinesegs: 8,
+            splinetype: 6,
+
+            cmlstyle: "Standard".to_string(),
+            cmljust: 0,
+            cmlscale: 1.0,
+
+            insunits: 0,
+            insunits_def_source: 0,
+            insunits_def_target: 0,
+            lwdisplay: false,
+            xedit: true,
 
             handseed: 0,
         }

@@ -80,8 +80,22 @@ pub fn read_line_geometry(reader: &mut BitReader<'_>) -> Result<LineGeometry, Dw
     let z_are_zero = reader.read_bit()? == 1;
     let sx = reader.read_raw_f64_le()?;
     let ex = reader.read_bit_double_with_default(sx)?;
+    let start_y_position = reader.position_in_bits();
     let sy = reader.read_raw_f64_le()?;
     let ey = reader.read_bit_double_with_default(sy)?;
+    let (sy, ey) = if z_are_zero && reader.bits_remaining() == 0 && start_y_position >= 8 {
+        let mut retry = reader.clone();
+        retry.set_position_in_bits(start_y_position - 8)?;
+        let recovered_sy = retry.read_raw_f64_le()?;
+        let recovered_ey = retry.read_bit_double_with_default(recovered_sy)?;
+        if retry.bits_remaining() == 8 {
+            (recovered_sy, recovered_ey)
+        } else {
+            (sy, ey)
+        }
+    } else {
+        (sy, ey)
+    };
     let (sz, ez) = if z_are_zero {
         (0.0, 0.0)
     } else {

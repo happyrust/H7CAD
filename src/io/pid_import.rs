@@ -7,7 +7,7 @@ use pid_parse::package::{PidPackage, RawStream};
 use pid_parse::writer::{PidWriter, WritePlan};
 use pid_parse::{
     build_import_view, derive_layout, DrawingMeta, GeneralMeta, ObjectGraph, PidDocument,
-    PidImportView, PidLayoutItem, PidLayoutModel, PidLayoutText, PidObject, PidParser,
+    PidImportView, PidLayoutItem, PidLayoutModel, PidObject, PidParser,
     PidRelationship, SummaryInfo,
 };
 use std::collections::BTreeMap;
@@ -81,6 +81,7 @@ impl PidPreviewIndex {
         self.by_handle.get(&handle.value())
     }
 
+    #[cfg(test)]
     pub fn handles_for_drawing_id(&self, drawing_id: &str) -> Vec<Handle> {
         self.by_drawing_id
             .get(drawing_id)
@@ -88,6 +89,7 @@ impl PidPreviewIndex {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
     pub fn handles_for_graphic_oid(&self, graphic_oid: u32) -> Vec<Handle> {
         self.by_graphic_oid
             .get(&graphic_oid)
@@ -3322,7 +3324,7 @@ mod tests {
     use acadrust::Handle;
     use pid_parse::{
         AttributeClassSummary, ClusterCoverage, CrossReferenceGraph, ObjectGraph, PidDocument,
-        PidObject, PidRelationship, ProbeSummary, SheetStream, SymbolUsage,
+        PidLayoutText, PidObject, PidRelationship, ProbeSummary, SheetStream, SymbolUsage,
     };
     use std::io::Write as _;
     use std::path::PathBuf;
@@ -5511,6 +5513,7 @@ mod tests {
                 records: Vec::new(),
             }],
             root_presence: vec![],
+            ..CrossReferenceGraph::default()
         });
 
         let bundle = pid_document_to_bundle(&doc);

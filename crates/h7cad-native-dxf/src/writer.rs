@@ -268,6 +268,73 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(9, "$DIMSCALE");
     w.pair_f64(40, doc.header.dimscale);
 
+    // ── Dimension defaults (Tier 1) ───────────────────────────────────────
+    w.pair_str(9, "$DIMASZ");
+    w.pair_f64(40, doc.header.dimasz);
+
+    w.pair_str(9, "$DIMEXO");
+    w.pair_f64(40, doc.header.dimexo);
+
+    w.pair_str(9, "$DIMEXE");
+    w.pair_f64(40, doc.header.dimexe);
+
+    w.pair_str(9, "$DIMTXT");
+    w.pair_f64(40, doc.header.dimtxt);
+
+    w.pair_str(9, "$DIMGAP");
+    w.pair_f64(40, doc.header.dimgap);
+
+    w.pair_str(9, "$DIMTOFL");
+    w.pair_i16(70, if doc.header.dimtofl { 1 } else { 0 });
+
+    w.pair_str(9, "$DIMDEC");
+    w.pair_i16(70, doc.header.dimdec);
+
+    w.pair_str(9, "$DIMADEC");
+    w.pair_i16(70, doc.header.dimadec);
+
+    w.pair_str(9, "$DIMSTYLE");
+    w.pair_str(2, &doc.header.dimstyle);
+
+    w.pair_str(9, "$DIMTXSTY");
+    w.pair_str(7, &doc.header.dimtxsty);
+
+    // ── Spline defaults ───────────────────────────────────────────────────
+    w.pair_str(9, "$SPLFRAME");
+    w.pair_i16(70, if doc.header.splframe { 1 } else { 0 });
+
+    w.pair_str(9, "$SPLINETYPE");
+    w.pair_i16(70, doc.header.splinetype);
+
+    w.pair_str(9, "$SPLINESEGS");
+    w.pair_i16(70, doc.header.splinesegs);
+
+    // ── Multi-line (MLINE) defaults ───────────────────────────────────────
+    w.pair_str(9, "$CMLSTYLE");
+    w.pair_str(2, &doc.header.cmlstyle);
+
+    w.pair_str(9, "$CMLJUST");
+    w.pair_i16(70, doc.header.cmljust);
+
+    w.pair_str(9, "$CMLSCALE");
+    w.pair_f64(40, doc.header.cmlscale);
+
+    // ── Insertion / display / edit miscellany ─────────────────────────────
+    w.pair_str(9, "$INSUNITS");
+    w.pair_i16(70, doc.header.insunits);
+
+    w.pair_str(9, "$INSUNITSDEFSOURCE");
+    w.pair_i16(70, doc.header.insunits_def_source);
+
+    w.pair_str(9, "$INSUNITSDEFTARGET");
+    w.pair_i16(70, doc.header.insunits_def_target);
+
+    w.pair_str(9, "$LWDISPLAY");
+    w.pair_i16(290, if doc.header.lwdisplay { 1 } else { 0 });
+
+    w.pair_str(9, "$XEDIT");
+    w.pair_i16(290, if doc.header.xedit { 1 } else { 0 });
+
     w.pair_str(9, "$PDMODE");
     w.pair_i32(70, doc.header.pdmode);
 

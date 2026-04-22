@@ -4,9 +4,7 @@
 // The created Viewport entity is routed to add_entity_to_layout by apply_cmd_result
 // because we're in paper space.
 
-use acadrust::entities::Viewport;
-use crate::types::Vector3;
-use acadrust::EntityType;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -60,13 +58,12 @@ impl CadCommand for MviewCommand {
             let cy = ((c1.y + pt.y) / 2.0) as f64;
             let cz = c1.z as f64;
 
-            let mut vp = Viewport::new();
-            vp.center = Vector3::new(cx, cy, cz);
-            vp.width = w;
-            vp.height = h;
-            vp.id = 2; // user viewport (id > 1)
-
-            CmdResult::CommitAndExit(EntityType::Viewport(vp))
+            let entity = nm::Entity::new(nm::EntityData::Viewport {
+                center: [cx, cy, cz],
+                width: w,
+                height: h,
+            });
+            CmdResult::CommitAndExitNative(entity)
         } else {
             self.corner1 = Some(pt);
             CmdResult::NeedPoint

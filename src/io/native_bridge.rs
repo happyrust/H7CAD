@@ -8,6 +8,46 @@ fn normalize_face3d_invisible_edges(bits: u8) -> i16 {
     i16::from(bits & 0x0F)
 }
 
+/// Map the h7cad native DWG version enum to the acadrust variant of
+/// the same marker. The two enums have a 1:1 correspondence over the
+/// 9 documented AC magic strings (R12 → R2018); `Unknown` collapses
+/// to acadrust's `AC1015`, matching the existing native `to_dxf()`
+/// fallback so round-trips of "legacy / untagged" documents land on
+/// a writer that actually has coverage.
+pub(crate) fn nm_version_to_acadrust(version: nm::DxfVersion) -> acadrust::types::DxfVersion {
+    use acadrust::types::DxfVersion as Ar;
+    match version {
+        nm::DxfVersion::R12 => Ar::Unknown, // acadrust has no AC1009 slot
+        nm::DxfVersion::R13 => Ar::AC1012,
+        nm::DxfVersion::R14 => Ar::AC1014,
+        nm::DxfVersion::R2000 => Ar::AC1015,
+        nm::DxfVersion::R2004 => Ar::AC1018,
+        nm::DxfVersion::R2007 => Ar::AC1021,
+        nm::DxfVersion::R2010 => Ar::AC1024,
+        nm::DxfVersion::R2013 => Ar::AC1027,
+        nm::DxfVersion::R2018 => Ar::AC1032,
+        nm::DxfVersion::Unknown => Ar::AC1015,
+    }
+}
+
+/// Inverse of `nm_version_to_acadrust`. `AC1012` (R13) has no
+/// dedicated native variant on the R12 side; it maps to `R13` per
+/// the native enum order. `Unknown` carries through unchanged.
+pub(crate) fn acadrust_version_to_nm(version: acadrust::types::DxfVersion) -> nm::DxfVersion {
+    use acadrust::types::DxfVersion as Ar;
+    match version {
+        Ar::Unknown => nm::DxfVersion::Unknown,
+        Ar::AC1012 => nm::DxfVersion::R13,
+        Ar::AC1014 => nm::DxfVersion::R14,
+        Ar::AC1015 => nm::DxfVersion::R2000,
+        Ar::AC1018 => nm::DxfVersion::R2004,
+        Ar::AC1021 => nm::DxfVersion::R2007,
+        Ar::AC1024 => nm::DxfVersion::R2010,
+        Ar::AC1027 => nm::DxfVersion::R2013,
+        Ar::AC1032 => nm::DxfVersion::R2018,
+    }
+}
+
 fn infer_polygon_mesh_dimensions(vertex_count: usize) -> (i16, i16) {
     if vertex_count == 0 {
         return (0, 0);
@@ -23,6 +63,7 @@ fn infer_polygon_mesh_dimensions(vertex_count: usize) -> (i16, i16) {
 
 pub fn native_doc_to_acadrust(native: &nm::CadDocument) -> acadrust::CadDocument {
     let mut doc = acadrust::CadDocument::new();
+    doc.version = nm_version_to_acadrust(native.header.version);
 
     for entity in &native.entities {
         if let Some(ar_entity) = native_entity_to_acadrust(entity) {
@@ -54,6 +95,7 @@ pub fn native_doc_to_acadrust(native: &nm::CadDocument) -> acadrust::CadDocument
 
 pub fn acadrust_doc_to_native(doc: &acadrust::CadDocument) -> nm::CadDocument {
     let mut native = nm::CadDocument::new();
+    native.header.version = acadrust_version_to_nm(doc.version);
     native.layers.clear();
     native.tables.layer.entries.clear();
 
@@ -1869,6 +1911,71 @@ fn acad_hatch_path_to_native(path: &ar::BoundaryPath) -> nm::HatchBoundaryPath {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_bridge_forward_covers_every_native_variant() {
+        use acadrust::types::DxfVersion as Ar;
+        for (nm_v, ar_v) in [
+            (nm::DxfVersion::R12, Ar::Unknown),
+            (nm::DxfVersion::R13, Ar::AC1012),
+            (nm::DxfVersion::R14, Ar::AC1014),
+            (nm::DxfVersion::R2000, Ar::AC1015),
+            (nm::DxfVersion::R2004, Ar::AC1018),
+            (nm::DxfVersion::R2007, Ar::AC1021),
+            (nm::DxfVersion::R2010, Ar::AC1024),
+            (nm::DxfVersion::R2013, Ar::AC1027),
+            (nm::DxfVersion::R2018, Ar::AC1032),
+            (nm::DxfVersion::Unknown, Ar::AC1015),
+        ] {
+            assert_eq!(nm_version_to_acadrust(nm_v), ar_v, "native {nm_v:?}");
+        }
+    }
+
+    #[test]
+    fn version_bridge_reverse_covers_every_acadrust_variant() {
+        use acadrust::types::DxfVersion as Ar;
+        for (ar_v, nm_v) in [
+            (Ar::Unknown, nm::DxfVersion::Unknown),
+            (Ar::AC1012, nm::DxfVersion::R13),
+            (Ar::AC1014, nm::DxfVersion::R14),
+            (Ar::AC1015, nm::DxfVersion::R2000),
+            (Ar::AC1018, nm::DxfVersion::R2004),
+            (Ar::AC1021, nm::DxfVersion::R2007),
+            (Ar::AC1024, nm::DxfVersion::R2010),
+            (Ar::AC1027, nm::DxfVersion::R2013),
+            (Ar::AC1032, nm::DxfVersion::R2018),
+        ] {
+            assert_eq!(acadrust_version_to_nm(ar_v), nm_v, "acadrust {ar_v:?}");
+        }
+    }
+
+    #[test]
+    fn native_to_acadrust_preserves_version_from_document_header() {
+        let mut native = nm::CadDocument::new();
+        native.header.version = nm::DxfVersion::R14;
+        let acad = native_doc_to_acadrust(&native);
+        assert_eq!(acad.version, acadrust::types::DxfVersion::AC1014);
+    }
+
+    #[test]
+    fn acadrust_to_native_preserves_version_from_document() {
+        let mut acad = acadrust::CadDocument::new();
+        acad.version = acadrust::types::DxfVersion::AC1015;
+        let native = acadrust_doc_to_native(&acad);
+        assert_eq!(native.header.version, nm::DxfVersion::R2000);
+    }
+
+    #[test]
+    fn version_survives_bridge_roundtrip_in_both_directions() {
+        // The canonical "open DWG then save as same version" flow:
+        // acadrust document → native → back to acadrust.
+        let mut acad = acadrust::CadDocument::new();
+        acad.version = acadrust::types::DxfVersion::AC1018; // R2004
+        let native = acadrust_doc_to_native(&acad);
+        assert_eq!(native.header.version, nm::DxfVersion::R2004);
+        let round_tripped = native_doc_to_acadrust(&native);
+        assert_eq!(round_tripped.version, acadrust::types::DxfVersion::AC1018);
+    }
 
     #[test]
     fn native_to_acadrust_preserves_arc_and_text_rotation_units() {

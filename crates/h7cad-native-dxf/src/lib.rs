@@ -232,6 +232,14 @@ fn read_header_section(
                 .unwrap_or(0)
         };
 
+        let bv = |c: i16| -> bool {
+            codes
+                .iter()
+                .find(|(code, _)| *code == c)
+                .map(|(_, v)| v.trim() != "0")
+                .unwrap_or(false)
+        };
+
         match var_name.as_str() {
             "$ACADVER" => doc.header.version = DxfVersion::from_acadver(sv(1)),
             "$INSBASE" => doc.header.insbase = [f(10), f(20), f(30)],
@@ -290,6 +298,35 @@ fn read_header_section(
             "$VIEWCTR" => doc.header.viewctr = [f(10), f(20)],
             "$VIEWSIZE" => doc.header.viewsize = f(40),
             "$VIEWDIR" => doc.header.viewdir = [f(10), f(20), f(30)],
+
+            // Default dimension style (Tier 1 subset).
+            "$DIMTXT" => doc.header.dimtxt = f(40),
+            "$DIMASZ" => doc.header.dimasz = f(40),
+            "$DIMEXO" => doc.header.dimexo = f(40),
+            "$DIMEXE" => doc.header.dimexe = f(40),
+            "$DIMGAP" => doc.header.dimgap = f(40),
+            "$DIMDEC" => doc.header.dimdec = i16v(70),
+            "$DIMADEC" => doc.header.dimadec = i16v(70),
+            "$DIMTOFL" => doc.header.dimtofl = i16v(70) != 0,
+            "$DIMSTYLE" => doc.header.dimstyle = sv(2).to_string(),
+            "$DIMTXSTY" => doc.header.dimtxsty = sv(7).to_string(),
+
+            // Spline defaults.
+            "$SPLFRAME" => doc.header.splframe = i16v(70) != 0,
+            "$SPLINESEGS" => doc.header.splinesegs = i16v(70),
+            "$SPLINETYPE" => doc.header.splinetype = i16v(70),
+
+            // Multi-line defaults.
+            "$CMLSTYLE" => doc.header.cmlstyle = sv(2).to_string(),
+            "$CMLJUST" => doc.header.cmljust = i16v(70),
+            "$CMLSCALE" => doc.header.cmlscale = f(40),
+
+            // Insertion / display / edit miscellany.
+            "$INSUNITS" => doc.header.insunits = i16v(70),
+            "$INSUNITSDEFSOURCE" => doc.header.insunits_def_source = i16v(70),
+            "$INSUNITSDEFTARGET" => doc.header.insunits_def_target = i16v(70),
+            "$LWDISPLAY" => doc.header.lwdisplay = bv(290),
+            "$XEDIT" => doc.header.xedit = bv(290),
 
             "$HANDSEED" => {
                 doc.header.handseed = u64::from_str_radix(sv(5), 16).unwrap_or(0);

@@ -80,7 +80,6 @@ impl<'a> BitReader<'a> {
         self.bytes
     }
 
-
     /// Reposition the cursor to an absolute bit offset measured from
     /// the start of the backing slice.
     pub fn set_position_in_bits(&mut self, position: usize) -> Result<(), DwgReadError> {

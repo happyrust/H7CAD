@@ -419,8 +419,8 @@ impl H7CAD {
             }
 
             Message::FileOpened(Err(e)) => {
-                if e != "Cancelled" {
-                    self.command_line.push_error(&format!("Open failed: {e}"));
+                if !e.is_silent() {
+                    self.command_line.push_error(&e.user_message_zh());
                 }
                 Task::none()
             }
@@ -3458,6 +3458,113 @@ impl H7CAD {
                         path.file_name().unwrap_or_default().to_string_lossy()
                     )),
                     Err(e) => self.command_line.push_error(&format!("Export failed: {e}")),
+                }
+                Task::none()
+            }
+
+            // ── SVG Export ─────────────────────────────────────────────────────
+            Message::SvgExport => {
+                let i = self.active_tab;
+                let stem = self.tabs[i]
+                    .current_path
+                    .as_deref()
+                    .and_then(|p: &std::path::Path| p.file_stem())
+                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "drawing".into());
+                Task::perform(
+                    crate::io::svg_export::pick_svg_path_owned(stem),
+                    Message::SvgExportPath,
+                )
+            }
+            Message::SvgExportPath(None) => Task::none(),
+            Message::SvgExportPath(Some(path)) => {
+                let i = self.active_tab;
+                let scene = &self.tabs[i].scene;
+                let layout_name = scene.current_layout.clone();
+                let wires = scene.entity_wires();
+
+                use acadrust::objects::{ObjectType, PlotType};
+                let ps_snap = scene.document.objects.values().find_map(|obj| {
+                    if let ObjectType::PlotSettings(ps) = obj {
+                        if ps.page_name == layout_name { Some(ps.clone()) } else { None }
+                    } else { None }
+                });
+
+                let (paper_w, paper_h, mut draw_ox, mut draw_oy, rotation_deg) =
+                    if let Some(((x0, y0), (x1, y1))) = scene.paper_limits() {
+                        let (pw, ph) = (x1 - x0, y1 - y0);
+                        let use_extents = ps_snap.as_ref()
+                            .map(|ps| matches!(ps.plot_type, PlotType::Extents))
+                            .unwrap_or(false);
+                        let (ox, oy) = if use_extents {
+                            if let Some((mn, _mx)) = scene.model_space_extents() {
+                                (-mn.x as f64, -mn.y as f64)
+                            } else {
+                                (-x0, -y0)
+                            }
+                        } else {
+                            (-x0, -y0)
+                        };
+                        let rot = ps_snap.as_ref()
+                            .map(|ps| ps.rotation.to_degrees() as i32)
+                            .unwrap_or(0);
+                        (pw, ph, ox, oy, rot)
+                    } else {
+                        let margin = 1.05_f64;
+                        if let Some((mn, mx)) = scene.model_space_extents() {
+                            let w = ((mx.x - mn.x) as f64 * margin).max(1.0);
+                            let h = ((mx.y - mn.y) as f64 * margin).max(1.0);
+                            let pad_x = (w - (mx.x - mn.x) as f64) * 0.5;
+                            let pad_y = (h - (mx.y - mn.y) as f64) * 0.5;
+                            (w, h, -(mn.x as f64) + pad_x, -(mn.y as f64) + pad_y, 0)
+                        } else {
+                            (297.0, 210.0, 0.0, 0.0, 0)
+                        }
+                    };
+
+                if let Some(ref ps) = ps_snap {
+                    if ps.flags.plot_centered {
+                        let all_x: Vec<f32> = wires.iter()
+                            .flat_map(|w| w.points.iter().map(|p| p[0]))
+                            .filter(|v| !v.is_nan())
+                            .collect();
+                        let all_y: Vec<f32> = wires.iter()
+                            .flat_map(|w| w.points.iter().map(|p| p[1]))
+                            .filter(|v| !v.is_nan())
+                            .collect();
+                        if let (Some(&min_x), Some(&max_x), Some(&min_y), Some(&max_y)) = (
+                            all_x.iter().copied().reduce(f32::min).as_ref(),
+                            all_x.iter().copied().reduce(f32::max).as_ref(),
+                            all_y.iter().copied().reduce(f32::min).as_ref(),
+                            all_y.iter().copied().reduce(f32::max).as_ref(),
+                        ) {
+                            let cx = (min_x + max_x) as f64 / 2.0;
+                            let cy = (min_y + max_y) as f64 / 2.0;
+                            draw_ox += paper_w / 2.0 - cx;
+                            draw_oy += paper_h / 2.0 - cy;
+                        }
+                    } else {
+                        draw_ox += ps.origin_x;
+                        draw_oy += ps.origin_y;
+                    }
+                }
+
+                let (eff_w, eff_h) = match rotation_deg {
+                    90 | 270 => (paper_h, paper_w),
+                    _        => (paper_w, paper_h),
+                };
+
+                match crate::io::svg_export::export_svg(
+                    &wires, eff_w, eff_h,
+                    draw_ox as f32, draw_oy as f32,
+                    rotation_deg, &path,
+                    self.active_plot_style.as_ref(),
+                ) {
+                    Ok(()) => self.command_line.push_info(&format!(
+                        "SVG exported: {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    )),
+                    Err(e) => self.command_line.push_error(&format!("SVG export failed: {e}")),
                 }
                 Task::none()
             }

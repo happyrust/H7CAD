@@ -5,8 +5,10 @@
 
 pub mod cui;
 pub mod obj;
+pub mod open_error;
 pub mod pdf_export;
 pub mod plot_style;
+pub mod svg_export;
 pub mod print_to_printer;
 pub mod step;
 pub mod stl;
@@ -21,6 +23,8 @@ pub mod native_bridge;
 pub mod pid_import;
 pub mod pid_package_store;
 pub mod pid_screenshot;
+
+pub use open_error::OpenError;
 
 #[derive(Debug, Clone)]
 pub enum OpenedDocument {
@@ -39,23 +43,39 @@ pub struct OpenFileResult {
 }
 
 // ── Open ──────────────────────────────────────────────────────────────────
+//
+// The public `pick_and_open` / `open_path` functions are `async fn` and
+// are normally polled on iced's event-loop executor (via
+// `Task::perform`). The actual DWG/DXF decoding is CPU-bound and
+// performs synchronous file I/O, so running it directly inside the
+// future would stall iced's main thread for the duration of the read
+// (seconds on large engineering drawings).
+//
+// The `*_blocking` helpers below keep that synchronous logic in its
+// natural form, and the async wrappers dispatch the work onto a
+// dedicated worker thread, signalling completion through an iced-
+// provided `futures::channel::oneshot`. This pattern needs no tokio
+// reactor and uses the same `futures` crate iced 0.14 already pulls
+// in transitively.
+
+use iced::futures::channel::oneshot;
 
 /// Show a file-open dialog and load the selected DWG or DXF file.
-/// Returns `(filename, path, opened)` or an error string.
-pub async fn pick_and_open() -> Result<OpenFileResult, String> {
+/// Returns `(filename, path, opened)` or a classified [`OpenError`].
+pub async fn pick_and_open() -> Result<OpenFileResult, OpenError> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("Open CAD file")
-        .add_filter("CAD Files", &["dwg", "dxf", "pid", "DWG", "DXF", "PID"])
-        .add_filter("DWG Files", &["dwg", "DWG"])
-        .add_filter("DXF Files", &["dxf", "DXF"])
-        .add_filter("PID Files", &["pid", "PID"])
+        .add_filter("CAD Files", &["dwg", "dxf", "pid"])
+        .add_filter("DWG Files", &["dwg"])
+        .add_filter("DXF Files", &["dxf"])
+        .add_filter("PID Files", &["pid"])
         .add_filter("All Files", &["*"])
         .pick_file()
         .await;
 
     let handle = match handle {
         Some(h) => h,
-        None => return Err("Cancelled".into()),
+        None => return Err(OpenError::Cancelled),
     };
 
     let path = handle.path().to_path_buf();
@@ -63,49 +83,87 @@ pub async fn pick_and_open() -> Result<OpenFileResult, String> {
 }
 
 /// Load a CAD or PID file from a known path (used by recent files).
-pub async fn open_path(path: PathBuf) -> Result<OpenFileResult, String> {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unknown".into());
-    let opened = open_document(&path)?;
-    Ok(OpenFileResult { name, path, opened })
+///
+/// The heavy decoding runs on a dedicated worker thread so iced's
+/// event loop stays responsive while large drawings are parsed.
+pub async fn open_path(path: PathBuf) -> Result<OpenFileResult, OpenError> {
+    let (tx, rx) = oneshot::channel();
+    std::thread::Builder::new()
+        .name("h7cad-open-file".into())
+        .spawn(move || {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "unknown".into());
+            let result = open_document_blocking(&path).map(|opened| OpenFileResult {
+                name,
+                path: path.clone(),
+                opened,
+            });
+            let _ = tx.send(result);
+        })
+        .map_err(|e| OpenError::Io {
+            path: None,
+            message: format!("failed to spawn file-open worker thread: {e}"),
+        })?;
+
+    rx.await.unwrap_or_else(|_| {
+        Err(OpenError::Other(
+            "file open worker terminated before responding".into(),
+        ))
+    })
 }
 
-/// Load a DWG or DXF file directly from a path (auto-detect by extension).
+/// Legacy backward-compatible loader used by xref resolution and
+/// anything else that only wants the compat (`acadrust`) document and
+/// is happy with stringified errors. New call sites should prefer
+/// [`load_file_with_native_blocking`] to get structured [`OpenError`]
+/// values.
+///
+/// This call is synchronous on the current thread — do not invoke it
+/// from an async context that must stay responsive; use [`open_path`]
+/// for that.
 pub fn load_file(path: &Path) -> Result<CadDocument, String> {
-    let (doc, _) = load_file_with_native(path)?;
+    let (doc, _) = load_file_with_native_blocking(path).map_err(|e| e.to_string())?;
     Ok(doc)
 }
 
-pub fn load_file_with_native(
+/// Synchronous CAD document loader. Produces both the compat
+/// (`acadrust`) representation and the native counterpart.
+pub fn load_file_with_native_blocking(
     path: &Path,
-) -> Result<(CadDocument, Option<NativeCadDocument>), String> {
-    let native = load_file_native(path)?;
+) -> Result<(CadDocument, Option<NativeCadDocument>), OpenError> {
+    let native = load_file_native_blocking(path)?;
     let compat = native_bridge::native_doc_to_acadrust(&native);
     Ok((compat, Some(native)))
 }
 
-pub fn open_document(path: &Path) -> Result<OpenedDocument, String> {
+/// Synchronous document-open dispatch. Prefer [`open_path`] from
+/// async contexts so the iced main loop is not blocked for the
+/// duration of the parse.
+pub fn open_document_blocking(path: &Path) -> Result<OpenedDocument, OpenError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
 
     match ext.as_str() {
-        "pid" => Ok(OpenedDocument::Pid(pid_import::open_pid(path)?)),
-        _ => {
-            let (compat_doc, native_doc) = load_file_with_native(path)?;
+        "dwg" | "dxf" => {
+            let (compat_doc, native_doc) = load_file_with_native_blocking(path)?;
             Ok(OpenedDocument::Cad {
                 compat_doc,
                 native_doc,
             })
         }
+        "pid" => Ok(OpenedDocument::Pid(pid_import::open_pid(path)?)),
+        _ => Err(OpenError::UnsupportedExtension { ext }),
     }
 }
 
-/// Native-first load path used by the ongoing runtime migration.
-pub fn load_file_native(path: &Path) -> Result<NativeCadDocument, String> {
+/// Synchronous native-first load path. Callers who need async
+/// execution should wrap a call to this function in
+/// [`std::thread::spawn`] or [`open_path`].
+pub fn load_file_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -113,55 +171,52 @@ pub fn load_file_native(path: &Path) -> Result<NativeCadDocument, String> {
 
     match ext.as_str() {
         "dwg" => {
-            let mut reader = DwgReader::from_file(path).map_err(|e| e.to_string())?;
-            let acad_doc = reader.read().map_err(|e| e.to_string())?;
+            let mut reader = DwgReader::from_file(path).map_err(|e| {
+                let mut err = open_error::classify_acadrust(e, "DWG");
+                if let OpenError::Io { path: slot, .. } = &mut err {
+                    *slot = Some(path.to_path_buf());
+                }
+                err
+            })?;
+            let acad_doc = reader
+                .read()
+                .map_err(|e| open_error::classify_acadrust(e, "DWG"))?;
             Ok(native_bridge::acadrust_doc_to_native(&acad_doc))
         }
-        "dxf" => load_dxf_native(path),
-        "pid" => pid_import::load_pid_native(path),
-        _ => Err(format!("Unsupported file format: .{ext}")),
+        "dxf" => load_dxf_native_blocking(path),
+        "pid" => pid_import::load_pid_native(path).map_err(OpenError::from),
+        _ => Err(OpenError::UnsupportedExtension { ext }),
     }
 }
 
+
 // ── Save dialog ───────────────────────────────────────────────────────────
 
-/// Show a save-file dialog listing all DWG and DXF version filters.
-/// DWG versions appear first; format is auto-detected from the returned extension.
+/// Show a save-file dialog for DWG / DXF / PID outputs.
+///
+/// The target CAD-file format is auto-detected from the returned
+/// extension. **The DWG/DXF version is not selected here** — it is
+/// taken from the document's in-memory `version` field (sniffed when
+/// the drawing was opened, or the acadrust default for fresh
+/// drawings). Exposing 8 "DWG Files (2018/.../R13)" labels like the
+/// earlier revision of this function did was misleading: rfd's
+/// `save_file` API does not return the selected filter, so none of
+/// those labels could ever influence the actual output format.
+///
+/// See `save_dwg` and `docs/plans/2026-04-21-dwg-save-version-honesty-plan.md`
+/// for the rationale. Explicit version selection is tracked as a
+/// future milestone.
 pub async fn pick_save_path() -> Option<PathBuf> {
-    let dwg_filters: &[(&str, &[&str])] = &[
-        ("DWG Files (2018)", &["dwg"]),
-        ("DWG Files (2013)", &["dwg"]),
-        ("DWG Files (2010)", &["dwg"]),
-        ("DWG Files (2007)", &["dwg"]),
-        ("DWG Files (2004)", &["dwg"]),
-        ("DWG Files (2000)", &["dwg"]),
-        ("DWG Files (R14)", &["dwg"]),
-        ("DWG Files (R13)", &["dwg"]),
-    ];
-    let dxf_filters: &[(&str, &[&str])] = &[
-        ("DXF Files (2018)", &["dxf"]),
-        ("DXF Files (2013)", &["dxf"]),
-        ("DXF Files (2010)", &["dxf"]),
-        ("DXF Files (2007)", &["dxf"]),
-        ("DXF Files (2004)", &["dxf"]),
-        ("DXF Files (2000)", &["dxf"]),
-        ("DXF Files (R14)", &["dxf"]),
-        ("DXF Files (R13)", &["dxf"]),
-    ];
-
-    let pid_filters: &[(&str, &[&str])] = &[("PID Files (Smart P&ID)", &["pid"])];
-
-    let mut dlg = rfd::AsyncFileDialog::new()
+    rfd::AsyncFileDialog::new()
         .set_title("Save As")
-        .set_file_name("drawing.dwg");
-    for (label, exts) in dwg_filters
-        .iter()
-        .chain(dxf_filters.iter())
-        .chain(pid_filters.iter())
-    {
-        dlg = dlg.add_filter(*label, *exts);
-    }
-    dlg.save_file().await.map(|h| h.path().to_path_buf())
+        .set_file_name("drawing.dwg")
+        .add_filter("DWG File", &["dwg"])
+        .add_filter("DXF File", &["dxf"])
+        .add_filter("PID File", &["pid"])
+        .add_filter("All Files", &["*"])
+        .save_file()
+        .await
+        .map(|h| h.path().to_path_buf())
 }
 
 // ── Plot Style Table ──────────────────────────────────────────────────────
@@ -270,17 +325,42 @@ pub fn save_native(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     }
 }
 
+/// Write the document to a DWG file at `path`.
+///
+/// The output DWG format version is taken from `doc.header.version`
+/// (propagated through `native_bridge::native_doc_to_acadrust`), so
+/// "Save As" on an opened drawing preserves its original version
+/// (e.g. an AC1015/R2000 file stays AC1015). Fresh documents built
+/// with `NativeCadDocument::new()` default to `R2000`; opening and
+/// re-saving them is lossless.
+///
+/// There is no per-save version override today — users who need a
+/// specific older output version should open a template drawing in
+/// that version first, then "Save As" over it. See
+/// `docs/plans/2026-04-21-dwg-save-version-honesty-plan.md` for the
+/// full rationale and the planned version-picker work.
 pub fn save_dwg(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let acad_doc = native_bridge::native_doc_to_acadrust(doc);
     DwgWriter::write_to_file(path, &acad_doc).map_err(|e| e.to_string())
 }
 
-/// Load a DXF file via the native reader.
-fn load_dxf_native(path: &Path) -> Result<NativeCadDocument, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("failed to read DXF: {e}"))?;
-    h7cad_native_dxf::read_dxf_bytes(&bytes).map_err(|e| format!("native DXF: {e}"))
+/// Load a DXF file via the native reader (synchronous).
+fn load_dxf_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError> {
+    let bytes = std::fs::read(path).map_err(|e| OpenError::Io {
+        path: Some(path.to_path_buf()),
+        message: e.to_string(),
+    })?;
+    h7cad_native_dxf::read_dxf_bytes(&bytes).map_err(open_error::classify_native_dxf)
 }
 
+/// Write the document to a DXF file at `path`.
+///
+/// The DXF writer (`h7cad-native-dxf`) emits a single target syntax
+/// regardless of the picked filter label; historic revisions of
+/// `pick_save_path` exposed 8 "DXF Files (2018/.../R13)" entries that
+/// could never actually influence the output (rfd's API does not
+/// return the selected filter). The dialog now advertises a single
+/// "DXF File" option to stay honest.
 pub fn save_dxf(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let text = h7cad_native_dxf::write_dxf(doc)?;
     std::fs::write(path, text).map_err(|e| e.to_string())
