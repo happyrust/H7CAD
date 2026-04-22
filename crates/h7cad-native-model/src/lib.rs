@@ -734,6 +734,54 @@ pub struct DocumentHeader {
     /// `$ATTMODE`: attribute visibility tri-state (0=off, 1=normal, 2=on).
     pub attmode: i16,
 
+    // Snap & grid geometry — value side of the `snapmode / gridmode /
+    // orthomode` tri-bool above. io layer is a pure passthrough; any
+    // semantic validation (e.g. "`snap_style == 1` requires x==y snap
+    // spacing") is UI / command layer concern.
+    /// `$SNAPBASE` (codes 10/20): snap grid base point in current UCS.
+    /// Default `[0.0, 0.0]`.
+    pub snap_base: [f64; 2],
+    /// `$SNAPUNIT` (codes 10/20): X / Y snap spacing. Default `[0.5, 0.5]`
+    /// (AutoCAD imperial template baseline).
+    pub snap_unit: [f64; 2],
+    /// `$SNAPSTYLE` (code 70): 0 = rectangular, 1 = isometric. Default 0.
+    pub snap_style: i16,
+    /// `$SNAPANG` (code 50): snap grid rotation, radians. Default 0.0.
+    pub snap_ang: f64,
+    /// `$SNAPISOPAIR` (code 70): isometric plane selection
+    /// (0 = left, 1 = top, 2 = right). Only meaningful when
+    /// `snap_style == 1`. Default 0.
+    pub snap_iso_pair: i16,
+    /// `$GRIDUNIT` (codes 10/20): grid display spacing X / Y. Independent
+    /// of `snap_unit` — AutoCAD lets snap and grid use different spacings.
+    /// Default `[0.5, 0.5]`.
+    pub grid_unit: [f64; 2],
+
+    // Display & render flags — value side of the default 3D viewport /
+    // shading behaviour. All stored as `i16` for family consistency
+    // (AutoCAD stores all five at code 70). io layer is a pure
+    // passthrough; semantic clamping (e.g. `shadedif ∈ 0..=100`) is the
+    // UI's concern.
+    /// `$DISPSILH` (code 70): display silhouette edges on 3D solids in
+    /// wireframe views. 0 = off (default), 1 = on.
+    pub dispsilh: i16,
+    /// `$DRAGMODE` (code 70): interactive drag preview.
+    /// 0 = off, 1 = on, 2 = auto (default — AutoCAD picks).
+    pub dragmode: i16,
+    /// `$REGENMODE` (code 70): automatic geometry regeneration on zoom
+    /// / view change. 0 = manual REGEN required, 1 = auto (default).
+    pub regenmode: i16,
+    /// `$SHADEDGE` (code 70): SHADE command edge / face combination.
+    /// 0 = faces shaded, no edges;
+    /// 1 = faces shaded + edges drawn;
+    /// 2 = faces hidden-line;
+    /// 3 = faces wireframe (default).
+    pub shadedge: i16,
+    /// `$SHADEDIF` (code 70): diffuse-to-ambient light ratio during
+    /// SHADE, as a percentage 0..=100. AutoCAD default 70. io layer
+    /// stores the raw i16 — UI is responsible for clamping on input.
+    pub shadedif: i16,
+
     // Current drawing attributes
     /// `$CLAYER` (code 8): current layer name.
     pub clayer: String,
@@ -914,6 +962,52 @@ pub struct DocumentHeader {
     /// and is not interpreted at the io layer. Default 0.
     pub required_versions: i64,
 
+    /// `$PROJECTNAME` (code 1): project name for this drawing. AutoCAD
+    /// uses it to pick a `ProjectFilePath` subdir when resolving XREF /
+    /// raster image paths. Default empty — io layer only passes the
+    /// value through; path resolution is a command-layer concern.
+    pub project_name: String,
+    /// `$HYPERLINKBASE` (code 1): base URL / path for all relative
+    /// hyperlinks embedded in the drawing. Default empty (no base).
+    pub hyperlink_base: String,
+    /// `$INDEXCTL` (code 70): layer / spatial index creation bitfield.
+    /// bit 0 = layer index, bit 1 = spatial index. Default 0 (no
+    /// indexes created — the most compact drawing). io stores the raw
+    /// `i16`; decoding individual bits is a UI / command-layer concern.
+    pub indexctl: i16,
+    /// `$OLESTARTUP` (code 290): on-open behaviour for OLE objects.
+    /// `false` = don't start OLE application when opening drawing
+    /// (default — faster); `true` = pre-start. No effect on drawing
+    /// content itself — purely a startup hint.
+    pub olestartup: bool,
+
+    // Loft 3D defaults — R2007+ LOFT command driver (4 × f64 draft
+    // params + 2 × i16 normals / flags). io layer is pure passthrough;
+    // semantic meaning of `loft_normals` enum values and `loft_param`
+    // bit flags is AutoCAD-documented and UI-decoded.
+    /// `$LOFTANG1` (code 40): start cross-section draft angle,
+    /// radians. Default 0.0.
+    pub loft_ang1: f64,
+    /// `$LOFTANG2` (code 40): end cross-section draft angle, radians.
+    /// Default 0.0.
+    pub loft_ang2: f64,
+    /// `$LOFTMAG1` (code 40): start cross-section draft magnitude.
+    /// Default 0.0.
+    pub loft_mag1: f64,
+    /// `$LOFTMAG2` (code 40): end cross-section draft magnitude.
+    /// Default 0.0.
+    pub loft_mag2: f64,
+    /// `$LOFTNORMALS` (code 70): lofted surface normals source.
+    /// 0 = ruled, 1 = smooth fit (default), 2 = start cross-section,
+    /// 3 = end cross-section, 4 = start and end, 5 = all
+    /// cross-sections, 6 = path.
+    pub loft_normals: i16,
+    /// `$LOFTPARAM` (code 70): lofted surface option bitfield.
+    /// bit 1 = no twist, bit 2 = align directions, bit 4 = simple
+    /// surfaces, bit 8 = closed / periodic. AutoCAD default 7
+    /// (1 + 2 + 4 = three flags on, not closed).
+    pub loft_param: i16,
+
     // Interactive geometry command defaults.
     /// `$CHAMFERA` (code 40): first chamfer distance. Default 0.0.
     pub chamfera: f64,
@@ -972,6 +1066,19 @@ impl Default for DocumentHeader {
             fillmode: true,
             mirrtext: false,
             attmode: 1,
+
+            snap_base: [0.0, 0.0],
+            snap_unit: [0.5, 0.5],
+            snap_style: 0,
+            snap_ang: 0.0,
+            snap_iso_pair: 0,
+            grid_unit: [0.5, 0.5],
+
+            dispsilh: 0,
+            dragmode: 2,
+            regenmode: 1,
+            shadedge: 3,
+            shadedif: 70,
 
             clayer: "0".to_string(),
             cecolor: 256,
@@ -1037,6 +1144,18 @@ impl Default for DocumentHeader {
             dwg_codepage: String::new(),
             cshadow: 0,
             required_versions: 0,
+
+            project_name: String::new(),
+            hyperlink_base: String::new(),
+            indexctl: 0,
+            olestartup: false,
+
+            loft_ang1: 0.0,
+            loft_ang2: 0.0,
+            loft_mag1: 0.0,
+            loft_mag2: 0.0,
+            loft_normals: 1,
+            loft_param: 7,
 
             chamfera: 0.0,
             chamferb: 0.0,

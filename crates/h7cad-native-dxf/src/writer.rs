@@ -57,17 +57,34 @@ impl DxfWriter {
     }
 }
 
+/// Stringify an `f64` for DXF output with **shortest round-trip
+/// precision** plus a guaranteed decimal point.
+///
+/// Precision policy (escalated in the 2026-04-22 snap-grid-family plan,
+/// round 25): `{:.10}` truncated transcendental constants like π/4 to
+/// `0.7853981634`, silently losing ~7 digits of precision across a
+/// read→write→read cycle. `f64::to_string()` uses Rust's shortest
+/// round-trip algorithm (ryū-style) so `s.parse::<f64>()` always
+/// recovers the identical bits.
+///
+/// Formatting policy (unchanged from the previous incarnation):
+///
+/// - `0.0` → `"0.0"` (canonicalised; avoids Rust's default `"-0"`).
+/// - Any value whose shortest representation is a pure integer gets a
+///   trailing `.0` so DXF consumers that parse on whitespace boundaries
+///   still see a decimal point (`"1"` → `"1.0"`).
+/// - Exponential forms (`"1e-20"`, `"1.5e10"`) are left untouched —
+///   AutoCAD tokenises them as numbers too, and the `.0` cue only
+///   matters for the fixed-decimal form.
 fn format_f64(v: f64) -> String {
     if v == 0.0 {
-        "0.0".into()
+        return "0.0".into();
+    }
+    let s = v.to_string();
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        s
     } else {
-        let s = format!("{:.10}", v);
-        let s = s.trim_end_matches('0');
-        if s.ends_with('.') {
-            format!("{s}0")
-        } else {
-            s.to_string()
-        }
+        format!("{s}.0")
     }
 }
 
@@ -374,6 +391,38 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(9, "$REQUIREDVERSIONS");
     w.pair_i64(160, doc.header.required_versions);
 
+    // ── Drawing metadata addendum ─────────────────────────────────────────
+    w.pair_str(9, "$PROJECTNAME");
+    w.pair_str(1, &doc.header.project_name);
+
+    w.pair_str(9, "$HYPERLINKBASE");
+    w.pair_str(1, &doc.header.hyperlink_base);
+
+    w.pair_str(9, "$INDEXCTL");
+    w.pair_i16(70, doc.header.indexctl);
+
+    w.pair_str(9, "$OLESTARTUP");
+    w.pair_i16(290, if doc.header.olestartup { 1 } else { 0 });
+
+    // ── Loft 3D defaults ──────────────────────────────────────────────────
+    w.pair_str(9, "$LOFTANG1");
+    w.pair_f64(40, doc.header.loft_ang1);
+
+    w.pair_str(9, "$LOFTANG2");
+    w.pair_f64(40, doc.header.loft_ang2);
+
+    w.pair_str(9, "$LOFTMAG1");
+    w.pair_f64(40, doc.header.loft_mag1);
+
+    w.pair_str(9, "$LOFTMAG2");
+    w.pair_f64(40, doc.header.loft_mag2);
+
+    w.pair_str(9, "$LOFTNORMALS");
+    w.pair_i16(70, doc.header.loft_normals);
+
+    w.pair_str(9, "$LOFTPARAM");
+    w.pair_i16(70, doc.header.loft_param);
+
     // ── Interactive geometry command defaults ─────────────────────────────
     w.pair_str(9, "$CHAMFERA");
     w.pair_f64(40, doc.header.chamfera);
@@ -436,6 +485,44 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
 
     w.pair_str(9, "$ATTMODE");
     w.pair_i16(70, doc.header.attmode);
+
+    // ── Snap & grid geometry (伴生 snapmode / gridmode / orthomode 布尔) ──
+    w.pair_str(9, "$SNAPBASE");
+    w.pair_f64(10, doc.header.snap_base[0]);
+    w.pair_f64(20, doc.header.snap_base[1]);
+
+    w.pair_str(9, "$SNAPUNIT");
+    w.pair_f64(10, doc.header.snap_unit[0]);
+    w.pair_f64(20, doc.header.snap_unit[1]);
+
+    w.pair_str(9, "$SNAPSTYLE");
+    w.pair_i16(70, doc.header.snap_style);
+
+    w.pair_str(9, "$SNAPANG");
+    w.pair_f64(50, doc.header.snap_ang);
+
+    w.pair_str(9, "$SNAPISOPAIR");
+    w.pair_i16(70, doc.header.snap_iso_pair);
+
+    w.pair_str(9, "$GRIDUNIT");
+    w.pair_f64(10, doc.header.grid_unit[0]);
+    w.pair_f64(20, doc.header.grid_unit[1]);
+
+    // ── Display & render flags ────────────────────────────────────────────
+    w.pair_str(9, "$DISPSILH");
+    w.pair_i16(70, doc.header.dispsilh);
+
+    w.pair_str(9, "$DRAGMODE");
+    w.pair_i16(70, doc.header.dragmode);
+
+    w.pair_str(9, "$REGENMODE");
+    w.pair_i16(70, doc.header.regenmode);
+
+    w.pair_str(9, "$SHADEDGE");
+    w.pair_i16(70, doc.header.shadedge);
+
+    w.pair_str(9, "$SHADEDIF");
+    w.pair_i16(70, doc.header.shadedif);
 
     // ── Current drawing attributes ────────────────────────────────────────
     w.pair_str(9, "$CLAYER");

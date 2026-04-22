@@ -273,6 +273,21 @@ fn read_header_section(
             "$MIRRTEXT" => doc.header.mirrtext = i16v(70) != 0,
             "$ATTMODE" => doc.header.attmode = i16v(70),
 
+            // Snap & grid geometry (伴生 snapmode / gridmode / orthomode 布尔).
+            "$SNAPBASE" => doc.header.snap_base = [f(10), f(20)],
+            "$SNAPUNIT" => doc.header.snap_unit = [f(10), f(20)],
+            "$SNAPSTYLE" => doc.header.snap_style = i16v(70),
+            "$SNAPANG" => doc.header.snap_ang = f(50),
+            "$SNAPISOPAIR" => doc.header.snap_iso_pair = i16v(70),
+            "$GRIDUNIT" => doc.header.grid_unit = [f(10), f(20)],
+
+            // Display & render flags.
+            "$DISPSILH" => doc.header.dispsilh = i16v(70),
+            "$DRAGMODE" => doc.header.dragmode = i16v(70),
+            "$REGENMODE" => doc.header.regenmode = i16v(70),
+            "$SHADEDGE" => doc.header.shadedge = i16v(70),
+            "$SHADEDIF" => doc.header.shadedif = i16v(70),
+
             // Current drawing attributes.
             "$CLAYER" => doc.header.clayer = sv(8).to_string(),
             "$CECOLOR" => doc.header.cecolor = i16v(62),
@@ -350,6 +365,20 @@ fn read_header_section(
             "$DWGCODEPAGE" => doc.header.dwg_codepage = sv(3).to_string(),
             "$CSHADOW" => doc.header.cshadow = i16v(280),
             "$REQUIREDVERSIONS" => doc.header.required_versions = i64v(160),
+
+            // Drawing metadata addendum (project / hyperlink / index / OLE startup).
+            "$PROJECTNAME" => doc.header.project_name = sv(1).to_string(),
+            "$HYPERLINKBASE" => doc.header.hyperlink_base = sv(1).to_string(),
+            "$INDEXCTL" => doc.header.indexctl = i16v(70),
+            "$OLESTARTUP" => doc.header.olestartup = bv(290),
+
+            // Loft 3D defaults (R2007+ LOFT command).
+            "$LOFTANG1" => doc.header.loft_ang1 = f(40),
+            "$LOFTANG2" => doc.header.loft_ang2 = f(40),
+            "$LOFTMAG1" => doc.header.loft_mag1 = f(40),
+            "$LOFTMAG2" => doc.header.loft_mag2 = f(40),
+            "$LOFTNORMALS" => doc.header.loft_normals = i16v(70),
+            "$LOFTPARAM" => doc.header.loft_param = i16v(70),
 
             // Interactive geometry command defaults.
             "$CHAMFERA" => doc.header.chamfera = f(40),

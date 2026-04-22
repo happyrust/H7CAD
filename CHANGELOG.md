@@ -2,6 +2,304 @@
 
 ## [未发布]
 
+### 2026-04-22（二十八）：LOFT 3D 默认家族 6 变量扩充（跨过 100 门槛）
+
+上一轮（二十七）首次混三类型、补完 drawing 元数据附加 4 变量，
+HEADER 覆盖到 97。本轮走 plan §9 下一轮候选里的 LOFT 家族，
+6 个变量里 **4 × f64（draft 角 / 幅度）+ 2 × i16（normals 枚举 /
+param bitfield）**，一次性支撑 AutoCAD R2007+ 的 LOFT 命令默认值
+保存 / 回放闭环，顺带让 HEADER 覆盖**越过 100 变量门槛**（97 → 103）。
+
+**字段**（`DocumentHeader`，紧跟二十七轮 `$OLESTARTUP` 之后、
+二十二轮 `$CHAMFERA` 之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `loft_ang1` | `f64` | `$LOFTANG1` | 40 | `0.0` | 起横截面 draft angle（弧度） |
+| `loft_ang2` | `f64` | `$LOFTANG2` | 40 | `0.0` | 止横截面 draft angle（弧度） |
+| `loft_mag1` | `f64` | `$LOFTMAG1` | 40 | `0.0` | 起横截面 draft magnitude |
+| `loft_mag2` | `f64` | `$LOFTMAG2` | 40 | `0.0` | 止横截面 draft magnitude |
+| `loft_normals` | `i16` | `$LOFTNORMALS` | 70 | `1` | 曲面法向量来源 0–6 枚举（AutoCAD 默认 1 = smooth fit） |
+| `loft_param` | `i16` | `$LOFTPARAM` | 70 | `7` | 位字段 1 = no twist / 2 = aligned / 4 = simple surfaces / 8 = closed（AutoCAD 默认 7） |
+
+**策略**：io 层**纯透传**——`loft_normals` 枚举值含义、`loft_param`
+各 bit 组合合法性、`loft_ang*` / `loft_mag*` 的物理单位，全部由 UI
+/ 3D engine 自己解读。writer 对 `loft_param` 不过滤非法 bit 组合
+（沿用 `indexctl` 二十七轮同款策略）。
+
+**reader / writer 同步**：6 arm + 6 对 pair，紧跟 `$OLESTARTUP`，
+在 HEADER 里形成 "元数据附加 → Loft 3D 默认 → 交互几何命令默认" 的
+递进语义链。
+
+**测试**（新增 `tests/header_loft.rs`，4 条）：
+
+ground-truth 值：
+
+- `loft_ang1 = π/6`（30°）/ `loft_ang2 = π/3`（60°） — 常用数学
+  常量，借此验证二十五轮升级的 `format_f64` shortest round-trip 在
+  本家族依然保真；任何精度回归都会在这两个 `assert_eq!` 上立刻挂
+- `loft_mag1 = 1.5` / `loft_mag2 = 2.5` — 互不相等，防止 ang1/2 和
+  mag1/2 两对 code-40 arm 串位（共享 code 40 是最容易的串位源）
+- `loft_normals = 6`（path，与 default 1 不同）
+- `loft_param = 9`（bit1 + bit8 = no twist + closed，罕见但合法 bit
+  组合，覆盖"无扭转的闭合 loft"场景）
+
+测试项：
+
+- `header_reads_loft_family`：6 字段精确恢复 + `loft_ang1 != ang2`
+  / `loft_mag1 != mag2` 两条 arm 串位 regression guard
+- `header_writes_loft_family`：6 个 `$VAR` 按 reader arm 顺序出现
+- `header_roundtrip_preserves_loft_family`：read → write → read 6
+  字段 bit-identical；π/6 / π/3 的保真是 format_f64 精度的哨兵
+- `header_legacy_file_without_loft_loads_with_defaults`：缺省命中
+  (`0 / 0 / 0 / 0 / 1 / 7`)
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **161 / 161 → 165 / 165 全绿**
+  （+4 header_loft，0 现存用例回归）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `cargo check -p h7cad-native-facade` 通过
+- `ReadLints` 改动的 4 个文件零 lint
+
+**DXF HEADER 覆盖增量**：97 → **103** 个变量（~34%），**越过 100
+门槛**。本轮是 docs/plans 系列从 Sprint 15 首日到现在的第 14 轮
+micro-iteration，平均每轮 ~7 变量增量，按当前节奏再跑 30 轮左右可
+望逼近 AutoCAD HEADER ~300 变量的 90% 工程性覆盖线。
+
+plan：`docs/plans/2026-04-22-loft-family-plan.md`
+
+---
+
+### 2026-04-22（二十七）：Drawing 元数据附加 4 变量扩充（混合类型首轮）
+
+上一轮（二十六）把 code 70 / `i16` 显示 & 渲染家族 5 变量一口气补齐，
+HEADER 覆盖到 93 变量。本轮走 plan §9 下一轮候选里最短的"drawing
+元数据附加"路径，**同时首次在一轮里混合 3 种类型**（`String × 2 +
+i16 × 1 + bool × 1`），顺带验证 `sv(1) / i16v(70) / bv(290)` 三个
+helper 在同一 HEADER 子组内的正交性。
+
+**字段**（`DocumentHeader`，紧跟二十四轮 `$REQUIREDVERSIONS` 之后、
+二十二轮 `$CHAMFERA` 之前，形成与二十三轮/二十四轮 drawing 身份组
+连贯的 "身份 4 + 元数据附加 4 = 8 字段" 块）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `project_name` | `String` | `$PROJECTNAME` | 1 | `""` | 项目名；AutoCAD 用它选 `ProjectFilePath` 子目录解析 XREF / raster 路径 |
+| `hyperlink_base` | `String` | `$HYPERLINKBASE` | 1 | `""` | drawing 内相对 hyperlink 的根 URL / 路径 |
+| `indexctl` | `i16` | `$INDEXCTL` | 70 | `0` | layer / spatial 索引 bitfield：bit0 = layer index，bit1 = spatial index |
+| `olestartup` | `bool` | `$OLESTARTUP` | 290 | `false` | 打开 drawing 时是否预启 OLE 应用 |
+
+**策略**：io 层**纯透传**——`project_name` 是否为合法路径、
+`hyperlink_base` 是否为合法 URL、`indexctl` 的 bit 拆解、`olestartup`
+的副作用，全部由 UI / 命令层负责。writer 对 `olestartup` 使用
+`pair_i16(290, ...)`（参照既有 `$LWDISPLAY / $XEDIT` 同款 pattern），
+不新引入 `pair_bool` 或类似。
+
+**reader / writer 同步**：4 arm + 4 对 pair，紧跟
+`$REQUIREDVERSIONS` 输出，在 HEADER 里形成 "身份 GUID 对 → 代码页
+→ shadow → required_versions → 元数据附加 4 项 → 几何命令默认" 的
+连贯顺序链。
+
+**测试**（新增 `tests/header_drawing_metadata_addendum.rs`，4 条）：
+
+ground-truth 值选得**每字段都与 Default 不同**，两个 String 还**互
+不相等**且含 Unicode（CJK + Greek），借此顺带烟测 HEADER 字符串路径
+对非 ASCII 的保真性：
+
+- `project_name = "my-proj/sub-dir 项目 α"` — 空格 + 斜杠 + 中文 + 希腊
+- `hyperlink_base = "https://example.com/docs/日本語/"` — 协议 + 路径 + 日文
+- `indexctl = 3` — 两 bit 同时置位
+- `olestartup = true`
+
+两 String 共享 DXF code 1，arm 串位是 code-1 家族里最容易出的错；
+`assert_ne!(project_name, hyperlink_base)` 作为直接 regression guard
+让此类错误第一条挂掉。
+
+测试项：
+
+- `header_reads_drawing_metadata_addendum_family`：4 字段全部精确
+  恢复 + 两 String arm 串位 regression guard
+- `header_writes_drawing_metadata_addendum_family`：4 个 `$VAR` 按
+  reader arm 顺序出现 + `project_name` / `hyperlink_base`
+  Unicode verbatim
+- `header_roundtrip_preserves_drawing_metadata_addendum_family`：
+  read → write → read 4 字段 bit-identical（String 含 Unicode 触发
+  路径的完整保真）
+- `header_legacy_file_without_drawing_metadata_addendum_loads_with_defaults`：
+  legacy HEADER 缺省命中 AutoCAD 出厂默认（空 / 空 / 0 / false）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **157 / 157 → 161 / 161 全绿**
+  （+4 header_drawing_metadata_addendum，0 现存用例回归）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `cargo check -p h7cad-native-facade` 通过
+- `ReadLints` 改动的 4 个文件（model lib.rs、dxf lib.rs、writer.rs、
+  新 test）零 lint
+
+**DXF HEADER 覆盖增量**：93 → **97** 个变量（~32%）。
+**类型混合覆盖**：同一 Sprint 内同时演练 `sv / i16v / bv` 三个
+helper，验证它们在 HEADER 子组内的正交 —— 为二十八轮及以后 "一轮
+就把 AutoCAD 某完整维度补齐" 策略解锁，不必再按类型分家。
+
+plan：`docs/plans/2026-04-22-drawing-metadata-addendum-plan.md`
+
+---
+
+### 2026-04-22（二十六）：显示 & 渲染控制家族 5 变量扩充
+
+上一轮（二十五）补完 SNAP/GRID 家族 + `format_f64` shortest
+round-trip，HEADER 覆盖到 88 变量。本轮选最短、最小风险路径：5 个
+**全部 code 70 / `i16`** 的显示与渲染控制布尔 / 小枚举，一口气把
+AutoCAD "用户自定义显示偏好"这一维度补齐。
+
+**字段**（`DocumentHeader`，插在 `grid_unit` 之后 / `clayer` 之前
+的全新 "Display & render flags" 子组）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `dispsilh` | `i16` | `$DISPSILH` | 70 | `0` | 3D 线框视图 silhouette 边：0 = 关 / 1 = 开 |
+| `dragmode` | `i16` | `$DRAGMODE` | 70 | `2` | 拖拽预览：0 = 关 / 1 = 开 / 2 = auto（AutoCAD 默认） |
+| `regenmode` | `i16` | `$REGENMODE` | 70 | `1` | 自动重生：0 = 关 / 1 = 开（AutoCAD 默认） |
+| `shadedge` | `i16` | `$SHADEDGE` | 70 | `3` | SHADE 着色：0 = 纯面 / 1 = 面+边 / 2 = 隐藏线 / 3 = 线框（AutoCAD 默认） |
+| `shadedif` | `i16` | `$SHADEDIF` | 70 | `70` | 漫反射比（百分比 0–100，AutoCAD 默认 70） |
+
+**策略**：io 层**纯透传**——`shadedif` 超 100 / `shadedge` 超 3 /
+`dragmode` 非 0/1/2 等边界条件 AutoCAD 自己去接，H7CAD 不 clamp
+不裁剪。所有 5 字段都存 `i16` 以保持家族**签名一致性**，哪怕
+`dispsilh / regenmode` 语义是 bool；下游消费用 `!= 0` 判真假即可。
+
+**reader / writer 同步**：5 arm + 5 对 pair，紧跟二十五轮 SNAP/GRID
+组、正好形成 "mode flag → 空间值 → 渲染 flag → 属性" 的四段语义
+梯度。
+
+**测试**（新增 `tests/header_display_render.rs`，4 条）：
+
+ground-truth 每字段都选**与 Default 不同**的值：
+
+- `dispsilh = 1`（≠ 0）
+- `dragmode = 0`（≠ 2）
+- `regenmode = 0`（≠ 1）
+- `shadedge = 1`（≠ 3）
+- `shadedif = 50`（≠ 70）
+
+arm 串位的 bug 一旦发生至少两条 assertion 同时挂掉，立刻可见。
+
+测试项：
+
+- `header_reads_display_render_family`：5 字段全部精确恢复
+- `header_writes_display_render_family`：5 个 `$VAR` 按 reader arm
+  顺序出现 + 值精确匹配（`contains`-then-advance-cursor 的顺序校验）
+- `header_roundtrip_preserves_display_render_family`：read → write
+  → read bit-identical
+- `header_legacy_file_without_display_render_loads_with_defaults`：
+  legacy HEADER 缺省命中 AutoCAD 出厂默认（0 / 2 / 1 / 3 / 70）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **153 / 153 → 157 / 157 全绿**
+  （+4 header_display_render，0 现存用例回归）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `cargo check -p h7cad-native-facade` 通过
+- `ReadLints` 改动的 4 个文件（model lib.rs、dxf lib.rs、writer.rs、
+  新 test）零 lint
+
+**DXF HEADER 覆盖增量**：88 → **93** 个变量（~31%）。
+**总耗时**：约 17 min，是 2026-04-21 以来最短的一轮 Sprint；验证了
+"小而密"策略下 `i16` 纯 passthrough 字段组的扩张极限速度。
+
+plan：`docs/plans/2026-04-22-display-render-family-plan.md`
+
+---
+
+### 2026-04-22（二十五）：SNAP/GRID 家族 6 变量扩充 + `format_f64` 精度升级
+
+上一轮（二十四）补完 i64 helper + `$REQUIREDVERSIONS`，HEADER 覆盖
+到 82 变量。本轮沿同一路径前进：`snapmode / gridmode / orthomode`
+三元布尔早就落地，但它们对应的"值"侧（snap 间距 / 基准 / 风格 / 旋
+转 / 等轴测面 / grid 间距）之前**全部忽略**，导致 snap 开着但间距
+归零的诡异 roundtrip。本轮把 6 个伴生变量一次补齐，顺带处理掉写入
+路径 10 位小数截断的**精度漂移**隐患。
+
+**字段**（`DocumentHeader`，插在 `attmode` 之后 / `clayer` 之前的
+全新 "Snap & grid geometry" 子组）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `snap_base` | `[f64; 2]` | `$SNAPBASE` | 10/20 | `[0.0, 0.0]` | snap 栅格基准点（当前 UCS） |
+| `snap_unit` | `[f64; 2]` | `$SNAPUNIT` | 10/20 | `[0.5, 0.5]` | snap X / Y 间距 |
+| `snap_style` | `i16` | `$SNAPSTYLE` | 70 | `0` | 0 = 正交；1 = 等轴测 |
+| `snap_ang` | `f64` | `$SNAPANG` | 50 | `0.0` | snap 栅格旋转角（弧度） |
+| `snap_iso_pair` | `i16` | `$SNAPISOPAIR` | 70 | `0` | 等轴测面 0 = 左 / 1 = 上 / 2 = 右 |
+| `grid_unit` | `[f64; 2]` | `$GRIDUNIT` | 10/20 | `[0.5, 0.5]` | grid 显示 X / Y 间距 |
+
+**策略**：io 层**纯透传**——`snap_style == 1` 时 AutoCAD UI 强制
+X / Y 等间距、`snap_iso_pair` 在非等轴测时无语义等业务规则全由 UI
+/ 命令层负责；writer 不自动对齐、不 normalise、不裁剪。
+
+**reader / writer 同步**：6 arm + 6 对 pair。writer 紧跟
+`$ATTMODE` 输出，在 HEADER 里形成 "mode flag → 伴生值" 的连贯
+顺序块。
+
+**`format_f64` 精度升级**（计划文件 §风险矩阵预案实现）：
+
+先前 `writer::format_f64` 用 `{:.10}` 写出，π/4 这类常用数学角度
+被截成 `0.7853981634`，丢失 7 位精度。本轮回归测试
+`header_roundtrip_preserves_snap_grid_family` 首次揭示这个隐患。
+修复：改用 `f64::to_string()`（Rust shortest round-trip, ryū 风），
+保证 `s.parse::<f64>()` 总能拿回 bit-identical 值，同时保留既有
+"整数值补 `.0`"、"零值输出 `"0.0"`" 两项格式约定。
+
+**测试**（新增 `tests/header_snap_grid.rs`，4 条）：
+
+ground-truth 值按字段选型：
+
+- `snap_base = [3.25, -7.125]` — 非原点 + 负数 + 分数
+- `snap_unit = [0.25, 0.5]` — X ≠ Y，盯死 code 10/20 列位
+- `snap_style = 1` — 等轴测，与 Default 0 区分
+- `snap_ang = π/4 ≈ 0.7853981633974483` — 直接暴露旧 `{:.10}`
+  截断
+- `snap_iso_pair = 2` — 右等轴测面
+- `grid_unit = [1.0, 2.0]` — X ≠ Y，且与 `snap_unit` 不同，防止
+  snap / grid 列混淆
+
+测试项：
+
+- `header_reads_snap_grid_family`：6 字段全部从非默认值恢复；额外
+  `assert_ne!(snap_unit x, snap_unit y)` 与 `assert_ne!(grid_unit, snap_unit)`
+  两条"列位混淆"回归断言
+- `header_writes_snap_grid_family`：verbatim 写入 + 按 reader arm
+  顺序出现（loose 顺序校验保 HEADER 布局确定）
+- `header_roundtrip_preserves_snap_grid_family`：**最关键**——π/4
+  必须 read → write → read bit-identical；此测试上先泄露了 `{:.10}`
+  精度 bug，触发 `format_f64` 本轮升级
+- `header_legacy_file_without_snap_grid_loads_with_defaults`：缺省
+  legacy HEADER 读出六字段全部命中 Default
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **149 / 149 → 153 / 153 全绿**
+  （+4 header_snap_grid，0 现存用例回归）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `cargo check -p h7cad-native-facade` 通过
+- `ReadLints` 改动的 4 个文件（model lib.rs、dxf lib.rs、writer.rs、
+  新 test）零 lint
+
+**DXF HEADER 覆盖增量**：82 → **88** 个变量（~29%）。
+**`format_f64` 精度**：10 位小数截断 → 完整 f64 精度 round-trip，
+所有 f64 写出路径（entity 坐标 / header 值 / table 参数 / block
+偏移 / image 像素大小 / hatch 边缘 / 所有 DXF 文档中约 80% 的数值
+字段）一次性受益。
+
+plan：`docs/plans/2026-04-22-snap-grid-family-plan.md`
+
+---
+
 ### 2026-04-22（二十四）：i64 helper 基建 + `$REQUIREDVERSIONS` 扩充
 
 上一轮（二十三）收尾时发现 H7CAD 的 DXF io 缺 **i64 group-code** 处理
