@@ -2,6 +2,69 @@
 
 ## [未发布]
 
+### 2026-04-22（二十四）：i64 helper 基建 + `$REQUIREDVERSIONS` 扩充
+
+上一轮（二十三）收尾时发现 H7CAD 的 DXF io 缺 **i64 group-code** 处理
+能力（reader / writer 均无 i64 helper），于是 code 160 的
+`$REQUIREDVERSIONS` 挂账推迟。本轮**同时补基建 + 吞入该字段**，让
+HEADER group-code 覆盖扩展到 160（int64）。
+
+**helper 基建**：
+
+- reader `crates/h7cad-native-dxf/src/lib.rs`：新增 `i64v` 闭包，与
+  `i32v` 同形状（`.parse().ok().unwrap_or(0)`）
+- writer `crates/h7cad-native-dxf/src/writer.rs`：新增 `pair_i64`
+  成员函数，与 `pair_i32` 同形状（`value.to_string()`，非定宽）
+
+**model 扩字段**（`DocumentHeader`，插在 `cshadow` 之后 / `chamfera`
+之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `required_versions` | `i64` | `$REQUIREDVERSIONS` | **160** | `0` | R2018+ 所需特性位字段 |
+
+**策略**：io 层做**纯 i64 透传**——bit→feature 的映射由 AutoCAD
+版本文档规定，不是 io 职责；writer 也**不**自动根据 drawing 里出现的
+entity 类型去推算该置哪个 bit（那是未来 "版本需求推断" 工作，本轮
+仅落地字段 io）。
+
+**reader / writer 同步**：1 arm + 1 对 pair。writer 紧随 `$CSHADOW`
+之后输出，在 Tier 3 metadata 组内形成 5 变量闭合。
+
+**测试**（新增 `tests/header_required_versions.rs`，4 条）：
+
+ground-truth 值选 `0x0000_1F2E_4D5C_789A` = **34 275 408 493 830 298**：
+
+1. 远超 `i32::MAX` 7+ 个数量级 — 证明 helper 走真正 i64 路径、不是
+   被编译器误推成 i32
+2. 高 / 低 32 bit 都非零 — 任何 32-bit truncation bug 会立刻暴露
+3. 既非 0 也非 `i64::MAX` — 与 Default / legacy-zero 场景天然区分
+
+测试项：
+
+- `header_reads_required_versions`：读后完整保留 + 断言 > `i32::MAX`
+- `header_writes_required_versions`：verbatim 写入十进制表示（防止
+  被错误千分位化 / 截断 / 十六进制化）
+- `header_roundtrip_preserves_required_versions`：**最关键**的 64-bit
+  保真校验 — read → write → read 大整数丝毫不差
+- `header_legacy_file_without_required_versions_loads_with_zero`：
+  缺省 → 0（向后兼容，不强制任何特性）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **149 / 149 全绿**（145 前轮 + **4** 新 required_versions）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `ReadLints` 改动的 4 个文件零 lint
+
+**DXF HEADER 覆盖增量**：81 → **82** 个变量（~27%）。  
+**DXF group-code 覆盖**：新增 **160（int64）**，让 io 层从此能处理
+任意 AutoCAD i64 HEADER 变量，为未来更多 R2018+ 特性扩展铺路。
+
+plan：`docs/plans/2026-04-22-required-versions-plan.md`
+
+---
+
 ### 2026-04-22（二十三）：DXF HEADER Tier 3 表头元数据 4 变量扩充
 
 前几轮主攻绘图样式 / 几何默认值，本轮补齐**表头元数据**家族 4 变量：

@@ -33,6 +33,10 @@ impl DxfWriter {
         self.pair(code, &value.to_string());
     }
 
+    fn pair_i64(&mut self, code: i16, value: i64) {
+        self.pair(code, &value.to_string());
+    }
+
     fn pair_f64(&mut self, code: i16, value: f64) {
         self.pair(code, &format_f64(value));
     }
@@ -366,6 +370,9 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
 
     w.pair_str(9, "$CSHADOW");
     w.pair_i16(280, doc.header.cshadow);
+
+    w.pair_str(9, "$REQUIREDVERSIONS");
+    w.pair_i64(160, doc.header.required_versions);
 
     // ── Interactive geometry command defaults ─────────────────────────────
     w.pair_str(9, "$CHAMFERA");

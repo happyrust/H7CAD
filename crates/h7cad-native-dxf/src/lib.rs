@@ -232,6 +232,14 @@ fn read_header_section(
                 .unwrap_or(0)
         };
 
+        let i64v = |c: i16| -> i64 {
+            codes
+                .iter()
+                .find(|(code, _)| *code == c)
+                .and_then(|(_, v)| v.parse().ok())
+                .unwrap_or(0)
+        };
+
         let bv = |c: i16| -> bool {
             codes
                 .iter()
@@ -341,6 +349,7 @@ fn read_header_section(
             "$VERSIONGUID" => doc.header.version_guid = sv(2).to_string(),
             "$DWGCODEPAGE" => doc.header.dwg_codepage = sv(3).to_string(),
             "$CSHADOW" => doc.header.cshadow = i16v(280),
+            "$REQUIREDVERSIONS" => doc.header.required_versions = i64v(160),
 
             // Interactive geometry command defaults.
             "$CHAMFERA" => doc.header.chamfera = f(40),

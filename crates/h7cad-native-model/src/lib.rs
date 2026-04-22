@@ -907,6 +907,12 @@ pub struct DocumentHeader {
     /// 0 = casts and receives shadows (AutoCAD default);
     /// 1 = casts only; 2 = receives only; 3 = ignores shadows.
     pub cshadow: i16,
+    /// `$REQUIREDVERSIONS` (code 160): R2018+ required-feature
+    /// bitfield. Each bit selects an AutoCAD feature / entity type a
+    /// reader must support. H7CAD treats this as an opaque `i64`
+    /// passthrough — bit-to-feature mapping is documented by AutoCAD
+    /// and is not interpreted at the io layer. Default 0.
+    pub required_versions: i64,
 
     // Interactive geometry command defaults.
     /// `$CHAMFERA` (code 40): first chamfer distance. Default 0.0.
@@ -1030,6 +1036,7 @@ impl Default for DocumentHeader {
             version_guid: String::new(),
             dwg_codepage: String::new(),
             cshadow: 0,
+            required_versions: 0,
 
             chamfera: 0.0,
             chamferb: 0.0,
