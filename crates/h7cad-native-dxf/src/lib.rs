@@ -336,6 +336,12 @@ fn read_header_section(
             "$LWDISPLAY" => doc.header.lwdisplay = bv(290),
             "$XEDIT" => doc.header.xedit = bv(290),
 
+            // Drawing identity and render metadata.
+            "$FINGERPRINTGUID" => doc.header.fingerprint_guid = sv(2).to_string(),
+            "$VERSIONGUID" => doc.header.version_guid = sv(2).to_string(),
+            "$DWGCODEPAGE" => doc.header.dwg_codepage = sv(3).to_string(),
+            "$CSHADOW" => doc.header.cshadow = i16v(280),
+
             // Interactive geometry command defaults.
             "$CHAMFERA" => doc.header.chamfera = f(40),
             "$CHAMFERB" => doc.header.chamferb = f(40),

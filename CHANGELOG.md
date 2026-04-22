@@ -2,6 +2,64 @@
 
 ## [未发布]
 
+### 2026-04-22（二十三）：DXF HEADER Tier 3 表头元数据 4 变量扩充
+
+前几轮主攻绘图样式 / 几何默认值，本轮补齐**表头元数据**家族 4 变量：
+drawing 身份 GUID 对 + 字符代码页 + 当前实体 shadow 模式。这些值不
+描述任何几何，而是图纸的身份 / 版本 / 渲染属性，H7CAD 之前 reader /
+writer 全部忽略，导致 roundtrip 后静默归零。
+
+**model 扩字段**（`DocumentHeader`，插在 `xedit` 之后 / `chamfera` 之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `fingerprint_guid` | `String` | `$FINGERPRINTGUID` | 2 | `""` | 永久 GUID（创建时写入） |
+| `version_guid` | `String` | `$VERSIONGUID` | 2 | `""` | 版本 GUID（每次 save 更新） |
+| `dwg_codepage` | `String` | `$DWGCODEPAGE` | 3 | `""` | 字符代码页（如 `ANSI_1252`） |
+| `cshadow` | `i16` | `$CSHADOW` | 280 | `0` | 当前实体阴影模式 0-3 |
+
+**关键策略**：
+
+- GUID 字段 Default `""` 而非随机生成 —— io 层**纯透传**，身份创建
+  是命令层责任；reader 缺字段时不自行合成 GUID 以免破坏 "roundtrip
+  不修改原有身份" 的保证。
+- `$DWGCODEPAGE` R2007+ 已迁 UTF-8 但 AutoCAD 仍继续写出此字段兼容
+  旧 reader，H7CAD 保持同样行为：写出原值即可，不做字符集转换。
+- `$CSHADOW` 选 i16 存储而非 bool/enum：与同族 code 280 整数一致，
+  且 4 个值（0=cast+receive, 1=cast, 2=receive, 3=ignore）未来若
+  AutoCAD 扩 bitfield 也能兼容。
+
+**reader / writer 同步**：4 arm + 4 对 pair。两个 `$FINGERPRINTGUID`/
+`$VERSIONGUID` 共用 code 2，reader 按 `$VAR` 名字 match 分支天然隔离。
+
+**测试**（新增 `tests/header_drawing_metadata.rs`，4 条）：
+
+- `header_reads_all_4_drawing_metadata_vars`：两个 GUID 字符串（带 `{}`
+  和连字符）+ `ANSI_1252` + `$CSHADOW=2` 精确读入
+- `header_writes_all_4_drawing_metadata_vars`：构造 → write → 4 个
+  `$VAR` + 3 个 GUID / codepage **原字面量**全在（防止意外 lower-case
+  或 `{}` 剥离）
+- `header_roundtrip_preserves_all_4_drawing_metadata_vars`：read →
+  write → read 后字段既相等、也保持与绝对 ground-truth 一致
+- `header_legacy_file_without_drawing_metadata_loads_with_defaults`：
+  缺省 → 3 个 String 空串，`cshadow=0`（验证 io 层**不**合成 GUID）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **145 / 145 全绿**（141 前轮 + **4** 新 drawing_metadata）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `ReadLints` 改动的 4 个文件（model/lib、dxf/lib、writer、新测试）零 lint
+
+**DXF HEADER 覆盖增量**：77 → **81** 个变量（约 **~27%**）。
+
+**后续**：`$REQUIREDVERSIONS`（code 160 i64）因 writer 缺 `pair_i64` /
+reader 缺 `i64v` helper，本轮暂缓；下一轮先加 helper 再一并吞入。
+
+plan：`docs/plans/2026-04-22-drawing-metadata-plan.md`
+
+---
+
 ### 2026-04-22（二十二）：DXF HEADER Tier 2 尺寸数字格式化 6 变量扩充
 
 Tier 1（前几轮）落地了尺寸的**几何布局** 10 变量（`DIMTXT / DIMASZ /

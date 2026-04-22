@@ -888,6 +888,26 @@ pub struct DocumentHeader {
     /// referenced as XREF. Default true.
     pub xedit: bool,
 
+    // Drawing identity and render metadata.
+    /// `$FINGERPRINTGUID` (code 2): permanent drawing GUID stamped at
+    /// creation time; unchanged across save / copy / rename. Default
+    /// empty — io layer only passes the value through. Generating a
+    /// fresh GUID for brand-new drawings is a command-layer concern.
+    pub fingerprint_guid: String,
+    /// `$VERSIONGUID` (code 2): per-save GUID — updated every time the
+    /// drawing is written. Default empty (same passthrough policy as
+    /// `$FINGERPRINTGUID`).
+    pub version_guid: String,
+    /// `$DWGCODEPAGE` (code 3): drawing character code page. Legacy
+    /// field from R2000–R2006 (ANSI_* families); AutoCAD R2007+ writes
+    /// UTF-8 on disk but still emits this for backward compatibility
+    /// (commonly `"ANSI_1252"`). Default empty.
+    pub dwg_codepage: String,
+    /// `$CSHADOW` (code 280): current-entity shadow mode.
+    /// 0 = casts and receives shadows (AutoCAD default);
+    /// 1 = casts only; 2 = receives only; 3 = ignores shadows.
+    pub cshadow: i16,
+
     // Interactive geometry command defaults.
     /// `$CHAMFERA` (code 40): first chamfer distance. Default 0.0.
     pub chamfera: f64,
@@ -1005,6 +1025,11 @@ impl Default for DocumentHeader {
             insunits_def_target: 0,
             lwdisplay: false,
             xedit: true,
+
+            fingerprint_guid: String::new(),
+            version_guid: String::new(),
+            dwg_codepage: String::new(),
+            cshadow: 0,
 
             chamfera: 0.0,
             chamferb: 0.0,

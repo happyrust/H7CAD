@@ -354,6 +354,19 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(9, "$XEDIT");
     w.pair_i16(290, if doc.header.xedit { 1 } else { 0 });
 
+    // ── Drawing identity and render metadata ──────────────────────────────
+    w.pair_str(9, "$FINGERPRINTGUID");
+    w.pair_str(2, &doc.header.fingerprint_guid);
+
+    w.pair_str(9, "$VERSIONGUID");
+    w.pair_str(2, &doc.header.version_guid);
+
+    w.pair_str(9, "$DWGCODEPAGE");
+    w.pair_str(3, &doc.header.dwg_codepage);
+
+    w.pair_str(9, "$CSHADOW");
+    w.pair_i16(280, doc.header.cshadow);
+
     // ── Interactive geometry command defaults ─────────────────────────────
     w.pair_str(9, "$CHAMFERA");
     w.pair_f64(40, doc.header.chamfera);
