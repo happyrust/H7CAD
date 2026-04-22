@@ -328,6 +328,17 @@ fn read_header_section(
             "$LWDISPLAY" => doc.header.lwdisplay = bv(290),
             "$XEDIT" => doc.header.xedit = bv(290),
 
+            // Interactive geometry command defaults.
+            "$CHAMFERA" => doc.header.chamfera = f(40),
+            "$CHAMFERB" => doc.header.chamferb = f(40),
+            "$CHAMFERC" => doc.header.chamferc = f(40),
+            "$CHAMFERD" => doc.header.chamferd = f(40),
+            "$FILLETRAD" => doc.header.filletrad = f(40),
+
+            // 2.5-D default attachment.
+            "$ELEVATION" => doc.header.elevation = f(40),
+            "$THICKNESS" => doc.header.thickness = f(40),
+
             "$HANDSEED" => {
                 doc.header.handseed = u64::from_str_radix(sv(5), 16).unwrap_or(0);
             }

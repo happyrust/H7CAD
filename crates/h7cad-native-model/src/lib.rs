@@ -862,6 +862,30 @@ pub struct DocumentHeader {
     /// referenced as XREF. Default true.
     pub xedit: bool,
 
+    // Interactive geometry command defaults.
+    /// `$CHAMFERA` (code 40): first chamfer distance. Default 0.0.
+    pub chamfera: f64,
+    /// `$CHAMFERB` (code 40): second chamfer distance. Default 0.0.
+    pub chamferb: f64,
+    /// `$CHAMFERC` (code 40): chamfer length (distance-angle mode).
+    /// Default 0.0.
+    pub chamferc: f64,
+    /// `$CHAMFERD` (code 40): chamfer angle (distance-angle mode).
+    /// Stored as AutoCAD stores it (raw f64 passthrough). Default 0.0.
+    pub chamferd: f64,
+    /// `$FILLETRAD` (code 40): default fillet radius. Default 0.0.
+    pub filletrad: f64,
+
+    // 2.5-D default attachment for freshly-created entities.
+    /// `$ELEVATION` (code 40): default Z value for new entities in the
+    /// current UCS. Default 0.0.
+    pub elevation: f64,
+    /// `$THICKNESS` (code 40): default extrusion thickness for new
+    /// entities (LINE / CIRCLE / ARC / TEXT). Default 0.0. Independent
+    /// of entity-level `thickness` — this is the per-drawing default,
+    /// each entity carries its own override.
+    pub thickness: f64,
+
     pub handseed: u64,
 }
 
@@ -942,6 +966,15 @@ impl Default for DocumentHeader {
             insunits_def_target: 0,
             lwdisplay: false,
             xedit: true,
+
+            chamfera: 0.0,
+            chamferb: 0.0,
+            chamferc: 0.0,
+            chamferd: 0.0,
+            filletrad: 0.0,
+
+            elevation: 0.0,
+            thickness: 0.0,
 
             handseed: 0,
         }

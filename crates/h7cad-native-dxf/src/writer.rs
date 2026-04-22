@@ -335,6 +335,29 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(9, "$XEDIT");
     w.pair_i16(290, if doc.header.xedit { 1 } else { 0 });
 
+    // ── Interactive geometry command defaults ─────────────────────────────
+    w.pair_str(9, "$CHAMFERA");
+    w.pair_f64(40, doc.header.chamfera);
+
+    w.pair_str(9, "$CHAMFERB");
+    w.pair_f64(40, doc.header.chamferb);
+
+    w.pair_str(9, "$CHAMFERC");
+    w.pair_f64(40, doc.header.chamferc);
+
+    w.pair_str(9, "$CHAMFERD");
+    w.pair_f64(40, doc.header.chamferd);
+
+    w.pair_str(9, "$FILLETRAD");
+    w.pair_f64(40, doc.header.filletrad);
+
+    // ── 2.5-D default attachment ──────────────────────────────────────────
+    w.pair_str(9, "$ELEVATION");
+    w.pair_f64(40, doc.header.elevation);
+
+    w.pair_str(9, "$THICKNESS");
+    w.pair_f64(40, doc.header.thickness);
+
     w.pair_str(9, "$PDMODE");
     w.pair_i32(70, doc.header.pdmode);
 

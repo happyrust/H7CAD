@@ -2,6 +2,60 @@
 
 ## [未发布]
 
+### 2026-04-22（二十）：DXF HEADER Chamfer / Fillet / 3D 默认值 7 变量扩充
+
+继 HEADER 系列扩字段（三→十五 共 48 变量），本轮再补 7 个 code 40 f64
+常用默认量：Chamfer 四距离（`$CHAMFERA/B/C/D`）+ Fillet 半径（`$FILLETRAD`）
++ 当前 Elevation / Thickness（`$ELEVATION` / `$THICKNESS`）。H7CAD 之前
+reader 全部丢、writer 不输出，任意读 AutoCAD .dxf 再存回都会让这 7 个
+设置静默归零。
+
+**model 扩字段**（`DocumentHeader`，插在 `xedit` 之后 / `handseed` 之前）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default |
+|---|---|---|---|---|
+| `chamfera` | f64 | `$CHAMFERA` | 40 | 0.0 |
+| `chamferb` | f64 | `$CHAMFERB` | 40 | 0.0 |
+| `chamferc` | f64 | `$CHAMFERC` | 40 | 0.0 |
+| `chamferd` | f64 | `$CHAMFERD` | 40 | 0.0 |
+| `filletrad` | f64 | `$FILLETRAD` | 40 | 0.0 |
+| `elevation` | f64 | `$ELEVATION` | 40 | 0.0 |
+| `thickness` | f64 | `$THICKNESS` | 40 | 0.0 |
+
+`$CHAMFERA/B` 是 Distance-Distance 模式两距离；`$CHAMFERC/D` 是
+Distance-Angle 模式的长度 + 角度（角度单位由 `$AUNITS` 决定，reader / writer
+纯 f64 透传，不做 rad↔deg 归一化）。`$ELEVATION` / `$THICKNESS` 是**绘图级
+默认**——与 entity-level 同名字段编译器作用域天然隔离，互不覆盖。
+
+**reader / writer 同步**：7 arm + 7 对 pair（writer 按 AutoCAD 顺序在 `$XEDIT`
+之后、`$PDMODE` 之前，分两组：interactive geometry defaults / 2.5-D default
+attachment）。
+
+**测试**（新增 `tests/header_geom_defaults.rs`，4 条）：
+
+- `header_reads_all_7_geom_default_vars`：非默认值（1.25 / 0.75 / 2.0 / 45.0
+  / 0.5 / 10.0 / 3.14）精确读取
+- `header_writes_all_7_geom_default_vars`：构造 → write → 7 个 `$VAR`
+  字符串都在
+- `header_roundtrip_preserves_all_7_geom_default_vars`：read → write → read
+  全字段 1e-9 精度保持
+- `header_legacy_file_without_geom_defaults_loads_with_zeros`：缺省 → 7 个
+  字段全部 0.0（Default trait 兜底）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **133 / 133 全绿**（129 前轮 + **4** 新 geom defaults）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check --bin H7CAD --tests` 通过，零新 warning
+- `ReadLints` 改动的 4 个文件（model/lib、dxf/lib、writer、新测试）零 lint 错误
+
+**DXF HEADER 覆盖增量**：63 → **70** 个变量（约覆盖 AutoCAD 总计 300+
+系统变量的 **~23%**）。
+
+plan：`docs/plans/2026-04-22-header-geom-defaults-plan.md`
+
+---
+
 ### 2026-04-22（十九）：DWG Open 非致命诊断接入命令行（Milestone D'）
 
 延续 2026-04-21 的 DWG open 路径收口（十六/十七/十八），把**已经由 `acadrust`
