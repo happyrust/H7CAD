@@ -825,6 +825,32 @@ pub struct DocumentHeader {
     /// Default `"Standard"`.
     pub dimtxsty: String,
 
+    // Tier-2 dim numerics (measurement text formatting).
+    /// `$DIMRND` (code 40): rounding value for dim measurements.
+    /// `0.0` means no rounding (raw measured value). Default 0.0.
+    pub dimrnd: f64,
+    /// `$DIMLFAC` (code 40): linear measurement scale factor. All linear
+    /// dims are multiplied by this before display. Default 1.0. Negative
+    /// values mean "apply only in paper-space viewports" — stored as
+    /// raw f64 passthrough, semantics left to the renderer.
+    pub dimlfac: f64,
+    /// `$DIMTDEC` (code 70): decimal places for tolerance text (distinct
+    /// from `$DIMDEC` which governs the main dim text). Default 4.
+    pub dimtdec: i16,
+    /// `$DIMFRAC` (code 70): fraction format: 0 = horizontal stacked,
+    /// 1 = diagonal stacked, 2 = not stacked. Only meaningful when
+    /// `$DIMLUNIT` selects a fractional unit. Default 0.
+    pub dimfrac: i16,
+    /// `$DIMDSEP` (code 70): decimal separator as an ASCII code point.
+    /// 46 = `.` (default, US); 44 = `,` (European). This is the
+    /// character's **ASCII value** — unrelated to file IO encoding.
+    pub dimdsep: i16,
+    /// `$DIMZIN` (code 70): zero-suppression bitfield for dim text.
+    /// bit 1 = suppress leading zero, bit 2 = suppress trailing zero,
+    /// bit 4 = suppress 0-feet, bit 8 = suppress 0-inches. Bits may
+    /// combine; value range is 0–15. Default 0.
+    pub dimzin: i16,
+
     // Spline defaults.
     /// `$SPLFRAME` (code 70): show spline control polygon. Default false.
     pub splframe: bool,
@@ -958,6 +984,13 @@ impl Default for DocumentHeader {
             dimtofl: false,
             dimstyle: "Standard".to_string(),
             dimtxsty: "Standard".to_string(),
+
+            dimrnd: 0.0,
+            dimlfac: 1.0,
+            dimtdec: 4,
+            dimfrac: 0,
+            dimdsep: 46,
+            dimzin: 0,
 
             splframe: false,
             splinesegs: 8,

@@ -311,6 +311,14 @@ fn read_header_section(
             "$DIMSTYLE" => doc.header.dimstyle = sv(2).to_string(),
             "$DIMTXSTY" => doc.header.dimtxsty = sv(7).to_string(),
 
+            // Tier-2 dim numerics.
+            "$DIMRND" => doc.header.dimrnd = f(40),
+            "$DIMLFAC" => doc.header.dimlfac = f(40),
+            "$DIMTDEC" => doc.header.dimtdec = i16v(70),
+            "$DIMFRAC" => doc.header.dimfrac = i16v(70),
+            "$DIMDSEP" => doc.header.dimdsep = i16v(70),
+            "$DIMZIN" => doc.header.dimzin = i16v(70),
+
             // Spline defaults.
             "$SPLFRAME" => doc.header.splframe = i16v(70) != 0,
             "$SPLINESEGS" => doc.header.splinesegs = i16v(70),

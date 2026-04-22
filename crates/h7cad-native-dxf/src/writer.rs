@@ -299,6 +299,25 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_str(9, "$DIMTXSTY");
     w.pair_str(7, &doc.header.dimtxsty);
 
+    // ── Tier-2 dim numerics ───────────────────────────────────────────────
+    w.pair_str(9, "$DIMRND");
+    w.pair_f64(40, doc.header.dimrnd);
+
+    w.pair_str(9, "$DIMLFAC");
+    w.pair_f64(40, doc.header.dimlfac);
+
+    w.pair_str(9, "$DIMTDEC");
+    w.pair_i16(70, doc.header.dimtdec);
+
+    w.pair_str(9, "$DIMFRAC");
+    w.pair_i16(70, doc.header.dimfrac);
+
+    w.pair_str(9, "$DIMDSEP");
+    w.pair_i16(70, doc.header.dimdsep);
+
+    w.pair_str(9, "$DIMZIN");
+    w.pair_i16(70, doc.header.dimzin);
+
     // ── Spline defaults ───────────────────────────────────────────────────
     w.pair_str(9, "$SPLFRAME");
     w.pair_i16(70, if doc.header.splframe { 1 } else { 0 });

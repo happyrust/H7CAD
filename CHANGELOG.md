@@ -2,6 +2,61 @@
 
 ## [未发布]
 
+### 2026-04-22（二十二）：DXF HEADER Tier 2 尺寸数字格式化 6 变量扩充
+
+Tier 1（前几轮）落地了尺寸的**几何布局** 10 变量（`DIMTXT / DIMASZ /
+DIMEXO / DIMEXE / DIMGAP / DIMDEC / DIMADEC / DIMTOFL / DIMSTYLE /
+DIMTXSTY`）。本轮 Tier 2 补齐**数字格式化**侧的 6 个最常用项，让
+尺寸文本的显示形式（舍入、缩放、公差小数、分数堆叠、分隔符、
+零抑制）能完整 roundtrip AutoCAD .dxf 而不丢失。
+
+**model 扩字段**（`DocumentHeader`，插在 `dimtxsty` 之后 / `splframe`
+之前，形成完整 Tier 1 + Tier 2 尺寸家族块）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `dimrnd` | `f64` | `$DIMRND` | 40 | `0.0` | 测量舍入精度（0 = 不舍入） |
+| `dimlfac` | `f64` | `$DIMLFAC` | 40 | `1.0` | 线性缩放因子（负值 = 仅 PS） |
+| `dimtdec` | `i16` | `$DIMTDEC` | 70 | `4` | 公差文本小数位数 |
+| `dimfrac` | `i16` | `$DIMFRAC` | 70 | `0` | 分数堆叠 0=水平/1=斜线/2=不堆叠 |
+| `dimdsep` | `i16` | `$DIMDSEP` | 70 | `46` | 小数分隔符 ASCII (46=`.`, 44=`,`) |
+| `dimzin` | `i16` | `$DIMZIN` | 70 | `0` | 零抑制 bitfield (bit1=leading, bit2=trailing, bit4=0ft, bit8=0in) |
+
+**关键点**：
+
+- `$DIMLFAC` 负值语义（仅在 paper-space 引用中生效）由渲染层解读，io 层
+  纯 f64 透传不做符号判断
+- `$DIMDSEP` 是**字符的 ASCII 码**，与文件 IO 的字符编码无关
+- `$DIMZIN` 各 bit 可组合，值域 0–15；测试用 `3`（bit1|bit2）验证
+  bitfield 精确保持
+
+**reader / writer 同步**：6 arm + 6 对 pair。writer 按 AutoCAD 顺序
+插在 `$DIMTXSTY` 之后、`$SPLFRAME` 之前，独立分组便于后续 Tier 3 再扩。
+
+**测试**（新增 `tests/header_dim_numerics.rs`，4 条）：
+
+- `header_reads_all_6_dim_numerics`：非默认值（0.25 / 2.54 / 3 / 1 / 44 / 3）
+  精确读取
+- `header_writes_all_6_dim_numerics`：构造 → write → 6 个 `$VAR` 字符串全在；
+  `$DIMZIN=12`（bit4|bit8）验证 0-feet / 0-inches 抑制位
+- `header_roundtrip_preserves_all_6_dim_numerics`：read → write → read 全保持
+- `header_legacy_file_without_dim_numerics_loads_with_defaults`：缺省 →
+  **非零默认值必须兑现**（`dimlfac=1.0`, `dimtdec=4`, `dimdsep=46`）
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **141 / 141 全绿**（137 前轮 + **4** 新 dim-numerics）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `ReadLints` 改动的 4 个文件（model/lib、dxf/lib、writer、新测试）零 lint
+
+**DXF HEADER 覆盖增量**：71 → **77** 个变量（约覆盖 AutoCAD 总计 300+
+系统变量的 **~26%**）。DIM 家族累计覆盖 16 个（Tier 1: 10 + Tier 2: 6）。
+
+plan：`docs/plans/2026-04-22-dim-numerics-plan.md`
+
+---
+
 ### 2026-04-22（二十一）：DXF HEADER `$CHAMMODE` 扩充（chamfer 模式联动）
 
 上一轮（二十）落地了 chamfer 四个距离（`$CHAMFERA/B/C/D`）和 fillet 半径，
