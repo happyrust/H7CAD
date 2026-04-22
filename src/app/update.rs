@@ -285,7 +285,12 @@ impl H7CAD {
             Message::OpenFile => Task::perform(crate::io::pick_and_open(), Message::FileOpened),
 
             Message::FileOpened(Ok(open_result)) => {
-                let crate::io::OpenFileResult { name, path, opened } = open_result;
+                let crate::io::OpenFileResult {
+                    name,
+                    path,
+                    opened,
+                    notices,
+                } = open_result;
                 let current_is_empty = {
                     let t = &self.tabs[self.active_tab];
                     t.current_path.is_none()
@@ -377,7 +382,32 @@ impl H7CAD {
                     }
                 };
 
-                self.command_line.push_output(&open_message);
+                // Append a notice-summary suffix to the open message
+                // when the reader surfaced non-fatal diagnostics, then
+                // echo up to a small prefix of the full list as
+                // follow-up command-line entries. A large DWG can
+                // carry dozens of NotImplemented notices; truncating
+                // keeps the history from drowning out other output
+                // while still letting power users see the first few
+                // concrete issues. The count suffix remains accurate
+                // even when the list is truncated.
+                let notice_counts = crate::io::NoticeCounts::from_notices(&notices);
+                let full_open_message = if let Some(summary) = notice_counts.summary_zh() {
+                    format!("{open_message} · {summary}")
+                } else {
+                    open_message
+                };
+                self.command_line.push_output(&full_open_message);
+                const MAX_INLINE_NOTICES: usize = 5;
+                for notice in notices.iter().take(MAX_INLINE_NOTICES) {
+                    self.command_line.push_info(&notice.format_zh());
+                }
+                if notices.len() > MAX_INLINE_NOTICES {
+                    self.command_line.push_info(&format!(
+                        "… 另有 {} 条诊断未展开",
+                        notices.len() - MAX_INLINE_NOTICES
+                    ));
+                }
                 self.app_menu.push_recent(path.clone());
                 self.tabs[i].scene.populate_hatches_from_document();
                 self.tabs[i].scene.populate_images_from_document();
@@ -4358,6 +4388,7 @@ mod tests {
                 .to_string(),
             path: path.clone(),
             opened: crate::io::OpenedDocument::Pid(bundle),
+            notices: Vec::new(),
         })));
 
         assert!(app.tabs[0].is_pid(), "pid file should switch the active tab into pid mode");
@@ -4433,6 +4464,7 @@ mod tests {
                 .to_string(),
             path: path.clone(),
             opened: crate::io::OpenedDocument::Pid(bundle),
+            notices: Vec::new(),
         })));
 
         let _ = app.update(Message::PidToggleHideMeta);

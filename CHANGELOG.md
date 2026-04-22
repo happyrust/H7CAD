@@ -2,6 +2,141 @@
 
 ## [未发布]
 
+### 2026-04-22（十九）：DWG Open 非致命诊断接入命令行（Milestone D'）
+
+延续 2026-04-21 的 DWG open 路径收口（十六/十七/十八），把**已经由 `acadrust`
+采集但一直被 H7CAD 丢弃**的非致命诊断（`CadDocument::notifications`）带到
+命令行输出。原审核 Milestone D（"把 `h7cad-native-dwg` 的 advisory 接入
+运行时"）的前提不成立——`h7cad-native-dwg::read_dwg` 并不在运行时主打开
+路径上（当前走的是 `acadrust::io::dwg::DwgReader`），真正"接入"等于先把
+主路径迁到 native-dwg，属于 Milestone E 级别的重构。
+
+退而调研发现更务实的目标：acadrust 的 DWG reader 本身就会在解析过程中
+通过 `NotificationCollection::notify` 填入 22 + 4 处 `NotImplemented /
+NotSupported / Warning / Error` 诊断，最终汇入 `CadDocument::notifications`。
+这条通道**从 reader → compat doc 一直是通的**，唯独 H7CAD 的 io 层在
+`native_bridge::acadrust_doc_to_native` 桥接时把 notifications 字段扔了，
+UI 层的 `Message::FileOpened(Ok)` 分支也从不访问它。本轮修复这条断链。
+
+**新增模块**（`src/io/diagnostics.rs`，~280 行，8 条单元测试）：
+
+```rust
+pub enum NoticeSeverity {
+    NotImplemented, NotSupported, Warning, Error,
+}
+
+pub struct OpenNotice {
+    pub severity: NoticeSeverity,
+    pub message: String,
+}
+
+pub struct NoticeCounts {
+    pub not_implemented: usize,
+    pub not_supported: usize,
+    pub warning: usize,
+    pub error: usize,
+}
+
+pub fn from_acadrust_notifications(
+    src: &acadrust::NotificationCollection,
+) -> Vec<OpenNotice>;
+```
+
+**设计要点**：
+
+- **独立于 acadrust 类型**：`OpenNotice` 是 io 层自有的 string-based struct，
+  不再暴露 `acadrust::Notification` 给 `app::update`。将来 Milestone E
+  真正切到 native-dwg 后，只需要在 `load_file_native_blocking` 里把
+  `Ac1015RecoveryDiagnostics.summarize()` 也映射到同一个 `OpenNotice`
+  形态即可——UI 管道零改动。
+- **中英双标签**：`NoticeSeverity::zh_label()` 给命令行（"警告"/"已恢复
+  错误"/"未实现"/"不支持"），`en_tag()` 预留给未来的日志文件/结构化
+  持久化（`#[allow(dead_code)]` 标注意图）。
+- **聚合摘要**：`NoticeCounts::summary_zh()` 生成"3 条警告 / 1 条已恢复
+  错误 / 2 条未实现"形式的紧凑摘要，通过 " · " 附在"Opened … — N
+  entities"之后；零通知时返回 `None`，调用点零分支即可跳过后缀。
+
+**链路改造**（`src/io/mod.rs`）：
+
+- `load_file_native_blocking` 签名从 `-> Result<NativeCadDocument, OpenError>`
+  升级为 `-> Result<(NativeCadDocument, Vec<OpenNotice>), OpenError>`
+- `load_file_with_native_blocking` 同步升级为 `(CadDocument, Option<Native>, Vec<OpenNotice>)`
+- `open_document_blocking` 升级为 `(OpenedDocument, Vec<OpenNotice>)`
+- `open_path` 在 worker 线程里把 notices 塞进 `OpenFileResult`
+- `load_file`（向后兼容 xref 用）丢弃 notices 保持 `Result<CadDocument, String>` 签名不变
+- DWG 路径：`diagnostics::from_acadrust_notifications(&acad_doc.notifications)`
+- DXF / PID 路径：返回空 `Vec`（将来各自接入时再填）
+
+**`OpenFileResult`** 新增 `pub notices: Vec<OpenNotice>` 字段，配套
+文档注释说明数据来源与未来扩展方向。
+
+**UI 消费**（`src/app/update.rs::Message::FileOpened(Ok)`）：
+
+```rust
+let notice_counts = crate::io::NoticeCounts::from_notices(&notices);
+let full_open_message = if let Some(summary) = notice_counts.summary_zh() {
+    format!("{open_message} · {summary}")
+} else {
+    open_message
+};
+self.command_line.push_output(&full_open_message);
+const MAX_INLINE_NOTICES: usize = 5;
+for notice in notices.iter().take(MAX_INLINE_NOTICES) {
+    self.command_line.push_info(&notice.format_zh());
+}
+if notices.len() > MAX_INLINE_NOTICES {
+    self.command_line.push_info(&format!(
+        "… 另有 {} 条诊断未展开",
+        notices.len() - MAX_INLINE_NOTICES
+    ));
+}
+```
+
+**截断策略**：大型工程 DWG 容易产生数十条 `NotImplemented` 级诊断
+（THUMBNAILIMAGE section、各种 APPID 表项等），一次性全推会淹没命令行
+其他输出。选择"汇总计数 + 首 5 条原文 + N 条省略尾注"的组合，覆盖典型
+"看一眼有什么毛病"场景，完整列表留给 Milestone D'' 的诊断面板（未来）。
+
+**测试**（`src/io/diagnostics.rs::tests`，8 条全绿）：
+
+- `severity_from_acadrust_covers_every_variant`：4 个 `NotificationType` → `NoticeSeverity` 映射完整
+- `severity_labels_are_stable_in_chinese_and_english`：4 个 severity × 2 种标签全非空
+- `format_zh_produces_bracketed_label_prefix`：`"[警告] handle …"` 格式稳定
+- `from_acadrust_notifications_preserves_order_and_message_text`：3 条不同严重度的通知按序转换
+- `from_acadrust_notifications_returns_empty_for_empty_collection`：空集合 → 空 Vec
+- `notice_counts_bucket_by_severity`：4 严重度分桶统计正确
+- `notice_counts_summary_zh_none_when_empty`：零通知时 `None`
+- `notice_counts_summary_zh_joins_nonzero_buckets`：非零桶以 " / " 连接，零桶不出现
+
+**验证**：
+
+- `cargo test --bin H7CAD io::diagnostics::` **8 / 8 全绿**（本轮新增）
+- `cargo test --bin H7CAD io::` **138 / 138 全绿**（130 前轮 + 8 本轮）
+- `cargo check --bin H7CAD --tests` 通过，**零新 warning**
+- `ReadLints` 受影响文件（`diagnostics.rs` / `mod.rs` / `update.rs`）零 lint
+
+**用户可感知的改进**：
+
+- 打开任何带非致命解析问题的 DWG 时，命令行会立刻看到："Opened "foo.dwg"
+  — 1234 entities · 3 条警告 / 1 条已恢复错误 / 2 条未实现"，紧接着前 5
+  条具体条目以 `[严重度] 消息` 形式列出。
+- 零诊断的"干净"DWG 打开路径不变，摘要行不出现多余后缀。
+- DXF / PID 打开路径当前零诊断（空 Vec 直接跳过后缀），为将来各自接入
+  留下 hook。
+
+**Milestone E 过渡路径**（非本轮）：
+
+当主打开路径切到 `h7cad_native_dwg::read_dwg` 时，只需在
+`load_file_native_blocking` 的 DWG 分支里把
+`Ac1015RecoveryDiagnostics.summarize()` 映射到同一批 `OpenNotice`
+（可能需要再补一个 `from_native_dwg_diagnostics` helper），UI 层零
+改动即可直接继承新数据源。这就是独立于 acadrust 类型设计的价值。
+
+plan 依据：本轮无独立 plan 文件；改自 2026-04-21（十七）的"不包含"段落
+与同日 DWG 审核报告 P2-⑦。
+
+---
+
 ### 2026-04-21（十八）：DWG/DXF Save 对话框版本标签诚实化 + 双向 version 保真
 
 继 2026-04-21（十六/十七）DWG 打开路径收口后完成审核 P0-③（Milestone C）。原始问题是 `pick_save_path` 暴露 **16 个版本标签**（DWG/DXF 各 8 个 `(2018)/(2013)/.../(R13)` 后缀），但 `rfd::AsyncFileDialog::save_file()` 的 API 不返回用户选中的 filter，所以这些标签**从不曾影响实际写出的版本**——纯菜单欺骗。

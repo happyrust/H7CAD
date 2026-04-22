@@ -4,6 +4,7 @@
 // the current UI/runtime until scene/document migration is complete.
 
 pub mod cui;
+pub mod diagnostics;
 pub mod obj;
 pub mod open_error;
 pub mod pdf_export;
@@ -24,6 +25,8 @@ pub mod pid_import;
 pub mod pid_package_store;
 pub mod pid_screenshot;
 
+#[allow(unused_imports)] // NoticeSeverity re-exported for downstream match/construction ergonomics
+pub use diagnostics::{NoticeCounts, NoticeSeverity, OpenNotice};
 pub use open_error::OpenError;
 
 #[derive(Debug, Clone)]
@@ -40,6 +43,12 @@ pub struct OpenFileResult {
     pub name: String,
     pub path: PathBuf,
     pub opened: OpenedDocument,
+    /// Non-fatal diagnostics surfaced by the underlying reader
+    /// (unsupported sub-sections, recovered errors, etc.). Collected
+    /// from `acadrust::CadDocument::notifications` when the source was
+    /// a DWG; empty for DXF/PID until those backends add their own
+    /// diagnostic producers. See [`diagnostics::OpenNotice`].
+    pub notices: Vec<OpenNotice>,
 }
 
 // ── Open ──────────────────────────────────────────────────────────────────
@@ -95,11 +104,13 @@ pub async fn open_path(path: PathBuf) -> Result<OpenFileResult, OpenError> {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "unknown".into());
-            let result = open_document_blocking(&path).map(|opened| OpenFileResult {
-                name,
-                path: path.clone(),
-                opened,
-            });
+            let result =
+                open_document_blocking(&path).map(|(opened, notices)| OpenFileResult {
+                    name,
+                    path: path.clone(),
+                    opened,
+                    notices,
+                });
             let _ = tx.send(result);
         })
         .map_err(|e| OpenError::Io {
@@ -124,24 +135,27 @@ pub async fn open_path(path: PathBuf) -> Result<OpenFileResult, OpenError> {
 /// from an async context that must stay responsive; use [`open_path`]
 /// for that.
 pub fn load_file(path: &Path) -> Result<CadDocument, String> {
-    let (doc, _) = load_file_with_native_blocking(path).map_err(|e| e.to_string())?;
+    let (doc, _, _) = load_file_with_native_blocking(path).map_err(|e| e.to_string())?;
     Ok(doc)
 }
 
 /// Synchronous CAD document loader. Produces both the compat
-/// (`acadrust`) representation and the native counterpart.
+/// (`acadrust`) representation and the native counterpart, along with
+/// any non-fatal [`OpenNotice`]s surfaced by the underlying reader.
 pub fn load_file_with_native_blocking(
     path: &Path,
-) -> Result<(CadDocument, Option<NativeCadDocument>), OpenError> {
-    let native = load_file_native_blocking(path)?;
+) -> Result<(CadDocument, Option<NativeCadDocument>, Vec<OpenNotice>), OpenError> {
+    let (native, notices) = load_file_native_blocking(path)?;
     let compat = native_bridge::native_doc_to_acadrust(&native);
-    Ok((compat, Some(native)))
+    Ok((compat, Some(native), notices))
 }
 
 /// Synchronous document-open dispatch. Prefer [`open_path`] from
 /// async contexts so the iced main loop is not blocked for the
 /// duration of the parse.
-pub fn open_document_blocking(path: &Path) -> Result<OpenedDocument, OpenError> {
+pub fn open_document_blocking(
+    path: &Path,
+) -> Result<(OpenedDocument, Vec<OpenNotice>), OpenError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -149,13 +163,16 @@ pub fn open_document_blocking(path: &Path) -> Result<OpenedDocument, OpenError> 
 
     match ext.as_str() {
         "dwg" | "dxf" => {
-            let (compat_doc, native_doc) = load_file_with_native_blocking(path)?;
-            Ok(OpenedDocument::Cad {
-                compat_doc,
-                native_doc,
-            })
+            let (compat_doc, native_doc, notices) = load_file_with_native_blocking(path)?;
+            Ok((
+                OpenedDocument::Cad {
+                    compat_doc,
+                    native_doc,
+                },
+                notices,
+            ))
         }
-        "pid" => Ok(OpenedDocument::Pid(pid_import::open_pid(path)?)),
+        "pid" => Ok((OpenedDocument::Pid(pid_import::open_pid(path)?), Vec::new())),
         _ => Err(OpenError::UnsupportedExtension { ext }),
     }
 }
@@ -163,7 +180,13 @@ pub fn open_document_blocking(path: &Path) -> Result<OpenedDocument, OpenError> 
 /// Synchronous native-first load path. Callers who need async
 /// execution should wrap a call to this function in
 /// [`std::thread::spawn`] or [`open_path`].
-pub fn load_file_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError> {
+///
+/// Returns `(document, notices)`. DWG reads surface acadrust's
+/// `NotificationCollection` through [`diagnostics::OpenNotice`]; DXF
+/// and PID currently produce no diagnostics and return an empty Vec.
+pub fn load_file_native_blocking(
+    path: &Path,
+) -> Result<(NativeCadDocument, Vec<OpenNotice>), OpenError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -181,10 +204,14 @@ pub fn load_file_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenE
             let acad_doc = reader
                 .read()
                 .map_err(|e| open_error::classify_acadrust(e, "DWG"))?;
-            Ok(native_bridge::acadrust_doc_to_native(&acad_doc))
+            let notices = diagnostics::from_acadrust_notifications(&acad_doc.notifications);
+            Ok((native_bridge::acadrust_doc_to_native(&acad_doc), notices))
         }
-        "dxf" => load_dxf_native_blocking(path),
-        "pid" => pid_import::load_pid_native(path).map_err(OpenError::from),
+        "dxf" => Ok((load_dxf_native_blocking(path)?, Vec::new())),
+        "pid" => Ok((
+            pid_import::load_pid_native(path).map_err(OpenError::from)?,
+            Vec::new(),
+        )),
         _ => Err(OpenError::UnsupportedExtension { ext }),
     }
 }
