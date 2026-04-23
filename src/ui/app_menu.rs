@@ -56,6 +56,12 @@ const MENU_ITEMS: &[MenuItem] = &[
         command: "PRINT",
     },
     MenuItem {
+        icon: "🖼",
+        label: "Export SVG",
+        desc: "Export the current layout to SVG (opens options dialog)",
+        command: "SVGEXPORTDIALOG",
+    },
+    MenuItem {
         icon: "⚙",
         label: "Options",
         desc: "Open application settings",
