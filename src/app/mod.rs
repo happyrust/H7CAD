@@ -116,6 +116,19 @@ pub(super) struct H7CAD {
     /// Plot scale: "Fit" | "1:1" | "1:2" | "1:4" | "1:5" | "1:10" | "1:20" | "1:50" | "1:100" | "2:1".
     page_setup_scale: String,
 
+    // ── SVG Export Dialog ────────────────────────────────────────────────
+    /// OS window Id for the SVG Export options dialog (None = closed).
+    svg_export_window: Option<window::Id>,
+    /// Currently-edited export options for the dialog — flushed into
+    /// `Message::SvgExport` when the user hits OK.
+    svg_export_opts: crate::io::svg_export::SvgExportOptions,
+    /// Edit buffer for the font-size scale input (string while typing).
+    svg_export_font_size_buf: String,
+    /// Edit buffer for the minimum stroke width.
+    svg_export_min_stroke_buf: String,
+    /// Edit buffer for the line-weight scale multiplier.
+    svg_export_lw_scale_buf: String,
+
     // ── Plot Style Table ──────────────────────────────────────────────────
     /// Currently loaded CTB/STB table (None = no override).
     active_plot_style: Option<crate::io::plot_style::PlotStyleTable>,
@@ -191,6 +204,22 @@ pub enum DsField {
     Dimtxt, Dimtxsty, Dimtad, Dimtih, Dimtoh,
     Dimscale, Dimlfac, Dimlunit, Dimdec, Dimpost,
     Dimtol, Dimlim, Dimtp, Dimtm, Dimtdec, Dimtfac,
+}
+
+/// Identifies a single editable field inside the SVG Export dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SvgExportDialogField {
+    Monochrome,
+    TextAsGeometry,
+    IncludeHatches,
+    UseBlockDefs,
+    IncludeImages,
+    EmbedImages,
+    NativeCurves,
+    NativeSplines,
+    FontSizeScale,
+    MinStrokeWidth,
+    LineWeightScale,
 }
 
 #[derive(Debug, Clone)]
@@ -440,10 +469,20 @@ pub enum Message {
     PlotExport,
     /// Callback after the user picks (or cancels) the PDF export path.
     PlotExportPath(Option<std::path::PathBuf>),
-    /// Show the SVG save-file dialog and trigger SVG export.
-    SvgExport,
+    /// Show the SVG save-file dialog and trigger SVG export with given options.
+    SvgExport(crate::io::svg_export::SvgExportOptions),
     /// Callback after the user picks (or cancels) the SVG export path.
-    SvgExportPath(Option<std::path::PathBuf>),
+    SvgExportPath(Option<std::path::PathBuf>, crate::io::svg_export::SvgExportOptions),
+    /// Open the SVG Export options dialog.  `SVGEXPORTDIALOG` / `SVGOPTIONS`.
+    SvgExportDialogOpen,
+    /// Close the SVG Export options dialog without exporting.
+    SvgExportDialogClose,
+    /// Toggle a boolean field in the dialog-backed `SvgExportOptions`.
+    SvgExportDialogToggle(SvgExportDialogField),
+    /// Edit one of the numeric text fields in the dialog.
+    SvgExportDialogEdit(SvgExportDialogField, String),
+    /// Commit the dialog's current options and fire `SvgExport(...)`.
+    SvgExportDialogCommit,
     /// Send current layout to the system printer (via lp / lpr).
     PrintToPrinter,
     /// Callback from the async printer job.
@@ -643,6 +682,11 @@ impl H7CAD {
             page_setup_offset_y: "0.0".to_string(),
             page_setup_rotation: "0".to_string(),
             page_setup_scale: "Fit".to_string(),
+            svg_export_window: None,
+            svg_export_opts: crate::io::svg_export::SvgExportOptions::default(),
+            svg_export_font_size_buf: String::new(),
+            svg_export_min_stroke_buf: String::new(),
+            svg_export_lw_scale_buf: String::new(),
             // Plot style
             active_plot_style: None,
             // Color scheme (default: dark CAD-style)
@@ -748,6 +792,7 @@ pub fn run() -> iced::Result {
             if Some(window_id) == state.plotstyle_window     { return "Plot Style Table Editor".into(); }
             if Some(window_id) == state.dimstyle_window      { return "Dimension Style Manager".into(); }
             if Some(window_id) == state.shortcuts_window     { return "Keyboard Shortcuts".into(); }
+            if Some(window_id) == state.svg_export_window    { return "SVG Export Options".into(); }
             if let Some(tab) = state.tabs.get(state.active_tab) {
                 let dot = if tab.dirty { "● " } else { "" };
                 let name = tab.tab_display_name();

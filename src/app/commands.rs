@@ -6680,8 +6680,36 @@ impl H7CAD {
             "PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
             }
-            "SVGEXPORT"|"EXPORTSVG" => {
-                return Task::done(Message::SvgExport);
+            // Phase 6: dedicated dialog command.  Opens the options window
+            // without immediately firing the save-file flow; the dialog's
+            // "Export…" button continues the normal pipeline.
+            "SVGEXPORTDIALOG" | "SVGOPTIONS" | "SVGEXPORTOPTIONS" => {
+                return Task::done(Message::SvgExportDialogOpen);
+            }
+            cmd if cmd == "SVGEXPORT" || cmd == "EXPORTSVG"
+                || cmd.starts_with("SVGEXPORT ") || cmd.starts_with("EXPORTSVG ") =>
+            {
+                let sub = cmd.split_once(' ')
+                    .map(|(_, r)| r.trim().to_uppercase())
+                    .unwrap_or_default();
+                let mut opts = crate::io::svg_export::SvgExportOptions::default();
+                for token in sub.split_whitespace() {
+                    match token {
+                        "COLOR" | "COLOUR" => opts.monochrome = false,
+                        "MONO" | "MONOCHROME" => opts.monochrome = true,
+                        "TEXTGEOM" | "TEXTGEOMETRY" => opts.text_as_geometry = true,
+                        "TEXT" => opts.text_as_geometry = false,
+                        "NOHATCH" => opts.include_hatches = false,
+                        // S3: ODA-compat toggles for the raster / curve layers.
+                        "NOIMAGE" | "NOIMAGES" => opts.include_images = false,
+                        "EXTIMG" | "EXTIMAGES" => opts.embed_images = false,
+                        "NOCURVES" | "NOCURVE" => opts.native_curves = false,
+                        // Phase 5 P3: spline native toggle.
+                        "NOSPLINES" | "NOSPLINE" => opts.native_splines = false,
+                        _ => {}
+                    }
+                }
+                return Task::done(Message::SvgExport(opts));
             }
             // PRINT — send current layout to the system default printer.
             "PRINT" => {

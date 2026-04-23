@@ -1,6 +1,6 @@
 //! Viewport overlay widgets:
 //!   • info_bar()        — top-left bracket buttons showing view name / style
-//!   • nav_toolbar()     — vertical orbit/pan/zoom buttons on the right
+//!   • nav_toolbar()     — vertical orbit/pan/zoom + export buttons on the right
 
 use glam::{Mat4, Vec3};
 use iced::mouse;
@@ -70,59 +70,90 @@ pub fn info_bar<'a>(view_name: &'a str, visual_style: &'a str) -> Element<'a, Me
 // ── Nav toolbar ───────────────────────────────────────────────────────────
 
 pub fn nav_toolbar<'a>() -> Element<'a, Message> {
-    let b = |icon: &'a str, cmd: &'a str| -> Element<'a, Message> {
+    // Icon button — larger font, used for navigation glyphs.
+    let icon_btn = |icon: &'a str, cmd: &'a str| -> Element<'a, Message> {
         button(text(icon).size(14).color(Color::WHITE))
             .on_press(Message::Command(cmd.into()))
-            .style(|_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered => Color {
-                        r: 0.32,
-                        g: 0.32,
-                        b: 0.32,
-                        a: 0.95,
-                    },
-                    button::Status::Pressed => Color {
-                        r: 0.18,
-                        g: 0.42,
-                        b: 0.70,
-                        a: 1.00,
-                    },
-                    _ => Color {
-                        r: 0.20,
-                        g: 0.20,
-                        b: 0.20,
-                        a: 0.85,
-                    },
-                })),
-                border: Border {
-                    color: Color {
-                        r: 0.30,
-                        g: 0.30,
-                        b: 0.30,
-                        a: 1.0,
-                    },
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                text_color: Color::WHITE,
-                shadow: iced::Shadow::default(),
-                snap: false,
-            })
+            .style(nav_button_style)
             .padding([6, 8])
             .into()
     };
+    // Text-label button — smaller font, used for export entries.
+    let label_btn = |label: &'a str, cmd: &'a str| -> Element<'a, Message> {
+        button(text(label).size(10).color(Color::WHITE))
+            .on_press(Message::Command(cmd.into()))
+            .style(nav_button_style)
+            .padding([4, 8])
+            .into()
+    };
+    // 1-pixel separator between nav and export groups.
+    let separator = container(iced::widget::Space::new().width(Length::Fill).height(1.0))
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color {
+                r: 0.35,
+                g: 0.35,
+                b: 0.35,
+                a: 0.85,
+            })),
+            ..Default::default()
+        })
+        .padding([2, 0]);
     container(
         column![
-            b("⟳", "3DORBIT"),
-            b("✥", "PAN"),
-            b("⊕", "ZOOMIN"),
-            b("⊖", "ZOOMOUT"),
-            b("⊡", "ZOOMEXTENTS")
+            icon_btn("⟳", "3DORBIT"),
+            icon_btn("✥", "PAN"),
+            icon_btn("⊕", "ZOOMIN"),
+            icon_btn("⊖", "ZOOMOUT"),
+            icon_btn("⊡", "ZOOMEXTENTS"),
+            separator,
+            label_btn("SVG",  "SVGEXPORT"),
+            label_btn("SVG+", "SVGEXPORT COLOR"),
+            label_btn("PDF",  "PLOT"),
+            label_btn("STEP", "STEPOUT"),
         ]
         .spacing(2),
     )
     .padding(4)
     .into()
+}
+
+/// Shared button style for the nav toolbar (icon + label variants).
+fn nav_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(match status {
+            button::Status::Hovered => Color {
+                r: 0.32,
+                g: 0.32,
+                b: 0.32,
+                a: 0.95,
+            },
+            button::Status::Pressed => Color {
+                r: 0.18,
+                g: 0.42,
+                b: 0.70,
+                a: 1.00,
+            },
+            _ => Color {
+                r: 0.20,
+                g: 0.20,
+                b: 0.20,
+                a: 0.85,
+            },
+        })),
+        border: Border {
+            color: Color {
+                r: 0.30,
+                g: 0.30,
+                b: 0.30,
+                a: 1.0,
+            },
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        text_color: Color::WHITE,
+        shadow: iced::Shadow::default(),
+        snap: false,
+    }
 }
 
 // ── Grid display params ───────────────────────────────────────────────────

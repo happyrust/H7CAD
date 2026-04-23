@@ -26,6 +26,14 @@ impl H7CAD {
                 &self.page_setup_rotation, &self.page_setup_scale,
             );
         }
+        if Some(window_id) == self.svg_export_window {
+            return crate::ui::svg_export_dialog::view_window(
+                &self.svg_export_opts,
+                &self.svg_export_font_size_buf,
+                &self.svg_export_min_stroke_buf,
+                &self.svg_export_lw_scale_buf,
+            );
+        }
         if Some(window_id) == self.textstyle_window {
             let tab = &self.tabs[self.active_tab];
             let styles: Vec<String> = tab.scene.document.text_styles

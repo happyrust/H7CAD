@@ -1280,6 +1280,7 @@ impl H7CAD {
                 if self.plotstyle_window     == Some(id) { self.plotstyle_window     = None; }
                 if self.dimstyle_window      == Some(id) { self.dimstyle_window      = None; }
                 if self.shortcuts_window     == Some(id) { self.shortcuts_window     = None; }
+                if self.svg_export_window    == Some(id) { self.svg_export_window    = None; }
                 Task::none()
             }
 
@@ -3493,7 +3494,7 @@ impl H7CAD {
             }
 
             // ── SVG Export ─────────────────────────────────────────────────────
-            Message::SvgExport => {
+            Message::SvgExport(opts) => {
                 let i = self.active_tab;
                 let stem = self.tabs[i]
                     .current_path
@@ -3503,11 +3504,11 @@ impl H7CAD {
                     .unwrap_or_else(|| "drawing".into());
                 Task::perform(
                     crate::io::svg_export::pick_svg_path_owned(stem),
-                    Message::SvgExportPath,
+                    move |p| Message::SvgExportPath(p, opts.clone()),
                 )
             }
-            Message::SvgExportPath(None) => Task::none(),
-            Message::SvgExportPath(Some(path)) => {
+            Message::SvgExportPath(None, _) => Task::none(),
+            Message::SvgExportPath(Some(path), opts) => {
                 let i = self.active_tab;
                 let scene = &self.tabs[i].scene;
                 let layout_name = scene.current_layout.clone();
@@ -3584,11 +3585,15 @@ impl H7CAD {
                     _        => (paper_w, paper_h),
                 };
 
-                match crate::io::svg_export::export_svg(
-                    &wires, eff_w, eff_h,
+                match crate::io::svg_export::export_svg_full(
+                    &wires,
+                    &scene.hatches,
+                    scene.native_doc(),
+                    eff_w, eff_h,
                     draw_ox as f32, draw_oy as f32,
                     rotation_deg, &path,
                     self.active_plot_style.as_ref(),
+                    &opts,
                 ) {
                     Ok(()) => self.command_line.push_info(&format!(
                         "SVG exported: {}",
@@ -3597,6 +3602,78 @@ impl H7CAD {
                     Err(e) => self.command_line.push_error(&format!("SVG export failed: {e}")),
                 }
                 Task::none()
+            }
+
+            // ── SVG Export options dialog ─────────────────────────────────
+            Message::SvgExportDialogOpen => {
+                // Seed the edit buffers with the current numeric options
+                // so the dialog reflects the effective defaults every time
+                // it is opened.
+                self.svg_export_font_size_buf =
+                    format!("{:.3}", self.svg_export_opts.font_size_scale);
+                self.svg_export_min_stroke_buf =
+                    format!("{:.3}", self.svg_export_opts.min_stroke_width);
+                self.svg_export_lw_scale_buf =
+                    format!("{:.4}", self.svg_export_opts.line_weight_scale);
+                if let Some(id) = self.svg_export_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(440.0, 440.0),
+                    resizable: false,
+                    ..Default::default()
+                });
+                self.svg_export_window = Some(id);
+                task.map(|_| Message::Noop)
+            }
+            Message::SvgExportDialogClose => {
+                if let Some(id) = self.svg_export_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::SvgExportDialogToggle(field) => {
+                crate::ui::svg_export_dialog::apply_toggle(&mut self.svg_export_opts, field);
+                Task::none()
+            }
+            Message::SvgExportDialogEdit(field, s) => {
+                use crate::app::SvgExportDialogField as F;
+                match field {
+                    F::FontSizeScale   => self.svg_export_font_size_buf  = s,
+                    F::MinStrokeWidth  => self.svg_export_min_stroke_buf = s,
+                    F::LineWeightScale => self.svg_export_lw_scale_buf   = s,
+                    // Booleans do not pass through the edit path.
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::SvgExportDialogCommit => {
+                // Flush numeric buffers into the options (fall back to the
+                // live value if the user typed something unparseable).
+                let parse_f32 = |buf: &str, fallback: f32| {
+                    buf.trim().parse::<f32>().ok().filter(|v| v.is_finite()).unwrap_or(fallback)
+                };
+                self.svg_export_opts.font_size_scale = parse_f32(
+                    &self.svg_export_font_size_buf,
+                    self.svg_export_opts.font_size_scale,
+                );
+                self.svg_export_opts.min_stroke_width = parse_f32(
+                    &self.svg_export_min_stroke_buf,
+                    self.svg_export_opts.min_stroke_width,
+                );
+                self.svg_export_opts.line_weight_scale = parse_f32(
+                    &self.svg_export_lw_scale_buf,
+                    self.svg_export_opts.line_weight_scale,
+                );
+                let opts = self.svg_export_opts.clone();
+                // Close the dialog and kick off the existing export flow.
+                let close_task = if let Some(id) = self.svg_export_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                };
+                Task::batch([close_task, Task::done(Message::SvgExport(opts))])
             }
 
             // ── Print to system printer ───────────────────────────────────────
