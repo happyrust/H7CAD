@@ -80,7 +80,7 @@ export_svg_full(
 | `image_url_prefix` | `"./"` | `ImageUrl` | Used when `embed_images=false` |
 | `image_base` | `None` | `ImageBase` | Resolve relative paths |
 | `native_curves` | `true` | — (H7CAD extension) | `<circle>`/`<ellipse>`/`<path A>` |
-| `native_splines` | `true` | — (H7CAD extension) | Degree-1 control polygon / fit-point approximation |
+| `native_splines` | `true` | — (H7CAD extension) | Degree-1 control polygon / degree-2/3 NURBS→Bezier / fit-point fallback |
 
 ## Element layer order
 
@@ -118,7 +118,15 @@ the exporter stacks from bottom to top:
 - Self-contained SVG output (base64-embedded images)
 - Native `<circle>` / `<ellipse>` / arc `<path>` for top-level curves
 - Native `<path d="... A ...">` for LwPolyline with bulge segments
-- Degree-1 Splines and fit-point Splines emitted as native polylines
+- Spline strategy ladder:
+  - **Degree 1** → exact polyline through control points
+  - **Degree 2 / 3 clamped non-rational** → piecewise Bezier via Boehm
+    knot insertion, emitted as a single `<path d="M … Q … Q …"/>`
+    (quadratic) or `<path d="M … C … C …"/>` (cubic) with every internal
+    knot refined to multiplicity = `degree` so segments are C⁰-continuous
+    yet authored in exact Bezier form
+  - **Closed / periodic / rational / degree ≥ 4** → fit-point polyline if
+    available, otherwise WireModel tessellation
 
 ### Intentional differences
 
@@ -156,9 +164,23 @@ MText, Hatch, nested Insert, Dimension, Spline, Face3D, or Solid.  Blocks
 with those child entities continue to rely on the WireModel pipeline.
 LwPolylines (bulged or straight) and Ellipses are supported as of Phase 4.
 
+**Q: My degree-2/3 NURBS with non-unit weights still comes out as a
+polyline.**
+A: The Bezier conversion only handles non-rational curves (all weights
+equal).  Truly rational NURBS would require a `<path>`-incompatible
+rational Bezier form; H7CAD currently falls back to the fit-point
+polyline path for those.  Degree-1, uniform-weight degree 2/3, and
+splines with fit-points continue to work natively.
+
 ## Tests
 
 `cargo test --package H7CAD --bin H7CAD io::svg_export` runs the full
 suite.  The end-to-end fixture `tests/fixtures/sample.dxf` covers the
 Line / Circle / Arc / Text path and is mirrored by
-`sample_dxf_end_to_end_produces_all_native_shapes`.
+`sample_dxf_end_to_end_produces_all_native_shapes`.  NURBS → Bezier
+decomposition is verified by
+`bspline_to_bezier_single_cubic_segment_returns_control_points_unchanged`,
+`bspline_to_bezier_cubic_with_one_internal_knot_yields_two_segments`,
+`bspline_to_bezier_quadratic_emits_one_segment`, and four guard tests
+for unsupported degrees, non-clamped knots, mismatched inputs, and
+rational weights.

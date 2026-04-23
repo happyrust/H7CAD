@@ -488,12 +488,17 @@ fn collect_emittable_spline_handles(
     for entity in &doc.entities {
         if let nm::EntityData::Spline {
             degree,
+            closed,
+            knots,
             control_points,
+            weights,
             fit_points,
             ..
         } = &entity.data
         {
-            if spline_emit_strategy(*degree, control_points, fit_points).is_some() {
+            if spline_emit_strategy(*degree, *closed, knots, control_points, weights, fit_points)
+                .is_some()
+            {
                 handles.insert(entity.handle.value().to_string());
             }
         }
@@ -506,22 +511,177 @@ fn collect_emittable_spline_handles(
 enum SplineEmit {
     /// Degree 1 spline — control polygon IS the curve.
     ControlPoly,
+    /// Clamped non-rational degree 2/3 NURBS decomposed into piecewise Bezier.
+    /// The payload is a flat `Vec` of control points of length
+    /// `segments * degree + 1`, where segment `s` spans
+    /// `[s*degree ..= s*degree + degree]`.
+    Bezier {
+        degree: usize,
+        control_points: Vec<[f64; 3]>,
+    },
     /// Curve has fit points → polyline through them is visually close.
     FitPoly,
 }
 
 fn spline_emit_strategy(
     degree: i32,
+    closed: bool,
+    knots: &[f64],
     control_points: &[[f64; 3]],
+    weights: &[f64],
     fit_points: &[[f64; 3]],
 ) -> Option<SplineEmit> {
     if degree == 1 && control_points.len() >= 2 {
         return Some(SplineEmit::ControlPoly);
     }
+    // Phase 7: NURBS → piecewise Bezier for degree 2/3, clamped, non-rational.
+    // Closed/periodic and true rational curves still defer to fit-poly / wire.
+    if !closed && (degree == 2 || degree == 3) {
+        let non_rational = weights.is_empty()
+            || weights.iter().all(|w| (w - 1.0).abs() < 1e-9)
+            || {
+                let first = weights[0];
+                weights.iter().all(|w| (w - first).abs() < 1e-9)
+            };
+        if non_rational {
+            if let Some(pts) = bspline_to_bezier(degree as usize, knots, control_points) {
+                return Some(SplineEmit::Bezier {
+                    degree: degree as usize,
+                    control_points: pts,
+                });
+            }
+        }
+    }
     if fit_points.len() >= 2 {
         return Some(SplineEmit::FitPoly);
     }
     None
+}
+
+// ── B-spline → Bezier decomposition (Boehm knot insertion) ─────────────────
+//
+// Converts a clamped non-rational B-spline into piecewise Bezier control
+// points.  For each distinct internal knot we insert the knot value until
+// its multiplicity equals `degree`; once that's done, every consecutive
+// `degree+1` control points form a Bezier segment with C0 continuity.
+//
+// Complexity: O(k · S · n) where k = degree, S = distinct-internal-knot
+// count, n = control-point count — cheap even for splines with hundreds of
+// control points that we typically see in real DXF drawings.
+
+/// Convert a clamped, non-rational B-spline into piecewise Bezier control
+/// points.  Returns `None` when inputs are inconsistent or the spline is
+/// not clamped (first/last knot repeated `degree+1` times).
+///
+/// The returned vector has length `segments * degree + 1`; segment `s`
+/// spans indices `[s*degree ..= s*degree + degree]`.  Adjacent segments
+/// share the boundary control point, giving a natural `M … C … C …`
+/// (cubic) or `M … Q … Q …` (quadratic) SVG path layout.
+fn bspline_to_bezier(
+    degree: usize,
+    knots: &[f64],
+    control_points: &[[f64; 3]],
+) -> Option<Vec<[f64; 3]>> {
+    let k = degree;
+    if !(2..=3).contains(&k) {
+        return None;
+    }
+    let n_plus_1 = control_points.len();
+    // Knot vector length invariant: m+1 = n + k + 2 ⇒ n + k + 2 == knots.len()
+    if n_plus_1 < k + 1 || knots.len() != n_plus_1 + k + 1 {
+        return None;
+    }
+    // Clamped: first k+1 and last k+1 knots each equal.
+    let u0 = knots[0];
+    let u_last = knots[knots.len() - 1];
+    if !knots.iter().take(k + 1).all(|u| (u - u0).abs() < 1e-9)
+        || !knots
+            .iter()
+            .rev()
+            .take(k + 1)
+            .all(|u| (u - u_last).abs() < 1e-9)
+    {
+        return None;
+    }
+    if (u_last - u0).abs() < 1e-12 {
+        return None;
+    }
+
+    let mut cps = control_points.to_vec();
+    let mut ks = knots.to_vec();
+
+    // Distinct internal knot values (strict interior: indices (k, m-k)).
+    let m = ks.len() - 1;
+    let mut distinct: Vec<f64> = Vec::new();
+    let mut i = k + 1;
+    while i < m - k {
+        let u = ks[i];
+        if distinct.last().map_or(true, |&prev| (prev - u).abs() > 1e-12) {
+            distinct.push(u);
+        }
+        i += 1;
+    }
+
+    for u in distinct {
+        let mult = ks.iter().filter(|&&x| (x - u).abs() < 1e-12).count();
+        let need = k.saturating_sub(mult);
+        for _ in 0..need {
+            insert_knot_once(k, &mut ks, &mut cps, u)?;
+        }
+    }
+
+    // Output invariant: segments * degree + 1 control points.
+    Some(cps)
+}
+
+/// One Boehm knot insertion step.  Finds `j` such that
+/// `knots[j] <= bar_u < knots[j+1]` and produces new control points
+/// `Q_0 .. Q_{n+1}` plus knot vector with `bar_u` inserted after index `j`.
+fn insert_knot_once(
+    degree: usize,
+    knots: &mut Vec<f64>,
+    cps: &mut Vec<[f64; 3]>,
+    bar_u: f64,
+) -> Option<()> {
+    let k = degree;
+    let mut j: Option<usize> = None;
+    for i in 0..knots.len() - 1 {
+        if knots[i] <= bar_u && bar_u < knots[i + 1] {
+            j = Some(i);
+            break;
+        }
+    }
+    let j = j?;
+    // For a clamped spline and internal knot, j ≥ k always holds.
+    if j < k {
+        return None;
+    }
+    let n = cps.len() - 1;
+    let mut q: Vec<[f64; 3]> = Vec::with_capacity(n + 2);
+    for i in 0..=n + 1 {
+        if i + k <= j {
+            q.push(cps[i]);
+        } else if i <= j {
+            let denom = knots[i + k] - knots[i];
+            let alpha = if denom.abs() < 1e-12 {
+                0.0
+            } else {
+                (bar_u - knots[i]) / denom
+            };
+            let a = cps[i - 1];
+            let b = cps[i];
+            q.push([
+                (1.0 - alpha) * a[0] + alpha * b[0],
+                (1.0 - alpha) * a[1] + alpha * b[1],
+                (1.0 - alpha) * a[2] + alpha * b[2],
+            ]);
+        } else {
+            q.push(cps[i - 1]);
+        }
+    }
+    knots.insert(j + 1, bar_u);
+    *cps = q;
+    Some(())
 }
 
 // ── Native curve emission (Circle / Arc / Ellipse → native SVG elements) ───
@@ -655,14 +815,17 @@ fn emit_native_splines(
         let nm::EntityData::Spline {
             degree,
             closed,
+            knots,
             control_points,
+            weights,
             fit_points,
             ..
         } = &entity.data
         else {
             continue;
         };
-        let Some(strategy) = spline_emit_strategy(*degree, control_points, fit_points)
+        let Some(strategy) =
+            spline_emit_strategy(*degree, *closed, knots, control_points, weights, fit_points)
         else {
             continue;
         };
@@ -670,21 +833,92 @@ fn emit_native_splines(
         let stroke = resolve_entity_stroke(entity, plot_style, options);
         let lw = resolve_entity_lineweight(entity, plot_style, options);
 
-        let src: &[[f64; 3]] = match strategy {
-            SplineEmit::ControlPoly => control_points,
-            SplineEmit::FitPoly => fit_points,
-        };
-        let vertices: Vec<PolylineVertex> = src
-            .iter()
-            .map(|p| PolylineVertex {
-                x: p[0] + ox as f64,
-                y: p[1] + oy as f64,
-                bulge: 0.0,
-            })
-            .collect();
-
-        emit_polyline_path(svg, &vertices, *closed, &stroke, lw);
+        match strategy {
+            SplineEmit::ControlPoly => {
+                let vertices = offset_polyline_vertices(control_points, ox, oy);
+                emit_polyline_path(svg, &vertices, *closed, &stroke, lw);
+            }
+            SplineEmit::FitPoly => {
+                let vertices = offset_polyline_vertices(fit_points, ox, oy);
+                emit_polyline_path(svg, &vertices, *closed, &stroke, lw);
+            }
+            SplineEmit::Bezier {
+                degree: k,
+                control_points: refined,
+            } => {
+                emit_bezier_path(svg, k, &refined, ox, oy, &stroke, lw);
+            }
+        }
     }
+}
+
+/// Helper used by the polyline-based spline strategies.  Produces the
+/// zero-bulge `PolylineVertex` list with the scene offset already applied.
+fn offset_polyline_vertices(src: &[[f64; 3]], ox: f32, oy: f32) -> Vec<PolylineVertex> {
+    src.iter()
+        .map(|p| PolylineVertex {
+            x: p[0] + ox as f64,
+            y: p[1] + oy as f64,
+            bulge: 0.0,
+        })
+        .collect()
+}
+
+/// Emit an SVG `<path>` tracing piecewise Bezier segments.  `refined` is the
+/// flat control-point list returned by `bspline_to_bezier`; adjacent segments
+/// share the boundary point so the SVG path only needs `degree` points per
+/// segment after the initial `M`.
+fn emit_bezier_path(
+    svg: &mut String,
+    degree: usize,
+    refined: &[[f64; 3]],
+    ox: f32,
+    oy: f32,
+    stroke: &str,
+    lw: f32,
+) {
+    if refined.len() < degree + 1 {
+        return;
+    }
+    let op = match degree {
+        2 => 'Q',
+        3 => 'C',
+        _ => return,
+    };
+    let seg_count = (refined.len() - 1) / degree;
+    if seg_count == 0 {
+        return;
+    }
+
+    let mut d = String::with_capacity(32 + seg_count * (degree * 24 + 4));
+    let p0 = refined[0];
+    let _ = write!(
+        d,
+        "M {x} {y}",
+        x = fmt_f32(p0[0] as f32 + ox),
+        y = fmt_f32(p0[1] as f32 + oy),
+    );
+    for s in 0..seg_count {
+        d.push(' ');
+        d.push(op);
+        for offset in 1..=degree {
+            let p = refined[s * degree + offset];
+            let _ = write!(
+                d,
+                " {x} {y}",
+                x = fmt_f32(p[0] as f32 + ox),
+                y = fmt_f32(p[1] as f32 + oy),
+            );
+        }
+    }
+
+    svg.push_str("<path d=\"");
+    svg.push_str(&d);
+    svg.push_str("\" fill=\"none\" stroke=\"");
+    svg.push_str(stroke);
+    svg.push_str("\" stroke-width=\"");
+    svg.push_str(&fmt_f32(lw));
+    svg.push_str("\"/>\n");
 }
 
 /// Compute an SVG `stroke="..."` value for a native entity, honouring
@@ -3633,7 +3867,10 @@ mod tests {
     }
 
     #[test]
-    fn native_spline_with_fit_points_uses_those() {
+    fn native_spline_clamped_cubic_emits_bezier_path() {
+        // Phase 7: a clamped non-rational cubic (degree 3, 4 cps, knots all 0
+        // or 1) is a single Bezier segment.  We now prefer the exact `<path
+        // C>` output over the earlier fit-point polyline approximation.
         let mut doc = nm::CadDocument::new();
         push_entity(
             &mut doc,
@@ -3666,8 +3903,14 @@ mod tests {
             None,
             &default_opts(),
         );
-        // Should use fit points, not control points.
-        assert!(svg.contains("points=\"0,0 1.5,1 3,0\""));
+        // Exact Bezier path, one segment (`M` + one `C`).
+        assert!(svg.contains("<path "), "svg was: {svg}");
+        assert!(
+            svg.contains("M 0 0 C 1 2 2 2 3 0"),
+            "expected Bezier path in: {svg}"
+        );
+        // fit-poly polyline should NOT appear for this spline any more.
+        assert!(!svg.contains("points=\"0,0 1.5,1 3,0\""), "svg was: {svg}");
     }
 
     #[test]
@@ -3738,6 +3981,232 @@ mod tests {
         );
         // Closed straight polyline → <polygon>.
         assert!(svg.contains("<polygon "));
+    }
+
+    // ── Phase 7: NURBS → Bezier decomposition ─────────────────────────────
+
+    #[test]
+    fn bspline_to_bezier_single_cubic_segment_returns_control_points_unchanged() {
+        // Clamped cubic with no internal knots: the 4 control points already
+        // ARE the single Bezier segment.
+        let cps = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [2.0, 2.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let out = bspline_to_bezier(3, &knots, &cps).expect("clamped cubic");
+        assert_eq!(out.len(), 4);
+        for (a, b) in out.iter().zip(cps.iter()) {
+            for i in 0..3 {
+                assert!((a[i] - b[i]).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn bspline_to_bezier_cubic_with_one_internal_knot_yields_two_segments() {
+        // 5 control points, 10 knots, one internal knot at 0.5 → 2 segments,
+        // 7 refined control points, first point matches input.
+        let cps = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [2.0, 2.0, 0.0],
+            [3.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+        ];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let out = bspline_to_bezier(3, &knots, &cps).expect("clamped cubic");
+        // (segments * degree + 1) = 2 * 3 + 1 = 7
+        assert_eq!(out.len(), 7);
+        // First and last points are preserved (clamped spline property).
+        for i in 0..3 {
+            assert!((out[0][i] - cps[0][i]).abs() < 1e-12);
+            assert!((out[6][i] - cps[4][i]).abs() < 1e-12);
+        }
+        // The shared boundary control point (index 3) lies on the original
+        // curve at u=0.5 and must sit at a sensible y-coordinate between
+        // the inner hump and the descent — strictly positive for this shape.
+        assert!(out[3][1] > 0.0, "boundary y should be positive: {:?}", out[3]);
+    }
+
+    #[test]
+    fn bspline_to_bezier_quadratic_emits_one_segment() {
+        // 3 cps, knots [0,0,0,1,1,1] → single quadratic Bezier.
+        let cps = vec![[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 0.0]];
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let out = bspline_to_bezier(2, &knots, &cps).expect("clamped quadratic");
+        assert_eq!(out.len(), 3);
+        for (a, b) in out.iter().zip(cps.iter()) {
+            for i in 0..3 {
+                assert!((a[i] - b[i]).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn bspline_to_bezier_rejects_non_clamped_knots() {
+        // Uniform (open, non-clamped) knots → we don't try to decompose.
+        let cps = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [2.0, 2.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ];
+        let knots = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        assert!(bspline_to_bezier(3, &knots, &cps).is_none());
+    }
+
+    #[test]
+    fn bspline_to_bezier_rejects_unsupported_degree() {
+        let cps = vec![[0.0; 3]; 6];
+        let knots = vec![0.0; 11];
+        assert!(bspline_to_bezier(4, &knots, &cps).is_none());
+        assert!(bspline_to_bezier(1, &knots, &cps).is_none());
+    }
+
+    #[test]
+    fn bspline_to_bezier_rejects_mismatched_inputs() {
+        // knots.len() must equal cps.len() + degree + 1.
+        let cps = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]];
+        let wrong_knots = vec![0.0; 5]; // would need 7 for degree 3
+        assert!(bspline_to_bezier(3, &wrong_knots, &cps).is_none());
+    }
+
+    #[test]
+    fn spline_emit_strategy_prefers_bezier_over_fit_poly() {
+        // A clamped cubic with fit_points should still go through Bezier
+        // because that's the more accurate representation.
+        let cps = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [2.0, 2.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let fit = vec![[0.0, 0.0, 0.0], [1.5, 1.0, 0.0], [3.0, 0.0, 0.0]];
+        let weights = vec![1.0; 4];
+        let strat = spline_emit_strategy(3, false, &knots, &cps, &weights, &fit);
+        assert!(matches!(strat, Some(SplineEmit::Bezier { .. })));
+    }
+
+    #[test]
+    fn spline_emit_strategy_falls_back_when_closed() {
+        // Closed/periodic splines still go through fit-poly or wire.
+        let cps = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [2.0, 2.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let fit = vec![[0.0, 0.0, 0.0], [1.5, 1.0, 0.0]];
+        let weights = vec![1.0; 4];
+        let strat = spline_emit_strategy(3, true, &knots, &cps, &weights, &fit);
+        assert!(matches!(strat, Some(SplineEmit::FitPoly)));
+    }
+
+    #[test]
+    fn spline_emit_strategy_rational_defers_to_fit_poly() {
+        // Non-unit weights = true NURBS; we don't handle rational curves yet.
+        let cps = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [2.0, 2.0, 0.0],
+            [3.0, 0.0, 0.0],
+        ];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let weights = vec![1.0, 2.0, 1.0, 1.0];
+        let fit = vec![[0.0, 0.0, 0.0], [1.5, 1.0, 0.0]];
+        let strat = spline_emit_strategy(3, false, &knots, &cps, &weights, &fit);
+        assert!(matches!(strat, Some(SplineEmit::FitPoly)));
+    }
+
+    #[test]
+    fn native_spline_bezier_path_includes_scene_offset() {
+        // Sanity: scene offset (ox=10, oy=20) is applied to every point in
+        // the emitted Bezier path.
+        let mut doc = nm::CadDocument::new();
+        push_entity(
+            &mut doc,
+            720,
+            nm::EntityData::Spline {
+                degree: 3,
+                closed: false,
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                control_points: vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 2.0, 0.0],
+                    [2.0, 2.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                ],
+                weights: vec![1.0; 4],
+                fit_points: Vec::new(),
+                start_tangent: [0.0, 0.0, 0.0],
+                end_tangent: [0.0, 0.0, 0.0],
+            },
+        );
+        let svg = build_svg_full(
+            &Vec::<WireModel>::new(),
+            &HashMap::new(),
+            Some(&doc),
+            50.0,
+            50.0,
+            10.0,
+            20.0,
+            0,
+            None,
+            &default_opts(),
+        );
+        // M at (0+10, 0+20) = (10, 20); first cubic C control at (1+10, 2+20).
+        assert!(svg.contains("M 10 20"), "svg was: {svg}");
+        assert!(svg.contains("C 11 22 12 22 13 20"), "svg was: {svg}");
+    }
+
+    #[test]
+    fn native_spline_bezier_path_suppresses_wire_fallback() {
+        // Emitting Bezier natively should stop the wire passthrough from
+        // also drawing this handle.
+        let mut doc = nm::CadDocument::new();
+        push_entity(
+            &mut doc,
+            721,
+            nm::EntityData::Spline {
+                degree: 3,
+                closed: false,
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                control_points: vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 2.0, 0.0],
+                    [2.0, 2.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                ],
+                weights: vec![1.0; 4],
+                fit_points: Vec::new(),
+                start_tangent: [0.0, 0.0, 0.0],
+                end_tangent: [0.0, 0.0, 0.0],
+            },
+        );
+        let wires = vec![make_wire("721", vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]], 7)];
+        let svg = build_svg_full(
+            &wires,
+            &HashMap::new(),
+            Some(&doc),
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &default_opts(),
+        );
+        assert_eq!(
+            svg.matches("<polyline ").count(),
+            0,
+            "wire must be suppressed when Bezier path is emitted: {svg}"
+        );
+        assert_eq!(svg.matches("<path ").count(), 1, "svg was: {svg}");
     }
 
     #[test]
