@@ -2,6 +2,63 @@
 
 ## [未发布]
 
+### 2026-04-25（三十五）：PDF 原生 Spline piecewise bezier
+
+> PDF Phase 3 的第一项——把 `SPLINE` 实体从 wire tessellation 升级
+> 到原生 PDF cubic bezier。任何有样条曲线的 DXF 文件导出 PDF 时
+> 现在都会输出平滑的 C 曲线而不是折线近似。
+> 详见 `docs/plans/2026-04-25-pdf-native-splines-plan.md`。
+
+**实现**
+
+- 把 `svg_export` 里已经跑通的 NURBS→Bezier 算法升级为 `pub(crate)`：
+  `bspline_to_bezier()`（Boehm 节点插入）/ `spline_emit_strategy()` /
+  `SplineEmit` enum / `collect_emittable_spline_handles()`
+- `PdfExportOptions::native_splines: bool`（默认 `true`，对齐 SVG）
+- `emit_native_splines()` 按策略分发：
+  - `ControlPoly` (degree = 1) → `Op::DrawLine` 控制点折线
+  - `Bezier { degree: 3, .. }` → `Op::DrawLine` 带 cubic bezier 控制点
+    （`[P0, C1=true, C2=true, P3]` 组装顺序）
+  - `Bezier { degree: 2, .. }` → **quadratic→cubic 精确提升**，对每
+    段 `[Q0, Q1, Q2]` 按 2/3 规则构造 `[P0, C1, C2, P3]`
+    (`C1 = Q0 + 2/3(Q1-Q0)`, `C2 = Q2 + 2/3(Q1-Q2)`)——不是近似，是
+    数学等价的 cubic
+  - `FitPoly` → fit-point 折线回退
+- `collect_native_handles()` 返回值从三元组 `(text, image, curve)`
+  扩成四元组 `(text, image, curve, spline)`；wire 层按 spline
+  handle 跳过对应 wire，避免原生路径和 wire 双绘
+
+**Rational / 闭合 / 高阶回退**
+
+`spline_emit_strategy` 对以下情况返回 `None`，继续走 wire 路径（不
+会被 spline handle 集合捕获）：
+
+- Rational spline（`weights` 非 uniform 且不是全 1）
+- Closed/periodic spline
+- degree ≥ 4 的 NURBS
+
+这与 SVG export 的策略对齐。
+
+**新增 3 个 fixture 测试**
+
+- `fixture_pdf_spline_degree_1_listed_in_collect_handles`：degree-1
+  spline 产生 1 个 spline handle；`native_splines=false` 清空集合
+- `fixture_pdf_spline_cubic_emits_bezier_path`：clamped 4-point cubic
+  spline (knots `[0,0,0,0,1,1,1,1]`) 的 PDF 字节比 empty 多 ≥ 50 B
+- `fixture_pdf_spline_rational_falls_back_to_wire_path`：weights 非
+  uniform 的 cubic spline 不进入 native 集合，wire fallback 仍生效
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD io::pdf_export` 15 → 18 全绿
+- `cargo test --bin H7CAD` 396 → 399 全绿
+
+**至此 PDF 导出 Phase 3 的 Spline 路径收口**。剩余的 PDF Phase 3 项
+（Gradient HATCH / Block Form XObject）延到后续轮次，视需求优先级。
+
+---
+
 ### 2026-04-25（三十四）：ARC_DIMENSION + LARGE_RADIAL_DIMENSION bridge 收口
 
 > 关掉 R31 2D 显示收口 table 里的最后两个「本轮不要求」dimension

@@ -503,7 +503,7 @@ fn collect_native_curve_handles(doc: &nm::CadDocument) -> std::collections::Hash
 
 /// Returns handles for only those splines we can emit natively, so unhandled
 /// NURBS configurations keep flowing through the WireModel tessellation pass.
-fn collect_emittable_spline_handles(
+pub(crate) fn collect_emittable_spline_handles(
     doc: &nm::CadDocument,
 ) -> std::collections::HashSet<String> {
     let mut handles = std::collections::HashSet::new();
@@ -530,7 +530,7 @@ fn collect_emittable_spline_handles(
 
 /// Pick an emission strategy for a DXF spline.  Returns `None` when the
 /// spline needs the wire fallback (high-order NURBS without fit points).
-enum SplineEmit {
+pub(crate) enum SplineEmit {
     /// Degree 1 spline — control polygon IS the curve.
     ControlPoly,
     /// Clamped non-rational degree 2/3 NURBS decomposed into piecewise Bezier.
@@ -545,7 +545,7 @@ enum SplineEmit {
     FitPoly,
 }
 
-fn spline_emit_strategy(
+pub(crate) fn spline_emit_strategy(
     degree: i32,
     closed: bool,
     knots: &[f64],
@@ -599,7 +599,7 @@ fn spline_emit_strategy(
 /// spans indices `[s*degree ..= s*degree + degree]`.  Adjacent segments
 /// share the boundary control point, giving a natural `M … C … C …`
 /// (cubic) or `M … Q … Q …` (quadratic) SVG path layout.
-fn bspline_to_bezier(
+pub(crate) fn bspline_to_bezier(
     degree: usize,
     knots: &[f64],
     control_points: &[[f64; 3]],

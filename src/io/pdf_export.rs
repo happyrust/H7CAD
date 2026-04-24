@@ -69,6 +69,15 @@ pub struct PdfExportOptions {
     /// PDF (三十三轮 Phase 2).  When `false`, pattern HATCHes are silently
     /// skipped — matches Phase 1 behaviour for backward compat.
     pub hatch_patterns: bool,
+    /// Emit native SPLINE entities as PDF bezier paths (三十五轮 Phase 3).
+    /// - degree 1 ⇒ control-point polyline
+    /// - clamped non-rational degree 2/3 ⇒ piecewise cubic bezier
+    ///   (degree 2 is promoted to cubic via the standard 2/3 rule)
+    /// - high-order / rational / closed-periodic ⇒ fit-point polyline fallback,
+    ///   or wire tessellation when no fit points exist
+    ///
+    /// Mirrors `SvgExportOptions::native_splines`.
+    pub native_splines: bool,
 }
 
 impl Default for PdfExportOptions {
@@ -85,6 +94,7 @@ impl Default for PdfExportOptions {
             native_dimension_text: true,
             native_curves: true,
             hatch_patterns: true,
+            native_splines: true,
         }
     }
 }
@@ -220,8 +230,12 @@ fn build_pdf_full(
     // Collect handles that will be drawn natively, so we skip the corresponding
     // wires below. Only active when a native doc is provided — otherwise fall
     // back to wires-only behaviour (print_to_printer path).
-    let (native_text_handles, native_image_handles, native_curve_handles) =
-        collect_native_handles(native_doc, options);
+    let (
+        native_text_handles,
+        native_image_handles,
+        native_curve_handles,
+        native_spline_handles,
+    ) = collect_native_handles(native_doc, options);
 
     // Register raster images up front so their XObject ids are available
     // when we emit UseXobject below.
@@ -296,12 +310,20 @@ fn build_pdf_full(
         &native_text_handles,
         &native_image_handles,
         &native_curve_handles,
+        &native_spline_handles,
     );
 
     // ── Layer 3b: native curves (Circle / Arc / Ellipse) ──────────────────
     if options.native_curves {
         if let Some(doc_ref) = native_doc {
             emit_native_curves(&mut ops, doc_ref, ox, oy, plot_style, options);
+        }
+    }
+
+    // ── Layer 3c: native splines ──────────────────────────────────────────
+    if options.native_splines {
+        if let Some(doc_ref) = native_doc {
+            emit_native_splines(&mut ops, doc_ref, ox, oy, plot_style, options);
         }
     }
 
@@ -335,6 +357,7 @@ fn emit_wires(
     skip_text_handles: &HashSet<String>,
     skip_image_handles: &HashSet<String>,
     skip_curve_handles: &HashSet<String>,
+    skip_spline_handles: &HashSet<String>,
 ) {
     let mut last_color: Option<[f32; 3]> = None;
     let mut last_lw: Option<f32> = None;
@@ -357,6 +380,9 @@ fn emit_wires(
             continue;
         }
         if skip_curve_handles.contains(&wire.name) {
+            continue;
+        }
+        if skip_spline_handles.contains(&wire.name) {
             continue;
         }
 
@@ -1302,17 +1328,182 @@ fn lp(x: f32, y: f32, bezier: bool) -> LinePoint {
     }
 }
 
+// ── Native splines (三十五轮 Phase 3) ──────────────────────────────────────
+
+fn emit_native_splines(
+    ops: &mut Vec<Op>,
+    doc: &nm::CadDocument,
+    ox: f32,
+    oy: f32,
+    plot_style: Option<&PlotStyleTable>,
+    options: &PdfExportOptions,
+) {
+    use crate::io::svg_export::{spline_emit_strategy, SplineEmit};
+
+    let frozen_layers: HashSet<&str> = doc
+        .layers
+        .values()
+        .filter(|l| l.is_frozen || !l.is_on())
+        .map(|l| l.name.as_str())
+        .collect();
+
+    for entity in &doc.entities {
+        if entity.invisible {
+            continue;
+        }
+        if frozen_layers.contains(entity.layer_name.as_str()) {
+            continue;
+        }
+        let nm::EntityData::Spline {
+            degree,
+            closed,
+            knots,
+            control_points,
+            weights,
+            fit_points,
+            ..
+        } = &entity.data
+        else {
+            continue;
+        };
+
+        let Some(strategy) = spline_emit_strategy(
+            *degree,
+            *closed,
+            knots,
+            control_points,
+            weights,
+            fit_points,
+        ) else {
+            continue; // falls back to wire path (not skipped above)
+        };
+
+        let (r, g, b) = resolve_entity_stroke_rgb(entity, plot_style, options);
+        let lw_pt = resolve_entity_lineweight_pt(entity, plot_style);
+        emit_stroke_setup(ops, r, g, b, lw_pt);
+
+        match strategy {
+            SplineEmit::ControlPoly => {
+                emit_polyline(ops, control_points, ox, oy, *closed);
+            }
+            SplineEmit::FitPoly => {
+                emit_polyline(ops, fit_points, ox, oy, false);
+            }
+            SplineEmit::Bezier {
+                degree,
+                control_points: cps,
+            } => {
+                emit_bezier_spline(ops, &cps, degree, ox, oy);
+            }
+        }
+    }
+}
+
+/// Emit a degenerate spline as a polyline through `pts` (xyz triples; Z is
+/// ignored for 2D PDF export).
+fn emit_polyline(ops: &mut Vec<Op>, pts: &[[f64; 3]], ox: f32, oy: f32, is_closed: bool) {
+    if pts.len() < 2 {
+        return;
+    }
+    let points: Vec<LinePoint> = pts
+        .iter()
+        .map(|&[x, y, _z]| LinePoint {
+            p: Point::new(Mm(x as f32 + ox), Mm(y as f32 + oy)),
+            bezier: false,
+        })
+        .collect();
+    ops.push(Op::DrawLine {
+        line: Line {
+            points,
+            is_closed,
+        },
+    });
+}
+
+/// Emit a clamped non-rational B-spline (already decomposed into piecewise
+/// Bezier control points) as a PDF path.  `degree` ∈ {2, 3}.
+///
+/// For degree = 3 we map each 4-point segment `[P0, C1, C2, P3]` directly
+/// onto a PDF cubic bezier.  For degree = 2 we promote each 3-point
+/// segment `[Q0, Q1, Q2]` to an exact cubic `[P0, C1, C2, P3]` via the
+/// standard 2/3 rule:
+///   P0 = Q0
+///   C1 = Q0 + 2/3 (Q1 - Q0)
+///   C2 = Q2 + 2/3 (Q1 - Q2)
+///   P3 = Q2
+fn emit_bezier_spline(
+    ops: &mut Vec<Op>,
+    control_points: &[[f64; 3]],
+    degree: usize,
+    ox: f32,
+    oy: f32,
+) {
+    if degree != 2 && degree != 3 {
+        return;
+    }
+    if control_points.len() < degree + 1 {
+        return;
+    }
+    let segments = (control_points.len() - 1) / degree;
+    if segments == 0 {
+        return;
+    }
+
+    let mut points: Vec<LinePoint> = Vec::with_capacity(segments * 3 + 1);
+    // Initial anchor.
+    let p0 = control_points[0];
+    points.push(lp(p0[0] as f32 + ox, p0[1] as f32 + oy, false));
+
+    for s in 0..segments {
+        let base = s * degree;
+        if degree == 3 {
+            let c1 = control_points[base + 1];
+            let c2 = control_points[base + 2];
+            let p3 = control_points[base + 3];
+            points.push(lp(c1[0] as f32 + ox, c1[1] as f32 + oy, true));
+            points.push(lp(c2[0] as f32 + ox, c2[1] as f32 + oy, true));
+            points.push(lp(p3[0] as f32 + ox, p3[1] as f32 + oy, false));
+        } else {
+            // degree == 2: promote quadratic → cubic exactly.
+            let q0 = control_points[base];
+            let q1 = control_points[base + 1];
+            let q2 = control_points[base + 2];
+            let c1 = [
+                q0[0] + (2.0 / 3.0) * (q1[0] - q0[0]),
+                q0[1] + (2.0 / 3.0) * (q1[1] - q0[1]),
+                0.0,
+            ];
+            let c2 = [
+                q2[0] + (2.0 / 3.0) * (q1[0] - q2[0]),
+                q2[1] + (2.0 / 3.0) * (q1[1] - q2[1]),
+                0.0,
+            ];
+            points.push(lp(c1[0] as f32 + ox, c1[1] as f32 + oy, true));
+            points.push(lp(c2[0] as f32 + ox, c2[1] as f32 + oy, true));
+            points.push(lp(q2[0] as f32 + ox, q2[1] as f32 + oy, false));
+        }
+    }
+
+    ops.push(Op::DrawLine {
+        line: Line {
+            points,
+            is_closed: false,
+        },
+    });
+}
+
 // ── Native text emission ───────────────────────────────────────────────────
 
 fn collect_native_handles(
     native_doc: Option<&nm::CadDocument>,
     options: &PdfExportOptions,
-) -> (HashSet<String>, HashSet<String>, HashSet<String>) {
+) -> (HashSet<String>, HashSet<String>, HashSet<String>, HashSet<String>) {
     let mut text = HashSet::new();
     let mut image = HashSet::new();
     let mut curve = HashSet::new();
+    let mut spline = HashSet::new();
     let Some(doc) = native_doc else {
-        return (text, image, curve);
+        return (text, image, curve, spline);
     };
     for entity in &doc.entities {
         // Frozen / layer-off / invisible filtering matches the wire pipeline
@@ -1341,7 +1532,13 @@ fn collect_native_handles(
             _ => {}
         }
     }
-    (text, image, curve)
+    // Splines use the richer strategy picker from `svg_export` to decide which
+    // ones we can safely emit natively (degree 1 / clamped non-rational 2-3 /
+    // fit-point fallback).  High-order rational curves stay on the wire path.
+    if options.native_splines {
+        spline = crate::io::svg_export::collect_emittable_spline_handles(doc);
+    }
+    (text, image, curve, spline)
 }
 
 /// `true` when the text consists of only characters safely supported by the
@@ -1692,7 +1889,7 @@ mod tests {
 
         // Collected handles must NOT list the CJK entity — proving fallback
         // semantics before we even generate a PDF.
-        let (text_handles, _image, _curve) = collect_native_handles(Some(&doc), &options);
+        let (text_handles, _image, _curve, _spline) = collect_native_handles(Some(&doc), &options);
         assert!(
             text_handles.is_empty(),
             "CJK text must fall back to wire tessellation, got {:?}",
@@ -2117,7 +2314,7 @@ mod tests {
         assert!(bytes.starts_with(b"%PDF-"));
 
         // Collected handles must list the circle so the wire pass skips it.
-        let (_, _, curve) = collect_native_handles(Some(&doc), &options);
+        let (_, _, curve, _) = collect_native_handles(Some(&doc), &options);
         assert_eq!(
             curve.len(),
             1,
@@ -2130,7 +2327,7 @@ mod tests {
             native_curves: false,
             ..options.clone()
         };
-        let (_, _, curve_off) = collect_native_handles(Some(&doc), &opts_off);
+        let (_, _, curve_off, _) = collect_native_handles(Some(&doc), &opts_off);
         assert!(curve_off.is_empty());
     }
 
@@ -2180,6 +2377,144 @@ mod tests {
         assert!(line.is_closed, "full ellipse sweep must produce closed path");
         // 4 bezier chunks × 3 points + 1 start anchor = 13.
         assert_eq!(line.points.len(), 13);
+    }
+
+    #[test]
+    fn fixture_pdf_spline_degree_1_listed_in_collect_handles() {
+        let mut doc = nm::CadDocument::new();
+        let handle = doc.allocate_handle();
+        let mut e = nm::Entity::new(nm::EntityData::Spline {
+            degree: 1,
+            closed: false,
+            knots: vec![0.0, 0.0, 1.0, 2.0, 2.0],
+            control_points: vec![
+                [0.0, 0.0, 0.0],
+                [10.0, 5.0, 0.0],
+                [20.0, 0.0, 0.0],
+            ],
+            weights: vec![],
+            fit_points: vec![],
+            start_tangent: [0.0, 0.0, 0.0],
+            end_tangent: [0.0, 0.0, 0.0],
+        });
+        e.handle = handle;
+        e.layer_name = "0".into();
+        doc.entities.push(e);
+
+        let options = PdfExportOptions::default();
+        let (_t, _i, _c, spline) = collect_native_handles(Some(&doc), &options);
+        assert_eq!(
+            spline.len(),
+            1,
+            "degree-1 spline must be listed in native spline handles, got {:?}",
+            spline
+        );
+
+        // Toggling native_splines=false must empty the set.
+        let opts_off = PdfExportOptions {
+            native_splines: false,
+            ..options
+        };
+        let (_, _, _, spline_off) = collect_native_handles(Some(&doc), &opts_off);
+        assert!(spline_off.is_empty());
+    }
+
+    #[test]
+    fn fixture_pdf_spline_cubic_emits_bezier_path() {
+        // Clamped cubic (degree=3) with 4 control points ⇒ exactly one
+        // bezier segment — knots = [0,0,0,0,1,1,1,1].
+        let mut doc = nm::CadDocument::new();
+        let handle = doc.allocate_handle();
+        let mut e = nm::Entity::new(nm::EntityData::Spline {
+            degree: 3,
+            closed: false,
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            control_points: vec![
+                [0.0, 0.0, 0.0],
+                [5.0, 10.0, 0.0],
+                [15.0, 10.0, 0.0],
+                [20.0, 0.0, 0.0],
+            ],
+            weights: vec![],
+            fit_points: vec![],
+            start_tangent: [0.0, 0.0, 0.0],
+            end_tangent: [0.0, 0.0, 0.0],
+        });
+        e.handle = handle;
+        e.layer_name = "0".into();
+        doc.entities.push(e);
+
+        let options = PdfExportOptions::default();
+        let bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            Some(&doc),
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert!(bytes.starts_with(b"%PDF-"));
+
+        let empty_bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert!(
+            bytes.len() > empty_bytes.len() + 50,
+            "cubic spline should emit a visible path (got {}B vs empty {}B)",
+            bytes.len(),
+            empty_bytes.len()
+        );
+
+        // Verify handle is listed so the wire pipeline skips the spline.
+        let (_, _, _, spline) = collect_native_handles(Some(&doc), &options);
+        assert_eq!(spline.len(), 1);
+    }
+
+    #[test]
+    fn fixture_pdf_spline_rational_falls_back_to_wire_path() {
+        // Weights non-uniform ⇒ rational spline ⇒ strategy returns None
+        // (for degree 2/3 without fit_points), handle NOT listed in
+        // native spline set ⇒ wire tessellation kicks in as before.
+        let mut doc = nm::CadDocument::new();
+        let handle = doc.allocate_handle();
+        let mut e = nm::Entity::new(nm::EntityData::Spline {
+            degree: 3,
+            closed: false,
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            control_points: vec![
+                [0.0, 0.0, 0.0],
+                [5.0, 10.0, 0.0],
+                [15.0, 10.0, 0.0],
+                [20.0, 0.0, 0.0],
+            ],
+            weights: vec![1.0, 0.7, 0.7, 1.0],
+            fit_points: vec![], // no fallback path either
+            start_tangent: [0.0, 0.0, 0.0],
+            end_tangent: [0.0, 0.0, 0.0],
+        });
+        e.handle = handle;
+        e.layer_name = "0".into();
+        doc.entities.push(e);
+
+        let options = PdfExportOptions::default();
+        let (_, _, _, spline) = collect_native_handles(Some(&doc), &options);
+        assert!(
+            spline.is_empty(),
+            "rational cubic without fit-points must fall back to wire tessellation"
+        );
     }
 
     #[test]
