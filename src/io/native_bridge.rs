@@ -667,6 +667,10 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             Some(ar::EntityType::Hatch(e))
         }
         nm::EntityData::Dimension { .. } => native_dimension_to_acadrust(entity),
+        nm::EntityData::ArcDimension { .. } => native_arc_dimension_to_acadrust(entity),
+        nm::EntityData::LargeRadialDimension { .. } => {
+            native_large_radial_dim_to_acadrust(entity)
+        }
         nm::EntityData::MultiLeader { .. } => native_multileader_to_acadrust(entity),
         nm::EntityData::Insert {
             block_name,
@@ -1461,6 +1465,95 @@ fn native_dimension_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> {
     base.insertion_point = v3(text_midpoint);
     base.text_rotation = text_rotation.to_radians();
     base.horizontal_direction = horizontal_direction.to_radians();
+    base.actual_measurement = *measurement;
+    apply_common(&mut base.common, entity);
+
+    Some(ar::EntityType::Dimension(dimension))
+}
+
+/// Bridge `nm::EntityData::ArcDimension` → `ar::Dimension::Angular3Pt`
+/// (三十四轮). acadrust 没有专门的 ArcLength 变体,用 Angular3Pt 做最
+/// 接近的几何近似:
+///   - `arc_center` → `angle_vertex` (圆心)
+///   - `first_point` / `second_point` 原样保留
+///   - `text_midpoint` → `definition_point`
+///
+/// compat 侧只用于显示,save_dxf 仍走 native 写回保真.
+fn native_arc_dimension_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> {
+    let nm::EntityData::ArcDimension {
+        block_name,
+        style_name,
+        definition_point,
+        text_midpoint,
+        text_override,
+        first_point,
+        second_point,
+        arc_center,
+        leader_length: _,
+        measurement,
+    } = &entity.data
+    else {
+        return None;
+    };
+
+    let mut dim = ar::DimensionAngular3Pt::new(
+        v3(arc_center),
+        v3(first_point),
+        v3(second_point),
+    );
+    dim.definition_point = v3(definition_point);
+    dim.base.definition_point = v3(definition_point);
+    let mut dimension = ar::Dimension::Angular3Pt(dim);
+
+    let base = dimension.base_mut();
+    base.style_name = style_name.clone();
+    base.block_name = block_name.clone();
+    base.text = text_override.clone();
+    base.user_text = (!text_override.trim().is_empty()).then(|| text_override.clone());
+    base.text_middle_point = v3(text_midpoint);
+    base.insertion_point = v3(text_midpoint);
+    base.actual_measurement = *measurement;
+    apply_common(&mut base.common, entity);
+
+    Some(ar::EntityType::Dimension(dimension))
+}
+
+/// Bridge `nm::EntityData::LargeRadialDimension` → `ar::Dimension::Radius`
+/// (三十四轮).  Close enough for wire generation:
+///   - `text_midpoint` 近似为 `angle_vertex` (视觉圆心锚点)
+///   - `definition_point` (半径端点) 原样保留
+///   - `leader_length` 原样
+///
+/// `chord_point` / `jog_angle` 只在 native 侧保留, compat 侧不表达,
+/// save_dxf 仍走 native 写回保真.
+fn native_large_radial_dim_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> {
+    let nm::EntityData::LargeRadialDimension {
+        block_name,
+        style_name,
+        definition_point,
+        text_midpoint,
+        text_override,
+        chord_point: _,
+        leader_length,
+        jog_angle: _,
+        measurement,
+    } = &entity.data
+    else {
+        return None;
+    };
+
+    let mut dim = ar::DimensionRadius::new(v3(text_midpoint), v3(definition_point));
+    dim.base.definition_point = v3(definition_point);
+    dim.leader_length = *leader_length;
+    let mut dimension = ar::Dimension::Radius(dim);
+
+    let base = dimension.base_mut();
+    base.style_name = style_name.clone();
+    base.block_name = block_name.clone();
+    base.text = text_override.clone();
+    base.user_text = (!text_override.trim().is_empty()).then(|| text_override.clone());
+    base.text_middle_point = v3(text_midpoint);
+    base.insertion_point = v3(text_midpoint);
     base.actual_measurement = *measurement;
     apply_common(&mut base.common, entity);
 

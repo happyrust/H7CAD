@@ -2,6 +2,69 @@
 
 ## [未发布]
 
+### 2026-04-25（三十四）：ARC_DIMENSION + LARGE_RADIAL_DIMENSION bridge 收口
+
+> 关掉 R31 2D 显示收口 table 里的最后两个「本轮不要求」dimension
+> 变体——桥接出来后 scene tessellate 能产 wire，显示路径不再完全丢失。
+> 详见 `docs/plans/2026-04-25-arc-large-radial-dim-bridge-plan.md`。
+
+**问题**
+
+R31 覆盖矩阵原状：
+
+| 实体 | Read | Write | Bridge→compat | 默认显示 |
+|------|------|-------|---------------|---------|
+| ARC_DIMENSION | ✅ | ✅ | ❌（`_ => None`） | ❌ |
+| LARGE_RADIAL_DIMENSION | ✅ | ✅ | ❌ | ❌ |
+
+DXF 可以读可以写，但 `native_doc_to_acadrust` 在 entity match 里没
+arm，走默认 `_ => None`——compat 文档里根本没有这两类实体，scene
+tessellate 也就一条 wire 都出不来。
+
+**修复**
+
+`acadrust::Dimension` 枚举没有专门的 ArcLength / LargeRadial 变体，
+桥接层选 **最接近的几何近似**：
+
+| native | compat 近似 | 字段对应 |
+|--------|------------|---------|
+| `ArcDimension` | `Dimension::Angular3Pt` | `arc_center → angle_vertex`，`first/second_point` 原样，`text_midpoint → definition_point` |
+| `LargeRadialDimension` | `Dimension::Radius` | `text_midpoint → angle_vertex`（视觉圆心），`definition_point`（半径端点）原样，`leader_length` 原样 |
+
+**显式 trade-off**（对齐 R31 Task 4 的「显示为先，保存为真源」模式）：
+
+- `acadrust_entity_to_native` 不识别这两种近似——compat 侧编辑回写
+  会退化成普通 `nm::Dimension`，`arc_center` / `chord_point` /
+  `jog_angle` 专有字段丢失。
+- Native 层保留原 `ArcDimension` / `LargeRadialDimension` 数据；
+  `save_dxf` 走 native 写回，未编辑的文件保真度 100%。
+- 不做静默破坏：不 panic、不删数据，只是编辑后专有字段归并入
+  regular Dimension。
+
+**新增 2 个 fixture 测试**
+
+- `fixture_arc_dimension_bridges_and_produces_wires`：构造只含 1 个
+  `ArcDimension` 的 native doc，`display_scene()` 之后 `entity_wires()`
+  里能找到对应 handle 的 wire
+- `fixture_large_radial_dim_bridges_and_produces_wires`：同上，对应
+  `LargeRadialDimension`
+
+两个 fixture 都在 `src/scene/mod.rs #[cfg(test)] mod tests` 下，
+使用 R31 建立的 `display_scene()` helper 复现默认显示路径（关闭
+native 直渲）。
+
+**不在本轮**
+
+- HELIX（R31 也是「本轮不要求」）：需要 3D→2D 投影，延到 3D 显示
+  收口轮次。
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD` 394 → 396 全绿（+2 bridge fixture）
+
+---
+
 ### 2026-04-25（三十三 · Phase 2b）：PDF 导出对话框
 
 > Phase 2a 做完 HATCH pattern 之后，SVG 侧的 options 对话框

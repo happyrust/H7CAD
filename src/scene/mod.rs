@@ -4294,6 +4294,68 @@ mod tests {
     }
 
     #[test]
+    fn fixture_arc_dimension_bridges_and_produces_wires() {
+        // 三十四轮 R31 补遗: native ArcDimension 之前走 bridge _=>None,
+        // 在 compat 文档里不存在 -> 显示完全丢失. 本 fixture 锁定 bridge
+        // 现在把它转成 Angular3Pt (近似), scene tessellate 可产 wire.
+        let mut native = nm::CadDocument::new();
+        let arc_dim_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::ArcDimension {
+                block_name: "*D_ARC".into(),
+                style_name: "Standard".into(),
+                definition_point: [5.0, 5.0, 0.0],
+                text_midpoint: [5.0, 8.0, 0.0],
+                text_override: String::new(),
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                arc_center: [5.0, 0.0, 0.0],
+                leader_length: 0.0,
+                measurement: 15.707,
+            }))
+            .expect("arc_dim");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires
+                .iter()
+                .any(|w| w.name == arc_dim_h.value().to_string()),
+            "ARC_DIMENSION wire missing after bridge; handle {} not found in {} wires",
+            arc_dim_h.value(),
+            wires.len()
+        );
+    }
+
+    #[test]
+    fn fixture_large_radial_dim_bridges_and_produces_wires() {
+        let mut native = nm::CadDocument::new();
+        let radial_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::LargeRadialDimension {
+                block_name: "*D_LRD".into(),
+                style_name: "Standard".into(),
+                definition_point: [20.0, 0.0, 0.0],
+                text_midpoint: [10.0, 5.0, 0.0],
+                text_override: String::new(),
+                chord_point: [15.0, 0.0, 0.0],
+                leader_length: 5.0,
+                jog_angle: 45.0_f64.to_radians(),
+                measurement: 20.0,
+            }))
+            .expect("large_radial");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == radial_h.value().to_string()),
+            "LARGE_RADIAL_DIMENSION wire missing after bridge; handle {} not found in {} wires",
+            radial_h.value(),
+            wires.len()
+        );
+    }
+
+    #[test]
     fn fixture_block_insert_shows_block_contents_after_bridge() {
         // This regression locks in the Task 2 fix: block_records entities
         // now flow through native_doc_to_acadrust, so INSERTs of custom
