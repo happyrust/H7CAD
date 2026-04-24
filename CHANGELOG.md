@@ -2,6 +2,103 @@
 
 ## [未发布]
 
+### 2026-04-25（三十九）：PDF + SVG Gradient HATCH（Phase 3 收口）
+
+> 三十二轮 PDF Phase 1 / 三十三轮 Phase 2 收口 solid + pattern HATCH 之
+> 后，gradient 一直延到 Phase 3；R35 结尾明确登记为 "Gradient HATCH /
+> Block Form XObject 延到后续轮次"。本轮关闭 gradient 缺口——`HatchPattern::Gradient`
+> 从**占位行为**（PDF silent-skip / SVG 半透明基色 polygon）升级到**真正的线性渐变**。
+> 详见 `docs/plans/2026-04-25-gradient-hatch-pdf-svg-plan.md`。
+
+**实现**
+
+_SVG 路径_：emit `<defs><linearGradient gradientUnits="userSpaceOnUse">`
++ 两个 `<stop>`，polygon 改引用 `fill="url(#grad_N)"`。gradient 方向由
+`angle_deg` 推导，两 stop 的颜色分别是 `hatch.color` 和 `color2`。
+gradient id 按 `grad_0`, `grad_1`, … 递增，不同 hatch 互不干扰。
+
+_PDF 路径_：`emit_hatch_gradient_strips()` 沿 `angle_deg` 把 boundary
+AABB 切成 **48 条平行 strip**，每条纯色填充，颜色按 strip 中心位置在
+`color` → `color2` 之间线性插值。trade-off（与 Phase 2a pattern 扫线
+一致）：裁剪到 AABB 而不是 boundary 本身——非凸 boundary 会有少量溢
+出，真实 AutoCAD gradient 输出在同等 fidelity tier 有相同行为。
+
+_Monochrome_：两边都特殊处理——SVG 用 `rgb(0,0,0)` → `rgb(200,200,200)`
+两 stop；PDF 把 strip 颜色映射到 `0.15 + 0.70 * u` 的灰度 ramp。保证
+黑白打印时 gradient 方向仍可辨识。
+
+**新增 Options 字段**
+
+```rust
+pub struct PdfExportOptions {
+    // ... existing ...
+    pub gradient_hatches: bool,  // default true (三十九轮)
+}
+
+pub struct SvgExportOptions {
+    // ... existing ...
+    pub gradient_hatches: bool,  // default true (三十九轮)
+}
+```
+
+两个字段都走 R38 建立的 `#[serde(default)]` 基础设施，可通过 `--options
+opts.json` 配置为 `false` 回到 pre-R39 的占位行为（PDF skip / SVG 半透
+明基色），保证向后字节级兼容。
+
+**用法（CLI）**
+
+```powershell
+# 渐变 hatch 默认 on：
+h7cad drawing.dxf --export-pdf out.pdf
+h7cad drawing.dxf --export-svg out.svg
+
+# 强制关闭 gradient（仅 PDF 例子）：
+echo '{"gradient_hatches": false}' > opts.json
+h7cad drawing.dxf --export-pdf out.pdf --options opts.json
+```
+
+**新增 5 条回归测试**
+
+_PDF_（`src/io/pdf_export.rs` 3 条）：
+
+- `fixture_pdf_gradient_strips_increase_byte_length` — 含一个 gradient
+  hatch 的 PDF 比空 PDF 至少多 500 B（48 条 strip polygon + fill-color
+  ops 的可观察字节增长）
+- `fixture_pdf_gradient_toggle_off_matches_empty` — `gradient_hatches=false`
+  时字节数 == 空 PDF（占位行为保真）
+- `fixture_pdf_gradient_monochrome_differs_from_colour` — `monochrome=true`
+  和 `monochrome=false` 两路径产出不同字节流（灰度 vs 彩色 fill 序列
+  必然分岔）
+
+_SVG_（`src/io/svg_export.rs` 2 条）：
+
+- `fixture_svg_gradient_emits_linear_gradient_defs` — 输出含
+  `<linearGradient id="grad_0"` + `fill="url(#grad_0)"`，两 stop 颜色
+  是 red / blue 字面量（对应 `hatch.color` / `color2`）
+- `fixture_svg_gradient_toggle_off_matches_legacy_half_opacity` —
+  `gradient_hatches=false` 时 SVG 不含任何 `<linearGradient>`、回退到
+  `opacity="0.5"` 字面量（Phase 1 的占位行为保真）
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD io::pdf_export` 18 → 21 全绿
+- `cargo test --bin H7CAD io::svg_export` 70 → 72 全绿
+- `cargo test --bin H7CAD` 421 → 426 全绿
+- `cargo test --test cli_batch_export` 10 / 10（不变）
+
+**不在本轮**
+
+- PDF Shading Pattern（`sh` 操作符 + `/Pattern` resource） — 需要研究
+  printpdf 0.9.1 Shading API 覆盖度，strip-fill 的视觉效果在 300 DPI
+  打印已经足够
+- Radial gradient（DXF 也支持但实际用例少）
+- Gradient 应用于非 hatch 实体
+- GUI PDF/SVG 对话框的 `gradient_hatches` toggle（P1，下轮合并到 GUI
+  对话框统一拓展，当前 CLI `--options` 已经能完整覆盖）
+
+---
+
 ### 2026-04-25（三十八）：CLI `--options <PATH>` JSON 覆盖
 
 > 三十六 / 三十七轮把 CLI 铺到了 PDF + SVG 双格式 + 多输入批处理，

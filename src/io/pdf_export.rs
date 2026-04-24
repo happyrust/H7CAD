@@ -70,6 +70,11 @@ pub struct PdfExportOptions {
     /// PDF (三十三轮 Phase 2).  When `false`, pattern HATCHes are silently
     /// skipped — matches Phase 1 behaviour for backward compat.
     pub hatch_patterns: bool,
+    /// Emit `HatchPattern::Gradient` fills as parallel strip polygons with
+    /// linearly-interpolated colour between `color` and `color2` along
+    /// `angle_deg` (三十九轮 Phase 3).  When `false`, gradient HATCHes
+    /// are silently skipped — preserves Phase 1/2 behaviour.
+    pub gradient_hatches: bool,
     /// Emit native SPLINE entities as PDF bezier paths (三十五轮 Phase 3).
     /// - degree 1 ⇒ control-point polyline
     /// - clamped non-rational degree 2/3 ⇒ piecewise cubic bezier
@@ -96,6 +101,7 @@ impl Default for PdfExportOptions {
             native_curves: true,
             hatch_patterns: true,
             native_splines: true,
+            gradient_hatches: true,
         }
     }
 }
@@ -500,12 +506,149 @@ fn emit_hatch_fills(
             HatchPattern::Pattern(families) if options.hatch_patterns => {
                 emit_hatch_pattern_lines(ops, hatch, families, ox, oy, options);
             }
+            HatchPattern::Gradient { angle_deg, color2 } if options.gradient_hatches => {
+                emit_hatch_gradient_strips(
+                    ops, hatch, *angle_deg, *color2, ox, oy, options,
+                );
+            }
             HatchPattern::Pattern(_) | HatchPattern::Gradient { .. } => {
-                // Gradient is still Phase 3;  pattern gets Phase 2 line-family
-                // emission above when `hatch_patterns == true` — otherwise we
-                // silently skip to keep Phase 1 semantics available.
+                // Phase 1 / 2 compatibility: when hatch_patterns=false or
+                // gradient_hatches=false the corresponding variant is
+                // silently skipped.
             }
         }
+    }
+}
+
+/// Number of parallel strips used to rasterise a gradient hatch.  48 is
+/// enough for 300 DPI print to look smooth without blowing up file size.
+const GRADIENT_STRIP_COUNT: usize = 48;
+
+/// Rasterise `HatchPattern::Gradient` as `GRADIENT_STRIP_COUNT` parallel
+/// filled polygons, each a thin slab of the boundary AABB with colour
+/// linearly interpolated between `hatch.color` (t=0) and `color2` (t=1)
+/// along `angle_deg`.
+///
+/// Simplification: clips against the boundary AABB rather than the full
+/// boundary polygon — the same trade-off `emit_hatch_pattern_lines` makes.
+/// Non-convex boundaries may see slight overflow; real AutoCAD gradient
+/// output has similar behaviour at the same fidelity tier.
+fn emit_hatch_gradient_strips(
+    ops: &mut Vec<Op>,
+    hatch: &HatchModel,
+    angle_deg: f32,
+    color2: [f32; 4],
+    ox: f32,
+    oy: f32,
+    options: &PdfExportOptions,
+) {
+    let (bx0, by0, bx1, by1) = aabb_of(&hatch.boundary);
+    if (bx1 - bx0).abs() < 1e-6 || (by1 - by0).abs() < 1e-6 {
+        return;
+    }
+
+    // Gradient direction (unit vector) and perpendicular axis.
+    let theta = angle_deg.to_radians();
+    let (sin_t, cos_t) = theta.sin_cos();
+    let dir = [cos_t, sin_t];
+    let perp = [-sin_t, cos_t];
+
+    // Project all 4 AABB corners onto `dir` to find the gradient range.
+    let corners = [
+        [bx0, by0],
+        [bx1, by0],
+        [bx1, by1],
+        [bx0, by1],
+    ];
+    let mut t_min = f32::INFINITY;
+    let mut t_max = f32::NEG_INFINITY;
+    for &[cx, cy] in &corners {
+        let t = cx * dir[0] + cy * dir[1];
+        if t < t_min {
+            t_min = t;
+        }
+        if t > t_max {
+            t_max = t;
+        }
+    }
+    if (t_max - t_min).abs() < 1e-6 {
+        return;
+    }
+
+    // Same on the perpendicular axis so each strip covers the full AABB.
+    let mut p_min = f32::INFINITY;
+    let mut p_max = f32::NEG_INFINITY;
+    for &[cx, cy] in &corners {
+        let p = cx * perp[0] + cy * perp[1];
+        if p < p_min {
+            p_min = p;
+        }
+        if p > p_max {
+            p_max = p;
+        }
+    }
+
+    let [c0_r, c0_g, c0_b, _c0_a] = hatch.color;
+    let [c1_r, c1_g, c1_b, _c1_a] = color2;
+    let n = GRADIENT_STRIP_COUNT;
+    let step = (t_max - t_min) / n as f32;
+
+    for i in 0..n {
+        let t0 = t_min + step * i as f32;
+        let t1 = t_min + step * (i + 1) as f32;
+        let mid_t = 0.5 * (t0 + t1);
+        let u = ((mid_t - t_min) / (t_max - t_min)).clamp(0.0, 1.0);
+
+        let (mut r, mut g, mut b) = (
+            c0_r + (c1_r - c0_r) * u,
+            c0_g + (c1_g - c0_g) * u,
+            c0_b + (c1_b - c0_b) * u,
+        );
+        if options.monochrome {
+            // Monochrome: map u∈[0,1] to a grey ramp so the gradient
+            // direction stays legible even on a black-and-white printer.
+            let grey = 0.15 + 0.70 * u;
+            r = grey;
+            g = grey;
+            b = grey;
+        }
+
+        // Four corners of the strip in world space (post-offset).
+        let corners_ws = [
+            (t0, p_min),
+            (t1, p_min),
+            (t1, p_max),
+            (t0, p_max),
+        ];
+        let ring_points: Vec<LinePoint> = corners_ws
+            .iter()
+            .map(|&(t, p)| {
+                let x = t * dir[0] + p * perp[0] + ox;
+                let y = t * dir[1] + p * perp[1] + oy;
+                LinePoint {
+                    p: Point::new(Mm(x), Mm(y)),
+                    bezier: false,
+                }
+            })
+            .collect();
+
+        ops.push(Op::SetFillColor {
+            col: Color::Rgb(Rgb {
+                r,
+                g,
+                b,
+                icc_profile: None,
+            }),
+        });
+        ops.push(Op::DrawPolygon {
+            polygon: Polygon {
+                rings: vec![PolygonRing {
+                    points: ring_points,
+                }],
+                mode: PaintMode::Fill,
+                winding_order: WindingOrder::EvenOdd,
+            },
+        });
     }
 }
 
@@ -2550,5 +2693,149 @@ mod tests {
         assert!(full.starts_with(b"%PDF-"));
         let _ = std::fs::remove_file(&out_legacy);
         let _ = std::fs::remove_file(&out_full);
+    }
+
+    // ── R39 gradient hatch fixtures ───────────────────────────────────────
+
+    fn gradient_hatch_doc() -> HashMap<Handle, HatchModel> {
+        // 50×30 rectangle, horizontal gradient from red → blue.
+        let mut hatches: HashMap<Handle, HatchModel> = HashMap::new();
+        hatches.insert(
+            Handle::new(0xEE),
+            HatchModel {
+                boundary: vec![
+                    [0.0, 0.0],
+                    [50.0, 0.0],
+                    [50.0, 30.0],
+                    [0.0, 30.0],
+                ],
+                pattern: HatchPattern::Gradient {
+                    angle_deg: 0.0,
+                    color2: [0.0, 0.0, 1.0, 1.0],
+                },
+                name: "LINEAR".into(),
+                color: [1.0, 0.0, 0.0, 1.0],
+                angle_offset: 0.0,
+                scale: 1.0,
+            },
+        );
+        hatches
+    }
+
+    #[test]
+    fn fixture_pdf_gradient_strips_increase_byte_length() {
+        let hatches = gradient_hatch_doc();
+        let options = PdfExportOptions::default();
+        let bytes = build_pdf_full(
+            &[],
+            &hatches,
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        let empty_bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert!(bytes.starts_with(b"%PDF-"));
+        // 48 strip polygons with SetFillColor ops each should grow the PDF
+        // content stream by at least ~500 bytes even after compression.
+        assert!(
+            bytes.len() > empty_bytes.len() + 500,
+            "expected gradient strips to add ≥500 bytes vs empty PDF (got {}B vs {}B)",
+            bytes.len(),
+            empty_bytes.len(),
+        );
+    }
+
+    #[test]
+    fn fixture_pdf_gradient_toggle_off_matches_empty() {
+        let hatches = gradient_hatch_doc();
+        let mut options = PdfExportOptions::default();
+        options.gradient_hatches = false;
+        let disabled_bytes = build_pdf_full(
+            &[],
+            &hatches,
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        let empty_bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert_eq!(
+            disabled_bytes.len(),
+            empty_bytes.len(),
+            "gradient_hatches=false ⇒ gradient hatches are skipped, bytes equal empty PDF"
+        );
+    }
+
+    #[test]
+    fn fixture_pdf_gradient_monochrome_differs_from_colour() {
+        let hatches = gradient_hatch_doc();
+        let mut mono = PdfExportOptions::default();
+        mono.monochrome = true;
+        let mut colour = PdfExportOptions::default();
+        colour.monochrome = false;
+        let mono_bytes = build_pdf_full(
+            &[],
+            &hatches,
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &mono,
+        );
+        let colour_bytes = build_pdf_full(
+            &[],
+            &hatches,
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &colour,
+        );
+        // The two code paths emit different fill-colour sequences — the
+        // resulting byte streams must diverge somewhere.  We don't compare
+        // lengths (compression may collide) but any byte must differ.
+        assert!(mono_bytes.starts_with(b"%PDF-"));
+        assert!(colour_bytes.starts_with(b"%PDF-"));
+        assert!(
+            mono_bytes != colour_bytes,
+            "monochrome and colour gradient paths must produce distinct PDFs"
+        );
     }
 }

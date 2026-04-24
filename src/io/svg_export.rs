@@ -91,6 +91,12 @@ pub struct SvgExportOptions {
     /// pipeline unchanged.  Set to `false` to fall back to the
     /// pre-Phase-8 behaviour.
     pub native_dimension_text: bool,
+    /// Emit `HatchPattern::Gradient` as a real `<linearGradient>` with
+    /// `stop-color` at `color` and `color2`, aligned to `angle_deg`
+    /// (三十九轮 Phase 3).  When `false`, falls back to the pre-R39
+    /// "half-opaque base color polygon" behaviour so existing callers
+    /// opting out stay at byte-level parity with older exports.
+    pub gradient_hatches: bool,
 }
 
 impl Default for SvgExportOptions {
@@ -111,6 +117,7 @@ impl Default for SvgExportOptions {
             line_weight_scale: 0.2646,
             native_splines: true,
             native_dimension_text: true,
+            gradient_hatches: true,
         }
     }
 }
@@ -390,6 +397,7 @@ fn emit_hatches(
     oy: f32,
     options: &SvgExportOptions,
 ) {
+    let mut gradient_idx = 0usize;
     for (_handle, hatch) in hatches {
         if hatch.boundary.is_empty() {
             continue;
@@ -422,8 +430,21 @@ fn emit_hatches(
                 }
                 svg.push_str("\" />\n");
             }
+            HatchPattern::Gradient { angle_deg, color2 } if options.gradient_hatches => {
+                emit_gradient_hatch_svg(
+                    svg,
+                    hatch,
+                    *angle_deg,
+                    *color2,
+                    ox,
+                    oy,
+                    gradient_idx,
+                    options,
+                );
+                gradient_idx += 1;
+            }
             HatchPattern::Gradient { .. } => {
-                // Simplified: solid fill with base color for now.
+                // Pre-R39 fallback: half-opaque base-color polygon.
                 svg.push_str("<polygon fill=\"");
                 svg.push_str(&fill_color);
                 svg.push_str("\" stroke=\"none\" opacity=\"0.5\" points=\"");
@@ -455,6 +476,107 @@ fn emit_hatches(
             }
         }
     }
+}
+
+/// Emit a gradient hatch as `<defs><linearGradient>…</linearGradient></defs>`
+/// followed by a `<polygon fill="url(#grad_N)">`.
+///
+/// Gradient vector is placed along `angle_deg` through the boundary AABB
+/// centre so the two stops always land at AABB extrema.  In `monochrome`
+/// mode both stops collapse to black / light grey so the print output
+/// stays black-and-white-compatible.
+fn emit_gradient_hatch_svg(
+    svg: &mut String,
+    hatch: &HatchModel,
+    angle_deg: f32,
+    color2: [f32; 4],
+    ox: f32,
+    oy: f32,
+    idx: usize,
+    options: &SvgExportOptions,
+) {
+    // AABB of the boundary in world space (post-offset).
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    );
+    for &[x, y] in &hatch.boundary {
+        let (wx, wy) = (x + ox, y + oy);
+        if wx < min_x {
+            min_x = wx;
+        }
+        if wx > max_x {
+            max_x = wx;
+        }
+        if wy < min_y {
+            min_y = wy;
+        }
+        if wy > max_y {
+            max_y = wy;
+        }
+    }
+
+    // Gradient axis passes through AABB centre along `angle_deg`, clipped
+    // to the AABB extent along that direction.
+    let cx = 0.5 * (min_x + max_x);
+    let cy = 0.5 * (min_y + max_y);
+    let half = 0.5
+        * ((max_x - min_x).abs() + (max_y - min_y).abs());
+    let (s, c) = angle_deg.to_radians().sin_cos();
+    let (x1, y1) = (cx - c * half, cy - s * half);
+    let (x2, y2) = (cx + c * half, cy + s * half);
+
+    let (stop0, stop1) = if options.monochrome {
+        ("rgb(0,0,0)".to_string(), "rgb(200,200,200)".to_string())
+    } else {
+        let [r0, g0, b0, _a0] = hatch.color;
+        let [r1, g1, b1, _a1] = color2;
+        (
+            format!(
+                "rgb({},{},{})",
+                (r0 * 255.0).clamp(0.0, 255.0) as u8,
+                (g0 * 255.0).clamp(0.0, 255.0) as u8,
+                (b0 * 255.0).clamp(0.0, 255.0) as u8,
+            ),
+            format!(
+                "rgb({},{},{})",
+                (r1 * 255.0).clamp(0.0, 255.0) as u8,
+                (g1 * 255.0).clamp(0.0, 255.0) as u8,
+                (b1 * 255.0).clamp(0.0, 255.0) as u8,
+            ),
+        )
+    };
+
+    svg.push_str("<defs><linearGradient id=\"grad_");
+    svg.push_str(&idx.to_string());
+    svg.push_str("\" gradientUnits=\"userSpaceOnUse\" x1=\"");
+    svg.push_str(&fmt_f32(x1));
+    svg.push_str("\" y1=\"");
+    svg.push_str(&fmt_f32(y1));
+    svg.push_str("\" x2=\"");
+    svg.push_str(&fmt_f32(x2));
+    svg.push_str("\" y2=\"");
+    svg.push_str(&fmt_f32(y2));
+    svg.push_str("\"><stop offset=\"0\" stop-color=\"");
+    svg.push_str(&stop0);
+    svg.push_str("\" /><stop offset=\"1\" stop-color=\"");
+    svg.push_str(&stop1);
+    svg.push_str("\" /></linearGradient></defs>\n");
+
+    svg.push_str("<polygon fill=\"url(#grad_");
+    svg.push_str(&idx.to_string());
+    svg.push_str(")\" stroke=\"none\" points=\"");
+    for (i, &[x, y]) in hatch.boundary.iter().enumerate() {
+        if i > 0 {
+            svg.push(' ');
+        }
+        svg.push_str(&fmt_f32(x + ox));
+        svg.push(',');
+        svg.push_str(&fmt_f32(y + oy));
+    }
+    svg.push_str("\" />\n");
 }
 
 // ── Text handle collection (for wire dedup) ────────────────────────────────
@@ -4738,5 +4860,95 @@ mod tests {
         );
         assert!(!svg.contains("<circle"));
         assert!(svg.contains("<polyline"), "fallback wire should remain: {svg}");
+    }
+
+    // ── R39 gradient hatch fixtures ───────────────────────────────────────
+
+    fn make_gradient_hatch_map() -> HashMap<Handle, HatchModel> {
+        let mut hatches: HashMap<Handle, HatchModel> = HashMap::new();
+        hatches.insert(
+            Handle::new(0xF0),
+            HatchModel {
+                boundary: vec![
+                    [0.0, 0.0],
+                    [50.0, 0.0],
+                    [50.0, 30.0],
+                    [0.0, 30.0],
+                ],
+                pattern: HatchPattern::Gradient {
+                    angle_deg: 0.0,
+                    color2: [0.0, 0.0, 1.0, 1.0],
+                },
+                name: "LINEAR".into(),
+                color: [1.0, 0.0, 0.0, 1.0],
+                angle_offset: 0.0,
+                scale: 1.0,
+            },
+        );
+        hatches
+    }
+
+    #[test]
+    fn fixture_svg_gradient_emits_linear_gradient_defs() {
+        let hatches = make_gradient_hatch_map();
+        let mut opts = default_opts();
+        opts.monochrome = false; // keep colours so stop-color shows red→blue
+        let svg = build_svg_full(
+            &Vec::<WireModel>::new(),
+            &hatches,
+            None,
+            60.0,
+            40.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &opts,
+        );
+        assert!(
+            svg.contains("<linearGradient id=\"grad_0\""),
+            "expected linearGradient defs in output: {svg}"
+        );
+        assert!(
+            svg.contains("fill=\"url(#grad_0)\""),
+            "polygon should reference the gradient: {svg}"
+        );
+        assert!(
+            svg.contains("stop-color=\"rgb(255,0,0)\""),
+            "stop-0 should be source color: {svg}"
+        );
+        assert!(
+            svg.contains("stop-color=\"rgb(0,0,255)\""),
+            "stop-1 should be target color2: {svg}"
+        );
+    }
+
+    #[test]
+    fn fixture_svg_gradient_toggle_off_matches_legacy_half_opacity() {
+        let hatches = make_gradient_hatch_map();
+        let opts = SvgExportOptions {
+            gradient_hatches: false,
+            ..default_opts()
+        };
+        let svg = build_svg_full(
+            &Vec::<WireModel>::new(),
+            &hatches,
+            None,
+            60.0,
+            40.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &opts,
+        );
+        assert!(
+            !svg.contains("<linearGradient"),
+            "gradient_hatches=false must not emit linearGradient: {svg}"
+        );
+        assert!(
+            svg.contains("opacity=\"0.5\""),
+            "gradient_hatches=false must fall back to half-opaque polygon: {svg}"
+        );
     }
 }
