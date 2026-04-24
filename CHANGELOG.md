@@ -2,6 +2,59 @@
 
 ## [未发布]
 
+### 2026-04-25（三十三 · Phase 2a）：PDF HATCH pattern（line family）
+
+> 关掉 PDF 导出的最后一个"空白"区域——非 solid HATCH。现在 ANSI31
+> 之类的斜线剖面、PAT 图案填充会在 PDF 里真正画出来，不再被 silently
+> skipped。
+> 详见 `docs/plans/2026-04-25-pdf-export-phase-2-plan.md`。
+
+**实现**
+
+- `PdfExportOptions::hatch_patterns: bool`（默认 `true`；toggle false
+  回退到 Phase 1 的 "skip pattern" 语义）
+- `emit_hatch_pattern_lines()` 遍历 `PatFamily` 族，按 QCAD PAT 约定
+  （`dy`=垂直间距、`dx`=沿线相位）在 boundary AABB 内生成扫线
+  - 扫线范围 N 通过把 AABB 四角投影到 perp 轴得到
+  - 每条扫线用 Liang-Barsky 裁剪到 AABB（`clip_line_aabb()`）
+  - 带 `dashes` 的族用 `emit_dashed_segments()` 走 dash cycle，跨
+    平行线保持 dash 对齐（`t0 mod period`）
+  - 安全网：`PATTERN_LINES_CAP = 4000`，pathological 密度直接 skip
+- 扫线颜色沿用 `hatch.color`，线宽 0.1 pt（足够细，剖面感正确）；
+  monochrome 时强制黑色
+- **简化 trade-off**：裁剪到 boundary AABB（不是 boundary polygon
+  本身），非凸 boundary 会让斜线轻微超出——与真实 AutoCAD PDF 输出
+  的 ANSI31 行为基本相同；真正的 Weiler-Atherton polygon clip 延到
+  Phase 3
+
+**新增 3 个回归测试**
+
+- `fixture_pdf_empty_pattern_hatch_is_noop` — 空 family 列表不输出
+  任何额外字节（与 empty PDF 等长）
+- `fixture_pdf_pattern_hatch_emits_line_segments` — 45° 族 + 3 mm
+  间距产生的 PDF 字节比 empty 多 ≥ 200 字节
+- `fixture_pdf_options_hatch_patterns_toggle_off_matches_phase_1_skip` —
+  `hatch_patterns=false` 时与 empty PDF 等长，保留 Phase 1 行为作为
+  回退通道
+- `fixture_pdf_pattern_dashed_hatch_survives_dash_walk` — 带 dash 的
+  pattern 依然产生 visible segments（`emit_dashed_segments` 正常工作）
+
+**改名**：`fixture_pdf_pattern_hatch_skipped_when_not_implemented` →
+`fixture_pdf_empty_pattern_hatch_is_noop`（新语义：skipped 状态只
+剩 empty pattern 这一个）
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD io::pdf_export` 12 → 15 全绿
+- `cargo test --bin H7CAD` 388 → 391 全绿
+
+剩余 Phase 2（本轮 T2/T3 分提交，或下轮）：
+- PDF 导出对话框 `src/ui/pdf_export_dialog.rs`
+- Message enum + update.rs 接线
+
+---
+
 ### 2026-04-24（三十二 · Phase 1b）：PDF 原生曲线（Circle / Arc / Ellipse）
 
 > Phase 1 收口后马上追加的小增量：用 cubic bezier 把

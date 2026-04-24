@@ -65,6 +65,10 @@ pub struct PdfExportOptions {
     /// Produces smaller, resolution-independent PDFs that stay smooth at
     /// arbitrary zoom. Mirrors `SvgExportOptions::native_curves`.
     pub native_curves: bool,
+    /// Emit `HatchPattern::Pattern(line family)` fills as real lines in the
+    /// PDF (三十三轮 Phase 2).  When `false`, pattern HATCHes are silently
+    /// skipped — matches Phase 1 behaviour for backward compat.
+    pub hatch_patterns: bool,
 }
 
 impl Default for PdfExportOptions {
@@ -80,6 +84,7 @@ impl Default for PdfExportOptions {
             image_base: None,
             native_dimension_text: true,
             native_curves: true,
+            hatch_patterns: true,
         }
     }
 }
@@ -456,52 +461,365 @@ fn emit_hatch_fills(
     options: &PdfExportOptions,
 ) {
     for hatch in hatches.values() {
-        // Only solid fills for Phase 1 — pattern / gradient is Phase 2.
-        if !matches!(hatch.pattern, HatchPattern::Solid) {
-            continue;
-        }
         if hatch.boundary.len() < 3 {
             continue;
         }
-
-        let [mut r, mut g, mut b, a] = hatch.color;
+        let a = hatch.color[3];
         if a < 0.01 {
             continue;
         }
-        if options.monochrome {
-            // Light greys in monochrome so hatches stay visible but don't
-            // overpower the strokes on a black-and-white print.
-            r = 0.80;
-            g = 0.80;
-            b = 0.80;
+        match &hatch.pattern {
+            HatchPattern::Solid => emit_hatch_solid(ops, hatch, ox, oy, options),
+            HatchPattern::Pattern(families) if options.hatch_patterns => {
+                emit_hatch_pattern_lines(ops, hatch, families, ox, oy, options);
+            }
+            HatchPattern::Pattern(_) | HatchPattern::Gradient { .. } => {
+                // Gradient is still Phase 3;  pattern gets Phase 2 line-family
+                // emission above when `hatch_patterns == true` — otherwise we
+                // silently skip to keep Phase 1 semantics available.
+            }
+        }
+    }
+}
+
+fn emit_hatch_solid(
+    ops: &mut Vec<Op>,
+    hatch: &HatchModel,
+    ox: f32,
+    oy: f32,
+    options: &PdfExportOptions,
+) {
+    let [mut r, mut g, mut b, _a] = hatch.color;
+    if options.monochrome {
+        // Light grey in monochrome so hatches stay visible but don't
+        // overpower the strokes on a black-and-white print.
+        r = 0.80;
+        g = 0.80;
+        b = 0.80;
+    }
+
+    ops.push(Op::SetFillColor {
+        col: Color::Rgb(Rgb {
+            r,
+            g,
+            b,
+            icc_profile: None,
+        }),
+    });
+
+    let ring_points: Vec<LinePoint> = hatch
+        .boundary
+        .iter()
+        .map(|&[x, y]| LinePoint {
+            p: Point::new(Mm(x + ox), Mm(y + oy)),
+            bezier: false,
+        })
+        .collect();
+
+    let polygon = Polygon {
+        rings: vec![PolygonRing {
+            points: ring_points,
+        }],
+        mode: PaintMode::Fill,
+        winding_order: WindingOrder::EvenOdd,
+    };
+    ops.push(Op::DrawPolygon { polygon });
+}
+
+/// Maximum number of parallel lines to emit per HATCH family — safety cap
+/// guarding against pathological patterns (e.g. perp_step ≈ 0 on a huge
+/// AABB) from blowing up file size.
+const PATTERN_LINES_CAP: i32 = 4000;
+
+fn emit_hatch_pattern_lines(
+    ops: &mut Vec<Op>,
+    hatch: &HatchModel,
+    families: &[crate::scene::hatch_model::PatFamily],
+    ox: f32,
+    oy: f32,
+    options: &PdfExportOptions,
+) {
+    if families.is_empty() {
+        return;
+    }
+
+    // AABB of the boundary polygon (in CAD world coords, then shifted by
+    // (ox, oy) inside the line emit). Using an AABB instead of the full
+    // boundary is the documented trade-off from the plan: lines may extend
+    // slightly past non-convex boundaries but no line is ever missing.
+    let (bx0, by0, bx1, by1) = aabb_of(&hatch.boundary);
+    if (bx1 - bx0).abs() < 1e-6 || (by1 - by0).abs() < 1e-6 {
+        return;
+    }
+
+    // Stroke style: pattern lines are thinner than entity strokes. Use
+    // 0.1 pt (≈ 0.035 mm) so they read as hatch marks, not outlines.
+    let lw_pt = 0.1_f32.max(0.25 * MM_TO_PT * 0.25);
+    let [mut r, mut g, mut b, _a] = hatch.color;
+    if options.monochrome {
+        r = 0.0;
+        g = 0.0;
+        b = 0.0;
+    }
+    ops.push(Op::SetOutlineColor {
+        col: Color::Rgb(Rgb {
+            r,
+            g,
+            b,
+            icc_profile: None,
+        }),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(lw_pt) });
+
+    let scale = hatch.scale.max(1e-6);
+    let global_angle_offset = hatch.angle_offset;
+
+    for family in families {
+        let angle_rad = family.angle_deg.to_radians() + global_angle_offset;
+        let (sin_a, cos_a) = angle_rad.sin_cos();
+        let dx = family.dx * scale;
+        let dy = family.dy * scale;
+
+        // Degenerate: no perpendicular offset ⇒ all lines coincide.  Skip.
+        if dy.abs() < 1e-4 {
+            continue;
         }
 
-        ops.push(Op::SetFillColor {
-            col: Color::Rgb(Rgb {
-                r,
-                g,
-                b,
-                icc_profile: None,
-            }),
-        });
+        let base_x = family.x0 * scale;
+        let base_y = family.y0 * scale;
 
-        let ring_points: Vec<LinePoint> = hatch
-            .boundary
+        // Perpendicular unit vector in world space.
+        // Along-line unit vector = (cos_a, sin_a); perp = (-sin_a, cos_a).
+        let perp_x = -sin_a;
+        let perp_y = cos_a;
+        let dir_x = cos_a;
+        let dir_y = sin_a;
+
+        // Project all AABB corners onto the perpendicular axis to find the
+        // range of N (line index) that touches the AABB.
+        let corners = [
+            (bx0, by0),
+            (bx1, by0),
+            (bx1, by1),
+            (bx0, by1),
+        ];
+        let perp_offsets: Vec<f32> = corners
             .iter()
-            .map(|&[x, y]| LinePoint {
-                p: Point::new(Mm(x + ox), Mm(y + oy)),
-                bezier: false,
-            })
+            .map(|&(x, y)| (x - base_x) * perp_x + (y - base_y) * perp_y)
             .collect();
+        let min_perp = perp_offsets
+            .iter()
+            .cloned()
+            .fold(f32::INFINITY, f32::min);
+        let max_perp = perp_offsets
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max);
 
-        let polygon = Polygon {
-            rings: vec![PolygonRing {
-                points: ring_points,
-            }],
-            mode: PaintMode::Fill,
-            winding_order: WindingOrder::EvenOdd,
-        };
-        ops.push(Op::DrawPolygon { polygon });
+        let n_start = (min_perp / dy).floor() as i32 - 1;
+        let n_end = (max_perp / dy).ceil() as i32 + 1;
+        if n_end - n_start > PATTERN_LINES_CAP {
+            // Suspiciously dense — likely bad data, skip to avoid bloat.
+            continue;
+        }
+
+        for n in n_start..=n_end {
+            let nf = n as f32;
+            let origin_x = base_x + nf * dy * perp_x + nf * dx * dir_x;
+            let origin_y = base_y + nf * dy * perp_y + nf * dx * dir_y;
+
+            if let Some((t0, t1)) = clip_line_aabb(
+                origin_x, origin_y, dir_x, dir_y, bx0, by0, bx1, by1,
+            ) {
+                let p0x = origin_x + t0 * dir_x + ox;
+                let p0y = origin_y + t0 * dir_y + oy;
+                let p1x = origin_x + t1 * dir_x + ox;
+                let p1y = origin_y + t1 * dir_y + oy;
+
+                if family.dashes.is_empty() {
+                    // Solid line; emit as single 2-point Line.
+                    emit_line_segment(ops, p0x, p0y, p1x, p1y);
+                } else {
+                    emit_dashed_segments(
+                        ops,
+                        p0x,
+                        p0y,
+                        dir_x,
+                        dir_y,
+                        t0,
+                        t1,
+                        origin_x,
+                        origin_y,
+                        ox,
+                        oy,
+                        &family.dashes,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn emit_line_segment(ops: &mut Vec<Op>, p0x: f32, p0y: f32, p1x: f32, p1y: f32) {
+    ops.push(Op::DrawLine {
+        line: Line {
+            points: vec![
+                LinePoint {
+                    p: Point::new(Mm(p0x), Mm(p0y)),
+                    bezier: false,
+                },
+                LinePoint {
+                    p: Point::new(Mm(p1x), Mm(p1y)),
+                    bezier: false,
+                },
+            ],
+            is_closed: false,
+        },
+    });
+}
+
+/// Emit a dashed scan-line by walking the dash sequence along `dir` starting
+/// from `(origin + t0 * dir)` and stopping at `(origin + t1 * dir)`.  Positive
+/// dash entries are pen-down strokes; negative entries are pen-up gaps.
+#[allow(clippy::too_many_arguments)]
+fn emit_dashed_segments(
+    ops: &mut Vec<Op>,
+    _p0x: f32,
+    _p0y: f32,
+    dir_x: f32,
+    dir_y: f32,
+    t0: f32,
+    t1: f32,
+    origin_x: f32,
+    origin_y: f32,
+    ox: f32,
+    oy: f32,
+    dashes: &[f32],
+) {
+    if dashes.is_empty() {
+        return;
+    }
+    let period: f32 = dashes.iter().map(|d| d.abs()).sum();
+    if period < 1e-6 {
+        return;
+    }
+
+    // Walk t from t0 to t1 following the dash cycle.
+    let mut t = t0;
+    // Start aligned at the cycle boundary closest to (and ≤) t0 so dashes
+    // remain coherent across all parallel lines in the family.
+    let cycles_before = (t0 / period).floor();
+    let within_cycle = t0 - cycles_before * period;
+    let mut dash_idx = 0_usize;
+    let mut dash_acc = 0.0_f32;
+    // Skip forward in the cycle until we reach `within_cycle`.
+    while within_cycle > 1e-6 && dash_idx < dashes.len() {
+        let len = dashes[dash_idx].abs();
+        if dash_acc + len >= within_cycle {
+            break;
+        }
+        dash_acc += len;
+        dash_idx += 1;
+    }
+    let mut carry_within = within_cycle - dash_acc;
+
+    // Safety cap to guard against degenerate infinite loops.
+    let mut iter_budget = 100_000;
+    while t < t1 && iter_budget > 0 {
+        iter_budget -= 1;
+        if dash_idx >= dashes.len() {
+            dash_idx = 0;
+            carry_within = 0.0;
+        }
+        let dash_len_signed = dashes[dash_idx];
+        let dash_len = dash_len_signed.abs();
+        let remaining_in_dash = (dash_len - carry_within).max(0.0);
+        let seg_end = (t + remaining_in_dash).min(t1);
+        if dash_len_signed > 0.0 && seg_end > t + 1e-6 {
+            let p0x = origin_x + t * dir_x + ox;
+            let p0y = origin_y + t * dir_y + oy;
+            let p1x = origin_x + seg_end * dir_x + ox;
+            let p1y = origin_y + seg_end * dir_y + oy;
+            emit_line_segment(ops, p0x, p0y, p1x, p1y);
+        }
+        t = seg_end;
+        dash_idx += 1;
+        carry_within = 0.0;
+    }
+}
+
+fn aabb_of(points: &[[f32; 2]]) -> (f32, f32, f32, f32) {
+    let mut x0 = f32::INFINITY;
+    let mut y0 = f32::INFINITY;
+    let mut x1 = f32::NEG_INFINITY;
+    let mut y1 = f32::NEG_INFINITY;
+    for &[x, y] in points {
+        if x < x0 {
+            x0 = x;
+        }
+        if y < y0 {
+            y0 = y;
+        }
+        if x > x1 {
+            x1 = x;
+        }
+        if y > y1 {
+            y1 = y;
+        }
+    }
+    (x0, y0, x1, y1)
+}
+
+/// Liang-Barsky line-vs-AABB clip.  Returns `(t0, t1)` such that the ray
+/// `P(t) = origin + t * dir` intersects `[bx0..bx1] × [by0..by1]` for
+/// `t ∈ [t0, t1]`, or `None` if the ray misses the box.
+#[allow(clippy::too_many_arguments)]
+fn clip_line_aabb(
+    ox: f32,
+    oy: f32,
+    dx: f32,
+    dy: f32,
+    bx0: f32,
+    by0: f32,
+    bx1: f32,
+    by1: f32,
+) -> Option<(f32, f32)> {
+    let mut t0 = f32::NEG_INFINITY;
+    let mut t1 = f32::INFINITY;
+
+    for &(p, q) in &[
+        (-dx, ox - bx0),
+        (dx, bx1 - ox),
+        (-dy, oy - by0),
+        (dy, by1 - oy),
+    ] {
+        if p.abs() < 1e-8 {
+            if q < 0.0 {
+                return None; // parallel and outside
+            }
+            continue;
+        }
+        let r = q / p;
+        if p < 0.0 {
+            if r > t1 {
+                return None;
+            }
+            if r > t0 {
+                t0 = r;
+            }
+        } else {
+            if r < t0 {
+                return None;
+            }
+            if r < t1 {
+                t1 = r;
+            }
+        }
+    }
+    if t0 <= t1 {
+        Some((t0, t1))
+    } else {
+        None
     }
 }
 
@@ -1449,17 +1767,17 @@ mod tests {
     }
 
     #[test]
-    fn fixture_pdf_pattern_hatch_skipped_when_not_implemented() {
-        // A pattern hatch must not crash export and should not bloat the file
-        // compared to an empty PDF (we treat pattern as pass-through until
-        // Phase 2 lands).
+    fn fixture_pdf_empty_pattern_hatch_is_noop() {
+        // Pattern HATCH with an *empty* family list produces no extra output.
+        // (A family-less pattern is what the Phase 1 fixture used to cover;
+        // with Phase 2's line emitter we only care that it doesn't crash.)
         let mut hatches: HashMap<Handle, HatchModel> = HashMap::new();
         hatches.insert(
             Handle::new(0xCC),
             HatchModel {
                 boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
                 pattern: HatchPattern::Pattern(vec![]),
-                name: "ANSI31".into(),
+                name: "EMPTY".into(),
                 color: [0.5, 0.5, 0.5, 1.0],
                 angle_offset: 0.0,
                 scale: 1.0,
@@ -1494,7 +1812,196 @@ mod tests {
         assert_eq!(
             bytes.len(),
             empty_bytes.len(),
-            "pattern hatch must be skipped (no polygon) in Phase 1"
+            "empty pattern family ⇒ no output, PDF byte length unchanged"
+        );
+    }
+
+    #[test]
+    fn fixture_pdf_pattern_hatch_emits_line_segments() {
+        use crate::scene::hatch_model::PatFamily;
+
+        // Triangle boundary + one 45° hatch family with 3mm perpendicular
+        // spacing → multiple scan lines within the AABB.
+        let mut hatches: HashMap<Handle, HatchModel> = HashMap::new();
+        hatches.insert(
+            Handle::new(0xDD),
+            HatchModel {
+                boundary: vec![
+                    [0.0, 0.0],
+                    [50.0, 0.0],
+                    [25.0, 30.0],
+                ],
+                pattern: HatchPattern::Pattern(vec![PatFamily {
+                    angle_deg: 45.0,
+                    x0: 0.0,
+                    y0: 0.0,
+                    dx: 0.0,
+                    dy: 3.0,
+                    dashes: vec![],
+                }]),
+                name: "ANSI31-like".into(),
+                color: [0.5, 0.5, 0.5, 1.0],
+                angle_offset: 0.0,
+                scale: 1.0,
+            },
+        );
+
+        let options = PdfExportOptions::default();
+        let pattern_bytes = build_pdf_full(
+            &[],
+            &hatches,
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        let empty_bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert!(pattern_bytes.starts_with(b"%PDF-"));
+        assert!(
+            pattern_bytes.len() > empty_bytes.len() + 200,
+            "pattern scan-lines should grow the PDF by at least ~200 bytes \
+             (got {}B vs empty {}B)",
+            pattern_bytes.len(),
+            empty_bytes.len()
+        );
+    }
+
+    #[test]
+    fn fixture_pdf_options_hatch_patterns_toggle_off_matches_phase_1_skip() {
+        use crate::scene::hatch_model::PatFamily;
+
+        let mut hatches: HashMap<Handle, HatchModel> = HashMap::new();
+        hatches.insert(
+            Handle::new(0xEE),
+            HatchModel {
+                boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                pattern: HatchPattern::Pattern(vec![PatFamily {
+                    angle_deg: 0.0,
+                    x0: 0.0,
+                    y0: 0.0,
+                    dx: 0.0,
+                    dy: 1.0,
+                    dashes: vec![],
+                }]),
+                name: "ANSI33-like".into(),
+                color: [0.5, 0.5, 0.5, 1.0],
+                angle_offset: 0.0,
+                scale: 1.0,
+            },
+        );
+
+        let options_off = PdfExportOptions {
+            hatch_patterns: false,
+            ..PdfExportOptions::default()
+        };
+        let off_bytes = build_pdf_full(
+            &[],
+            &hatches,
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options_off,
+        );
+        let empty_bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options_off,
+        );
+        assert_eq!(
+            off_bytes.len(),
+            empty_bytes.len(),
+            "hatch_patterns=false must match Phase 1 skip semantics"
+        );
+    }
+
+    #[test]
+    fn fixture_pdf_pattern_dashed_hatch_survives_dash_walk() {
+        use crate::scene::hatch_model::PatFamily;
+
+        // One dashed horizontal family (1mm dash, 1mm gap) over a 100×100
+        // boundary. This exercises `emit_dashed_segments` with a positive
+        // dash followed by a gap — if the walk were broken we'd either
+        // crash or produce 0 lines (= same length as empty).
+        let mut hatches: HashMap<Handle, HatchModel> = HashMap::new();
+        hatches.insert(
+            Handle::new(0xFF),
+            HatchModel {
+                boundary: vec![
+                    [0.0, 0.0],
+                    [100.0, 0.0],
+                    [100.0, 100.0],
+                    [0.0, 100.0],
+                ],
+                pattern: HatchPattern::Pattern(vec![PatFamily {
+                    angle_deg: 0.0,
+                    x0: 0.0,
+                    y0: 0.0,
+                    dx: 0.0,
+                    dy: 5.0,
+                    dashes: vec![1.0, -1.0],
+                }]),
+                name: "DASHED".into(),
+                color: [0.0, 0.0, 0.0, 1.0],
+                angle_offset: 0.0,
+                scale: 1.0,
+            },
+        );
+
+        let options = PdfExportOptions::default();
+        let bytes = build_pdf_full(
+            &[],
+            &hatches,
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert!(bytes.starts_with(b"%PDF-"));
+        let empty_bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            None,
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert!(
+            bytes.len() > empty_bytes.len() + 200,
+            "dashed pattern must still emit visible segments"
         );
     }
 
