@@ -1,4 +1,5 @@
-//! Integration tests for the headless CLI batch export path (三十六轮).
+//! Integration tests for the headless CLI batch export path
+//! (三十六轮 初版; 三十七轮 multi-input + SVG; 三十八轮 `--options` JSON).
 //!
 //! These tests invoke the compiled `h7cad` binary via
 //! `CARGO_BIN_EXE_H7CAD` and drive it with real command-line arguments,
@@ -303,4 +304,143 @@ fn cli_infers_output_path_from_input_stem() {
 
     let _ = fs::remove_file(&input_path);
     let _ = fs::remove_file(&expected_output);
+}
+
+// ── R38 integration tests: --options JSON ─────────────────────────────────
+
+fn write_minimal_dxf_to(path: &std::path::Path) {
+    let mut doc = h7cad_native_model::CadDocument::new();
+    let _ = doc
+        .add_entity(h7cad_native_model::Entity::new(
+            h7cad_native_model::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [80.0, 40.0, 0.0],
+            },
+        ))
+        .expect("add line");
+    let dxf_str = h7cad_native_dxf::write_dxf_string(&doc).expect("write DXF");
+    std::fs::write(path, &dxf_str).expect("write input DXF");
+}
+
+#[test]
+fn cli_options_json_produces_valid_pdf() {
+    use std::fs;
+
+    let pid = std::process::id();
+    let tmp = std::env::temp_dir();
+    let input = tmp.join(format!("h7cad_r38_opts_{pid}_in.dxf"));
+    let output = tmp.join(format!("h7cad_r38_opts_{pid}_out.pdf"));
+    let opts = tmp.join(format!("h7cad_r38_opts_{pid}_opts.json"));
+
+    write_minimal_dxf_to(&input);
+    fs::write(
+        &opts,
+        r#"{ "monochrome": false, "font_family": "TimesRoman" }"#,
+    )
+    .expect("write opts");
+    let _ = fs::remove_file(&output);
+
+    let run = Command::new(binary_path())
+        .arg(&input)
+        .arg("--export-pdf")
+        .arg(&output)
+        .arg("--options")
+        .arg(&opts)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn h7cad with --options");
+
+    assert!(
+        run.status.success(),
+        "expected exit 0 with --options; stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let bytes = fs::read(&output).expect("options-overridden pdf should exist");
+    assert!(
+        bytes.starts_with(b"%PDF-") && bytes.len() > 500,
+        "expected valid PDF, got {} bytes",
+        bytes.len()
+    );
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&output);
+    let _ = fs::remove_file(&opts);
+}
+
+#[test]
+fn cli_options_missing_file_exits_one() {
+    let pid = std::process::id();
+    let tmp = std::env::temp_dir();
+    let input = tmp.join(format!("h7cad_r38_miss_{pid}_in.dxf"));
+    let output = tmp.join(format!("h7cad_r38_miss_{pid}_out.pdf"));
+    write_minimal_dxf_to(&input);
+
+    let bogus_opts = tmp.join(format!("h7cad_r38_miss_{pid}_does_not_exist.json"));
+
+    let run = Command::new(binary_path())
+        .arg(&input)
+        .arg("--export-pdf")
+        .arg(&output)
+        .arg("--options")
+        .arg(&bogus_opts)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn h7cad with missing options");
+
+    assert!(
+        !run.status.success(),
+        "expected non-zero exit for missing options file"
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("cannot open") && stderr.contains("does_not_exist"),
+        "expected path-bearing 'cannot open' error, got: {stderr}"
+    );
+
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&output);
+}
+
+#[test]
+fn cli_options_malformed_json_exits_one() {
+    use std::fs;
+
+    let pid = std::process::id();
+    let tmp = std::env::temp_dir();
+    let input = tmp.join(format!("h7cad_r38_bad_{pid}_in.dxf"));
+    let output = tmp.join(format!("h7cad_r38_bad_{pid}_out.pdf"));
+    let opts = tmp.join(format!("h7cad_r38_bad_{pid}_malformed.json"));
+
+    write_minimal_dxf_to(&input);
+    fs::write(&opts, b"{ not valid json").expect("write malformed opts");
+
+    let run = Command::new(binary_path())
+        .arg(&input)
+        .arg("--export-pdf")
+        .arg(&output)
+        .arg("--options")
+        .arg(&opts)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn h7cad with malformed options");
+
+    assert!(
+        !run.status.success(),
+        "expected non-zero exit for malformed json"
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("invalid JSON"),
+        "expected 'invalid JSON' in stderr, got: {stderr}"
+    );
+
+    let _ = fs::remove_file(&input);
+    let _ = fs::remove_file(&output);
+    let _ = fs::remove_file(&opts);
 }

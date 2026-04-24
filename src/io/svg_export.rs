@@ -34,7 +34,8 @@ use std::path::Path;
 
 // ── Options ────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
 pub struct SvgExportOptions {
     /// All strokes forced to black (default true — matches ODA ColorPolicy=1).
     pub monochrome: bool,

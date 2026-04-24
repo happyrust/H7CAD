@@ -1,8 +1,11 @@
-//! Headless CLI batch path (三十六轮 初版; 三十七轮扩展至多输入 + SVG).
+//! Headless CLI batch path (三十六轮 初版; 三十七轮扩展至多输入 + SVG;
+//! 三十八轮加 `--options <PATH>` JSON override).
 //!
 //! Allows the `h7cad` binary to perform DXF → PDF / DXF → SVG conversion
 //! without launching the iced GUI, so CI / automation pipelines can
-//! integrate it.  Supports multiple input files in a single invocation.
+//! integrate it.  Supports multiple input files in a single invocation
+//! and arbitrary override of `PdfExportOptions` / `SvgExportOptions`
+//! via a JSON file.
 //!
 //! Invocation:
 //!
@@ -12,6 +15,7 @@
 //! h7cad A.dxf B.dxf C.dxf --export-pdf OUT_DIR/     # multi-input, output directory
 //! h7cad A.dxf B.dxf --export-pdf                    # multi-input, inferred side-by-side
 //! h7cad INPUT.dxf --export-svg OUTPUT.svg           # SVG, mirrors --export-pdf
+//! h7cad INPUT.dxf --export-pdf OUT.pdf --options opts.json  # override defaults
 //! h7cad --help
 //! ```
 //!
@@ -30,6 +34,9 @@ pub enum BatchArgs {
         format: ExportFormat,
         inputs: Vec<PathBuf>,
         output: ExportTarget,
+        /// Optional path to a JSON file overriding the default
+        /// `PdfExportOptions` / `SvgExportOptions` for this invocation.
+        options_path: Option<PathBuf>,
     },
 }
 
@@ -80,17 +87,31 @@ pub fn parse_batch_args(args: &[String]) -> Option<BatchArgs> {
         },
     };
 
-    // The arg immediately after the flag is the (optional) output path —
-    // skip it when gathering inputs so we don't double-count.
+    // The arg immediately after the --export-* flag is the (optional)
+    // output path — skip it when gathering inputs so we don't double-count.
     let output_idx = args
         .get(flag_idx + 1)
         .filter(|s| !s.starts_with('-'))
         .map(|_| flag_idx + 1);
 
+    // `--options <PATH>` is independent of `--export-*`; can appear in any
+    // order.  The arg right after the flag is the (required) JSON path.
+    let options_flag_idx = args.iter().position(|a| a == "--options");
+    let options_value_idx = options_flag_idx
+        .and_then(|i| args.get(i + 1).map(|v| (i, v)))
+        .and_then(|(i, v)| if !v.starts_with('-') { Some(i + 1) } else { None });
+
+    let skip_indices: [Option<usize>; 4] = [
+        Some(flag_idx),
+        output_idx,
+        options_flag_idx,
+        options_value_idx,
+    ];
+
     let inputs: Vec<PathBuf> = args
         .iter()
         .enumerate()
-        .filter(|(i, _)| *i != flag_idx && Some(*i) != output_idx)
+        .filter(|(i, _)| !skip_indices.iter().any(|s| *s == Some(*i)))
         .map(|(_, s)| s.as_str())
         .filter(|s| !s.starts_with('-'))
         .map(PathBuf::from)
@@ -112,10 +133,13 @@ pub fn parse_batch_args(args: &[String]) -> Option<BatchArgs> {
         None => ExportTarget::SameStem,
     };
 
+    let options_path = options_value_idx.map(|i| PathBuf::from(&args[i]));
+
     Some(BatchArgs::Export {
         format,
         inputs,
         output,
+        options_path,
     })
 }
 
@@ -146,12 +170,20 @@ OUTPUT RESOLUTION:
     - Otherwise          treated as a single output file (only valid when
                          exactly one input is given)
 
+OPTIONAL FLAGS:
+    --options <PATH>     JSON file overriding any field of the default
+                         `PdfExportOptions` / `SvgExportOptions`.  All
+                         fields are optional — missing keys fall back to
+                         the built-in default.  Shared across every input
+                         in a multi-input invocation.  Example:
+                           { \"monochrome\": false, \"font_family\": \"TimesRoman\" }
+
 BATCH EXPORT NOTES:
-    Uses default `PdfExportOptions` / `SvgExportOptions` (monochrome, native
-    curves/splines/text, solid + pattern HATCH, embedded images).
-    Exit code 0 when every input succeeds, 1 when any failed.  Failures are
-    non-fatal — the remaining inputs still attempt export and a per-file
-    diagnostic is printed to stderr.
+    Defaults match the GUI's dialog (monochrome, native curves/splines/text,
+    solid + pattern HATCH, embedded images).  Exit code 0 when every input
+    succeeds, 1 when any failed.  Failures are non-fatal — the remaining
+    inputs still attempt export and a per-file diagnostic is printed to
+    stderr.
 ";
 
 /// Execute the batch path.  Matches the entry-point signature expected by
@@ -167,7 +199,8 @@ pub fn run_batch_export(args: BatchArgs) -> Result<(), String> {
             format,
             inputs,
             output,
-        } => run_export_batch(format, &inputs, &output),
+            options_path,
+        } => run_export_batch(format, &inputs, &output, options_path.as_deref()),
     }
 }
 
@@ -175,6 +208,7 @@ fn run_export_batch(
     format: ExportFormat,
     inputs: &[PathBuf],
     output: &ExportTarget,
+    options_path: Option<&Path>,
 ) -> Result<(), String> {
     // Reject obvious misuses up front so the user gets a single clean error
     // instead of N identical "overwrite-on-same-file" diagnostics.
@@ -190,12 +224,17 @@ fn run_export_batch(
         }
     }
 
+    // Load the JSON options once up-front so a malformed file fails fast
+    // before we start processing any input.  `LoadedOptions` mirrors the
+    // two exporter variants so `export_one` can dispatch without re-reading.
+    let loaded_options = LoadedOptions::load(format, options_path)?;
+
     let mut failed = 0usize;
     let total = inputs.len();
 
     for input in inputs {
         let out_path = resolve_output(input, output, format);
-        match export_one(input, &out_path, format) {
+        match export_one(input, &out_path, format, &loaded_options) {
             Ok(()) => {
                 eprintln!(
                     "h7cad: {} -> {} ({})",
@@ -215,6 +254,68 @@ fn run_export_batch(
         Err(format!("{failed} of {total} inputs failed"))
     } else {
         Ok(())
+    }
+}
+
+/// Options resolved once for the whole batch.  `Pdf` / `Svg` variants carry
+/// the concrete `*ExportOptions` so `export_one` stays allocation-free per
+/// input.
+#[derive(Clone, Debug)]
+enum LoadedOptions {
+    Pdf(crate::io::pdf_export::PdfExportOptions),
+    Svg(crate::io::svg_export::SvgExportOptions),
+}
+
+impl LoadedOptions {
+    fn load(format: ExportFormat, path: Option<&Path>) -> Result<Self, String> {
+        match format {
+            ExportFormat::Pdf => Ok(LoadedOptions::Pdf(load_pdf_options(path)?)),
+            ExportFormat::Svg => Ok(LoadedOptions::Svg(load_svg_options(path)?)),
+        }
+    }
+}
+
+fn load_pdf_options(
+    path: Option<&Path>,
+) -> Result<crate::io::pdf_export::PdfExportOptions, String> {
+    match path {
+        None => Ok(crate::io::pdf_export::PdfExportOptions::default()),
+        Some(p) => {
+            let bytes = std::fs::read(p).map_err(|e| {
+                format!(
+                    "cannot open options file \"{}\": {e}",
+                    p.display()
+                )
+            })?;
+            serde_json::from_slice(&bytes).map_err(|e| {
+                format!(
+                    "invalid JSON in options file \"{}\": {e}",
+                    p.display()
+                )
+            })
+        }
+    }
+}
+
+fn load_svg_options(
+    path: Option<&Path>,
+) -> Result<crate::io::svg_export::SvgExportOptions, String> {
+    match path {
+        None => Ok(crate::io::svg_export::SvgExportOptions::default()),
+        Some(p) => {
+            let bytes = std::fs::read(p).map_err(|e| {
+                format!(
+                    "cannot open options file \"{}\": {e}",
+                    p.display()
+                )
+            })?;
+            serde_json::from_slice(&bytes).map_err(|e| {
+                format!(
+                    "invalid JSON in options file \"{}\": {e}",
+                    p.display()
+                )
+            })
+        }
     }
 }
 
@@ -240,7 +341,12 @@ fn resolve_output(input: &Path, target: &ExportTarget, format: ExportFormat) -> 
     }
 }
 
-fn export_one(input: &Path, output: &Path, format: ExportFormat) -> Result<(), String> {
+fn export_one(
+    input: &Path,
+    output: &Path,
+    format: ExportFormat,
+    options: &LoadedOptions,
+) -> Result<(), String> {
     if !input.exists() {
         return Err(format!("cannot open \"{}\": file not found", input.display()));
     }
@@ -268,9 +374,8 @@ fn export_one(input: &Path, output: &Path, format: ExportFormat) -> Result<(), S
         }
     }
 
-    match format {
-        ExportFormat::Pdf => {
-            let options = crate::io::pdf_export::PdfExportOptions::default();
+    match (format, options) {
+        (ExportFormat::Pdf, LoadedOptions::Pdf(opts)) => {
             crate::io::pdf_export::export_pdf_full(
                 &wires,
                 &scene.hatches,
@@ -282,12 +387,11 @@ fn export_one(input: &Path, output: &Path, format: ExportFormat) -> Result<(), S
                 0,
                 output,
                 None,
-                &options,
+                opts,
             )
             .map_err(|e| format!("PDF export failed: {e}"))?;
         }
-        ExportFormat::Svg => {
-            let options = crate::io::svg_export::SvgExportOptions::default();
+        (ExportFormat::Svg, LoadedOptions::Svg(opts)) => {
             crate::io::svg_export::export_svg_full(
                 &wires,
                 &scene.hatches,
@@ -299,9 +403,16 @@ fn export_one(input: &Path, output: &Path, format: ExportFormat) -> Result<(), S
                 0,
                 output,
                 None,
-                &options,
+                opts,
             )
             .map_err(|e| format!("SVG export failed: {e}"))?;
+        }
+        // The two mismatched arms are unreachable by construction
+        // (LoadedOptions::load always matches format).  Keeping them
+        // explicit future-proofs against someone adding a variant.
+        (ExportFormat::Pdf, LoadedOptions::Svg(_))
+        | (ExportFormat::Svg, LoadedOptions::Pdf(_)) => {
+            return Err("internal: options type does not match export format".into());
         }
     }
 
@@ -346,6 +457,21 @@ mod tests {
             format,
             inputs: inputs.iter().map(PathBuf::from).collect(),
             output,
+            options_path: None,
+        }
+    }
+
+    fn export_with_options(
+        format: ExportFormat,
+        inputs: &[&str],
+        output: ExportTarget,
+        options_path: &str,
+    ) -> BatchArgs {
+        BatchArgs::Export {
+            format,
+            inputs: inputs.iter().map(PathBuf::from).collect(),
+            output,
+            options_path: Some(PathBuf::from(options_path)),
         }
     }
 
@@ -506,5 +632,160 @@ mod tests {
             ExportFormat::Pdf,
         );
         assert_eq!(p, Path::new("/out/alpha.pdf"));
+    }
+
+    #[test]
+    fn parse_recognises_options_flag() {
+        let got = parse_batch_args(&s(&[
+            "drawing.dxf",
+            "--export-pdf",
+            "out.pdf",
+            "--options",
+            "opts.json",
+        ]));
+        assert_eq!(
+            got,
+            Some(export_with_options(
+                ExportFormat::Pdf,
+                &["drawing.dxf"],
+                ExportTarget::File(PathBuf::from("out.pdf")),
+                "opts.json",
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_options_flag_coexists_with_multi_input_dir() {
+        let got = parse_batch_args(&s(&[
+            "a.dxf",
+            "b.dxf",
+            "--export-svg",
+            "out/",
+            "--options",
+            "opts.json",
+        ]));
+        assert_eq!(
+            got,
+            Some(export_with_options(
+                ExportFormat::Svg,
+                &["a.dxf", "b.dxf"],
+                ExportTarget::Dir(PathBuf::from("out/")),
+                "opts.json",
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_without_options_flag_has_none() {
+        let got = parse_batch_args(&s(&["drawing.dxf", "--export-pdf", "out.pdf"]));
+        if let Some(BatchArgs::Export { options_path, .. }) = got {
+            assert!(options_path.is_none());
+        } else {
+            panic!("expected BatchArgs::Export, got {:?}", got);
+        }
+    }
+
+    #[test]
+    fn parse_options_flag_order_agnostic() {
+        // --options can appear before or after --export-*.
+        let got = parse_batch_args(&s(&[
+            "drawing.dxf",
+            "--options",
+            "opts.json",
+            "--export-pdf",
+            "out.pdf",
+        ]));
+        assert_eq!(
+            got,
+            Some(export_with_options(
+                ExportFormat::Pdf,
+                &["drawing.dxf"],
+                ExportTarget::File(PathBuf::from("out.pdf")),
+                "opts.json",
+            ))
+        );
+    }
+
+    #[test]
+    fn load_pdf_options_none_returns_default() {
+        let opts = load_pdf_options(None).expect("default path never fails");
+        let expected = crate::io::pdf_export::PdfExportOptions::default();
+        assert_eq!(opts.monochrome, expected.monochrome);
+        assert_eq!(opts.include_hatches, expected.include_hatches);
+        assert_eq!(opts.native_curves, expected.native_curves);
+    }
+
+    #[test]
+    fn load_pdf_options_missing_file_errs_with_path() {
+        let err = load_pdf_options(Some(Path::new("definitely_missing_opts_file_38.json")))
+            .expect_err("missing path must fail");
+        assert!(
+            err.contains("cannot open") && err.contains("definitely_missing_opts_file_38.json"),
+            "expected path-bearing error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn load_pdf_options_json_override_partial_preserves_defaults() {
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!(
+            "h7cad_r38_pdf_opts_{}.json",
+            std::process::id()
+        ));
+        let mut f = std::fs::File::create(&tmp).unwrap();
+        writeln!(f, r#"{{ "monochrome": false, "font_family": "TimesRoman" }}"#).unwrap();
+        drop(f);
+
+        let opts = load_pdf_options(Some(&tmp)).expect("partial json must parse");
+        assert!(!opts.monochrome, "monochrome override should apply");
+        assert_eq!(
+            opts.font_family,
+            crate::io::pdf_export::PdfFontChoice::TimesRoman
+        );
+        // Unset fields still default:
+        assert!(opts.include_hatches);
+        assert!(opts.native_curves);
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn load_pdf_options_malformed_json_errs_with_path() {
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!(
+            "h7cad_r38_malformed_{}.json",
+            std::process::id()
+        ));
+        let mut f = std::fs::File::create(&tmp).unwrap();
+        writeln!(f, "{{ not valid json").unwrap();
+        drop(f);
+
+        let err = load_pdf_options(Some(&tmp)).expect_err("malformed json must fail");
+        assert!(
+            err.contains("invalid JSON"),
+            "expected 'invalid JSON' in error, got: {err}"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn load_svg_options_json_override_partial_preserves_defaults() {
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!(
+            "h7cad_r38_svg_opts_{}.json",
+            std::process::id()
+        ));
+        let mut f = std::fs::File::create(&tmp).unwrap();
+        writeln!(f, r#"{{ "monochrome": false, "font_family": "Arial" }}"#).unwrap();
+        drop(f);
+
+        let opts = load_svg_options(Some(&tmp)).expect("partial json must parse");
+        assert!(!opts.monochrome);
+        assert_eq!(opts.font_family, "Arial");
+        // Unset keep defaults:
+        assert!(opts.include_hatches);
+        assert!(opts.native_curves);
+
+        let _ = std::fs::remove_file(&tmp);
     }
 }

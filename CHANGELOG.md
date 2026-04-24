@@ -2,6 +2,106 @@
 
 ## [未发布]
 
+### 2026-04-25（三十八）：CLI `--options <PATH>` JSON 覆盖
+
+> 三十六 / 三十七轮把 CLI 铺到了 PDF + SVG 双格式 + 多输入批处理，
+> 但所有导出都强制用 `*ExportOptions::default()`——想切 monochrome /
+> 字体 / 关 hatch / 禁原生曲线只能改源码重编。
+> 本轮新增 `--options <PATH>` flag，让自动化管线可以用 JSON 文件一次
+> 性 override 任何 `PdfExportOptions` / `SvgExportOptions` 字段，
+> 完整复现 GUI 对话框的能力。
+> 详见 `docs/plans/2026-04-25-cli-options-json-plan.md`。
+
+**用法**
+
+```
+h7cad INPUT.dxf --export-pdf OUT.pdf --options opts.json
+h7cad A.dxf B.dxf --export-svg OUTDIR\   --options opts.json
+```
+
+`--options` 可出现在任何位置；同一份 JSON 共享给所有输入。未在 JSON
+里出现的字段回落到 `PdfExportOptions::default()` / `SvgExportOptions::default()`。
+
+**JSON 示例（PDF）**
+
+```json
+{
+  "monochrome": false,
+  "font_family": "TimesRoman",
+  "include_hatches": false,
+  "native_curves": true
+}
+```
+
+`PdfFontChoice` 走 serde 的外部 tag 字符串（`"Helvetica"` /
+`"TimesRoman"` / `"Courier"`，与 GUI 对话框 pill 文字一致）。
+
+**新依赖**
+
+```toml
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+两个 crate 之前已经通过 `pid-parse` / 多个深依赖存在于 Cargo.lock 里，
+本轮只是显式加到 H7CAD top-level 的 `[dependencies]`。实际新增的
+编译时间 cost 近乎为零。
+
+**实现**
+
+- `PdfExportOptions` / `PdfFontChoice` / `SvgExportOptions` 加
+  `#[derive(serde::Deserialize)]` + struct-level `#[serde(default)]`，
+  让部分 JSON 可以无痛 merge 到 `Default`
+- `BatchArgs::Export` 多一个 `options_path: Option<PathBuf>` 字段
+- `parse_batch_args` 独立识别 `--options <PATH>` flag（顺序无关，既可
+  出现在 `--export-*` 前也可在后）；flag + value 两个 index 同时从
+  `inputs` 采集里剔除
+- `LoadedOptions` enum 在 batch 开头一次性加载 + 验证 JSON，所有输入
+  共享，避免 malformed JSON 让第一个输入成功、第二个失败这类诡异语义
+- 错误文案含路径：`cannot open options file "opts.json": ...` /
+  `invalid JSON in options file "opts.json": line X column Y ...`
+
+**不在本轮**
+
+- `--options default.json --options override.json` 多 JSON 继承
+- `--monochrome=false` 这类直接 flag（与 JSON 的优先级协商 scope 爆炸）
+- schema validation（依赖 serde 行列号错误即可）
+- PDF + SVG 同时 override（一次调用只能一个 format）
+
+**新增 9 条 unit tests**（`src/cli.rs`）
+
+- `parse_recognises_options_flag`
+- `parse_options_flag_coexists_with_multi_input_dir`
+- `parse_without_options_flag_has_none`
+- `parse_options_flag_order_agnostic`（`--options` 在 `--export-*` 前也能识别）
+- `load_pdf_options_none_returns_default`
+- `load_pdf_options_missing_file_errs_with_path`
+- `load_pdf_options_json_override_partial_preserves_defaults` ——
+  `{"monochrome": false, "font_family": "TimesRoman"}` 反序列化后
+  `monochrome=false` / `font_family=TimesRoman` / `include_hatches=true`
+  （保持 default）/ `native_curves=true`（保持 default）
+- `load_pdf_options_malformed_json_errs_with_path`
+- `load_svg_options_json_override_partial_preserves_defaults` —
+  SVG 侧同样的 partial-override 验证
+
+**新增 3 条集成测试**（`tests/cli_batch_export.rs`）
+
+- `cli_options_json_produces_valid_pdf` — 端到端：写 opts JSON →
+  CLI `--options` → 读出的 PDF 以 `%PDF-` 开头且字节 ≥ 500
+- `cli_options_missing_file_exits_one` — 指向不存在的 JSON 路径 →
+  退出码 1 + stderr 同时含 "cannot open" 和 JSON 文件名
+- `cli_options_malformed_json_exits_one` — `{ not valid json` →
+  退出码 1 + stderr 含 "invalid JSON"
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD cli::` 13 → 22 全绿（+9 R38）
+- `cargo test --test cli_batch_export` 7 → 10 全绿（+3 R38）
+- `cargo test --bin H7CAD` 412 → 421 全绿
+
+---
+
 ### 2026-04-25（三十七）：CLI `--export-svg` + 多输入批处理
 
 > 三十六轮落地 `h7cad INPUT.dxf --export-pdf OUTPUT.pdf` 之后，本轮做两

@@ -32,7 +32,8 @@ use std::path::{Path, PathBuf};
 // ── Options ────────────────────────────────────────────────────────────────
 
 /// Configurable knobs for PDF export — parallels `SvgExportOptions`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
 pub struct PdfExportOptions {
     /// All strokes forced to black (default true — matches SVG ColorPolicy=1).
     pub monochrome: bool,
@@ -101,7 +102,7 @@ impl Default for PdfExportOptions {
 
 /// Built-in Standard 14 PDF font selection.
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 pub enum PdfFontChoice {
     Helvetica,
     TimesRoman,

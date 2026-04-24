@@ -20,6 +20,8 @@ dependencies = [
  "printpdf",
  "rfd",
  "roxmltree 0.20.0",
+ "serde",
+ "serde_json",
  "truck-meshalgo",
  "truck-modeling",
  "truck-polymesh",
