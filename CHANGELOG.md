@@ -2,6 +2,84 @@
 
 ## [未发布]
 
+### 2026-04-25（三十六）：CLI 批处理 PDF 导出（headless）
+
+> 给 `h7cad` 可执行程序加一条 headless CLI 路径——`h7cad drawing.dxf
+> --export-pdf out.pdf` 就能无 GUI 把 DXF 转成 PDF，退出码标准化，
+> 直接可用于 CI / 批处理 / 自动化管线。
+> 详见 `docs/plans/2026-04-25-cli-pdf-export-plan.md`。
+
+**用法**
+
+```
+h7cad                                         # 启动 GUI
+h7cad drawing.dxf                             # GUI 打开文件（原有行为）
+h7cad drawing.dxf --export-pdf out.pdf        # headless 导出
+h7cad drawing.dxf --export-pdf                # 推导 out = drawing.pdf
+h7cad --help                                  # 显示用法
+```
+
+退出码：`0` 成功 / `1` 失败（诊断打到 stderr）。
+
+**实现**
+
+- 新建 `src/cli.rs`（~230 行），`BatchArgs` 枚举 + `parse_batch_args`
+  + `run_batch_export` + `HELP_TEXT`
+- `src/main.rs` 改签名：`fn main() -> ExitCode`，argv 识别到 batch
+  flag 就走 `cli::run_batch_export` 分支，否则 fall-through 到原有
+  `app::run()`
+- headless 管线：`crate::io::load_file_with_native_blocking(input)` →
+  compat + native + notices → 构造 `Scene { document, native_doc,
+  native_render_enabled: false }` → `entity_wires()` / `hatches` / 纸张
+  尺寸 → `export_pdf_full` → 写文件
+- 纸张尺寸选择与 GUI `PlotExportPath` 对齐：`paper_limits` → model
+  extents 1.05 margin → A4 (297×210) 三级 fallback；CLI 不接
+  PlotSettings / centering / rotation，保证输出 deterministic
+- CLI 用默认 `PdfExportOptions`（monochrome / 原生曲线 / 原生样条 /
+  pattern HATCH / 嵌入图像 全部 on）
+
+**参数解析约定**
+
+`--export-pdf` 后紧跟的非 flag 参数是 output 路径；arg 顺序可以任意
+（例如 `--export-pdf out.pdf drawing.dxf` 与 `drawing.dxf --export-pdf
+out.pdf` 等价）。`--help` / `-h` 无条件获胜，忽略其它 flag。
+
+零新外部依赖（没有引入 `clap` 等），手写 args parser。
+
+**新增 11 个测试**
+
+`src/cli.rs` unit tests (7 条)：
+
+- `parse_returns_none_for_plain_gui_invocation`（无 batch flag 走 GUI）
+- `parse_recognises_help_flag`（`--help` / `-h` 都生效，优先级最高）
+- `parse_extracts_input_and_output`（正常顺序）
+- `parse_infers_output_when_missing`（只给 `--export-pdf`，output 推导）
+- `parse_accepts_flag_order_swapped`（`--export-pdf out.pdf input.dxf`
+  也能正确识别——初次实现时这条抓到 bug：用 `position(|x| !x.starts_with('-'))`
+  的方式会错把 output 当 input，修复后限制了 input 搜索的 exclude
+  集合）
+- `run_batch_export_help_succeeds`
+- `run_batch_export_missing_file_fails`（错误信息含 "cannot open"）
+
+`tests/cli_batch_export.rs` 集成测试 (4 条，走 `CARGO_BIN_EXE_H7CAD`
+跑实际二进制)：
+
+- `cli_help_flag_returns_zero_and_prints_usage`
+- `cli_missing_input_returns_nonzero`
+- `cli_writes_pdf_for_minimal_dxf`（程序化构一个最小 DXF → 跑 CLI →
+  断言 output 以 `%PDF-` 开头 + 字节数 > 500）
+- `cli_infers_output_path_from_input_stem`（推导路径落盘验证）
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD` 399 → 406 全绿（+7 cli unit tests）
+- `cargo test --test cli_batch_export` 4 / 4 全绿
+- 手动验证：用 `h7cad --help` / `h7cad bad.dxf --export-pdf out.pdf`
+  均得到预期退出码
+
+---
+
 ### 2026-04-25（三十五）：PDF 原生 Spline piecewise bezier
 
 > PDF Phase 3 的第一项——把 `SPLINE` 实体从 wire tessellation 升级
