@@ -1,13 +1,17 @@
-//! Headless CLI batch path (三十六轮).
+//! Headless CLI batch path (三十六轮 初版; 三十七轮扩展至多输入 + SVG).
 //!
-//! Allows the `h7cad` binary to perform DXF → PDF conversion without
-//! launching the iced GUI, so CI / automation pipelines can integrate it.
+//! Allows the `h7cad` binary to perform DXF → PDF / DXF → SVG conversion
+//! without launching the iced GUI, so CI / automation pipelines can
+//! integrate it.  Supports multiple input files in a single invocation.
 //!
 //! Invocation:
 //!
 //! ```text
-//! h7cad drawing.dxf --export-pdf out.pdf
-//! h7cad drawing.dxf --export-pdf            # infers out = drawing.pdf
+//! h7cad INPUT.dxf --export-pdf OUTPUT.pdf           # single, explicit output
+//! h7cad INPUT.dxf --export-pdf                      # single, inferred output (INPUT.pdf)
+//! h7cad A.dxf B.dxf C.dxf --export-pdf OUT_DIR/     # multi-input, output directory
+//! h7cad A.dxf B.dxf --export-pdf                    # multi-input, inferred side-by-side
+//! h7cad INPUT.dxf --export-svg OUTPUT.svg           # SVG, mirrors --export-pdf
 //! h7cad --help
 //! ```
 //!
@@ -21,8 +25,44 @@ use std::path::{Path, PathBuf};
 pub enum BatchArgs {
     /// Show usage string on stdout and exit 0.
     Help,
-    /// Export `input` → `output` as PDF.
-    ExportPdf { input: PathBuf, output: PathBuf },
+    /// Export a list of input DXFs to PDF or SVG.
+    Export {
+        format: ExportFormat,
+        inputs: Vec<PathBuf>,
+        output: ExportTarget,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportFormat {
+    Pdf,
+    Svg,
+}
+
+impl ExportFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            ExportFormat::Pdf => "pdf",
+            ExportFormat::Svg => "svg",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            ExportFormat::Pdf => "PDF",
+            ExportFormat::Svg => "SVG",
+        }
+    }
+}
+
+/// Where to put each exported file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportTarget {
+    /// Infer: each input's parent dir + stem + correct extension.
+    SameStem,
+    /// Exactly one input → this path is the output file.
+    File(PathBuf),
+    /// Any number of inputs → put `<stem>.<ext>` inside this directory.
+    Dir(PathBuf),
 }
 
 /// Inspect `args` (already stripped of argv[0]) and return a recognised
@@ -32,53 +72,86 @@ pub fn parse_batch_args(args: &[String]) -> Option<BatchArgs> {
         return Some(BatchArgs::Help);
     }
 
-    // Any supported batch flag currently requires at least `<input> --export-pdf`.
-    let export_idx = args.iter().position(|a| a == "--export-pdf")?;
-
-    // The first arg after `--export-pdf` is treated as the output path when
-    // it doesn't itself look like a flag — so we must skip it during input
-    // search, otherwise invocation `--export-pdf out.pdf drawing.dxf` would
-    // pick `out.pdf` for both input and output.
-    let output_idx = args
-        .get(export_idx + 1)
-        .filter(|s| !s.starts_with('-'))
-        .map(|_| export_idx + 1);
-
-    let input = args
-        .iter()
-        .enumerate()
-        .find(|(i, a)| *i != export_idx && Some(*i) != output_idx && !a.starts_with('-'))
-        .map(|(_, a)| PathBuf::from(a))?;
-
-    let output = match output_idx {
-        Some(idx) => PathBuf::from(&args[idx]),
-        None => {
-            // Infer output by swapping extension to .pdf.
-            let mut inferred = input.clone();
-            inferred.set_extension("pdf");
-            inferred
-        }
+    let (format, flag_idx) = match args.iter().position(|a| a == "--export-pdf") {
+        Some(idx) => (ExportFormat::Pdf, idx),
+        None => match args.iter().position(|a| a == "--export-svg") {
+            Some(idx) => (ExportFormat::Svg, idx),
+            None => return None,
+        },
     };
 
-    Some(BatchArgs::ExportPdf { input, output })
+    // The arg immediately after the flag is the (optional) output path —
+    // skip it when gathering inputs so we don't double-count.
+    let output_idx = args
+        .get(flag_idx + 1)
+        .filter(|s| !s.starts_with('-'))
+        .map(|_| flag_idx + 1);
+
+    let inputs: Vec<PathBuf> = args
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != flag_idx && Some(*i) != output_idx)
+        .map(|(_, s)| s.as_str())
+        .filter(|s| !s.starts_with('-'))
+        .map(PathBuf::from)
+        .collect();
+
+    if inputs.is_empty() {
+        return None;
+    }
+
+    let output = match output_idx {
+        Some(idx) => {
+            let raw = &args[idx];
+            if looks_like_dir(raw) {
+                ExportTarget::Dir(PathBuf::from(raw))
+            } else {
+                ExportTarget::File(PathBuf::from(raw))
+            }
+        }
+        None => ExportTarget::SameStem,
+    };
+
+    Some(BatchArgs::Export {
+        format,
+        inputs,
+        output,
+    })
 }
 
-/// Short help text; kept inline (not pulled from a markdown file) so the
-/// build produces a self-contained binary.
+/// `true` when `raw` already exists as a directory, or ends with `/` / `\`.
+fn looks_like_dir(raw: &str) -> bool {
+    if raw.ends_with('/') || raw.ends_with('\\') {
+        return true;
+    }
+    let p = Path::new(raw);
+    p.is_dir()
+}
+
+/// Short help text; kept inline so the build produces a self-contained binary.
 pub const HELP_TEXT: &str = "\
 H7CAD — CAD viewer and DXF/DWG editor
 
 USAGE:
     h7cad                                         Launch the GUI.
     h7cad <PATH>                                  Launch the GUI and open PATH.
-    h7cad <INPUT.dxf> --export-pdf [OUTPUT.pdf]   Batch convert DXF → PDF.
+    h7cad <INPUT.dxf>... --export-pdf [OUTPUT]    Batch convert DXF → PDF.
+    h7cad <INPUT.dxf>... --export-svg [OUTPUT]    Batch convert DXF → SVG.
     h7cad --help                                  Show this message.
 
+OUTPUT RESOLUTION:
+    - Omitted            each INPUT's stem + .pdf / .svg beside the input
+    - Ends with / or \\   treated as a directory (required for multi-input)
+    - Existing directory same as above
+    - Otherwise          treated as a single output file (only valid when
+                         exactly one input is given)
+
 BATCH EXPORT NOTES:
-    When `OUTPUT.pdf` is omitted, it defaults to `<INPUT>.pdf`.
-    The batch path uses default `PdfExportOptions` (monochrome, native
+    Uses default `PdfExportOptions` / `SvgExportOptions` (monochrome, native
     curves/splines/text, solid + pattern HATCH, embedded images).
-    Exit code 0 on success, 1 on failure (diagnostic printed to stderr).
+    Exit code 0 when every input succeeds, 1 when any failed.  Failures are
+    non-fatal — the remaining inputs still attempt export and a per-file
+    diagnostic is printed to stderr.
 ";
 
 /// Execute the batch path.  Matches the entry-point signature expected by
@@ -90,11 +163,84 @@ pub fn run_batch_export(args: BatchArgs) -> Result<(), String> {
             print!("{HELP_TEXT}");
             Ok(())
         }
-        BatchArgs::ExportPdf { input, output } => export_pdf(&input, &output),
+        BatchArgs::Export {
+            format,
+            inputs,
+            output,
+        } => run_export_batch(format, &inputs, &output),
     }
 }
 
-fn export_pdf(input: &Path, output: &Path) -> Result<(), String> {
+fn run_export_batch(
+    format: ExportFormat,
+    inputs: &[PathBuf],
+    output: &ExportTarget,
+) -> Result<(), String> {
+    // Reject obvious misuses up front so the user gets a single clean error
+    // instead of N identical "overwrite-on-same-file" diagnostics.
+    if inputs.len() > 1 {
+        if let ExportTarget::File(_) = output {
+            return Err(format!(
+                "{} inputs were given but the output \"{}\" is a single file — \
+                 pass a directory (ending in '/' or '\\\\') or omit the output \
+                 to infer side-by-side paths.",
+                inputs.len(),
+                output_display(output)
+            ));
+        }
+    }
+
+    let mut failed = 0usize;
+    let total = inputs.len();
+
+    for input in inputs {
+        let out_path = resolve_output(input, output, format);
+        match export_one(input, &out_path, format) {
+            Ok(()) => {
+                eprintln!(
+                    "h7cad: {} -> {} ({})",
+                    input.display(),
+                    out_path.display(),
+                    format.label()
+                );
+            }
+            Err(e) => {
+                eprintln!("h7cad: {} failed: {}", input.display(), e);
+                failed += 1;
+            }
+        }
+    }
+
+    if failed > 0 {
+        Err(format!("{failed} of {total} inputs failed"))
+    } else {
+        Ok(())
+    }
+}
+
+fn output_display(target: &ExportTarget) -> String {
+    match target {
+        ExportTarget::SameStem => "<inferred>".into(),
+        ExportTarget::File(p) => p.display().to_string(),
+        ExportTarget::Dir(p) => p.display().to_string(),
+    }
+}
+
+fn resolve_output(input: &Path, target: &ExportTarget, format: ExportFormat) -> PathBuf {
+    match target {
+        ExportTarget::SameStem => input.with_extension(format.extension()),
+        ExportTarget::File(path) => path.clone(),
+        ExportTarget::Dir(dir) => {
+            let stem = input.file_stem().unwrap_or_default();
+            let mut name = stem.to_string_lossy().into_owned();
+            name.push('.');
+            name.push_str(format.extension());
+            dir.join(name)
+        }
+    }
+}
+
+fn export_one(input: &Path, output: &Path, format: ExportFormat) -> Result<(), String> {
     if !input.exists() {
         return Err(format!("cannot open \"{}\": file not found", input.display()));
     }
@@ -102,46 +248,63 @@ fn export_pdf(input: &Path, output: &Path) -> Result<(), String> {
     let (compat, native, _notices) = crate::io::load_file_with_native_blocking(input)
         .map_err(|e| format!("failed to load \"{}\": {e}", input.display()))?;
 
-    // Assemble a headless Scene mirroring the GUI default-display path:
-    // compat doc in the tessellator, native doc preserved for bridge-aware
-    // emits (text / images / native curves / native splines).
     let mut scene = crate::scene::Scene::new();
     scene.document = compat;
     scene.set_native_doc(native);
     scene.native_render_enabled = false;
 
     let wires = scene.entity_wires();
-
-    // Paper size: prefer paper_limits if the active layout supplies them,
-    // otherwise fit the model-space extents with a 5% margin, otherwise
-    // fall back to A4 (297 × 210).  Mirrors the PlotExportPath branch in
-    // `src/app/update.rs` but drops PlotSettings / centering / rotation
-    // so the CLI output is deterministic and config-free.
     let (paper_w, paper_h, offset_x, offset_y) = resolve_paper_and_offset(&scene);
 
-    let options = crate::io::pdf_export::PdfExportOptions::default();
-    crate::io::pdf_export::export_pdf_full(
-        &wires,
-        &scene.hatches,
-        scene.native_doc(),
-        paper_w,
-        paper_h,
-        offset_x,
-        offset_y,
-        0, // no rotation
-        output,
-        None, // no CTB
-        &options,
-    )
-    .map_err(|e| format!("PDF export failed: {e}"))?;
+    // Ensure the parent directory exists for Dir-style outputs.
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "cannot create output directory \"{}\": {e}",
+                    parent.display()
+                )
+            })?;
+        }
+    }
 
-    eprintln!(
-        "h7cad: wrote {} ({:.1} × {:.1} mm, {} wires)",
-        output.display(),
-        paper_w,
-        paper_h,
-        wires.len()
-    );
+    match format {
+        ExportFormat::Pdf => {
+            let options = crate::io::pdf_export::PdfExportOptions::default();
+            crate::io::pdf_export::export_pdf_full(
+                &wires,
+                &scene.hatches,
+                scene.native_doc(),
+                paper_w,
+                paper_h,
+                offset_x,
+                offset_y,
+                0,
+                output,
+                None,
+                &options,
+            )
+            .map_err(|e| format!("PDF export failed: {e}"))?;
+        }
+        ExportFormat::Svg => {
+            let options = crate::io::svg_export::SvgExportOptions::default();
+            crate::io::svg_export::export_svg_full(
+                &wires,
+                &scene.hatches,
+                scene.native_doc(),
+                paper_w,
+                paper_h,
+                offset_x,
+                offset_y,
+                0,
+                output,
+                None,
+                &options,
+            )
+            .map_err(|e| format!("SVG export failed: {e}"))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -178,6 +341,14 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    fn export(format: ExportFormat, inputs: &[&str], output: ExportTarget) -> BatchArgs {
+        BatchArgs::Export {
+            format,
+            inputs: inputs.iter().map(PathBuf::from).collect(),
+            output,
+        }
+    }
+
     #[test]
     fn parse_returns_none_for_plain_gui_invocation() {
         assert_eq!(parse_batch_args(&[]), None);
@@ -188,7 +359,6 @@ mod tests {
     fn parse_recognises_help_flag() {
         assert_eq!(parse_batch_args(&s(&["--help"])), Some(BatchArgs::Help));
         assert_eq!(parse_batch_args(&s(&["-h"])), Some(BatchArgs::Help));
-        // --help wins over any other args.
         assert_eq!(
             parse_batch_args(&s(&["input.dxf", "--export-pdf", "--help"])),
             Some(BatchArgs::Help)
@@ -196,26 +366,72 @@ mod tests {
     }
 
     #[test]
-    fn parse_extracts_input_and_output() {
+    fn parse_single_input_pdf_explicit_file() {
         let got = parse_batch_args(&s(&["drawing.dxf", "--export-pdf", "out.pdf"]));
         assert_eq!(
             got,
-            Some(BatchArgs::ExportPdf {
-                input: PathBuf::from("drawing.dxf"),
-                output: PathBuf::from("out.pdf"),
-            })
+            Some(export(
+                ExportFormat::Pdf,
+                &["drawing.dxf"],
+                ExportTarget::File(PathBuf::from("out.pdf"))
+            ))
         );
     }
 
     #[test]
-    fn parse_infers_output_when_missing() {
+    fn parse_single_input_pdf_inferred() {
         let got = parse_batch_args(&s(&["drawing.dxf", "--export-pdf"]));
         assert_eq!(
             got,
-            Some(BatchArgs::ExportPdf {
-                input: PathBuf::from("drawing.dxf"),
-                output: PathBuf::from("drawing.pdf"),
-            })
+            Some(export(
+                ExportFormat::Pdf,
+                &["drawing.dxf"],
+                ExportTarget::SameStem,
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_single_input_svg() {
+        let got = parse_batch_args(&s(&["drawing.dxf", "--export-svg", "out.svg"]));
+        assert_eq!(
+            got,
+            Some(export(
+                ExportFormat::Svg,
+                &["drawing.dxf"],
+                ExportTarget::File(PathBuf::from("out.svg"))
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_multi_input_with_dir_output_via_trailing_slash() {
+        let got = parse_batch_args(&s(&[
+            "a.dxf",
+            "b.dxf",
+            "--export-pdf",
+            "out/",
+        ]));
+        assert_eq!(
+            got,
+            Some(export(
+                ExportFormat::Pdf,
+                &["a.dxf", "b.dxf"],
+                ExportTarget::Dir(PathBuf::from("out/"))
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_multi_input_no_output_uses_same_stem() {
+        let got = parse_batch_args(&s(&["a.dxf", "b.dxf", "--export-svg"]));
+        assert_eq!(
+            got,
+            Some(export(
+                ExportFormat::Svg,
+                &["a.dxf", "b.dxf"],
+                ExportTarget::SameStem,
+            ))
         );
     }
 
@@ -224,10 +440,11 @@ mod tests {
         let got = parse_batch_args(&s(&["--export-pdf", "out.pdf", "drawing.dxf"]));
         assert_eq!(
             got,
-            Some(BatchArgs::ExportPdf {
-                input: PathBuf::from("drawing.dxf"),
-                output: PathBuf::from("out.pdf"),
-            })
+            Some(export(
+                ExportFormat::Pdf,
+                &["drawing.dxf"],
+                ExportTarget::File(PathBuf::from("out.pdf"))
+            ))
         );
     }
 
@@ -238,14 +455,56 @@ mod tests {
 
     #[test]
     fn run_batch_export_missing_file_fails() {
-        let err = run_batch_export(BatchArgs::ExportPdf {
-            input: PathBuf::from("this_definitely_does_not_exist.dxf"),
-            output: PathBuf::from("out.pdf"),
-        })
+        let err = run_batch_export(export(
+            ExportFormat::Pdf,
+            &["this_definitely_does_not_exist.dxf"],
+            ExportTarget::File(PathBuf::from("out.pdf")),
+        ))
         .expect_err("missing input must fail");
         assert!(
-            err.to_lowercase().contains("cannot open"),
-            "expected 'cannot open' in error, got: {err}"
+            err.to_lowercase().contains("failed"),
+            "expected 'failed' in error, got: {err}"
         );
+    }
+
+    #[test]
+    fn run_batch_export_rejects_multi_input_to_single_file() {
+        let err = run_batch_export(export(
+            ExportFormat::Pdf,
+            &["a.dxf", "b.dxf"],
+            ExportTarget::File(PathBuf::from("merged.pdf")),
+        ))
+        .expect_err("multi input → single file must be rejected");
+        assert!(
+            err.contains("single file"),
+            "expected 'single file' guidance in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_output_same_stem_uses_format_extension() {
+        let p = resolve_output(
+            Path::new("/tmp/drawing.dxf"),
+            &ExportTarget::SameStem,
+            ExportFormat::Pdf,
+        );
+        assert_eq!(p, Path::new("/tmp/drawing.pdf"));
+
+        let s = resolve_output(
+            Path::new("drawing.dxf"),
+            &ExportTarget::SameStem,
+            ExportFormat::Svg,
+        );
+        assert_eq!(s, Path::new("drawing.svg"));
+    }
+
+    #[test]
+    fn resolve_output_dir_joins_stem() {
+        let p = resolve_output(
+            Path::new("/src/alpha.dxf"),
+            &ExportTarget::Dir(PathBuf::from("/out")),
+            ExportFormat::Pdf,
+        );
+        assert_eq!(p, Path::new("/out/alpha.pdf"));
     }
 }

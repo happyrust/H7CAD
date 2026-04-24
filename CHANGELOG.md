@@ -2,6 +2,123 @@
 
 ## [未发布]
 
+### 2026-04-25（三十七）：CLI `--export-svg` + 多输入批处理
+
+> 三十六轮落地 `h7cad INPUT.dxf --export-pdf OUTPUT.pdf` 之后，本轮做两
+> 个对称扩展：**加 SVG 路径** + **支持一次传多个输入文件**。至此 CI
+> 脚本可以用一条命令把整包 DXF 导成 PDF 或 SVG。
+> 详见 `docs/plans/2026-04-25-cli-svg-and-multi-input-plan.md`。
+
+**用法**
+
+```
+h7cad INPUT.dxf --export-pdf OUTPUT.pdf         # 单输入 → 显式文件
+h7cad INPUT.dxf --export-pdf                    # 单输入 → 推导 INPUT.pdf
+h7cad A.dxf B.dxf C.dxf --export-pdf OUTDIR\    # 多输入 → 目录
+h7cad A.dxf B.dxf --export-pdf                  # 多输入 → 各自推导
+h7cad INPUT.dxf --export-svg OUTPUT.svg         # SVG 对称
+h7cad A.dxf B.dxf --export-svg OUTDIR\          # SVG 批量
+```
+
+退出码：**全部成功 0 / 任一失败 1**。失败 non-fatal——其余输入继续处
+理，每条失败单独打印到 stderr，最终统计 `N of M inputs failed`。
+
+**`BatchArgs` 重构（对比 R36）**
+
+三十六轮：`BatchArgs::ExportPdf { input: PathBuf, output: Option<PathBuf> }`
+（单输入 + 单可选输出）
+
+三十七轮：
+
+```rust
+pub enum BatchArgs {
+    Help,
+    Export {
+        format: ExportFormat,          // Pdf | Svg
+        inputs: Vec<PathBuf>,          // 1..N 输入
+        output: ExportTarget,          // SameStem | File | Dir
+    },
+}
+```
+
+`ExportTarget` 三种模式：
+- `SameStem` — 省略输出时，对每个输入推导 `<parent>/<stem>.{pdf|svg}`
+- `File(PathBuf)` — 显式单文件输出（仅允许 `inputs.len() == 1`，
+  多输入时 `run_batch_export` 早返回带指引的错误）
+- `Dir(PathBuf)` — 目录模式：路径以 `/` 或 `\` 结尾、或已是存在目录
+  时自动识别；目录不存在则自动 `create_dir_all`
+
+**目录检测策略**（`looks_like_dir`）：
+
+```
+ends_with('/') || ends_with('\\') || Path::is_dir()
+```
+
+保证首次调用时即使目录尚未存在也能正确识别（关键路径由测试
+`cli_batch_two_dxfs_to_dir` / `cli_mixed_failure_keeps_processing_and_reports_nonzero`
+锁定）。
+
+**SVG 接入**
+
+`export_one` 按 `ExportFormat` 分发：
+- `Pdf` → `io::pdf_export::export_pdf_full` + `PdfExportOptions::default()`
+- `Svg` → `io::svg_export::export_svg_full` + `SvgExportOptions::default()`
+
+两条路径共用 `resolve_paper_and_offset` + scene 构造，纸张尺寸回落
+同 R36（`paper_limits` → model extents ×1.05 → A4 fallback）。
+
+**零新外部依赖**
+
+仍然手写 args parser，没有引入 `clap` / `structopt` 等。`parse_batch_args`
+纯函数，所有行为由 13 条单元测试覆盖。
+
+**新增 13 条 unit tests**（`src/cli.rs`）
+
+- `parse_returns_none_for_plain_gui_invocation` — 无 batch flag 走 GUI
+- `parse_recognises_help_flag` — `--help` / `-h` 最高优先级，即使和
+  `--export-pdf` 同时出现也优先 Help
+- `parse_single_input_pdf_explicit_file` — 正常单输入单输出
+- `parse_single_input_pdf_inferred` — 只给 flag、推导输出
+- `parse_single_input_svg` — SVG 路径单输入
+- `parse_multi_input_with_dir_output_via_trailing_slash` — 多输入 +
+  trailing-slash 触发 Dir target
+- `parse_multi_input_no_output_uses_same_stem` — 多输入不给输出 → 各自推导
+- `parse_accepts_flag_order_swapped` — `--export-pdf OUT IN` 也能正确识别
+- `run_batch_export_help_succeeds` — Help 分支退出 0
+- `run_batch_export_missing_file_fails` — 缺失输入 → Err("failed" 字样)
+- `run_batch_export_rejects_multi_input_to_single_file` — 多输入 + File
+  target 早退 + 错误文案含 "single file" 指引
+- `resolve_output_same_stem_uses_format_extension` — 推导路径用正确扩展名
+- `resolve_output_dir_joins_stem` — Dir target 正确拼 `<dir>/<stem>.<ext>`
+
+**集成测试追加 4 条**（`tests/cli_batch_export.rs`）
+
+- `cli_exports_svg_for_minimal_dxf` — `--export-svg` 路径产合法 SVG
+  （断言 `<?xml` 或 `<svg` magic + 内含 `<svg ` 元素）
+- `cli_batch_two_dxfs_to_dir` — 两个 DXF → 一个（尚不存在的）目录，
+  断言目录被创建 + 两个 `.pdf` 都落盘
+- `cli_mixed_failure_keeps_processing_and_reports_nonzero` — 好坏输入
+  混合：好的照样产出、坏的报错到 stderr、最终退出码 1
+- `cli_infers_output_path_from_input_stem` — 推导路径落盘验证
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD cli::` 13 / 13 全绿
+- `cargo test --bin H7CAD` 406 → 412 全绿（+6 R37 新增 unit tests；
+  其余 7 条 R36 已存在）
+- `cargo test --test cli_batch_export` 7 / 7 全绿（+4 R37 新增）
+
+**不在本轮**（延到后续）
+
+- `--plot-style` / `--options <json>` 等高级 flag
+- 同时 `--export-pdf --export-svg` 双输出
+- DWG 输入批处理（`load_file_with_native_blocking` 已支持 DWG，但 CLI
+  目前只保证 DXF 路径稳定；DWG 需要 `h7cad-native-dwg` 运行时 enable
+  后再解锁）
+
+---
+
 ### 2026-04-25（三十六）：CLI 批处理 PDF 导出（headless）
 
 > 给 `h7cad` 可执行程序加一条 headless CLI 路径——`h7cad drawing.dxf
