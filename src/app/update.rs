@@ -3478,11 +3478,16 @@ impl H7CAD {
                     _        => (paper_w, paper_h),
                 };
 
-                match crate::io::pdf_export::export_pdf(
-                    &wires, eff_w, eff_h,
+                let pdf_options = crate::io::pdf_export::PdfExportOptions::default();
+                match crate::io::pdf_export::export_pdf_full(
+                    &wires,
+                    &scene.hatches,
+                    scene.native_doc(),
+                    eff_w, eff_h,
                     draw_ox as f32, draw_oy as f32,
                     rotation_deg, &path,
                     self.active_plot_style.as_ref(),
+                    &pdf_options,
                 ) {
                     Ok(()) => self.command_line.push_info(&format!(
                         "Exported: {}",

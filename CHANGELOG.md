@@ -2,6 +2,62 @@
 
 ## [未发布]
 
+### 2026-04-24（三十二）：PDF 导出与 SVG 导出功能对齐（Phase 1）
+
+> 把 `src/io/pdf_export.rs` 从 191 行「只会画线」原型升级到可与
+> `export_svg_full` **产品特性对齐** 的导出路径。
+> 详见 `docs/plans/2026-04-24-pdf-export-parity-plan.md`。
+
+**本轮修复的核心缺口（对照 SVG 导出的功能矩阵）**
+
+| 能力 | 三十一轮（旧） | 三十二轮（新） |
+|------|---------------|---------------|
+| TEXT / MTEXT 原生渲染 | ❌ 依赖 wire tessellation，字体信息丢失 | ✅ 内置 Helvetica 字体 + `Tm`/`Td` 定位 + MText 多行 |
+| HATCH solid 填充 | ❌ 完全不输出 | ✅ `Op::DrawPolygon` + EvenOdd 填充 |
+| IMAGE / RasterImage 嵌入 | ❌ 完全不输出 | ✅ printpdf `add_image` + `UseXobject`（手动 image 加载，不依赖 printpdf `images` feature） |
+| 导出选项 | ❌ 无 | ✅ `PdfExportOptions`（monochrome / text_as_geometry / font_family / font_size_scale / include_hatches / include_images / embed_images / image_base / native_dimension_text） |
+| CJK fallback | N/A | ✅ 非 Latin-1 文字自动回退到 wire tessellation（避免内置字体输出乱码） |
+
+**新增 API**
+
+- `PdfExportOptions` + `PdfFontChoice{Helvetica, TimesRoman, Courier}`
+- `export_pdf_full(wires, hatches, native_doc, paper_w, paper_h, ox, oy, rotation, path, plot_style, options)`
+- 既有 `export_pdf(wires, ..., plot_style)` 保留，`print_to_printer` 路径继续可用（内部委托 `export_pdf_full` 传默认 options）
+
+**新增的 8 个回归测试**（`src/io/pdf_export.rs #[cfg(test)] mod tests`）
+
+- `fixture_pdf_wire_smoke` — 空 hatches / None native_doc 仍能导出合法 PDF
+- `fixture_pdf_text_renders_as_native_text` — ASCII TEXT 触发 `/Font` 资源引用
+- `fixture_pdf_cjk_text_falls_back_to_geometry` — `collect_native_handles` 对 CJK 返回空集，builder 不产生 text section
+- `fixture_pdf_solid_hatch_emits_fill_ops` — solid HATCH 产生的 PDF 字节数严格大于空 PDF
+- `fixture_pdf_pattern_hatch_skipped_when_not_implemented` — pattern HATCH 不崩溃、长度与空 PDF 一致
+- `fixture_pdf_image_missing_file_does_not_crash` — IMAGE 指向不存在文件时优雅跳过，PDF 仍合法
+- `fixture_pdf_options_monochrome_forces_black_strokes` — options 切换不崩溃，两路径都产生 `%PDF-` 头
+- `fixture_pdf_export_full_wires_only_matches_legacy_export_pdf` — 新旧签名双路径都能写出合法 PDF
+
+**改动面**
+
+- `src/io/pdf_export.rs`：191 → 913 行（包含 8 条 fixture）
+- `src/app/update.rs`：PDF 导出菜单路径改调 `export_pdf_full`，喂入 `scene.hatches` / `scene.native_doc()`
+- 依赖：无新增（只用已有的 `printpdf 0.9.1` + `image 0.25`，手动构建 `RawImage`）
+
+**测试**
+
+- `cargo check -p H7CAD`：通过，零新 warning
+- `cargo test --bin H7CAD`：376 → 384 全绿（+8 PDF fixture）
+- `cargo test --bin H7CAD io::pdf_export`：8 / 8 全绿
+- 现有 `print_to_printer` 路径 API 不变，零风险
+
+**延到 Phase 2 的部分**（路线图已登记）
+
+- HATCH pattern（line family）/ gradient 填充
+- PDF 导出对话框（`src/ui/pdf_export_dialog.rs` 对齐 `svg_export_dialog.rs`）
+- Block 定义去重（PDF Form XObject）
+- 原生圆/椭圆/Arc（PDF path + bezier 近似）
+- Spline piecewise bezier（复用 svg_export 的 NURBS→Bezier 代码）
+
+plan：`docs/plans/2026-04-24-pdf-export-parity-plan.md`
+
 ### 2026-04-24（三十一）：DXF 2D 显示收口
 
 > 关闭常规二维工程图的 DXF 读-写-桥接-显示缺口。
