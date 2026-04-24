@@ -129,6 +129,11 @@ pub(super) struct H7CAD {
     /// Edit buffer for the line-weight scale multiplier.
     svg_export_lw_scale_buf: String,
 
+    // ── PDF Export Dialog (三十三轮 Phase 2b) ───────────────────────────
+    pdf_export_window: Option<window::Id>,
+    pdf_export_opts: crate::io::pdf_export::PdfExportOptions,
+    pdf_export_font_size_buf: String,
+
     // ── Plot Style Table ──────────────────────────────────────────────────
     /// Currently loaded CTB/STB table (None = no override).
     active_plot_style: Option<crate::io::plot_style::PlotStyleTable>,
@@ -221,6 +226,21 @@ pub enum SvgExportDialogField {
     FontSizeScale,
     MinStrokeWidth,
     LineWeightScale,
+}
+
+/// Identifies a single editable field inside the PDF Export dialog
+/// (三十三轮 Phase 2b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PdfExportDialogField {
+    Monochrome,
+    TextAsGeometry,
+    IncludeHatches,
+    HatchPatterns,
+    NativeCurves,
+    IncludeImages,
+    EmbedImages,
+    NativeDimensionText,
+    FontSizeScale,
 }
 
 #[derive(Debug, Clone)]
@@ -474,6 +494,22 @@ pub enum Message {
     SvgExport(crate::io::svg_export::SvgExportOptions),
     /// Callback after the user picks (or cancels) the SVG export path.
     SvgExportPath(Option<std::path::PathBuf>, crate::io::svg_export::SvgExportOptions),
+    /// Open the PDF Export options dialog (三十三轮 Phase 2b).
+    PdfExportDialogOpen,
+    /// Close the PDF Export options dialog without exporting.
+    PdfExportDialogClose,
+    /// Toggle a boolean field in the dialog-backed `PdfExportOptions`.
+    PdfExportDialogToggle(PdfExportDialogField),
+    /// Edit one of the numeric text fields in the dialog.
+    PdfExportDialogEdit(PdfExportDialogField, String),
+    /// Pick one of the Standard 14 built-in fonts.
+    PdfExportDialogSelectFont(crate::io::pdf_export::PdfFontChoice),
+    /// Commit the dialog's current options and fire file-save → `PlotExportPathWithOpts`.
+    PdfExportDialogCommit,
+    /// Callback after the user picks (or cancels) the PDF export path from the
+    /// dialog flow, carrying the committed options alongside.
+    PlotExportPathWithOpts(Option<std::path::PathBuf>, crate::io::pdf_export::PdfExportOptions),
+
     /// Open the SVG Export options dialog.  `SVGEXPORTDIALOG` / `SVGOPTIONS`.
     SvgExportDialogOpen,
     /// Close the SVG Export options dialog without exporting.
@@ -688,6 +724,9 @@ impl H7CAD {
             svg_export_font_size_buf: String::new(),
             svg_export_min_stroke_buf: String::new(),
             svg_export_lw_scale_buf: String::new(),
+            pdf_export_window: None,
+            pdf_export_opts: crate::io::pdf_export::PdfExportOptions::default(),
+            pdf_export_font_size_buf: String::new(),
             // Plot style
             active_plot_style: None,
             // Color scheme (default: dark CAD-style)
@@ -794,6 +833,7 @@ pub fn run() -> iced::Result {
             if Some(window_id) == state.dimstyle_window      { return "Dimension Style Manager".into(); }
             if Some(window_id) == state.shortcuts_window     { return "Keyboard Shortcuts".into(); }
             if Some(window_id) == state.svg_export_window    { return "SVG Export Options".into(); }
+            if Some(window_id) == state.pdf_export_window    { return "PDF Export Options".into(); }
             if let Some(tab) = state.tabs.get(state.active_tab) {
                 let dot = if tab.dirty { "● " } else { "" };
                 let name = tab.tab_display_name();

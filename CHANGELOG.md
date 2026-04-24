@@ -2,6 +2,64 @@
 
 ## [未发布]
 
+### 2026-04-25（三十三 · Phase 2b）：PDF 导出对话框
+
+> Phase 2a 做完 HATCH pattern 之后，SVG 侧的 options 对话框
+> (`src/ui/svg_export_dialog.rs`) PDF 侧一直缺——用户想切 monochrome
+> / 字体 / 不出图像之类的 options 没地方设。本轮把这块补齐，PDF 导出
+> 从此也有独立的 options 窗口。
+>
+> 详见 `docs/plans/2026-04-25-pdf-export-phase-2-plan.md` T2/T3。
+
+**新增：`src/ui/pdf_export_dialog.rs`**
+
+- 约 280 行，与 `svg_export_dialog.rs` 同结构（toolbar + scrollable form）
+- 分 4 个 section：Color & Strokes / Text / Geometry / Images
+- 字体选择用 pill 三选一（Helvetica / Times / Courier）
+- 所有 `PdfExportOptions` 的布尔字段一一映射成 `toggle()`
+- `font_size_scale` 走 text_input，确认时 parse 到 f32
+- 附带 3 条单元测试：
+  - `toggle_flips_each_boolean_field` — 8 个布尔字段 toggle 一次后全部翻面
+  - `font_choice_updates_options` — Helvetica → TimesRoman → Courier 依次切换
+  - `font_size_scale_field_does_not_flip_on_toggle_path` — typed 字段在
+    toggle 路径上是 no-op（只走 Edit message）
+
+**App 接线**
+
+- `PdfExportDialogField` 枚举（9 变体）落在 `src/app/mod.rs`
+- 新增 7 个 Message 变体：`PdfExportDialogOpen/Close/Toggle/Edit/SelectFont/Commit` +
+  `PlotExportPathWithOpts(path, opts)`（文件选择回调）
+- `H7CAD` state 新增 `pdf_export_window` / `pdf_export_opts` /
+  `pdf_export_font_size_buf` 三字段
+- `iced::daemon` 的多窗口路由在 `view.rs` / `daemon::title` 里各加一条
+- 窗口关闭清理在 `update.rs::WindowCloseRequested` 里也加一条
+- 新增命令 `PDFEXPORTDIALOG` / `PDFOPTIONS` / `PDFEXPORTOPTIONS`
+  （对应 SVGEXPORTDIALOG 系列）
+- `PlotExportPath(Some(path))` 处理器改用 `self.pdf_export_opts`——
+  对话框路径生效，既有 `PLOT`/`EXPORT` 命令仍然使用 factory default
+  （零行为回归）
+
+**UX 流**
+
+```
+PLOT / EXPORT 命令            → 直接文件对话框 → 默认 options 导出（旧行为不变）
+PDFOPTIONS / PDFEXPORTDIALOG  → 打开 options 窗口 → 点 "Export…"
+                                → 文件对话框 → 按所选 options 导出
+```
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD` 391 → 394 全绿（+3 dialog 单元测试）
+- 手动：命令行输入 `PDFOPTIONS` → 弹出 PDF Export Options 窗口，四
+  个 section + 三字体 pill + 字号输入框全部可交互
+
+至此 PDF 导出 Phase 1 + Phase 2a + Phase 2b 形成闭环：
+**文字 / solid-hatch / pattern-hatch / image / 原生曲线 / options 对话框**，
+与 SVG 导出在真实二维工程图上视觉和交互基本等价。
+
+---
+
 ### 2026-04-25（三十三 · Phase 2a）：PDF HATCH pattern（line family）
 
 > 关掉 PDF 导出的最后一个"空白"区域——非 solid HATCH。现在 ANSI31

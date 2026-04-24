@@ -34,6 +34,12 @@ impl H7CAD {
                 &self.svg_export_lw_scale_buf,
             );
         }
+        if Some(window_id) == self.pdf_export_window {
+            return crate::ui::pdf_export_dialog::view_window(
+                &self.pdf_export_opts,
+                &self.pdf_export_font_size_buf,
+            );
+        }
         if Some(window_id) == self.textstyle_window {
             let tab = &self.tabs[self.active_tab];
             let styles: Vec<String> = tab.scene.document.text_styles

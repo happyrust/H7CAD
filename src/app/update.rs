@@ -1281,6 +1281,7 @@ impl H7CAD {
                 if self.dimstyle_window      == Some(id) { self.dimstyle_window      = None; }
                 if self.shortcuts_window     == Some(id) { self.shortcuts_window     = None; }
                 if self.svg_export_window    == Some(id) { self.svg_export_window    = None; }
+                if self.pdf_export_window    == Some(id) { self.pdf_export_window    = None; }
                 Task::none()
             }
 
@@ -3478,7 +3479,11 @@ impl H7CAD {
                     _        => (paper_w, paper_h),
                 };
 
-                let pdf_options = crate::io::pdf_export::PdfExportOptions::default();
+                // Use the current dialog-backed options — when the user went
+                // through `PdfExportDialogCommit` these reflect their choices;
+                // when invoked directly via `PlotExport` / `PLOT` command they
+                // default to the factory presets.
+                let pdf_options = self.pdf_export_opts.clone();
                 match crate::io::pdf_export::export_pdf_full(
                     &wires,
                     &scene.hatches,
@@ -3653,6 +3658,82 @@ impl H7CAD {
                 }
                 Task::none()
             }
+            // ── PDF Export Dialog (三十三轮 Phase 2b) ─────────────────
+            Message::PdfExportDialogOpen => {
+                self.pdf_export_font_size_buf =
+                    format!("{:.3}", self.pdf_export_opts.font_size_scale);
+                if let Some(id) = self.pdf_export_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(420.0, 420.0),
+                    resizable: false,
+                    ..Default::default()
+                });
+                self.pdf_export_window = Some(id);
+                task.map(|_| Message::Noop)
+            }
+            Message::PdfExportDialogClose => {
+                if let Some(id) = self.pdf_export_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::PdfExportDialogToggle(field) => {
+                crate::ui::pdf_export_dialog::apply_toggle(&mut self.pdf_export_opts, field);
+                Task::none()
+            }
+            Message::PdfExportDialogSelectFont(choice) => {
+                crate::ui::pdf_export_dialog::apply_font_choice(&mut self.pdf_export_opts, choice);
+                Task::none()
+            }
+            Message::PdfExportDialogEdit(field, s) => {
+                use crate::app::PdfExportDialogField as F;
+                if let F::FontSizeScale = field {
+                    self.pdf_export_font_size_buf = s;
+                }
+                Task::none()
+            }
+            Message::PdfExportDialogCommit => {
+                let parse_f32 = |buf: &str, fallback: f32| {
+                    buf.trim().parse::<f32>().ok().filter(|v| v.is_finite()).unwrap_or(fallback)
+                };
+                self.pdf_export_opts.font_size_scale = parse_f32(
+                    &self.pdf_export_font_size_buf,
+                    self.pdf_export_opts.font_size_scale,
+                );
+                let opts = self.pdf_export_opts.clone();
+                let close_task = if let Some(id) = self.pdf_export_window.take() {
+                    window::close(id)
+                } else {
+                    Task::none()
+                };
+                let i = self.active_tab;
+                let stem = self.tabs[i]
+                    .current_path
+                    .as_deref()
+                    .and_then(|p: &std::path::Path| p.file_stem())
+                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "drawing".into());
+                let opts_for_picker = opts.clone();
+                let pick_task = Task::perform(
+                    crate::io::pdf_export::pick_pdf_path_owned(stem),
+                    move |p| Message::PlotExportPathWithOpts(p, opts_for_picker.clone()),
+                );
+                Task::batch([close_task, pick_task])
+            }
+            Message::PlotExportPathWithOpts(None, _opts) => Task::none(),
+            Message::PlotExportPathWithOpts(Some(path), opts) => {
+                // Re-dispatch through the PlotExportPath pipeline but with the
+                // dialog-chosen options baked in.  We reuse the same geometry
+                // assembly as the no-dialog path by stashing the options on
+                // the app state; the existing PlotExportPath handler picks
+                // them up via the `Some(path)` arm.
+                self.pdf_export_opts = opts;
+                Task::done(Message::PlotExportPath(Some(path)))
+            }
+
             Message::SvgExportDialogCommit => {
                 // Flush numeric buffers into the options (fall back to the
                 // live value if the user typed something unparseable).

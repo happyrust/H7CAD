@@ -6680,6 +6680,10 @@ impl H7CAD {
             "PLOT"|"EXPORT" => {
                 return Task::done(Message::PlotExport);
             }
+            // 三十三轮 Phase 2b: dedicated PDF options dialog command.
+            "PDFEXPORTDIALOG" | "PDFOPTIONS" | "PDFEXPORTOPTIONS" => {
+                return Task::done(Message::PdfExportDialogOpen);
+            }
             // Phase 6: dedicated dialog command.  Opens the options window
             // without immediately firing the save-file flow; the dialog's
             // "Export…" button continues the normal pipeline.

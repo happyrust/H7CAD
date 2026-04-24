@@ -18,6 +18,7 @@ pub mod shortcuts;
 pub mod snap_popup;
 pub mod statusbar;
 pub mod svg_export_dialog;
+pub mod pdf_export_dialog;
 pub mod tablestyle;
 pub mod textstyle;
 pub mod workspace_panel;
