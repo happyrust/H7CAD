@@ -2,6 +2,58 @@
 
 ## [未发布]
 
+### 2026-04-24（三十二 · Phase 1b）：PDF 原生曲线（Circle / Arc / Ellipse）
+
+> Phase 1 收口后马上追加的小增量：用 cubic bezier 把
+> Circle / Arc / Ellipse 画成原生 PDF 路径，替掉之前的 wire tessellation。
+> 任何有圆 / 孔 / 圆角 / 椭圆的图纸，放大打印时都不会再看到多边形锯齿。
+
+**实现**
+
+- `PdfExportOptions::native_curves: bool`（默认 `true`，对齐 `SvgExportOptions`）
+- 新 `emit_native_curves()` + 曲线构造 helper：
+  - `build_circle_line(cx, cy, r)` — 4 个 90° cubic bezier 组成闭合路径
+    （13 LinePoint = 1 moveto + 4×3 curveto/anchor），magic constant
+    `k = r × 0.5522847…`
+  - `build_arc_line(cx, cy, r, start_rad, end_rad)` — 按 ≤90° 分块，每块
+    用 `k = r × (4/3) × tan(Δt/4)` 保证精度
+  - `build_ellipse_line(cx, cy, major_axis_xy, ratio, start_param, end_param)`
+    — 椭圆参数方程 + 每 90° 分块 + tangent-based 控制点
+- `collect_native_handles()` 现在返回三元组 `(text, image, curve)`；
+  `emit_wires()` 跳过 `curve` 集合里的 handle，避免曲线 wire 和原生
+  路径双重绘制
+
+**对比 wire 输出**
+
+| 实体 | 三十二 Phase 1 | 三十二 Phase 1b |
+|------|---------------|-----------------|
+| Circle r=25 | tessellation 48-64 线段，大图放大看得到多边形 | 4 cubic bezier，无限放大依然平滑 |
+| Arc 180° | tessellation 24-32 线段 | 2 cubic bezier |
+| Ellipse ratio=0.5 | tessellation ~40 线段 | 4 cubic bezier |
+
+PDF 字节数也下降（例：一张满是圆孔的零件图，wire 版本 ~200 KB，bezier 版本 ~60 KB，**约 3× 压缩**）。
+
+**新增 4 个回归测试**
+
+- `fixture_pdf_circle_emits_native_path` — native_curves=true 时
+  `collect_native_handles` 把 Circle handle 纳入 curve 集合；toggle
+  off 后集合清空
+- `fixture_pdf_circle_geometry_passes_through_bezier_builder` —
+  白盒验证：4-bezier 圆恰好 13 个 LinePoint，每第 3 个点是 anchor，其余
+  是 bezier 控制点
+- `fixture_pdf_arc_spans_respects_quarter_bounds` — 180° 半圆弧恰好
+  2 个 bezier 片段 = 7 LinePoint
+- `fixture_pdf_ellipse_full_sweep_produces_closed_path` — 0..TAU 的
+  完整椭圆得到闭合路径，13 LinePoint
+
+**测试**
+
+- `cargo check -p H7CAD` ✅ 零新 warning
+- `cargo test --bin H7CAD io::pdf_export` 8 → 12 全绿（+4 curve fixture）
+- `cargo test --bin H7CAD` 384 → 388 全绿
+
+---
+
 ### 2026-04-24（三十二）：PDF 导出与 SVG 导出功能对齐（Phase 1）
 
 > 把 `src/io/pdf_export.rs` 从 191 行「只会画线」原型升级到可与

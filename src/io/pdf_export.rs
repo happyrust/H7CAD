@@ -60,6 +60,11 @@ pub struct PdfExportOptions {
     /// via the native doc entity list.
     #[allow(dead_code)]
     pub native_dimension_text: bool,
+    /// Emit native PDF bezier paths for `Circle` / `Arc` / `Ellipse` entities
+    /// instead of relying on the scene's tessellated `WireModel` output.
+    /// Produces smaller, resolution-independent PDFs that stay smooth at
+    /// arbitrary zoom. Mirrors `SvgExportOptions::native_curves`.
+    pub native_curves: bool,
 }
 
 impl Default for PdfExportOptions {
@@ -74,6 +79,7 @@ impl Default for PdfExportOptions {
             embed_images: true,
             image_base: None,
             native_dimension_text: true,
+            native_curves: true,
         }
     }
 }
@@ -209,7 +215,7 @@ fn build_pdf_full(
     // Collect handles that will be drawn natively, so we skip the corresponding
     // wires below. Only active when a native doc is provided — otherwise fall
     // back to wires-only behaviour (print_to_printer path).
-    let (native_text_handles, native_image_handles) =
+    let (native_text_handles, native_image_handles, native_curve_handles) =
         collect_native_handles(native_doc, options);
 
     // Register raster images up front so their XObject ids are available
@@ -284,7 +290,15 @@ fn build_pdf_full(
         options,
         &native_text_handles,
         &native_image_handles,
+        &native_curve_handles,
     );
+
+    // ── Layer 3b: native curves (Circle / Arc / Ellipse) ──────────────────
+    if options.native_curves {
+        if let Some(doc_ref) = native_doc {
+            emit_native_curves(&mut ops, doc_ref, ox, oy, plot_style, options);
+        }
+    }
 
     // ── Layer 4: native TEXT / MTEXT (top) ────────────────────────────────
     if !options.text_as_geometry {
@@ -315,6 +329,7 @@ fn emit_wires(
     options: &PdfExportOptions,
     skip_text_handles: &HashSet<String>,
     skip_image_handles: &HashSet<String>,
+    skip_curve_handles: &HashSet<String>,
 ) {
     let mut last_color: Option<[f32; 3]> = None;
     let mut last_lw: Option<f32> = None;
@@ -334,6 +349,9 @@ fn emit_wires(
             continue;
         }
         if skip_image_handles.contains(&wire.name) {
+            continue;
+        }
+        if skip_curve_handles.contains(&wire.name) {
             continue;
         }
 
@@ -622,18 +640,368 @@ fn load_raw_image(path: &Path) -> Option<RawImage> {
     })
 }
 
+// ── Native curves (Circle / Arc / Ellipse) ─────────────────────────────────
+
+/// Magic constant for approximating a 90° circular arc with one cubic bezier:
+///   k = 4/3 * tan(π/8)
+/// Extending an arc over a smaller span t uses `k = 4/3 * tan(t/4)` instead.
+const CIRCLE_QUARTER_K: f32 = 0.552_284_75;
+
+fn emit_native_curves(
+    ops: &mut Vec<Op>,
+    doc: &nm::CadDocument,
+    ox: f32,
+    oy: f32,
+    plot_style: Option<&PlotStyleTable>,
+    options: &PdfExportOptions,
+) {
+    let frozen_layers: HashSet<&str> = doc
+        .layers
+        .values()
+        .filter(|l| l.is_frozen || !l.is_on())
+        .map(|l| l.name.as_str())
+        .collect();
+
+    for entity in &doc.entities {
+        if entity.invisible {
+            continue;
+        }
+        if frozen_layers.contains(entity.layer_name.as_str()) {
+            continue;
+        }
+
+        // Resolve stroke color + lineweight once per entity, matching
+        // the wire layer's CTB / monochrome policy.
+        let (r, g, b) = resolve_entity_stroke_rgb(entity, plot_style, options);
+        let lw_pt = resolve_entity_lineweight_pt(entity, plot_style);
+
+        match &entity.data {
+            nm::EntityData::Circle { center, radius } => {
+                emit_stroke_setup(ops, r, g, b, lw_pt);
+                let line = build_circle_line(
+                    center[0] as f32 + ox,
+                    center[1] as f32 + oy,
+                    *radius as f32,
+                );
+                ops.push(Op::DrawLine { line });
+            }
+            nm::EntityData::Arc {
+                center,
+                radius,
+                start_angle,
+                end_angle,
+            } => {
+                emit_stroke_setup(ops, r, g, b, lw_pt);
+                let line = build_arc_line(
+                    center[0] as f32 + ox,
+                    center[1] as f32 + oy,
+                    *radius as f32,
+                    (*start_angle as f32).to_radians(),
+                    (*end_angle as f32).to_radians(),
+                );
+                ops.push(Op::DrawLine { line });
+            }
+            nm::EntityData::Ellipse {
+                center,
+                major_axis,
+                ratio,
+                start_param,
+                end_param,
+            } => {
+                // `start_param` / `end_param` are already in radians per DXF
+                // spec (unlike Arc which stores degrees).
+                emit_stroke_setup(ops, r, g, b, lw_pt);
+                let line = build_ellipse_line(
+                    center[0] as f32 + ox,
+                    center[1] as f32 + oy,
+                    [major_axis[0] as f32, major_axis[1] as f32],
+                    *ratio as f32,
+                    *start_param as f32,
+                    *end_param as f32,
+                );
+                ops.push(Op::DrawLine { line });
+            }
+            _ => {}
+        }
+    }
+}
+
+fn emit_stroke_setup(ops: &mut Vec<Op>, r: f32, g: f32, b: f32, lw_pt: f32) {
+    ops.push(Op::SetOutlineColor {
+        col: Color::Rgb(Rgb {
+            r,
+            g,
+            b,
+            icc_profile: None,
+        }),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(lw_pt) });
+}
+
+fn resolve_entity_stroke_rgb(
+    entity: &nm::Entity,
+    plot_style: Option<&PlotStyleTable>,
+    options: &PdfExportOptions,
+) -> (f32, f32, f32) {
+    if options.monochrome {
+        return (0.0, 0.0, 0.0);
+    }
+    // Try CTB first (ACI → RGB), otherwise fall back to ACI defaults the
+    // SVG exporter uses (lines 1985-2004 of svg_export.rs).
+    let aci = entity.color_index;
+    if aci > 0 && aci < 256 {
+        if let Some(ctb) = plot_style {
+            if let Some([cr, cg, cb]) = ctb.resolve_color(aci as u8) {
+                return (cr, cg, cb);
+            }
+        }
+        let (r, g, b) = aci_to_rgb(aci as u8);
+        return (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    }
+    (0.0, 0.0, 0.0)
+}
+
+fn resolve_entity_lineweight_pt(entity: &nm::Entity, plot_style: Option<&PlotStyleTable>) -> f32 {
+    let aci = entity.color_index;
+    if aci > 0 && aci < 256 {
+        if let Some(ctb) = plot_style {
+            if let Some(mm) = ctb.resolve_lineweight(aci as u8) {
+                return (mm * MM_TO_PT).max(0.1);
+            }
+        }
+    }
+    // Default 0.25 mm line — same default the wire pipeline falls back to
+    // when no explicit lineweight is present.
+    0.25_f32 * MM_TO_PT
+}
+
+/// Minimal ACI → RGB mapping sufficient for the 9 indexed CAD colors.
+/// (Mirrors `svg_export.rs` `aci_to_rgb` defaults — kept local to avoid
+/// exposing that helper as `pub(crate)` just for PDF consumption.)
+fn aci_to_rgb(aci: u8) -> (u8, u8, u8) {
+    match aci {
+        1 => (255, 0, 0),       // red
+        2 => (255, 255, 0),     // yellow
+        3 => (0, 255, 0),       // green
+        4 => (0, 255, 255),     // cyan
+        5 => (0, 0, 255),       // blue
+        6 => (255, 0, 255),     // magenta
+        7 | 0 => (0, 0, 0),     // white / ByBlock → black on white paper
+        _ => (0, 0, 0),         // default to black for 8-255
+    }
+}
+
+/// Build a closed 4-bezier approximation of a circle centred at `(cx, cy)`
+/// with radius `r`. The output is a `Line { is_closed: true }` containing
+/// 4 anchor points and 8 control points so the printpdf serialiser emits
+/// `m c c c c h S` (four cubic beziers + close + stroke).
+fn build_circle_line(cx: f32, cy: f32, r: f32) -> Line {
+    let k = r * CIRCLE_QUARTER_K;
+
+    let mut points = Vec::with_capacity(13);
+
+    // Anchor at (cx + r, cy) — 0°.
+    points.push(lp(cx + r, cy, false));
+    // Quarter 1: 0° → 90°.
+    points.push(lp(cx + r, cy + k, true));
+    points.push(lp(cx + k, cy + r, true));
+    points.push(lp(cx, cy + r, false));
+    // Quarter 2: 90° → 180°.
+    points.push(lp(cx - k, cy + r, true));
+    points.push(lp(cx - r, cy + k, true));
+    points.push(lp(cx - r, cy, false));
+    // Quarter 3: 180° → 270°.
+    points.push(lp(cx - r, cy - k, true));
+    points.push(lp(cx - k, cy - r, true));
+    points.push(lp(cx, cy - r, false));
+    // Quarter 4: 270° → 360°.
+    points.push(lp(cx + k, cy - r, true));
+    points.push(lp(cx + r, cy - k, true));
+    points.push(lp(cx + r, cy, false));
+
+    Line {
+        points,
+        is_closed: true,
+    }
+}
+
+/// Build a bezier approximation of an arc from `start_rad` to `end_rad`
+/// (counter-clockwise; the DXF spec always draws arcs ccw) with radius
+/// `r` around `(cx, cy)`.
+fn build_arc_line(cx: f32, cy: f32, r: f32, start_rad: f32, end_rad: f32) -> Line {
+    // Normalise end > start so sweep is positive.
+    let mut sweep = end_rad - start_rad;
+    while sweep < 0.0 {
+        sweep += std::f32::consts::TAU;
+    }
+    if sweep < 1e-6 {
+        // Degenerate (zero-length) arc — emit a single anchor, no segments.
+        let x = cx + r * start_rad.cos();
+        let y = cy + r * start_rad.sin();
+        return Line {
+            points: vec![lp(x, y, false)],
+            is_closed: false,
+        };
+    }
+    // Split into ≤90° chunks so each chunk is within the bezier's accuracy
+    // envelope (< 1/1000 deviation for a 90° segment).
+    let chunks = ((sweep / std::f32::consts::FRAC_PI_2).ceil() as usize).max(1);
+    let dt = sweep / chunks as f32;
+    let k = r * (4.0 / 3.0) * (dt / 4.0).tan();
+
+    let mut points = Vec::with_capacity(chunks * 3 + 1);
+    // First anchor = start point.
+    let (mut cos0, mut sin0) = start_rad.sin_cos();
+    std::mem::swap(&mut cos0, &mut sin0); // sin_cos returns (sin, cos); we want cos/sin in that order
+    let mut x0 = cx + r * cos0;
+    let mut y0 = cy + r * sin0;
+    points.push(lp(x0, y0, false));
+
+    for i in 0..chunks {
+        let t0 = start_rad + (i as f32) * dt;
+        let t1 = t0 + dt;
+        let (s0, c0) = t0.sin_cos();
+        let (s1, c1) = t1.sin_cos();
+
+        // Control points for arc segment t0 → t1.
+        // Tangent at t = perpendicular to radial direction; scale by k.
+        let c1x = cx + r * c0 - k * s0;
+        let c1y = cy + r * s0 + k * c0;
+        let c2x = cx + r * c1 + k * s1;
+        let c2y = cy + r * s1 - k * c1;
+        let p3x = cx + r * c1;
+        let p3y = cy + r * s1;
+
+        points.push(lp(c1x, c1y, true));
+        points.push(lp(c2x, c2y, true));
+        points.push(lp(p3x, p3y, false));
+
+        x0 = p3x;
+        y0 = p3y;
+    }
+    let _ = (x0, y0);
+
+    Line {
+        points,
+        is_closed: false,
+    }
+}
+
+/// Build a bezier approximation of an ellipse or elliptical arc.
+/// `major_axis_xy` is the major-axis vector (length = major radius), in the
+/// ellipse's local plane (we assume Z = 0 for 2D export).
+/// `ratio` = minor_radius / major_radius (0..1).
+/// `start_param` / `end_param` are parametric angles in radians (0 at the
+/// end of the major axis, increasing ccw).
+fn build_ellipse_line(
+    cx: f32,
+    cy: f32,
+    major_axis_xy: [f32; 2],
+    ratio: f32,
+    start_param: f32,
+    end_param: f32,
+) -> Line {
+    let major_len = (major_axis_xy[0] * major_axis_xy[0]
+        + major_axis_xy[1] * major_axis_xy[1])
+        .sqrt();
+    if major_len < 1e-6 {
+        return Line {
+            points: vec![lp(cx, cy, false)],
+            is_closed: false,
+        };
+    }
+    let mx = major_axis_xy[0] / major_len;
+    let my = major_axis_xy[1] / major_len;
+    // Minor axis is +90° rotation of major axis in the plane.
+    let nx = -my;
+    let ny = mx;
+
+    let a = major_len;
+    let b = major_len * ratio;
+
+    // Determine sweep, treating 0..TAU as "full ellipse" (DXF full ellipse
+    // has start_param = 0 and end_param = TAU per DXF spec).
+    let mut sweep = end_param - start_param;
+    while sweep < 0.0 {
+        sweep += std::f32::consts::TAU;
+    }
+    let is_closed = (sweep - std::f32::consts::TAU).abs() < 1e-4;
+
+    if sweep < 1e-6 {
+        let x = cx + a * start_param.cos() * mx + b * start_param.sin() * nx;
+        let y = cy + a * start_param.cos() * my + b * start_param.sin() * ny;
+        return Line {
+            points: vec![lp(x, y, false)],
+            is_closed: false,
+        };
+    }
+
+    let chunks = ((sweep / std::f32::consts::FRAC_PI_2).ceil() as usize).max(1);
+    let dt = sweep / chunks as f32;
+    // k scales the unit-circle control-point distance (4/3 tan(t/4)).
+    let k_unit = (4.0 / 3.0) * (dt / 4.0).tan();
+
+    let mut points = Vec::with_capacity(chunks * 3 + 1);
+
+    // Helper: parametric point + tangent scale factors on the unit circle.
+    let eval = |t: f32| -> ([f32; 2], [f32; 2]) {
+        let (s, c) = t.sin_cos();
+        // Ellipse point.
+        let px = cx + a * c * mx + b * s * nx;
+        let py = cy + a * c * my + b * s * ny;
+        // Tangent direction (derivative wrt t), unnormalised.
+        let tx = -a * s * mx + b * c * nx;
+        let ty = -a * s * my + b * c * ny;
+        ([px, py], [tx, ty])
+    };
+
+    let (p0, _t0) = eval(start_param);
+    points.push(lp(p0[0], p0[1], false));
+
+    for i in 0..chunks {
+        let t0 = start_param + (i as f32) * dt;
+        let t1 = t0 + dt;
+        let (p_start, t_start) = eval(t0);
+        let (p_end, t_end) = eval(t1);
+
+        let c1x = p_start[0] + k_unit * t_start[0];
+        let c1y = p_start[1] + k_unit * t_start[1];
+        let c2x = p_end[0] - k_unit * t_end[0];
+        let c2y = p_end[1] - k_unit * t_end[1];
+
+        points.push(lp(c1x, c1y, true));
+        points.push(lp(c2x, c2y, true));
+        points.push(lp(p_end[0], p_end[1], false));
+    }
+
+    Line { points, is_closed }
+}
+
+fn lp(x: f32, y: f32, bezier: bool) -> LinePoint {
+    LinePoint {
+        p: Point::new(Mm(x), Mm(y)),
+        bezier,
+    }
+}
+
 // ── Native text emission ───────────────────────────────────────────────────
 
 fn collect_native_handles(
     native_doc: Option<&nm::CadDocument>,
     options: &PdfExportOptions,
-) -> (HashSet<String>, HashSet<String>) {
+) -> (HashSet<String>, HashSet<String>, HashSet<String>) {
     let mut text = HashSet::new();
     let mut image = HashSet::new();
+    let mut curve = HashSet::new();
     let Some(doc) = native_doc else {
-        return (text, image);
+        return (text, image, curve);
     };
     for entity in &doc.entities {
+        // Frozen / layer-off / invisible filtering matches the wire pipeline
+        // and the native-emit passes below, so skips stay consistent.
+        if entity.invisible {
+            continue;
+        }
         match &entity.data {
             nm::EntityData::Text { value, .. } | nm::EntityData::MText { value, .. } => {
                 if !options.text_as_geometry && can_render_native_text(value) {
@@ -645,10 +1013,17 @@ fn collect_native_handles(
                     image.insert(entity.handle.value().to_string());
                 }
             }
+            nm::EntityData::Circle { .. }
+            | nm::EntityData::Arc { .. }
+            | nm::EntityData::Ellipse { .. } => {
+                if options.native_curves {
+                    curve.insert(entity.handle.value().to_string());
+                }
+            }
             _ => {}
         }
     }
-    (text, image)
+    (text, image, curve)
 }
 
 /// `true` when the text consists of only characters safely supported by the
@@ -999,7 +1374,7 @@ mod tests {
 
         // Collected handles must NOT list the CJK entity — proving fallback
         // semantics before we even generate a PDF.
-        let (text_handles, _) = collect_native_handles(Some(&doc), &options);
+        let (text_handles, _image, _curve) = collect_native_handles(Some(&doc), &options);
         assert!(
             text_handles.is_empty(),
             "CJK text must fall back to wire tessellation, got {:?}",
@@ -1201,6 +1576,103 @@ mod tests {
         // Both should succeed; we don't decompress to compare but monochrome
         // strips RGB variance — the point is that toggling the flag does
         // not crash and produces valid PDFs.
+    }
+
+    #[test]
+    fn fixture_pdf_circle_emits_native_path() {
+        let mut doc = nm::CadDocument::new();
+        let handle = doc.allocate_handle();
+        let mut e = nm::Entity::new(nm::EntityData::Circle {
+            center: [100.0, 100.0, 0.0],
+            radius: 25.0,
+        });
+        e.handle = handle;
+        e.layer_name = "0".into();
+        doc.entities.push(e);
+
+        let options = PdfExportOptions {
+            native_curves: true,
+            ..PdfExportOptions::default()
+        };
+
+        let bytes = build_pdf_full(
+            &[],
+            &HashMap::new(),
+            Some(&doc),
+            297.0,
+            210.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &options,
+        );
+        assert!(bytes.starts_with(b"%PDF-"));
+
+        // Collected handles must list the circle so the wire pass skips it.
+        let (_, _, curve) = collect_native_handles(Some(&doc), &options);
+        assert_eq!(
+            curve.len(),
+            1,
+            "expected exactly one curve handle, got {:?}",
+            curve
+        );
+
+        // Toggling native_curves off should empty the curve set again.
+        let opts_off = PdfExportOptions {
+            native_curves: false,
+            ..options.clone()
+        };
+        let (_, _, curve_off) = collect_native_handles(Some(&doc), &opts_off);
+        assert!(curve_off.is_empty());
+    }
+
+    #[test]
+    fn fixture_pdf_circle_geometry_passes_through_bezier_builder() {
+        // White-box check: the bezier approximation must form a closed ring
+        // with 13 LinePoint entries (1 moveto + 4 × 3 curveto anchors).
+        let line = build_circle_line(0.0, 0.0, 10.0);
+        assert!(line.is_closed, "circle line must be closed");
+        assert_eq!(
+            line.points.len(),
+            13,
+            "4-bezier circle requires 13 control points"
+        );
+        // Every third point (0, 3, 6, 9, 12) must be an anchor; the rest
+        // must be bezier handles.
+        for (i, p) in line.points.iter().enumerate() {
+            let expected_anchor = i % 3 == 0;
+            assert_eq!(
+                p.bezier,
+                !expected_anchor,
+                "point {i} should have bezier={}",
+                !expected_anchor
+            );
+        }
+    }
+
+    #[test]
+    fn fixture_pdf_arc_spans_respects_quarter_bounds() {
+        // A half-circle arc (180° sweep) must emit exactly 2 bezier chunks
+        // (2×90°) → 1 start anchor + 2 × 3 control/anchor = 7 points.
+        let line = build_arc_line(0.0, 0.0, 5.0, 0.0, std::f32::consts::PI);
+        assert!(!line.is_closed, "arc line must NOT be closed (open path)");
+        assert_eq!(line.points.len(), 7, "half-circle = 2 bezier chunks + anchor");
+    }
+
+    #[test]
+    fn fixture_pdf_ellipse_full_sweep_produces_closed_path() {
+        let line = build_ellipse_line(
+            0.0,
+            0.0,
+            [10.0, 0.0],
+            0.5,
+            0.0,
+            std::f32::consts::TAU,
+        );
+        assert!(line.is_closed, "full ellipse sweep must produce closed path");
+        // 4 bezier chunks × 3 points + 1 start anchor = 13.
+        assert_eq!(line.points.len(), 13);
     }
 
     #[test]
