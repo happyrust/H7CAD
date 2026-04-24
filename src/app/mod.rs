@@ -217,6 +217,7 @@ pub enum SvgExportDialogField {
     EmbedImages,
     NativeCurves,
     NativeSplines,
+    NativeDimensionText,
     FontSizeScale,
     MinStrokeWidth,
     LineWeightScale,

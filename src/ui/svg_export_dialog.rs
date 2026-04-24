@@ -142,6 +142,11 @@ pub fn view_window<'a>(
     let text_section = column![
         section_label("Text"),
         toggle("Tessellate text (TextAsGeometry)", opts.text_as_geometry, F::TextAsGeometry),
+        toggle(
+            "Native dimension text",
+            opts.native_dimension_text,
+            F::NativeDimensionText,
+        ),
         row![
             lbl("Font size scale"),
             text_input("0.8", font_size_buf)
@@ -201,14 +206,15 @@ pub fn view_window<'a>(
 pub fn apply_toggle(opts: &mut SvgExportOptions, field: SvgExportDialogField) {
     use SvgExportDialogField as F;
     match field {
-        F::Monochrome      => opts.monochrome      = !opts.monochrome,
-        F::TextAsGeometry  => opts.text_as_geometry = !opts.text_as_geometry,
-        F::IncludeHatches  => opts.include_hatches = !opts.include_hatches,
-        F::UseBlockDefs    => opts.use_block_defs  = !opts.use_block_defs,
-        F::IncludeImages   => opts.include_images  = !opts.include_images,
-        F::EmbedImages     => opts.embed_images    = !opts.embed_images,
-        F::NativeCurves    => opts.native_curves   = !opts.native_curves,
-        F::NativeSplines   => opts.native_splines  = !opts.native_splines,
+        F::Monochrome           => opts.monochrome           = !opts.monochrome,
+        F::TextAsGeometry       => opts.text_as_geometry     = !opts.text_as_geometry,
+        F::IncludeHatches       => opts.include_hatches      = !opts.include_hatches,
+        F::UseBlockDefs         => opts.use_block_defs       = !opts.use_block_defs,
+        F::IncludeImages        => opts.include_images       = !opts.include_images,
+        F::EmbedImages          => opts.embed_images         = !opts.embed_images,
+        F::NativeCurves         => opts.native_curves        = !opts.native_curves,
+        F::NativeSplines        => opts.native_splines       = !opts.native_splines,
+        F::NativeDimensionText  => opts.native_dimension_text = !opts.native_dimension_text,
         F::FontSizeScale | F::MinStrokeWidth | F::LineWeightScale => {}
     }
 }
@@ -220,10 +226,10 @@ mod tests {
     #[test]
     fn toggle_flips_each_boolean_field() {
         let mut o = SvgExportOptions::default();
-        let (mono0, tag0, hat0, blk0, img0, emb0, cur0, spl0) = (
+        let (mono0, tag0, hat0, blk0, img0, emb0, cur0, spl0, dim0) = (
             o.monochrome, o.text_as_geometry, o.include_hatches,
             o.use_block_defs, o.include_images, o.embed_images,
-            o.native_curves, o.native_splines,
+            o.native_curves, o.native_splines, o.native_dimension_text,
         );
         apply_toggle(&mut o, SvgExportDialogField::Monochrome);
         apply_toggle(&mut o, SvgExportDialogField::TextAsGeometry);
@@ -233,15 +239,17 @@ mod tests {
         apply_toggle(&mut o, SvgExportDialogField::EmbedImages);
         apply_toggle(&mut o, SvgExportDialogField::NativeCurves);
         apply_toggle(&mut o, SvgExportDialogField::NativeSplines);
+        apply_toggle(&mut o, SvgExportDialogField::NativeDimensionText);
 
-        assert_ne!(o.monochrome,       mono0);
-        assert_ne!(o.text_as_geometry, tag0);
-        assert_ne!(o.include_hatches,  hat0);
-        assert_ne!(o.use_block_defs,   blk0);
-        assert_ne!(o.include_images,   img0);
-        assert_ne!(o.embed_images,     emb0);
-        assert_ne!(o.native_curves,    cur0);
-        assert_ne!(o.native_splines,   spl0);
+        assert_ne!(o.monochrome,            mono0);
+        assert_ne!(o.text_as_geometry,      tag0);
+        assert_ne!(o.include_hatches,       hat0);
+        assert_ne!(o.use_block_defs,        blk0);
+        assert_ne!(o.include_images,        img0);
+        assert_ne!(o.embed_images,          emb0);
+        assert_ne!(o.native_curves,         cur0);
+        assert_ne!(o.native_splines,        spl0);
+        assert_ne!(o.native_dimension_text, dim0);
     }
 
     #[test]

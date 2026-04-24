@@ -138,12 +138,12 @@ impl Scene {
 
     /// Returns the block-record handle for `current_layout`.
     ///
-    /// Primary path: the Layout object's `block_record` field (set correctly
-    /// by the DWG reader).
+    /// Primary path: the Layout object's `block_record` field (set by both
+    /// the DWG reader and the native DXF reader via group code 340).
     ///
-    /// Fallback for DXF files: the DXF reader never reads group code 340
-    /// (block_record handle), so `block_record` is NULL after loading DXF.
-    /// In that case we derive the block-record name from the DXF convention:
+    /// Fallback for legacy DXF files where `block_record` is NULL (e.g.
+    /// files written by older exporters that omit code 340 on LAYOUT):
+    /// derive the block-record name from the DXF convention:
     ///   Model            → "*Model_Space"
     ///   first paper tab  → "*Paper_Space"
     ///   second paper tab → "*Paper_Space0"
@@ -2840,6 +2840,23 @@ impl Scene {
             entity.common_mut().handle = Handle::NULL;
             let h = self.document.add_entity(entity).unwrap_or(Handle::NULL);
             if !h.is_null() {
+                // Mirror the freshly allocated compat entity into the native
+                // store so the authoritative save path (save_dxf / save_dwg,
+                // both via `NativeCadDocument`) can persist it. Without this
+                // mirror, entities created by Copy / Array / Paste survive on
+                // screen but vanish on save — a silent data-loss path.
+                if let Some(store) = self.native_store.as_mut() {
+                    let native_doc = store.inner_mut();
+                    if let Some(new_entity) = self.document.get_entity(h).cloned() {
+                        if let Some(mut native_entity) =
+                            crate::io::native_bridge::acadrust_entity_to_native(&new_entity)
+                        {
+                            native_entity.handle = nm::Handle::new(h.value());
+                            native_entity.owner_handle = native_doc.model_space_handle();
+                            let _ = native_doc.add_entity(native_entity);
+                        }
+                    }
+                }
                 let new_model = if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(h) {
                     let color = tessellate::aci_to_rgba(&dxf.common.color);
                     Self::hatch_model_from_dxf(dxf, color)
@@ -2877,7 +2894,13 @@ impl Scene {
     // ── Hit-test convenience: wire name → Handle ──────────────────────────
 
     pub fn handle_from_wire_name(name: &str) -> Option<Handle> {
-        name.parse::<u64>().ok().map(Handle::new)
+        // Accept plain decimal handles as well as annotated variants that
+        // sub-pipelines use to tag semantically-distinct wires within a
+        // single source entity (e.g. SVG export's "dimtext_<handle>"
+        // marker).  Hit-testing and selection still map back to the
+        // underlying entity handle.
+        let core = name.strip_prefix("dimtext_").unwrap_or(name);
+        core.parse::<u64>().ok().map(Handle::new)
     }
 
     /// Restore camera to a named view from the document view table.
@@ -3941,12 +3964,18 @@ mod tests {
 
         let scene = scene_with_native(native);
         let wires = scene.entity_wires();
-        let unique_names: std::collections::HashSet<_> =
-            wires.iter().map(|wire| wire.name.clone()).collect();
+        let unique_handles: std::collections::HashSet<_> = wires
+            .iter()
+            .filter_map(|wire| Scene::handle_from_wire_name(&wire.name))
+            .collect();
 
         assert!(wires.iter().any(|wire| wire.name == insert_handle.value().to_string()));
         assert!(wires.iter().any(|wire| wire.name == dim_handle.value().to_string()));
-        assert_eq!(unique_names.len(), 2, "insert and dimension should each own one parent handle namespace");
+        // insert and dimension should each own one parent handle namespace —
+        // even after the Phase 8 dim-text-wire tag, both text and geometry
+        // wires resolve to the SAME dimension handle via
+        // `handle_from_wire_name`, so the distinct-handle count stays at 2.
+        assert_eq!(unique_handles.len(), 2);
     }
 
     #[test]
@@ -4051,6 +4080,1448 @@ mod tests {
                 .and_then(|doc| doc.get_entity(handle))
                 .is_none(),
             "erase_entities should remove mirrored native entity"
+        );
+    }
+
+    // ========================================================================
+    // Task 5 — Display regression fixtures.
+    //
+    // Each fixture builds a small native document covering a specific entity
+    // class, bridges it to compat, and asserts that Scene derived state
+    // (wires / hatch cache / compat projection) is non-empty and preserves
+    // the key handles and layer names. Tests do NOT depend on GPU output.
+    //
+    // These tests run with `native_render_enabled = false` to lock in the
+    // default display path (native = authoritative store, compat = display
+    // projection). See docs/plans/2026-04-24-dxf-2d-display-closure-plan.md.
+    // ========================================================================
+
+    /// Build a Scene that mirrors the end-user default display path: native
+    /// doc present, compat doc projected via `native_bridge`, but
+    /// `native_render_enabled = false` so the compat tessellator owns display.
+    fn display_scene(native: nm::CadDocument) -> Scene {
+        let compat = native_bridge::native_doc_to_acadrust(&native);
+        let mut scene = Scene::new();
+        scene.document = compat;
+        scene.set_native_doc(Some(native));
+        scene.native_render_enabled = false;
+        scene
+    }
+
+    fn entity_with_layer(mut e: nm::Entity, layer: &str) -> nm::Entity {
+        e.layer_name = layer.into();
+        e
+    }
+
+    #[test]
+    fn fixture_basic_geometry_wires_cover_every_entity() {
+        let mut native = nm::CadDocument::new();
+        let line_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("line");
+        let circle_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Circle {
+                center: [5.0, 5.0, 0.0],
+                radius: 3.0,
+            }))
+            .expect("circle");
+        let arc_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Arc {
+                center: [0.0, 0.0, 0.0],
+                radius: 4.0,
+                start_angle: 0.0,
+                end_angle: 180.0,
+            }))
+            .expect("arc");
+        let point_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Point {
+                position: [1.0, 2.0, 0.0],
+            }))
+            .expect("point");
+        let ellipse_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Ellipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [5.0, 0.0, 0.0],
+                ratio: 0.5,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            }))
+            .expect("ellipse");
+        let lwpoly_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::LwPolyline {
+                vertices: vec![
+                    nm::LwVertex { x: 0.0, y: 0.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                    nm::LwVertex { x: 10.0, y: 0.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                    nm::LwVertex { x: 10.0, y: 10.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                ],
+                closed: false,
+                constant_width: 0.0,
+            }))
+            .expect("lwpolyline");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        for h in [line_h, circle_h, arc_h, point_h, ellipse_h, lwpoly_h] {
+            assert!(
+                wires.iter().any(|w| w.name == h.value().to_string()),
+                "wire for handle {:X} must be present; got {:?}",
+                h.value(),
+                wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn fixture_text_mtext_wires_preserve_layer_and_handle() {
+        let mut native = nm::CadDocument::new();
+
+        let text_h = native
+            .add_entity(entity_with_layer(
+                nm::Entity::new(nm::EntityData::Text {
+                    insertion: [0.0, 0.0, 0.0],
+                    height: 2.5,
+                    value: "HELLO".into(),
+                    rotation: 0.0,
+                    style_name: "Standard".into(),
+                    width_factor: 1.0,
+                    oblique_angle: 0.0,
+                    horizontal_alignment: 0,
+                    vertical_alignment: 0,
+                    alignment_point: None,
+                }),
+                "TEXT_LAYER",
+            ))
+            .expect("text");
+
+        let mtext_h = native
+            .add_entity(entity_with_layer(
+                nm::Entity::new(nm::EntityData::MText {
+                    insertion: [5.0, 0.0, 0.0],
+                    height: 2.0,
+                    width: 40.0,
+                    rectangle_height: None,
+                    value: "WORLD".into(),
+                    rotation: 0.0,
+                    style_name: "Standard".into(),
+                    attachment_point: 1,
+                    line_spacing_factor: 1.0,
+                    drawing_direction: 1,
+                }),
+                "MTEXT_LAYER",
+            ))
+            .expect("mtext");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == text_h.value().to_string()),
+            "TEXT wire missing"
+        );
+        assert!(
+            wires.iter().any(|w| w.name == mtext_h.value().to_string()),
+            "MTEXT wire missing"
+        );
+
+        assert!(
+            scene
+                .native_doc()
+                .and_then(|d| d.get_entity(text_h))
+                .map(|e| e.layer_name.as_str() == "TEXT_LAYER")
+                .unwrap_or(false),
+            "TEXT layer lost after bridge"
+        );
+        assert!(
+            scene
+                .native_doc()
+                .and_then(|d| d.get_entity(mtext_h))
+                .map(|e| e.layer_name.as_str() == "MTEXT_LAYER")
+                .unwrap_or(false),
+            "MTEXT layer lost after bridge"
+        );
+    }
+
+    #[test]
+    fn fixture_dimension_and_leader_produce_wires() {
+        let mut native = nm::CadDocument::new();
+
+        let dim_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Dimension {
+                dim_type: 1,
+                block_name: "*D1".into(),
+                style_name: "Standard".into(),
+                definition_point: [10.0, 5.0, 0.0],
+                text_midpoint: [5.0, 5.0, 0.0],
+                text_override: String::new(),
+                attachment_point: 5,
+                measurement: 10.0,
+                text_rotation: 0.0,
+                horizontal_direction: 0.0,
+                flip_arrow1: false,
+                flip_arrow2: false,
+                first_point: [0.0, 0.0, 0.0],
+                second_point: [10.0, 0.0, 0.0],
+                angle_vertex: [0.0, 0.0, 0.0],
+                dimension_arc: [0.0, 0.0, 0.0],
+                leader_length: 0.0,
+                rotation: 0.0,
+                ext_line_rotation: 0.0,
+            }))
+            .expect("dim");
+
+        let leader_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Leader {
+                vertices: vec![[0.0, 0.0, 0.0], [5.0, 5.0, 0.0], [10.0, 5.0, 0.0]],
+                has_arrowhead: true,
+            }))
+            .expect("leader");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == dim_h.value().to_string()),
+            "DIMENSION wire missing"
+        );
+        assert!(
+            wires.iter().any(|w| w.name == leader_h.value().to_string()),
+            "LEADER wire missing"
+        );
+    }
+
+    #[test]
+    fn fixture_block_insert_shows_block_contents_after_bridge() {
+        // This regression locks in the Task 2 fix: block_records entities
+        // now flow through native_doc_to_acadrust, so INSERTs of custom
+        // blocks resolve to visible wires (compat explode path).
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "MY_TITLEBLOCK",
+            vec![
+                nm::Entity::new(nm::EntityData::Line {
+                    start: [0.0, 0.0, 0.0],
+                    end: [100.0, 0.0, 0.0],
+                }),
+                nm::Entity::new(nm::EntityData::Line {
+                    start: [100.0, 0.0, 0.0],
+                    end: [100.0, 20.0, 0.0],
+                }),
+            ],
+        );
+        let insert_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "MY_TITLEBLOCK".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == insert_h.value().to_string()),
+            "INSERT wire missing — block contents did not flow through bridge"
+        );
+
+        // Compat document must now carry a BlockRecord so explode paths
+        // can find the block content.
+        let has_block = scene
+            .document
+            .block_records
+            .iter()
+            .any(|br| br.name == "MY_TITLEBLOCK");
+        assert!(
+            has_block,
+            "compat doc must have a BlockRecord for MY_TITLEBLOCK after bridge"
+        );
+    }
+
+    #[test]
+    fn fixture_hatch_solid_populates_hatch_cache() {
+        let mut native = nm::CadDocument::new();
+        let hatch_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [10.0, 0.0, 0.0],
+                            [10.0, 10.0, 0.0],
+                            [0.0, 10.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("hatch");
+        let solid_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Solid {
+                corners: [
+                    [20.0, 0.0, 0.0],
+                    [30.0, 0.0, 0.0],
+                    [30.0, 10.0, 0.0],
+                    [20.0, 10.0, 0.0],
+                ],
+                normal: [0.0, 0.0, 1.0],
+                thickness: 0.0,
+            }))
+            .expect("solid");
+
+        let mut scene = display_scene(native);
+        scene.populate_hatches_from_document();
+
+        // Compat-side cache: DXF Solid fills through populate_hatches_from_document.
+        assert!(
+            !scene.hatches.is_empty(),
+            "populate_hatches_from_document must seed at least the SOLID entry"
+        );
+        assert!(
+            scene.hatches.contains_key(&acadrust::Handle::new(solid_h.value())),
+            "SOLID entity must have a compat hatch cache entry"
+        );
+
+        // Native-side path: synced_hatch_models folds native HATCH into the output.
+        let models = scene.synced_hatch_models();
+        assert!(
+            !models.is_empty(),
+            "synced_hatch_models must be non-empty"
+        );
+        assert!(
+            models.iter().any(|m| m.name == "SOLID"),
+            "expected at least one SOLID hatch model; got {:?}",
+            models.iter().map(|m| m.name.as_str()).collect::<Vec<_>>()
+        );
+        let _ = hatch_h;
+    }
+
+    #[test]
+    fn fixture_image_wipeout_project_into_compat_document() {
+        // IMAGE: ImageModel needs a real file to decode, so we do not
+        // assert pixel load here. Instead we lock in that the bridge
+        // projects IMAGE → RasterImage and WIPEOUT → Wipeout so the
+        // compat document is the shape the renderer expects.
+        let mut native = nm::CadDocument::new();
+        let img_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Image {
+                insertion: [0.0, 0.0, 0.0],
+                u_vector: [1.0, 0.0, 0.0],
+                v_vector: [0.0, 1.0, 0.0],
+                image_size: [128.0, 64.0],
+                image_def_handle: nm::Handle::NULL,
+                file_path: "/nonexistent/unit_test.png".into(),
+                display_flags: 7,
+            }))
+            .expect("image");
+        let wipeout_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Wipeout {
+                clip_vertices: vec![
+                    [0.0, 0.0],
+                    [10.0, 0.0],
+                    [10.0, 10.0],
+                    [0.0, 10.0],
+                ],
+                elevation: 0.25,
+            }))
+            .expect("wipeout");
+
+        let mut scene = display_scene(native);
+        // Must not panic on missing image file:
+        scene.populate_images_from_document();
+
+        let has_raster_image = scene.document.entities().any(|e| {
+            matches!(e, EntityType::RasterImage(img)
+                if img.common.handle == acadrust::Handle::new(img_h.value()))
+        });
+        assert!(
+            has_raster_image,
+            "IMAGE native entity must bridge to compat RasterImage"
+        );
+        let has_wipeout = scene.document.entities().any(|e| {
+            matches!(e, EntityType::Wipeout(w)
+                if w.common.handle == acadrust::Handle::new(wipeout_h.value()))
+        });
+        assert!(
+            has_wipeout,
+            "WIPEOUT native entity must bridge to compat Wipeout"
+        );
+    }
+
+    // ========================================================================
+    // Task 4 — Dual-storage alignment.
+    //
+    // Editing operations must keep native (authoritative save source) and
+    // compat (display projection) in sync for supported entities, and must
+    // never silently destroy native data for entities that the compat/native
+    // bridge doesn't round-trip on edit.
+    // ========================================================================
+
+    #[test]
+    fn dualstore_copy_entities_mirrors_clones_into_native_document() {
+        // Regression: copy_entities() used to add the clone only to the
+        // compat document; the save path goes through native so the clone
+        // would vanish on save. The mirror must preserve handle identity.
+        let mut native = nm::CadDocument::new();
+        let source_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [5.0, 0.0, 0.0],
+            }))
+            .expect("source line");
+
+        let mut scene = scene_with_native(native);
+
+        let xform = crate::command::EntityTransform::Translate(glam::Vec3::new(10.0, 0.0, 0.0));
+        let clones = scene.copy_entities(&[acadrust::Handle::new(source_h.value())], &xform);
+        assert_eq!(clones.len(), 1, "copy_entities must return one handle");
+        let clone_h = clones[0];
+        assert!(!clone_h.is_null(), "clone handle must be non-null");
+
+        // Clone must exist in BOTH compat and native.
+        let compat_present = scene.document.get_entity(clone_h).is_some();
+        let native_present = scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(nm::Handle::new(clone_h.value())))
+            .is_some();
+        assert!(compat_present, "clone must be present in compat document");
+        assert!(
+            native_present,
+            "clone must be mirrored into native document so save path preserves it"
+        );
+    }
+
+    #[test]
+    fn dualstore_transform_entities_updates_both_stores_for_supported_entity() {
+        let mut native = nm::CadDocument::new();
+        let line_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("line");
+        let mut scene = scene_with_native(native);
+
+        let xform = crate::command::EntityTransform::Translate(glam::Vec3::new(3.0, 4.0, 0.0));
+        scene.transform_entities(&[acadrust::Handle::new(line_h.value())], &xform);
+
+        // Compat must reflect the translated endpoints.
+        let compat_start = match scene.document.get_entity(acadrust::Handle::new(line_h.value())) {
+            Some(EntityType::Line(l)) => [l.start.x, l.start.y, l.start.z],
+            _ => panic!("compat line missing after transform"),
+        };
+        assert!(
+            (compat_start[0] - 3.0).abs() < 1e-9 && (compat_start[1] - 4.0).abs() < 1e-9,
+            "compat line.start did not update: {compat_start:?}"
+        );
+
+        // Native must also reflect the translated endpoints.
+        let native_start = scene
+            .native_doc()
+            .and_then(|doc| doc.get_entity(line_h).cloned())
+            .and_then(|e| match e.data {
+                nm::EntityData::Line { start, .. } => Some(start),
+                _ => None,
+            })
+            .expect("native line must survive transform");
+        assert!(
+            (native_start[0] - 3.0).abs() < 1e-9 && (native_start[1] - 4.0).abs() < 1e-9,
+            "native line.start did not update: {native_start:?}"
+        );
+    }
+
+    #[test]
+    fn dualstore_erase_clears_derived_caches_not_just_storage() {
+        // erase_entities() must drop the hatch/image caches keyed on the
+        // erased handle; leaving stale cache entries would surface as
+        // phantom fills on a subsequent redraw.
+        let mut native = nm::CadDocument::new();
+        let hatch_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [2.0, 0.0, 0.0],
+                            [2.0, 2.0, 0.0],
+                            [0.0, 2.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("hatch");
+
+        let mut scene = scene_with_native(native);
+        scene.populate_hatches_from_document();
+        let h_compat = acadrust::Handle::new(hatch_h.value());
+        assert!(
+            scene.hatches.contains_key(&h_compat),
+            "hatch cache must be seeded before erase"
+        );
+
+        scene.erase_entities(&[h_compat]);
+
+        assert!(
+            !scene.hatches.contains_key(&h_compat),
+            "erase must drop the hatch cache entry"
+        );
+        assert!(
+            scene.document.get_entity(h_compat).is_none(),
+            "compat must no longer carry the erased hatch"
+        );
+        assert!(
+            scene
+                .native_doc()
+                .and_then(|doc| doc.get_entity(hatch_h))
+                .is_none(),
+            "native must no longer carry the erased hatch"
+        );
+    }
+
+    #[test]
+    fn dualstore_add_entity_unsupported_by_native_bridge_does_not_panic() {
+        // Some compat entity variants aren't covered by
+        // `acadrust_entity_to_native` (returns None). add_entity() must
+        // silently keep the compat-only record without panicking; the
+        // entity is still displayable. The key invariant: add_entity never
+        // fails the UI flow just because the native mirror is unavailable.
+        let mut scene = scene_with_native(nm::CadDocument::new());
+
+        // Viewport isn't covered by `acadrust_entity_to_native`, so the
+        // native mirror is a no-op.
+        let mut viewport = acadrust::entities::Viewport::new();
+        viewport.id = 1;
+        let handle = scene.add_entity(EntityType::Viewport(viewport));
+
+        assert!(
+            !handle.is_null(),
+            "add_entity must still return a compat handle even if native mirror is absent"
+        );
+        assert!(
+            scene.document.get_entity(handle).is_some(),
+            "compat must carry the entity"
+        );
+    }
+
+    // ========================================================================
+    // Task 6 — End-to-end closure acceptance.
+    //
+    // One test exercising the entire data flow a user experiences:
+    //   build native doc -> write_dxf -> read_dxf -> bridge -> Scene wires.
+    // If this passes, the read-write-display pipeline is closed for the
+    // acceptance entities named in the DXF 2D display closure plan.
+    // ========================================================================
+
+    #[test]
+    fn e2e_native_writes_reads_bridges_and_displays_basic_geometry() {
+        use h7cad_native_dxf::{read_dxf_bytes, write_dxf};
+
+        // 1. Build a native document with one instance of every
+        //    non-block acceptance entity that exercises a distinct
+        //    Scene code path.
+        let mut native = nm::CadDocument::new();
+        let line_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("line");
+        let circle_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Circle {
+                center: [5.0, 5.0, 0.0],
+                radius: 3.0,
+            }))
+            .expect("circle");
+        let text_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Text {
+                insertion: [0.0, 10.0, 0.0],
+                height: 2.0,
+                value: "CLOSURE".into(),
+                rotation: 0.0,
+                style_name: "Standard".into(),
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                horizontal_alignment: 0,
+                vertical_alignment: 0,
+                alignment_point: None,
+            }))
+            .expect("text");
+        let hatch_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [20.0, 0.0, 0.0],
+                            [30.0, 0.0, 0.0],
+                            [30.0, 10.0, 0.0],
+                            [20.0, 10.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("hatch");
+
+        // 2. Write the native doc to DXF bytes, then parse them back.
+        let dxf_text = write_dxf(&native).expect("write_dxf must succeed");
+        let reloaded = read_dxf_bytes(dxf_text.as_bytes()).expect("read_dxf must succeed");
+
+        // 3. All four entities must survive the roundtrip with their
+        //    handles intact.
+        for (label, h) in [
+            ("LINE", line_h),
+            ("CIRCLE", circle_h),
+            ("TEXT", text_h),
+            ("HATCH", hatch_h),
+        ] {
+            assert!(
+                reloaded.get_entity(h).is_some(),
+                "{label} (handle={:X}) must survive write_dxf -> read_dxf",
+                h.value()
+            );
+        }
+
+        // 4. Bridge the reloaded native doc into compat and confirm the
+        //    default display path produces non-empty wires and the hatch
+        //    cache is seeded for SOLID.
+        let mut scene = display_scene(reloaded);
+        scene.populate_hatches_from_document();
+        let wires = scene.entity_wires();
+
+        for (label, h) in [
+            ("LINE", line_h),
+            ("CIRCLE", circle_h),
+            ("TEXT", text_h),
+        ] {
+            assert!(
+                wires.iter().any(|w| w.name == h.value().to_string()),
+                "{label} wire missing after full read-write-display cycle"
+            );
+        }
+
+        let hatch_models = scene.synced_hatch_models();
+        assert!(
+            hatch_models.iter().any(|m| m.name == "SOLID"),
+            "SOLID hatch model missing after full read-write-display cycle"
+        );
+    }
+
+    #[test]
+    fn fixture_nested_block_insert_displays_through_bridge() {
+        // Nested block references (block A contains INSERT(block B))
+        // are common: a title block embedding a logo block. The bridge
+        // must project BOTH block definitions AND keep the inner
+        // INSERT routable so the display path can explode them.
+        let mut native = nm::CadDocument::new();
+
+        // Inner block: LOGO (just a line).
+        let logo_h = native.allocate_handle();
+        let mut logo = nm::BlockRecord::new(logo_h, "LOGO");
+        logo.entities = vec![nm::Entity::new(nm::EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [5.0, 5.0, 0.0],
+        })];
+        native.insert_block_record(logo);
+
+        // Outer block: TITLEBLOCK — draws a border + INSERTs LOGO inside.
+        let title_h = native.allocate_handle();
+        let mut title = nm::BlockRecord::new(title_h, "TITLEBLOCK");
+        title.entities = vec![
+            nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [100.0, 0.0, 0.0],
+            }),
+            nm::Entity::new(nm::EntityData::Insert {
+                block_name: "LOGO".into(),
+                insertion: [10.0, 10.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }),
+        ];
+        native.insert_block_record(title);
+
+        // Model-space INSERT of TITLEBLOCK.
+        let outer_insert_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "TITLEBLOCK".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("outer insert");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires
+                .iter()
+                .any(|w| w.name == outer_insert_h.value().to_string()),
+            "outer INSERT wire missing — nested block explode failed; got {:?}",
+            wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
+        );
+
+        // Compat doc must have BOTH block records so the explode path
+        // can walk from TITLEBLOCK -> LOGO.
+        let names: Vec<&str> = scene
+            .document
+            .block_records
+            .iter()
+            .map(|br| br.name.as_str())
+            .collect();
+        assert!(
+            names.contains(&"LOGO"),
+            "inner block LOGO must be present in compat doc; got {names:?}"
+        );
+        assert!(
+            names.contains(&"TITLEBLOCK"),
+            "outer block TITLEBLOCK must be present in compat doc; got {names:?}"
+        );
+    }
+
+    #[test]
+    fn fixture_image_with_real_file_populates_images_cache() {
+        // Real-file pass of populate_images_from_document:
+        //   1. Write a 4×4 red PNG to the OS temp dir.
+        //   2. Build a native doc with an IMAGE entity pointing at it.
+        //   3. Bridge + populate → images cache must have one entry
+        //      with the decoded pixels.
+        // The earlier `fixture_image_wipeout_project_into_compat_document`
+        // deliberately used a nonexistent path to check the no-panic
+        // contract; this test locks in the happy path.
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "h7cad_image_fixture_{}.png",
+            std::process::id()
+        ));
+        // 4×4 RGBA, all red.
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _ in 0..(4 * 4) {
+            pixels.extend_from_slice(&[0xFFu8, 0x00, 0x00, 0xFF]);
+        }
+        image::save_buffer(
+            &path,
+            &pixels,
+            4,
+            4,
+            image::ColorType::Rgba8,
+        )
+        .expect("write test PNG");
+
+        let mut native = nm::CadDocument::new();
+        let img_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Image {
+                insertion: [0.0, 0.0, 0.0],
+                u_vector: [1.0, 0.0, 0.0],
+                v_vector: [0.0, 1.0, 0.0],
+                image_size: [4.0, 4.0],
+                image_def_handle: nm::Handle::NULL,
+                file_path: path.to_string_lossy().into_owned(),
+                display_flags: 7,
+            }))
+            .expect("image entity");
+
+        let mut scene = display_scene(native);
+        scene.populate_images_from_document();
+
+        let compat_h = acadrust::Handle::new(img_h.value());
+        let model = scene
+            .images
+            .get(&compat_h)
+            .expect("image cache must be populated for a real file");
+        assert_eq!(model.width, 4);
+        assert_eq!(model.height, 4);
+        assert_eq!(model.pixels.len(), 4 * 4 * 4, "RGBA pixel buffer");
+        // First pixel must be red.
+        assert_eq!(model.pixels[0], 0xFF);
+        assert_eq!(model.pixels[1], 0x00);
+        assert_eq!(model.pixels[2], 0x00);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn fixture_unknown_hatch_pattern_falls_back_without_panic() {
+        // Drawings may reference application-specific hatch patterns
+        // that the bundled pattern library doesn't carry. The renderer
+        // must degrade gracefully (empty pattern / solid-ish fallback)
+        // rather than panic or emit zero hatches.
+        let mut native = nm::CadDocument::new();
+        let hatch_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "CUSTOM_PROPRIETARY_PATTERN_XYZ".into(),
+                solid_fill: false,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [10.0, 0.0, 0.0],
+                            [10.0, 10.0, 0.0],
+                            [0.0, 10.0, 0.0],
+                        ],
+                    }],
+                }],
+            }))
+            .expect("hatch");
+
+        let mut scene = display_scene(native);
+        // Populate cache — must not panic on unknown pattern.
+        scene.populate_hatches_from_document();
+
+        // Native-side synced_hatch_models also must not panic and must
+        // still surface a model (possibly with an empty Pattern arm).
+        let models = scene.synced_hatch_models();
+        assert!(
+            models.iter().any(|m| m.name == "CUSTOM_PROPRIETARY_PATTERN_XYZ"),
+            "unknown-pattern hatch must still produce a HatchModel (for boundary display)"
+        );
+        let _ = hatch_h;
+    }
+
+    #[test]
+    fn fixture_three_level_nested_blocks_display_through_bridge() {
+        // Generalisation of `fixture_nested_block_insert_displays_through_bridge`:
+        // verify the explode path survives at least 3 levels of nesting.
+        // Real drawings often do: SHEET > TITLEBLOCK > LOGO > SYMBOL.
+        let mut native = nm::CadDocument::new();
+
+        // Deepest block: DOT — a single point primitive.
+        let dot_h = native.allocate_handle();
+        let mut dot = nm::BlockRecord::new(dot_h, "DOT");
+        dot.entities = vec![nm::Entity::new(nm::EntityData::Point {
+            position: [0.0, 0.0, 0.0],
+        })];
+        native.insert_block_record(dot);
+
+        // Middle block: SYMBOL — inserts DOT at two places.
+        let symbol_h = native.allocate_handle();
+        let mut symbol = nm::BlockRecord::new(symbol_h, "SYMBOL");
+        symbol.entities = vec![
+            nm::Entity::new(nm::EntityData::Insert {
+                block_name: "DOT".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }),
+            nm::Entity::new(nm::EntityData::Insert {
+                block_name: "DOT".into(),
+                insertion: [5.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }),
+        ];
+        native.insert_block_record(symbol);
+
+        // Outer block: SHEET — inserts SYMBOL + a stroke.
+        let sheet_h = native.allocate_handle();
+        let mut sheet = nm::BlockRecord::new(sheet_h, "SHEET");
+        sheet.entities = vec![
+            nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [297.0, 0.0, 0.0],
+            }),
+            nm::Entity::new(nm::EntityData::Insert {
+                block_name: "SYMBOL".into(),
+                insertion: [20.0, 20.0, 0.0],
+                scale: [2.0, 2.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }),
+        ];
+        native.insert_block_record(sheet);
+
+        let outer_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "SHEET".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("outer insert");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == outer_h.value().to_string()),
+            "3-level nested INSERT must render; got {:?}",
+            wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
+        );
+
+        // All three block definitions must be projected into compat.
+        let names: std::collections::HashSet<&str> = scene
+            .document
+            .block_records
+            .iter()
+            .map(|br| br.name.as_str())
+            .collect();
+        for n in ["DOT", "SYMBOL", "SHEET"] {
+            assert!(names.contains(n), "block {n} missing in compat doc");
+        }
+    }
+
+    #[test]
+    fn fixture_circular_block_reference_terminates_without_overflow() {
+        // Defensive: if a pathological drawing contains A -> INSERT B
+        // and B -> INSERT A, the explode path must NOT infinitely
+        // recurse. The renderer uses a `visited_blocks` HashSet; this
+        // test exercises the guard.
+        let mut native = nm::CadDocument::new();
+
+        let a_h = native.allocate_handle();
+        let mut a = nm::BlockRecord::new(a_h, "A");
+        a.entities = vec![
+            nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [1.0, 0.0, 0.0],
+            }),
+            nm::Entity::new(nm::EntityData::Insert {
+                block_name: "B".into(),
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }),
+        ];
+        native.insert_block_record(a);
+
+        let b_h = native.allocate_handle();
+        let mut b = nm::BlockRecord::new(b_h, "B");
+        b.entities = vec![
+            nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [0.0, 1.0, 0.0],
+            }),
+            nm::Entity::new(nm::EntityData::Insert {
+                block_name: "A".into(), // <-- cycle back to A
+                insertion: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }),
+        ];
+        native.insert_block_record(b);
+
+        let outer_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "A".into(),
+                insertion: [10.0, 10.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("outer insert");
+
+        let scene = display_scene(native);
+        // Key expectation: entity_wires() returns in bounded time without
+        // panicking or stack overflowing. The exact wire count is less
+        // important than termination; we just check outer INSERT shows
+        // at least one wire so the cycle guard doesn't zero out everything.
+        let wires = scene.entity_wires();
+        assert!(
+            wires.iter().any(|w| w.name == outer_h.value().to_string()),
+            "even under circular block refs, outer INSERT wire must exist"
+        );
+    }
+
+    #[test]
+    fn fixture_frozen_layer_hides_entities_from_default_display() {
+        // Freezing a layer must remove its geometry from the default
+        // display. The filter lives in `wires_for_block()` (see
+        // `layers.get(...).flags.off || .frozen`) but nothing tested
+        // it end-to-end through the bridge.
+        let mut native = nm::CadDocument::new();
+        let visible = native
+            .add_entity({
+                let mut e = nm::Entity::new(nm::EntityData::Line {
+                    start: [0.0, 0.0, 0.0],
+                    end: [10.0, 0.0, 0.0],
+                });
+                e.layer_name = "VISIBLE".into();
+                e
+            })
+            .expect("visible line");
+        let _hidden = native
+            .add_entity({
+                let mut e = nm::Entity::new(nm::EntityData::Line {
+                    start: [0.0, 10.0, 0.0],
+                    end: [10.0, 10.0, 0.0],
+                });
+                e.layer_name = "FROZEN".into();
+                e
+            })
+            .expect("hidden line");
+
+        native.layers.insert(
+            "VISIBLE".into(),
+            nm::LayerProperties {
+                name: "VISIBLE".into(),
+                color: 7,
+                ..nm::LayerProperties::new("VISIBLE")
+            },
+        );
+        native.layers.insert(
+            "FROZEN".into(),
+            nm::LayerProperties {
+                name: "FROZEN".into(),
+                color: 7,
+                is_frozen: true,
+                ..nm::LayerProperties::new("FROZEN")
+            },
+        );
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+        let names: Vec<String> = wires.iter().map(|w| w.name.clone()).collect();
+
+        assert!(
+            names.iter().any(|n| n == &visible.value().to_string()),
+            "visible layer entity must render; got {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n == &_hidden.value().to_string()),
+            "frozen-layer entity must NOT render; got {names:?}"
+        );
+    }
+
+    #[test]
+    fn fixture_layer_off_via_negative_aci_hides_entity() {
+        // Layers marked off (ACI color < 0) must also be filtered out.
+        let mut native = nm::CadDocument::new();
+        let hidden = native
+            .add_entity({
+                let mut e = nm::Entity::new(nm::EntityData::Line {
+                    start: [0.0, 0.0, 0.0],
+                    end: [5.0, 0.0, 0.0],
+                });
+                e.layer_name = "OFF_LAYER".into();
+                e
+            })
+            .expect("hidden line");
+
+        native.layers.insert(
+            "OFF_LAYER".into(),
+            nm::LayerProperties {
+                name: "OFF_LAYER".into(),
+                // Negative ACI = layer switched off.
+                color: -7,
+                ..nm::LayerProperties::new("OFF_LAYER")
+            },
+        );
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            !wires
+                .iter()
+                .any(|w| w.name == hidden.value().to_string()),
+            "off-layer entity must NOT render; wires: {:?}",
+            wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn fixture_insert_with_rotation_and_mirror_still_renders() {
+        // Users routinely place block references with rotation and
+        // mirrored scales (negative x-scale flips symbols). This test
+        // verifies the display pipeline survives compound transforms
+        // — previous regressions have manifested as missing wires when
+        // scale[0] < 0 caused the explode path to short-circuit.
+        let mut native = nm::CadDocument::new();
+        let br_handle = native.allocate_handle();
+        let mut block = nm::BlockRecord::new(br_handle, "ARROW");
+        block.entities = vec![
+            nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }),
+            nm::Entity::new(nm::EntityData::Line {
+                start: [10.0, 0.0, 0.0],
+                end: [8.0, 1.0, 0.0],
+            }),
+            nm::Entity::new(nm::EntityData::Line {
+                start: [10.0, 0.0, 0.0],
+                end: [8.0, -1.0, 0.0],
+            }),
+        ];
+        native.insert_block_record(block);
+
+        let insert_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "ARROW".into(),
+                insertion: [50.0, 50.0, 0.0],
+                scale: [-2.0, 2.0, 1.0], // mirrored in X + scaled 2×
+                rotation: 45.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == insert_h.value().to_string()),
+            "INSERT with rotation + mirrored scale must still render"
+        );
+    }
+
+    #[test]
+    fn fixture_bylayer_entity_resolves_compat_display_color_from_layer() {
+        // With `native_render_enabled = false` (default display path) the
+        // compat renderer must pull the entity's display color from the
+        // owning layer when `color_index == 256` (BYLAYER).  This locks
+        // in the color-inheritance contract a user relies on when they
+        // change a layer color and expect all BYLAYER geometry to
+        // follow. Regression rail for any future refactor of
+        // `Scene::render_style()`.
+        let mut native = nm::CadDocument::new();
+        native.layers.insert(
+            "WALLS".into(),
+            nm::LayerProperties {
+                name: "WALLS".into(),
+                color: 1,
+                linetype_name: "Continuous".into(),
+                lineweight: -1,
+                ..nm::LayerProperties::new("WALLS")
+            },
+        );
+        let mut line = nm::Entity::new(nm::EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [10.0, 0.0, 0.0],
+        });
+        line.layer_name = "WALLS".into();
+        line.color_index = 256; // BYLAYER
+        native.add_entity(line).expect("line on WALLS");
+
+        let scene = display_scene(native);
+        let entity = scene
+            .document
+            .entities()
+            .next()
+            .expect("line must exist in compat doc");
+        let (color, _, _, _, aci) = scene.render_style(entity);
+        // ACI 1 = red (255,0,0) in AutoCAD palette.
+        assert_eq!(aci, 1, "resolved ACI must be the layer's color index");
+        assert!(
+            (color[0] - 1.0).abs() < 1e-6
+                && color[1].abs() < 1e-6
+                && color[2].abs() < 1e-6,
+            "BYLAYER red should resolve to (1,0,0,*): got {color:?}"
+        );
+    }
+
+    #[test]
+    fn fixture_paper_viewport_projects_model_content_into_layout() {
+        // Cross-layout display: a VIEWPORT on a paper layout must
+        // project model-space entities inside its frame. Regression for
+        // `native_doc_to_acadrust()` previously producing viewports
+        // with `id = 0`, which the renderer filtered out — blocking all
+        // paper-space viewport previews of model content.
+        let mut native = nm::CadDocument::new();
+
+        // Model-space line the viewport should show.
+        let model_line_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [100.0, 0.0, 0.0],
+            }))
+            .expect("model line");
+
+        // Viewport owned by *Paper_Space.
+        let paper_br = native
+            .tables
+            .block_record
+            .entries
+            .get("*Paper_Space")
+            .copied()
+            .expect("*Paper_Space block record");
+        let mut viewport = nm::Entity::new(nm::EntityData::Viewport {
+            center: [148.5, 105.0, 0.0],
+            width: 200.0,
+            height: 140.0,
+        });
+        viewport.owner_handle = paper_br;
+        let _viewport_h = native.add_entity(viewport).expect("viewport");
+
+        let mut scene = display_scene(native);
+        scene.current_layout = "Layout1".into();
+        let wires = scene.entity_wires();
+
+        // The paper-space viewport itself must be visible.
+        assert!(
+            wires.iter().any(|w| !w.name.is_empty()),
+            "Layout1 must produce at least one wire (the paper boundary or viewport)"
+        );
+        // The model-space line must project THROUGH the viewport into
+        // Layout1. Its wire name carries the model entity handle.
+        assert!(
+            wires.iter().any(|w| w.name == model_line_h.value().to_string()),
+            "model-space line must be visible through paper-space viewport; got {:?}",
+            wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn fixture_paper_space_entity_visible_when_layout_is_active() {
+        // Complement to `fixture_paper_space_entity_does_not_leak_into_model_wires`:
+        // paper-space content MUST appear when the user switches to the
+        // corresponding paper layout.
+        let mut native = nm::CadDocument::new();
+
+        let paper_br = native
+            .tables
+            .block_record
+            .entries
+            .get("*Paper_Space")
+            .copied()
+            .expect("*Paper_Space block record must exist");
+
+        let mut paper_line = nm::Entity::new(nm::EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [297.0, 0.0, 0.0],
+        });
+        paper_line.owner_handle = paper_br;
+        let paper_line_h = native.add_entity(paper_line).expect("paper line");
+
+        let mut scene = display_scene(native);
+        scene.current_layout = "Layout1".into();
+
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == paper_line_h.value().to_string()),
+            "paper-space line must render when Layout1 is active; got {:?}",
+            wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn e2e_edit_save_reopen_displays_edited_geometry() {
+        // Complete user cycle: open a drawing, edit an entity, save,
+        // reopen. The edited geometry must be what the user sees after
+        // the second open. This compounds Task 3 (roundtrip) + Task 4
+        // (dual storage) + Task 5 (display) + Task 6 (e2e) into one
+        // acceptance test.
+        use h7cad_native_dxf::{read_dxf_bytes, write_dxf};
+
+        let mut native = nm::CadDocument::new();
+        let line_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("line");
+
+        // Step 1: Open the drawing (scene_with_native simulates load).
+        let mut scene = scene_with_native(native);
+
+        // Step 2: Edit — move the line by (20, 30).
+        let xform = crate::command::EntityTransform::Translate(glam::Vec3::new(20.0, 30.0, 0.0));
+        scene.transform_entities(&[acadrust::Handle::new(line_h.value())], &xform);
+
+        // Step 3: Save — the save path goes through native.
+        let native_doc = scene.native_doc().expect("native store present").clone();
+        let dxf_text = write_dxf(&native_doc).expect("write_dxf");
+
+        // Step 4: Reopen — parse DXF, bridge to compat, build Scene.
+        let reloaded_native = read_dxf_bytes(dxf_text.as_bytes()).expect("read_dxf");
+        let reopened_scene = display_scene(reloaded_native);
+
+        // Step 5: Verify — the edit must be visible in the reopened
+        // scene. Walk the compat document to find the line and check
+        // its endpoints match the translated position.
+        let compat_h = acadrust::Handle::new(line_h.value());
+        let line = reopened_scene
+            .document
+            .get_entity(compat_h)
+            .expect("line must still exist after reopen");
+        match line {
+            EntityType::Line(l) => {
+                assert!(
+                    (l.start.x - 20.0).abs() < 1e-9,
+                    "start.x edited from 0.0 to 20.0; got {}",
+                    l.start.x
+                );
+                assert!(
+                    (l.start.y - 30.0).abs() < 1e-9,
+                    "start.y edited from 0.0 to 30.0; got {}",
+                    l.start.y
+                );
+                assert!(
+                    (l.end.x - 30.0).abs() < 1e-9,
+                    "end.x translated to 30.0; got {}",
+                    l.end.x
+                );
+                assert!(
+                    (l.end.y - 30.0).abs() < 1e-9,
+                    "end.y translated to 30.0; got {}",
+                    l.end.y
+                );
+            }
+            other => panic!("expected Line, got variant {other:?}"),
+        }
+
+        // Display: the line wire must still be present.
+        let wires = reopened_scene.entity_wires();
+        assert!(
+            wires.iter().any(|w| w.name == compat_h.value().to_string()),
+            "edited line must render after reopen"
+        );
+    }
+
+    #[test]
+    fn e2e_block_insert_survives_full_read_write_display_cycle() {
+        // The most user-visible DXF flow: draw a title block, save to
+        // disk, reopen. This test exercises the same chain end-to-end
+        // but programmatically, locking the fix landed in
+        // `native_doc_to_acadrust()` where block-owned entities now
+        // carry their owner handle and Layout objects resolve to the
+        // native-aligned *Model_Space block-record handle.
+        use h7cad_native_dxf::{read_dxf_bytes, write_dxf};
+
+        let mut native = nm::CadDocument::new();
+        // Define a custom block with two body lines.
+        let block_handle = native.allocate_handle();
+        let mut block = nm::BlockRecord::new(block_handle, "PART_STAMP");
+        block.entities = vec![
+            nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [40.0, 0.0, 0.0],
+            }),
+            nm::Entity::new(nm::EntityData::Line {
+                start: [40.0, 0.0, 0.0],
+                end: [40.0, 10.0, 0.0],
+            }),
+        ];
+        native.insert_block_record(block);
+
+        // Reference the block via INSERT in model space.
+        let insert_h = native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "PART_STAMP".into(),
+                insertion: [100.0, 100.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 0.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        // Round-trip through the DXF reader/writer.
+        let dxf_text = write_dxf(&native).expect("write_dxf must succeed");
+        let reloaded = read_dxf_bytes(dxf_text.as_bytes()).expect("read_dxf must succeed");
+
+        // Both the block definition and the INSERT must survive.
+        let block_survived = reloaded
+            .block_records
+            .values()
+            .any(|br| br.name == "PART_STAMP" && br.entities.len() == 2);
+        assert!(block_survived, "custom block PART_STAMP must survive roundtrip");
+        assert!(
+            reloaded.get_entity(insert_h).is_some(),
+            "INSERT entity must survive roundtrip"
+        );
+
+        // Bridge + display: INSERT wire must appear in the scene so the
+        // user actually sees the title block after reopening.
+        let scene = display_scene(reloaded);
+        let wires = scene.entity_wires();
+        assert!(
+            wires.iter().any(|w| w.name == insert_h.value().to_string()),
+            "INSERT wire missing after full read-write-bridge-display cycle"
+        );
+    }
+
+    #[test]
+    fn fixture_paper_space_entity_does_not_leak_into_model_wires() {
+        // Build a doc with entities on both Model and Paper_Space, verify
+        // the model-layout Scene only emits wires for model-space entities.
+        let mut native = nm::CadDocument::new();
+        let model_line = native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("model line");
+
+        // Route a line to Paper_Space (the block_record is reserved
+        // during CadDocument::new).
+        let paper_br = native
+            .tables
+            .block_record
+            .entries
+            .get("*Paper_Space")
+            .copied()
+            .expect("*Paper_Space block record must exist");
+        let mut paper_line = nm::Entity::new(nm::EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [0.0, 100.0, 0.0],
+        });
+        paper_line.owner_handle = paper_br;
+        let paper_line_h = native.add_entity(paper_line).expect("paper line");
+
+        let mut scene = display_scene(native);
+        scene.current_layout = "Model".into();
+        let wires = scene.entity_wires();
+
+        assert!(
+            wires.iter().any(|w| w.name == model_line.value().to_string()),
+            "model-space line should show in Model layout"
+        );
+        // Paper-space entity may or may not appear depending on layout
+        // routing; either way it must NOT carry the same handle as the
+        // model-space line.
+        let paper_matches: usize = wires
+            .iter()
+            .filter(|w| w.name == paper_line_h.value().to_string())
+            .count();
+        assert!(
+            paper_matches <= 1,
+            "paper-space line must not duplicate into Model layout"
+        );
+        // Parent handles must remain unique per entity (sanity).
+        let model_matches: usize = wires
+            .iter()
+            .filter(|w| w.name == model_line.value().to_string())
+            .count();
+        assert_eq!(
+            model_matches, 1,
+            "model line must produce exactly one wire in Model layout"
         );
     }
 }

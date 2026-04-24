@@ -5,7 +5,7 @@ mod entity_parsers;
 use std::fmt;
 
 pub use tokenizer::*;
-pub use writer::write_dxf_string;
+pub use writer::{write_dxf_string, write_dxf_strict, DxfWriteError};
 use h7cad_native_model::CadDocument;
 
 // ---------------------------------------------------------------------------
@@ -341,6 +341,137 @@ fn read_header_section(
             "$DIMFRAC" => doc.header.dimfrac = i16v(70),
             "$DIMDSEP" => doc.header.dimdsep = i16v(70),
             "$DIMZIN" => doc.header.dimzin = i16v(70),
+
+            // Dimension alternate units (DIMALT*).
+            "$DIMALT" => doc.header.dim_alt = i16v(70),
+            "$DIMALTD" => doc.header.dim_altd = i16v(70),
+            "$DIMALTF" => doc.header.dim_altf = f(40),
+            "$DIMALTRND" => doc.header.dim_altrnd = f(40),
+            "$DIMALTTD" => doc.header.dim_alttd = i16v(70),
+            "$DIMALTTZ" => doc.header.dim_alttz = i16v(70),
+            "$DIMALTU" => doc.header.dim_altu = i16v(70),
+            "$DIMALTZ" => doc.header.dim_altz = i16v(70),
+            "$DIMAPOST" => doc.header.dim_apost = sv(1).to_string(),
+
+            // Dimension arrow / symbol names.
+            "$DIMBLK" => doc.header.dim_blk = sv(1).to_string(),
+            "$DIMBLK1" => doc.header.dim_blk1 = sv(1).to_string(),
+            "$DIMBLK2" => doc.header.dim_blk2 = sv(1).to_string(),
+            "$DIMLDRBLK" => doc.header.dim_ldrblk = sv(1).to_string(),
+            "$DIMARCSYM" => doc.header.dim_arcsym = i16v(70),
+            "$DIMJOGANG" => doc.header.dim_jogang = f(40),
+
+            // Dimension visual control.
+            "$DIMJUST" => doc.header.dim_just = i16v(70),
+            "$DIMSD1" => doc.header.dim_sd1 = i16v(70),
+            "$DIMSD2" => doc.header.dim_sd2 = i16v(70),
+            "$DIMSE1" => doc.header.dim_se1 = i16v(70),
+            "$DIMSE2" => doc.header.dim_se2 = i16v(70),
+            "$DIMSOXD" => doc.header.dim_soxd = i16v(70),
+            "$DIMATFIT" => doc.header.dim_atfit = i16v(70),
+            "$DIMAZIN" => doc.header.dim_azin = i16v(70),
+            "$DIMTIX" => doc.header.dim_tix = i16v(70),
+
+            // Dimension rendering attributes.
+            "$DIMCLRD" => doc.header.dim_clrd = i16v(70),
+            "$DIMCLRE" => doc.header.dim_clre = i16v(70),
+            "$DIMCLRT" => doc.header.dim_clrt = i16v(70),
+            "$DIMLWD" => doc.header.dim_lwd = i16v(70),
+            "$DIMLWE" => doc.header.dim_lwe = i16v(70),
+            "$DIMTAD" => doc.header.dim_tad = i16v(70),
+            "$DIMTIH" => doc.header.dim_tih = i16v(70),
+            "$DIMTOH" => doc.header.dim_toh = i16v(70),
+            "$DIMDLE" => doc.header.dim_dle = f(40),
+            "$DIMCEN" => doc.header.dim_cen = f(40),
+            "$DIMTSZ" => doc.header.dim_tsz = f(40),
+
+            // Paper space control.
+            "$PSTYLEMODE" => doc.header.pstylemode = i16v(70),
+            "$TILEMODE" => doc.header.tilemode = i16v(70),
+            "$MAXACTVP" => doc.header.maxactvp = i16v(70),
+            "$PSVPSCALE" => doc.header.psvpscale = f(40),
+
+            // Miscellaneous flags.
+            "$TREEDEPTH" => doc.header.treedepth = i16v(70),
+            "$VISRETAIN" => doc.header.visretain = i16v(70),
+            "$DELOBJ" => doc.header.delobj = i16v(70),
+            "$PROXYGRAPHICS" => doc.header.proxygraphics = i16v(70),
+
+            // 3D Surface defaults.
+            "$SURFTAB1" => doc.header.surftab1 = i16v(70),
+            "$SURFTAB2" => doc.header.surftab2 = i16v(70),
+            "$SURFTYPE" => doc.header.surftype = i16v(70),
+            "$SURFU" => doc.header.surfu = i16v(70),
+            "$SURFV" => doc.header.surfv = i16v(70),
+            "$PFACEVMAX" => doc.header.pfacevmax = i16v(70),
+
+            // Additional common variables.
+            "$MEASUREMENT" => doc.header.measurement = i16v(70),
+            "$EXTNAMES" => doc.header.extnames = i16v(290) != 0,
+            "$WORLDVIEW" => doc.header.worldview = i16v(70),
+            "$UNITMODE" => doc.header.unitmode = i16v(70),
+            "$SPLMAXDEG" => doc.header.splmaxdeg = i16v(70),
+
+            // Paper space UCS.
+            "$PUCSBASE" => doc.header.pucsbase = sv(2).to_string(),
+            "$PUCSNAME" => doc.header.pucsname = sv(2).to_string(),
+            "$PUCSORG" => doc.header.pucsorg = [f(10), f(20), f(30)],
+            "$PUCSXDIR" => doc.header.pucsxdir = [f(10), f(20), f(30)],
+            "$PUCSYDIR" => doc.header.pucsydir = [f(10), f(20), f(30)],
+
+            // Additional DIM controls.
+            "$DIMPOST" => doc.header.dim_post = sv(1).to_string(),
+            "$DIMLUNIT" => doc.header.dim_lunit = i16v(70),
+
+            // Object snap / selection.
+            "$OSMODE" => doc.header.osmode = i16v(70),
+            "$PICKSTYLE" => doc.header.pickstyle = i16v(70),
+            "$LIMCHECK" => doc.header.limcheck = i16v(70),
+
+            // Rendering / display / metadata.
+            "$PELEVATION" => doc.header.pelevation = f(40),
+            "$FACETRES" => doc.header.facetres = f(40),
+            "$ISOLINES" => doc.header.isolines = i16v(70),
+            "$TEXTQLTY" => doc.header.textqlty = i16v(70),
+            "$TSTACKALIGN" => doc.header.tstackalign = i16v(70),
+            "$TSTACKSIZE" => doc.header.tstacksize = i16v(70),
+            "$ACADMAINTVER" => doc.header.acadmaintver = i16v(70),
+            "$CDATE" => doc.header.cdate = f(40),
+            "$LASTSAVEDBY" => doc.header.lastsavedby = sv(1).to_string(),
+            "$MENU" => doc.header.menu = sv(1).to_string(),
+
+            // Dimension tolerance.
+            "$DIMTP" => doc.header.dim_tp = f(40),
+            "$DIMTM" => doc.header.dim_tm = f(40),
+            "$DIMTOL" => doc.header.dim_tol = i16v(70),
+            "$DIMLIM" => doc.header.dim_lim = i16v(70),
+            "$DIMTVP" => doc.header.dim_tvp = f(40),
+            "$DIMTFAC" => doc.header.dim_tfac = f(40),
+            "$DIMTOLJ" => doc.header.dim_tolj = i16v(70),
+
+            // Additional UI / legacy.
+            "$COORDS" => doc.header.coords = i16v(70),
+            "$SPLTKNOTS" => doc.header.spltknots = i16v(70),
+            "$BLIPMODE" => doc.header.blipmode = i16v(70),
+
+            "$USERI1" => doc.header.useri1 = i16v(70),
+            "$USERI2" => doc.header.useri2 = i16v(70),
+            "$USERI3" => doc.header.useri3 = i16v(70),
+            "$USERI4" => doc.header.useri4 = i16v(70),
+            "$USERI5" => doc.header.useri5 = i16v(70),
+            "$USERR1" => doc.header.userr1 = f(40),
+            "$USERR2" => doc.header.userr2 = f(40),
+            "$USERR3" => doc.header.userr3 = f(40),
+            "$USERR4" => doc.header.userr4 = f(40),
+            "$USERR5" => doc.header.userr5 = f(40),
+
+            "$LATITUDE" => doc.header.latitude = f(40),
+            "$LONGITUDE" => doc.header.longitude = f(40),
+            "$TIMEZONE" => doc.header.timezone = i16v(70),
+            "$STEPSPERSEC" => doc.header.stepspersec = f(40),
+            "$STEPSIZE" => doc.header.stepsize = f(40),
+            "$LENSLENGTH" => doc.header.lenslength = f(40),
+            "$SKETCHINC" => doc.header.sketchinc = f(40),
 
             // Spline defaults.
             "$SPLFRAME" => doc.header.splframe = i16v(70) != 0,

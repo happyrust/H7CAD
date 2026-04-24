@@ -1108,6 +1108,8 @@ pub(crate) fn parse_acad_table(codes: &[(i16, String)]) -> EntityData {
     let mut horizontal_direction = [1.0f64, 0.0, 0.0];
     let mut version: i16 = 0;
     let mut value_flag: i32 = 0;
+    let mut row_heights: Vec<f64> = Vec::new();
+    let mut column_widths: Vec<f64> = Vec::new();
     for &(code, ref val) in codes {
         match code {
             91 => num_rows = val.parse().unwrap_or(0),
@@ -1120,6 +1122,8 @@ pub(crate) fn parse_acad_table(codes: &[(i16, String)]) -> EntityData {
             31 => horizontal_direction[2] = val.parse().unwrap_or(0.0),
             280 => version = val.parse().unwrap_or(0),
             90 => value_flag = val.parse().unwrap_or(0),
+            141 => row_heights.push(val.parse().unwrap_or(0.0)),
+            142 => column_widths.push(val.parse().unwrap_or(0.0)),
             _ => {}
         }
     }
@@ -1130,6 +1134,8 @@ pub(crate) fn parse_acad_table(codes: &[(i16, String)]) -> EntityData {
         horizontal_direction,
         version,
         value_flag,
+        row_heights,
+        column_widths,
     }
 }
 

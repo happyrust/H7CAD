@@ -286,7 +286,11 @@ pub fn tessellate_native_dimension(
         entity_color,
         line_weight_px,
     ) {
-        wire.name = name;
+        // Phase 8: tag dim-text wires so downstream exporters (SVG) can
+        // replace them with native <text>.  `handle_from_wire_name` strips
+        // the prefix, so hit-testing and selection still map back to the
+        // Dimension handle.
+        wire.name = format!("dimtext_{name}");
         wires.push(wire);
     }
 
@@ -376,7 +380,9 @@ pub fn tessellate_dimension(
             [0.0; 8],
             line_weight_px,
         );
-        wire.name = name;
+        // Phase 8: same prefix tag as the native adapter uses so SVG
+        // export can skip this wire in favour of native <text>.
+        wire.name = format!("dimtext_{name}");
         wires.push(wire);
     }
 

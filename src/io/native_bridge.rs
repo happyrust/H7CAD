@@ -65,9 +65,110 @@ pub fn native_doc_to_acadrust(native: &nm::CadDocument) -> acadrust::CadDocument
     let mut doc = acadrust::CadDocument::new();
     doc.version = nm_version_to_acadrust(native.header.version);
 
+    // Sync layout block record handles so entity routing works correctly.
+    // Native model and compat doc both seed *Model_Space / *Paper_Space with
+    // independently allocated handles; aligning them lets add_entity() route
+    // entities based on their owner_handle without remapping.
+    let native_ms = Handle::new(native.model_space_handle().value());
+    let native_ps = Handle::new(native.paper_space_handle().value());
+
+    if let Some(ms) = doc.block_records.get_mut("*Model_Space") {
+        ms.handle = native_ms;
+    }
+    doc.header.model_space_block_handle = native_ms;
+
+    if let Some(ps) = doc.block_records.get_mut("*Paper_Space") {
+        ps.handle = native_ps;
+    }
+    doc.header.paper_space_block_handle = native_ps;
+
+    // Sync Layout objects' `block_record` fields so
+    // `Scene::current_layout_block_handle()` resolves to the native-aligned
+    // *Model_Space / *Paper_Space handles rather than the stale defaults
+    // left over from `acadrust::CadDocument::new()`. Without this, layout
+    // -> block-record lookups at render time return the wrong handle and
+    // `belongs_to_visible_block()` filters out every entity.
+    for obj in doc.objects.values_mut() {
+        if let acadrust::objects::ObjectType::Layout(layout) = obj {
+            if layout.name == "Model" {
+                layout.block_record = native_ms;
+            } else if layout.name.starts_with("Layout")
+                || layout.block_record == doc.header.paper_space_block_handle
+            {
+                // First paper layout — align with native paper-space BR.
+                // Additional custom paper layouts keep their own
+                // block_record (custom block_records[] loop below will
+                // handle them if they were created in the native doc).
+                if layout.block_record != native_ms {
+                    layout.block_record = native_ps;
+                }
+            }
+        }
+    }
+
+    // Create block records for all native blocks not already in compat.
+    for (handle, br) in &native.block_records {
+        let ar_handle = Handle::new(handle.value());
+        if ar_handle == native_ms || ar_handle == native_ps {
+            continue;
+        }
+        let mut ar_br = acadrust::tables::BlockRecord::new(&br.name);
+        ar_br.handle = ar_handle;
+        ar_br.block_entity_handle = Handle::new(br.block_entity_handle.value());
+        if let Some(layout_handle) = br.layout_handle {
+            ar_br.layout = Handle::new(layout_handle.value());
+        }
+        doc.block_records.add_or_replace(ar_br);
+    }
+
+    // Root entities (model space + paper space from native.entities).
     for entity in &native.entities {
         if let Some(ar_entity) = native_entity_to_acadrust(entity) {
             let _ = doc.add_entity(ar_entity);
+        }
+    }
+
+    // Block-owned entities (custom blocks, INSERT targets). Native
+    // storage allows `br.entities[i].owner_handle` to be `Handle::NULL`
+    // when callers mutate `BlockRecord::entities` directly; in that case
+    // compat `add_entity` would fall back to *Model_Space and the block
+    // content would leak into model space. Force the owner to the block
+    // record's handle so routing stays consistent.
+    for (br_handle, br) in &native.block_records {
+        if br.layout_handle.is_some() {
+            continue;
+        }
+        let ar_br_handle = Handle::new(br_handle.value());
+        for entity in &br.entities {
+            if let Some(mut ar_entity) = native_entity_to_acadrust(entity) {
+                let common = ar_entity.common_mut();
+                if common.owner_handle.is_null()
+                    || common.owner_handle == Handle::new(native.model_space_handle().value())
+                {
+                    common.owner_handle = ar_br_handle;
+                }
+                let _ = doc.add_entity(ar_entity);
+            }
+        }
+    }
+
+    // Assign sequential viewport ids to paper-space viewports. The
+    // native model doesn't track `id` (DXF code 69) because the field
+    // is an in-document render-order index rather than persisted data;
+    // but `Scene::viewport_content_wires()` requires `vp.id > 1` to
+    // distinguish a real viewport from the reserved tile placeholder
+    // (id = 1). Without this, any programmatically-built paper layout
+    // fails to project model-space content through its viewport.
+    {
+        let paper_space = doc.header.paper_space_block_handle;
+        let mut next_id: i16 = 2;
+        for entity in doc.entities_mut() {
+            if let acadrust::EntityType::Viewport(vp) = entity {
+                if vp.common.owner_handle == paper_space && vp.id == 0 {
+                    vp.id = next_id;
+                    next_id = next_id.saturating_add(1);
+                }
+            }
         }
     }
 
@@ -620,6 +721,7 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             horizontal_direction,
             version,
             value_flag,
+            ..
         } => {
             let mut table = ar::Table::new(v3(insertion), *num_rows as usize, *num_cols as usize);
             table.horizontal_direction = v3(horizontal_direction);
@@ -1089,6 +1191,8 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 ],
                 version: table.data_version,
                 value_flag: table.value_flags,
+                row_heights: Vec::new(),
+                column_widths: Vec::new(),
             },
         )),
         ar::EntityType::Mesh(mesh) => {

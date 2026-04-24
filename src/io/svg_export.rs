@@ -83,6 +83,13 @@ pub struct SvgExportOptions {
     /// NURBS curves still defer to WireModel tessellation.  Mirrors the
     /// same native-vs-tessellate trade-off `native_curves` makes.
     pub native_splines: bool,
+    /// Phase 8: replace the SHX-tessellated dim-text WireModel with a
+    /// native `<text>` element so standing measurement values stay
+    /// legible, selectable, and searchable.  Geometry (dim line,
+    /// extension lines, arrows) keeps flowing through the WireModel
+    /// pipeline unchanged.  Set to `false` to fall back to the
+    /// pre-Phase-8 behaviour.
+    pub native_dimension_text: bool,
 }
 
 impl Default for SvgExportOptions {
@@ -102,6 +109,7 @@ impl Default for SvgExportOptions {
             native_curves: true,
             line_weight_scale: 0.2646,
             native_splines: true,
+            native_dimension_text: true,
         }
     }
 }
@@ -276,6 +284,13 @@ fn build_svg_full(
         }
     }
 
+    // ── Layer 3b: Native dimension text ────────────────────────────────────
+    if options.native_dimension_text && !options.text_as_geometry {
+        if let Some(doc) = native_doc {
+            emit_dimension_texts(&mut svg, doc, ox, oy, options);
+        }
+    }
+
     svg.push_str("</g>\n</svg>\n");
     svg
 }
@@ -297,6 +312,13 @@ fn emit_wires(
             continue;
         }
         if skip_handles.contains(&wire.name) {
+            continue;
+        }
+        // Phase 8: skip the SHX-tessellated dim-text wire when we're
+        // going to emit a native <text> for this dimension.  Geometry
+        // wires (dim line / ext / arrows) carry the bare handle and are
+        // untouched.
+        if options.native_dimension_text && wire.name.starts_with("dimtext_") {
             continue;
         }
 
@@ -919,6 +941,224 @@ fn emit_bezier_path(
     svg.push_str("\" stroke-width=\"");
     svg.push_str(&fmt_f32(lw));
     svg.push_str("\"/>\n");
+}
+
+// ── Phase 8: Dimension text emission ───────────────────────────────────────
+//
+// The SHX-tessellated dim-text wire is skipped in `emit_wires` (via the
+// `dimtext_` prefix).  This pass walks `doc.entities` and draws a native
+// `<text>` for every Dimension / ArcDimension / LargeRadialDimension with
+// the measurement value and position derived exactly the same way as the
+// scene tessellator, so the rendered location matches what the user sees
+// in the CAD view.  DIMSTYLE's `dimtxt` drives the font size when
+// available; `dimtxsty_name` feeds the font family via the per-style
+// `TextStyleProperties` table.
+
+fn emit_dimension_texts(
+    svg: &mut String,
+    doc: &nm::CadDocument,
+    ox: f32,
+    oy: f32,
+    options: &SvgExportOptions,
+) {
+    let frozen_layers: std::collections::HashSet<&str> = doc
+        .layers
+        .values()
+        .filter(|l| l.is_frozen || !l.is_on())
+        .map(|l| l.name.as_str())
+        .collect();
+
+    for entity in &doc.entities {
+        if entity.invisible {
+            continue;
+        }
+        if frozen_layers.contains(entity.layer_name.as_str()) {
+            continue;
+        }
+
+        let Some((value, pos, rotation_deg, style_name)) = dim_text_of_entity(entity) else {
+            continue;
+        };
+
+        let dim_style = doc
+            .dim_styles
+            .get(style_name.as_str())
+            .or_else(|| doc.dim_styles.get("Standard"))
+            .or_else(|| doc.dim_styles.values().next());
+        let text_height = dim_style
+            .map(|s| s.dimtxt)
+            .filter(|h| *h > 0.0)
+            .unwrap_or_else(|| dim_measurement_text_height(entity));
+        let font_family = dim_style
+            .map(|style| style.dimtxsty_name.as_str())
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| resolve_native_text_font_family(name, doc))
+            .unwrap_or_else(|| options.font_family.clone());
+
+        let x = pos[0] as f32 + ox;
+        let y = pos[1] as f32 + oy;
+        let fs = (text_height as f32) * options.font_size_scale;
+        let fill = resolve_entity_fill(entity, options);
+
+        emit_text_element_with_font(
+            svg,
+            x,
+            y,
+            fs,
+            rotation_deg as f32,
+            &value,
+            &font_family,
+            &fill,
+            options,
+        );
+    }
+}
+
+fn resolve_native_text_font_family(style_name: &str, doc: &nm::CadDocument) -> String {
+    let style = doc.text_styles.values().find(|entry| {
+        entry.name.eq_ignore_ascii_case(style_name)
+            || (style_name.trim().is_empty() && entry.name.eq_ignore_ascii_case("Standard"))
+    });
+
+    if let Some(style) = style {
+        if !style.font_name.trim().is_empty() {
+            let file = style.font_name.trim();
+            let basename = file.rsplit(['/', '\\']).next().unwrap_or(file);
+            let stem = basename.split('.').next().unwrap_or(basename).trim();
+            if !stem.is_empty() {
+                stem.to_string()
+            } else if !style.name.trim().is_empty() {
+                style.name.trim().to_string()
+            } else {
+                "Standard".to_string()
+            }
+        } else if !style.name.trim().is_empty() {
+            style.name.trim().to_string()
+        } else {
+            "Standard".to_string()
+        }
+    } else if style_name.trim().is_empty() {
+        "Standard".to_string()
+    } else {
+        style_name.trim().to_string()
+    }
+}
+
+/// Extract (displayed-text, world-space-position, rotation-deg, dimstyle-name)
+/// for every kind of dimension entity we render natively.  Returns `None` if
+/// the entity is not a dimension or lacks a usable position.
+fn dim_text_of_entity(entity: &nm::Entity) -> Option<(String, [f64; 3], f64, String)> {
+    match &entity.data {
+        nm::EntityData::Dimension {
+            dim_type,
+            text_override,
+            measurement,
+            text_midpoint,
+            first_point,
+            second_point,
+            angle_vertex,
+            definition_point,
+            dimension_arc,
+            text_rotation,
+            style_name,
+            ..
+        } => {
+            let value = dim_display_text(*dim_type, measurement, text_override);
+            let pos = dim_fallback_position(
+                *dim_type,
+                *text_midpoint,
+                *first_point,
+                *second_point,
+                *angle_vertex,
+                *definition_point,
+                *dimension_arc,
+            );
+            Some((value, pos, *text_rotation, style_name.clone()))
+        }
+        nm::EntityData::ArcDimension {
+            text_override,
+            measurement,
+            text_midpoint,
+            style_name,
+            ..
+        } => {
+            let value = dim_display_text(2, measurement, text_override);
+            Some((value, *text_midpoint, 0.0, style_name.clone()))
+        }
+        nm::EntityData::LargeRadialDimension {
+            text_override,
+            measurement,
+            text_midpoint,
+            style_name,
+            ..
+        } => {
+            let value = dim_display_text(4, measurement, text_override);
+            Some((value, *text_midpoint, 0.0, style_name.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Expand `text_override` against the measurement: empty → measured value,
+/// `"<>"` placeholder → substituted measurement, anything else → verbatim.
+fn dim_display_text(dim_type: i16, measurement: &f64, text_override: &str) -> String {
+    let trimmed = text_override.trim();
+    let measured = dim_measurement_text(dim_type, *measurement);
+    if trimmed.is_empty() {
+        measured
+    } else if trimmed.contains("<>") {
+        trimmed.replace("<>", &measured)
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn dim_measurement_text(dim_type: i16, measurement: f64) -> String {
+    match dim_type & 0x0F {
+        4 => format!("R{measurement:.4}"),
+        3 => format!("Ø{measurement:.4}"),
+        2 | 5 => format!("{measurement:.2}°"),
+        _ => format!("{measurement:.4}"),
+    }
+}
+
+fn dim_fallback_position(
+    dim_type: i16,
+    text_midpoint: [f64; 3],
+    first_point: [f64; 3],
+    second_point: [f64; 3],
+    angle_vertex: [f64; 3],
+    definition_point: [f64; 3],
+    dimension_arc: [f64; 3],
+) -> [f64; 3] {
+    let non_zero = text_midpoint[0] * text_midpoint[0]
+        + text_midpoint[1] * text_midpoint[1]
+        + text_midpoint[2] * text_midpoint[2];
+    if non_zero > 1e-8 {
+        return text_midpoint;
+    }
+    let avg = |a: [f64; 3], b: [f64; 3]| {
+        [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5]
+    };
+    match dim_type & 0x0F {
+        0 | 1 => avg(first_point, second_point),
+        3 | 4 => avg(angle_vertex, definition_point),
+        2 => dimension_arc,
+        5 => definition_point,
+        6 => second_point,
+        _ => [0.0, 0.0, 0.0],
+    }
+}
+
+fn dim_measurement_text_height(entity: &nm::Entity) -> f64 {
+    let measurement = match &entity.data {
+        nm::EntityData::Dimension { measurement, .. } => *measurement,
+        nm::EntityData::ArcDimension { measurement, .. } => *measurement,
+        nm::EntityData::LargeRadialDimension { measurement, .. } => *measurement,
+        _ => return 0.25,
+    };
+    let scale = (measurement.abs() * 0.12).clamp(0.25, 2.0);
+    if scale.is_finite() { scale } else { 0.25 }
 }
 
 /// Compute an SVG `stroke="..."` value for a native entity, honouring
@@ -1836,6 +2076,30 @@ fn emit_text_element(
     fill: &str,
     options: &SvgExportOptions,
 ) {
+    emit_text_element_with_font(
+        svg,
+        x,
+        y,
+        font_size,
+        rotation_deg,
+        text,
+        &options.font_family,
+        fill,
+        options,
+    );
+}
+
+fn emit_text_element_with_font(
+    svg: &mut String,
+    x: f32,
+    y: f32,
+    font_size: f32,
+    rotation_deg: f32,
+    text: &str,
+    font_family: &str,
+    fill: &str,
+    _options: &SvgExportOptions,
+) {
     if text.is_empty() || font_size < 0.001 {
         return;
     }
@@ -1848,7 +2112,7 @@ fn emit_text_element(
     svg.push_str("\" font-size=\"");
     svg.push_str(&fmt_f32(font_size));
     svg.push_str("\" font-family=\"");
-    svg.push_str(&options.font_family);
+    svg.push_str(font_family);
     svg.push_str("\" fill=\"");
     svg.push_str(fill);
     svg.push('"');
@@ -2228,6 +2492,52 @@ mod tests {
     }
 
     #[test]
+    fn svg_export_to_tempfile_smoke_test() {
+        // Higher-level smoke test: exercise the file-writing entry point
+        // end-to-end. Uses the OS temp dir so we don't pollute the repo.
+        let dir = std::env::temp_dir();
+        let path = dir.join("h7cad_svg_export_smoke.svg");
+        let wires = vec![make_wire(
+            "1",
+            vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
+            7,
+        )];
+        let hatches: HashMap<Handle, HatchModel> = HashMap::new();
+
+        let result = export_svg_full(
+            &wires,
+            &hatches,
+            None,
+            100.0,
+            100.0,
+            0.0,
+            0.0,
+            0,
+            &path,
+            None,
+            &default_opts(),
+        );
+        assert!(result.is_ok(), "export_svg_full must succeed: {result:?}");
+
+        let contents = std::fs::read_to_string(&path).expect("file must exist");
+        assert!(
+            contents.starts_with("<?xml"),
+            "SVG file must start with XML declaration"
+        );
+        assert!(
+            contents.contains("<polyline"),
+            "polyline element must be present"
+        );
+        assert!(
+            contents.trim_end().ends_with("</svg>"),
+            "SVG file must close with </svg>"
+        );
+
+        // Clean up.
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn paper_boundary_wire_is_skipped() {
         let wires = vec![
             make_wire("100", vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]], 7),
@@ -2439,6 +2749,63 @@ mod tests {
         );
         assert!(svg.contains("<polyline"), "wire kept as geometry: {svg}");
         assert!(!svg.contains("<text"), "native <text> suppressed in geometry mode: {svg}");
+    }
+
+    #[test]
+    fn dimension_text_uses_dimstyle_text_font_family() {
+        let mut doc = nm::CadDocument::new();
+
+        let mut text_style = nm::TextStyleProperties::new("DimRoman");
+        text_style.font_name = "romans.shx".into();
+        doc.text_styles.insert(text_style.name.clone(), text_style);
+
+        let mut dim_style = nm::DimStyleProperties::new("DimStyleA");
+        dim_style.dimtxt = 3.5;
+        dim_style.dimtxsty_name = "DimRoman".into();
+        doc.dim_styles.insert(dim_style.name.clone(), dim_style);
+
+        let mut entity = nm::Entity::new(nm::EntityData::Dimension {
+            dim_type: 0,
+            block_name: String::new(),
+            style_name: "DimStyleA".into(),
+            definition_point: [10.0, 0.0, 0.0],
+            text_midpoint: [5.0, 2.0, 0.0],
+            text_override: String::new(),
+            attachment_point: 0,
+            measurement: 12.3456,
+            text_rotation: 0.0,
+            horizontal_direction: 0.0,
+            flip_arrow1: false,
+            flip_arrow2: false,
+            first_point: [0.0, 0.0, 0.0],
+            second_point: [10.0, 0.0, 0.0],
+            angle_vertex: [0.0, 0.0, 0.0],
+            dimension_arc: [0.0, 0.0, 0.0],
+            leader_length: 0.0,
+            rotation: 0.0,
+            ext_line_rotation: 0.0,
+        });
+        entity.handle = nm::Handle::new(501);
+        doc.entities.push(entity);
+
+        let svg = build_svg_full(
+            &Vec::<WireModel>::new(),
+            &HashMap::new(),
+            Some(&doc),
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &default_opts(),
+        );
+
+        assert!(svg.contains("<text"), "dimension text should be emitted: {svg}");
+        assert!(
+            svg.contains("font-family=\"romans\""),
+            "dimension text should honor DIMSTYLE text style font: {svg}",
+        );
     }
 
     #[test]

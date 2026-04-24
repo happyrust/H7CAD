@@ -112,6 +112,8 @@ impl CadCommand for TableCommand {
                 horizontal_direction: [1.0, 0.0, 0.0],
                 version: 0,
                 value_flag: 0,
+                row_heights: Vec::new(),
+                column_widths: Vec::new(),
             });
             CmdResult::CommitAndExitNative(entity)
         } else {

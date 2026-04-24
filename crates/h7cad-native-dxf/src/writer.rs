@@ -1,5 +1,69 @@
 use h7cad_native_model::*;
-use std::fmt::Write;
+use std::fmt::{self, Write};
+
+// ---------------------------------------------------------------------------
+// DxfWriteError
+// ---------------------------------------------------------------------------
+//
+// Structured error type for `write_dxf_strict`, paired with reader-side
+// `DxfReadError`. Introduced in round 30 (2026-04-22 post-DIMALT roadmap,
+// Phase 1) to replace the legacy `Result<String, String>` writer contract
+// with a pattern-matchable enum while keeping the string-returning
+// `write_dxf_string` / `write_dxf` as backward-compatible shims.
+
+/// Errors emitted by `write_dxf_strict`.
+///
+/// Variants mirror the conceptual failure modes a DXF serialiser can hit.
+/// The writer currently has no internal failure paths (all helpers are
+/// infallible `fn(&mut DxfWriter, &CadDocument) -> ()`), so in practice
+/// only a future callsite that validates document invariants or grows an
+/// `&mut dyn Write` overload will actually surface these variants —— but
+/// the enum is future-proofed **now** so downstream consumers can pattern
+/// match instead of regex'ing strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DxfWriteError {
+    /// The document is internally inconsistent in a way that prevents
+    /// serialisation (e.g. an IMAGE entity's `image_def_handle` points
+    /// to a non-existent IMAGEDEF; a TABLE row references a vanished
+    /// block record). Ship a human-readable description — callers that
+    /// care about the precise shape should query the document directly.
+    InvalidDocument(String),
+    /// A serialisation feature is intentionally not implemented yet
+    /// (e.g. binary DXF output, a specific R2018+ entity flavour).
+    Unsupported(String),
+    /// Low-level formatting failure surfaced from `std::fmt::Write`.
+    /// The string-backed writer used by `write_dxf_strict` is infallible,
+    /// so this variant is reserved for future `&mut dyn Write` overloads
+    /// (streaming to a file handle / socket).
+    Io(String),
+}
+
+impl fmt::Display for DxfWriteError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidDocument(msg) => write!(f, "invalid document: {msg}"),
+            Self::Unsupported(msg) => write!(f, "unsupported: {msg}"),
+            Self::Io(msg) => write!(f, "io: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for DxfWriteError {}
+
+/// Wrap a free-form `String` error as `InvalidDocument` — a lossy but
+/// convenient adaptor for callsites migrating from the legacy
+/// `Result<String, String>` contract.
+impl From<String> for DxfWriteError {
+    fn from(msg: String) -> Self {
+        Self::InvalidDocument(msg)
+    }
+}
+
+impl From<&str> for DxfWriteError {
+    fn from(msg: &str) -> Self {
+        Self::InvalidDocument(msg.to_string())
+    }
+}
 
 pub struct DxfWriter {
     buf: String,
@@ -91,6 +155,16 @@ fn format_f64(v: f64) -> String {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+pub fn write_dxf_strict(doc: &CadDocument) -> Result<String, DxfWriteError> {
+    if needs_ensure_image_defs(doc) {
+        let mut owned = doc.clone();
+        ensure_image_defs(&mut owned);
+        write_dxf_string_impl(&owned).map_err(DxfWriteError::from)
+    } else {
+        write_dxf_string_impl(doc).map_err(DxfWriteError::from)
+    }
+}
 
 pub fn write_dxf_string(doc: &CadDocument) -> Result<String, String> {
     // Pre-pass: auto-create IMAGEDEF objects for any IMAGE entities that
@@ -338,6 +412,293 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
 
     w.pair_str(9, "$DIMZIN");
     w.pair_i16(70, doc.header.dimzin);
+
+    // ── Dimension alternate units (DIMALT*) ───────────────────────────────
+    w.pair_str(9, "$DIMALT");
+    w.pair_i16(70, doc.header.dim_alt);
+
+    w.pair_str(9, "$DIMALTD");
+    w.pair_i16(70, doc.header.dim_altd);
+
+    w.pair_str(9, "$DIMALTF");
+    w.pair_f64(40, doc.header.dim_altf);
+
+    w.pair_str(9, "$DIMALTRND");
+    w.pair_f64(40, doc.header.dim_altrnd);
+
+    w.pair_str(9, "$DIMALTTD");
+    w.pair_i16(70, doc.header.dim_alttd);
+
+    w.pair_str(9, "$DIMALTTZ");
+    w.pair_i16(70, doc.header.dim_alttz);
+
+    w.pair_str(9, "$DIMALTU");
+    w.pair_i16(70, doc.header.dim_altu);
+
+    w.pair_str(9, "$DIMALTZ");
+    w.pair_i16(70, doc.header.dim_altz);
+
+    w.pair_str(9, "$DIMAPOST");
+    w.pair_str(1, &doc.header.dim_apost);
+
+    // ── Dimension arrow / symbol names ────────────────────────────────────
+    w.pair_str(9, "$DIMBLK");
+    w.pair_str(1, &doc.header.dim_blk);
+
+    w.pair_str(9, "$DIMBLK1");
+    w.pair_str(1, &doc.header.dim_blk1);
+
+    w.pair_str(9, "$DIMBLK2");
+    w.pair_str(1, &doc.header.dim_blk2);
+
+    w.pair_str(9, "$DIMLDRBLK");
+    w.pair_str(1, &doc.header.dim_ldrblk);
+
+    w.pair_str(9, "$DIMARCSYM");
+    w.pair_i16(70, doc.header.dim_arcsym);
+
+    w.pair_str(9, "$DIMJOGANG");
+    w.pair_f64(40, doc.header.dim_jogang);
+
+    // ── Dimension visual control ──────────────────────────────────────────
+    w.pair_str(9, "$DIMJUST");
+    w.pair_i16(70, doc.header.dim_just);
+
+    w.pair_str(9, "$DIMSD1");
+    w.pair_i16(70, doc.header.dim_sd1);
+
+    w.pair_str(9, "$DIMSD2");
+    w.pair_i16(70, doc.header.dim_sd2);
+
+    w.pair_str(9, "$DIMSE1");
+    w.pair_i16(70, doc.header.dim_se1);
+
+    w.pair_str(9, "$DIMSE2");
+    w.pair_i16(70, doc.header.dim_se2);
+
+    w.pair_str(9, "$DIMSOXD");
+    w.pair_i16(70, doc.header.dim_soxd);
+
+    w.pair_str(9, "$DIMATFIT");
+    w.pair_i16(70, doc.header.dim_atfit);
+
+    w.pair_str(9, "$DIMAZIN");
+    w.pair_i16(70, doc.header.dim_azin);
+
+    w.pair_str(9, "$DIMTIX");
+    w.pair_i16(70, doc.header.dim_tix);
+
+    // ── Dimension rendering attributes ────────────────────────────────────
+    w.pair_str(9, "$DIMCLRD");
+    w.pair_i16(70, doc.header.dim_clrd);
+
+    w.pair_str(9, "$DIMCLRE");
+    w.pair_i16(70, doc.header.dim_clre);
+
+    w.pair_str(9, "$DIMCLRT");
+    w.pair_i16(70, doc.header.dim_clrt);
+
+    w.pair_str(9, "$DIMLWD");
+    w.pair_i16(70, doc.header.dim_lwd);
+
+    w.pair_str(9, "$DIMLWE");
+    w.pair_i16(70, doc.header.dim_lwe);
+
+    w.pair_str(9, "$DIMTAD");
+    w.pair_i16(70, doc.header.dim_tad);
+
+    w.pair_str(9, "$DIMTIH");
+    w.pair_i16(70, doc.header.dim_tih);
+
+    w.pair_str(9, "$DIMTOH");
+    w.pair_i16(70, doc.header.dim_toh);
+
+    w.pair_str(9, "$DIMDLE");
+    w.pair_f64(40, doc.header.dim_dle);
+
+    w.pair_str(9, "$DIMCEN");
+    w.pair_f64(40, doc.header.dim_cen);
+
+    w.pair_str(9, "$DIMTSZ");
+    w.pair_f64(40, doc.header.dim_tsz);
+
+    // ── Paper space control ───────────────────────────────────────────────
+    w.pair_str(9, "$PSTYLEMODE");
+    w.pair_i16(70, doc.header.pstylemode);
+
+    w.pair_str(9, "$TILEMODE");
+    w.pair_i16(70, doc.header.tilemode);
+
+    w.pair_str(9, "$MAXACTVP");
+    w.pair_i16(70, doc.header.maxactvp);
+
+    w.pair_str(9, "$PSVPSCALE");
+    w.pair_f64(40, doc.header.psvpscale);
+
+    // ── Miscellaneous flags ───────────────────────────────────────────────
+    w.pair_str(9, "$TREEDEPTH");
+    w.pair_i16(70, doc.header.treedepth);
+
+    w.pair_str(9, "$VISRETAIN");
+    w.pair_i16(70, doc.header.visretain);
+
+    w.pair_str(9, "$DELOBJ");
+    w.pair_i16(70, doc.header.delobj);
+
+    w.pair_str(9, "$PROXYGRAPHICS");
+    w.pair_i16(70, doc.header.proxygraphics);
+
+    // ── 3D Surface defaults ───────────────────────────────────────────────
+    w.pair_str(9, "$SURFTAB1");
+    w.pair_i16(70, doc.header.surftab1);
+
+    w.pair_str(9, "$SURFTAB2");
+    w.pair_i16(70, doc.header.surftab2);
+
+    w.pair_str(9, "$SURFTYPE");
+    w.pair_i16(70, doc.header.surftype);
+
+    w.pair_str(9, "$SURFU");
+    w.pair_i16(70, doc.header.surfu);
+
+    w.pair_str(9, "$SURFV");
+    w.pair_i16(70, doc.header.surfv);
+
+    w.pair_str(9, "$PFACEVMAX");
+    w.pair_i16(70, doc.header.pfacevmax);
+
+    // ── Additional common variables ───────────────────────────────────────
+    w.pair_str(9, "$MEASUREMENT");
+    w.pair_i16(70, doc.header.measurement);
+
+    w.pair_str(9, "$EXTNAMES");
+    w.pair_i16(290, if doc.header.extnames { 1 } else { 0 });
+
+    w.pair_str(9, "$WORLDVIEW");
+    w.pair_i16(70, doc.header.worldview);
+
+    w.pair_str(9, "$UNITMODE");
+    w.pair_i16(70, doc.header.unitmode);
+
+    w.pair_str(9, "$SPLMAXDEG");
+    w.pair_i16(70, doc.header.splmaxdeg);
+
+    // ── Paper space UCS ───────────────────────────────────────────────────
+    w.pair_str(9, "$PUCSBASE");
+    w.pair_str(2, &doc.header.pucsbase);
+
+    w.pair_str(9, "$PUCSNAME");
+    w.pair_str(2, &doc.header.pucsname);
+
+    w.pair_str(9, "$PUCSORG");
+    w.point3d(10, doc.header.pucsorg);
+
+    w.pair_str(9, "$PUCSXDIR");
+    w.point3d(10, doc.header.pucsxdir);
+
+    w.pair_str(9, "$PUCSYDIR");
+    w.point3d(10, doc.header.pucsydir);
+
+    // ── Additional DIM controls ───────────────────────────────────────────
+    w.pair_str(9, "$DIMPOST");
+    w.pair_str(1, &doc.header.dim_post);
+
+    w.pair_str(9, "$DIMLUNIT");
+    w.pair_i16(70, doc.header.dim_lunit);
+
+    // ── Object snap / selection ───────────────────────────────────────────
+    w.pair_str(9, "$OSMODE");
+    w.pair_i16(70, doc.header.osmode);
+
+    w.pair_str(9, "$PICKSTYLE");
+    w.pair_i16(70, doc.header.pickstyle);
+
+    w.pair_str(9, "$LIMCHECK");
+    w.pair_i16(70, doc.header.limcheck);
+
+    // ── Rendering / display / metadata ────────────────────────────────────
+    w.pair_str(9, "$PELEVATION");
+    w.pair_f64(40, doc.header.pelevation);
+
+    w.pair_str(9, "$FACETRES");
+    w.pair_f64(40, doc.header.facetres);
+
+    w.pair_str(9, "$ISOLINES");
+    w.pair_i16(70, doc.header.isolines);
+
+    w.pair_str(9, "$TEXTQLTY");
+    w.pair_i16(70, doc.header.textqlty);
+
+    w.pair_str(9, "$TSTACKALIGN");
+    w.pair_i16(70, doc.header.tstackalign);
+
+    w.pair_str(9, "$TSTACKSIZE");
+    w.pair_i16(70, doc.header.tstacksize);
+
+    w.pair_str(9, "$ACADMAINTVER");
+    w.pair_i16(70, doc.header.acadmaintver);
+
+    w.pair_str(9, "$CDATE");
+    w.pair_f64(40, doc.header.cdate);
+
+    w.pair_str(9, "$LASTSAVEDBY");
+    w.pair_str(1, &doc.header.lastsavedby);
+
+    w.pair_str(9, "$MENU");
+    w.pair_str(1, &doc.header.menu);
+
+    // ── Dimension tolerance ───────────────────────────────────────────────
+    w.pair_str(9, "$DIMTP");
+    w.pair_f64(40, doc.header.dim_tp);
+
+    w.pair_str(9, "$DIMTM");
+    w.pair_f64(40, doc.header.dim_tm);
+
+    w.pair_str(9, "$DIMTOL");
+    w.pair_i16(70, doc.header.dim_tol);
+
+    w.pair_str(9, "$DIMLIM");
+    w.pair_i16(70, doc.header.dim_lim);
+
+    w.pair_str(9, "$DIMTVP");
+    w.pair_f64(40, doc.header.dim_tvp);
+
+    w.pair_str(9, "$DIMTFAC");
+    w.pair_f64(40, doc.header.dim_tfac);
+
+    w.pair_str(9, "$DIMTOLJ");
+    w.pair_i16(70, doc.header.dim_tolj);
+
+    // ── Additional UI / legacy ────────────────────────────────────────────
+    w.pair_str(9, "$COORDS");
+    w.pair_i16(70, doc.header.coords);
+
+    w.pair_str(9, "$SPLTKNOTS");
+    w.pair_i16(70, doc.header.spltknots);
+
+    w.pair_str(9, "$BLIPMODE");
+    w.pair_i16(70, doc.header.blipmode);
+
+    // ── User variables ────────────────────────────────────────────────────
+    w.pair_str(9, "$USERI1"); w.pair_i16(70, doc.header.useri1);
+    w.pair_str(9, "$USERI2"); w.pair_i16(70, doc.header.useri2);
+    w.pair_str(9, "$USERI3"); w.pair_i16(70, doc.header.useri3);
+    w.pair_str(9, "$USERI4"); w.pair_i16(70, doc.header.useri4);
+    w.pair_str(9, "$USERI5"); w.pair_i16(70, doc.header.useri5);
+    w.pair_str(9, "$USERR1"); w.pair_f64(40, doc.header.userr1);
+    w.pair_str(9, "$USERR2"); w.pair_f64(40, doc.header.userr2);
+    w.pair_str(9, "$USERR3"); w.pair_f64(40, doc.header.userr3);
+    w.pair_str(9, "$USERR4"); w.pair_f64(40, doc.header.userr4);
+    w.pair_str(9, "$USERR5"); w.pair_f64(40, doc.header.userr5);
+
+    // ── Geolocation / 3D walk / misc ──────────────────────────────────────
+    w.pair_str(9, "$LATITUDE"); w.pair_f64(40, doc.header.latitude);
+    w.pair_str(9, "$LONGITUDE"); w.pair_f64(40, doc.header.longitude);
+    w.pair_str(9, "$TIMEZONE"); w.pair_i16(70, doc.header.timezone);
+    w.pair_str(9, "$STEPSPERSEC"); w.pair_f64(40, doc.header.stepspersec);
+    w.pair_str(9, "$STEPSIZE"); w.pair_f64(40, doc.header.stepsize);
+    w.pair_str(9, "$LENSLENGTH"); w.pair_f64(40, doc.header.lenslength);
+    w.pair_str(9, "$SKETCHINC"); w.pair_f64(40, doc.header.sketchinc);
 
     // ── Spline defaults ───────────────────────────────────────────────────
     w.pair_str(9, "$SPLFRAME");
@@ -814,7 +1175,12 @@ fn write_blocks(w: &mut DxfWriter, doc: &CadDocument) {
         w.pair_handle(330, br.handle);
         w.pair_str(2, &br.name);
         w.pair_i16(70, 0);
-        w.point3d(10, [0.0, 0.0, 0.0]);
+        // DXF code 10/20/30 — the block's base point (insertion anchor).
+        // Previously hard-coded to the origin, which silently erased any
+        // custom anchor on save. Write the actual stored base_point so
+        // round-tripping a drawing with custom-anchored blocks is
+        // lossless.
+        w.point3d(10, br.base_point);
 
         for entity in &br.entities {
             write_entity(w, entity);
@@ -1502,6 +1868,8 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             horizontal_direction,
             version,
             value_flag,
+            row_heights,
+            column_widths,
         } => {
             w.pair_i32(90, *value_flag);
             w.pair_i16(280, *version);
@@ -1513,6 +1881,12 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
             w.pair_f64(31, horizontal_direction[2]);
             w.pair_i32(91, *num_rows);
             w.pair_i32(92, *num_cols);
+            for h in row_heights {
+                w.pair_f64(141, *h);
+            }
+            for cw in column_widths {
+                w.pair_f64(142, *cw);
+            }
         }
         EntityData::Mesh {
             vertex_count,
@@ -1791,7 +2165,7 @@ fn write_object(w: &mut DxfWriter, obj: &CadObject) {
             w.pair_handle(330, obj.owner_handle);
             w.pair_str(1, name);
             w.pair_i32(71, *tab_order);
-            w.pair_handle(330, *block_record_handle);
+            w.pair_handle(340, *block_record_handle);
             w.pair_f64(44, plot_paper_size[0]);
             w.pair_f64(45, plot_paper_size[1]);
             w.pair_f64(46, plot_origin[0]);

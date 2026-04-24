@@ -2,6 +2,309 @@
 
 ## [未发布]
 
+### 2026-04-24（三十一）：DXF 2D 显示收口
+
+> 关闭常规二维工程图的 DXF 读-写-桥接-显示缺口。
+> 详见 `docs/plans/2026-04-24-dxf-2d-display-closure-plan.md`。
+
+**修复的 6 个隐藏缺陷（均由新增回归测试暴露）**
+
+1. `native_doc_to_acadrust()` 未同步 compat Layout 对象的 `block_record`
+   字段。`acadrust::CadDocument::new()` 预置的 Layout 指向默认 handle
+   （≈0x15），`Scene::current_layout_block_handle()` 据此查询就拿到
+   与实际 BR 不一致的 handle，`belongs_to_visible_block()` 过滤掉
+   所有实体 → 所有通过 bridge 打开的文件默认显示路径零 wire。
+2. 块内实体在桥接时 `owner_handle` 若为 `NULL` 或指向 native model
+   space，会错误落到 compat `*Model_Space` 而非自定义 BlockRecord，
+   导致块内容泄漏到 model space + 块自身为空壳。修复：桥接时强制
+   回填 `owner_handle = br_handle`。
+3. `Scene::copy_entities()` 只将克隆体加入 compat 文档，`save_dxf`/
+   `save_dwg` 走 native → 克隆体在保存时静默丢失。修复：在 compat
+   添加后立即镜像进 native。
+4. `native_doc_to_acadrust()` 把 paper-space Viewport 的 `id` 保持
+   在默认 0，`Scene::viewport_content_wires()` 的 `vp.id > 1` 过滤
+   会淘汰它们 → 任何 programmatic 生成的 paper layout 看不到 model
+   内容。修复：桥接后按顺序分配 `id = 2..N`。
+5. `write_blocks()` 把 BLOCK 代码 10（基准点）硬编码为 `[0,0,0]`，
+   自定义锚点块保存后变形。修复：写 `br.base_point`。
+6. `write_entity` 缺少 `thickness` / `extrusion` / `true_color`
+   等字段的缺省短路（仅附带一次性更正）。
+
+**新增的 50+ 个回归测试**
+
+- `crates/h7cad-native-dxf/tests/entity_2d_roundtrip.rs`：从 13 → 38
+  用例，覆盖 LINE / CIRCLE / ARC / POLYLINE×4 / DIMENSION×2 / INSERT+ATTRIB /
+  ATTDEF / HATCH 三种 edge + island 拓扑 / WIPEOUT+elevation / MLINE /
+  MULTILEADER / ProxyEntity / XData（多 app 多 code）/ Layer 全字段 /
+  DIMSTYLE 全字段 / BLOCK base_point / 句柄保活 /
+  true_color/transparency/invisible / 双重 roundtrip 结构稳定 /
+  空文档 roundtrip。
+- `src/scene/mod.rs #[cfg(test)] mod tests`：新增 25 个 `fixture_*` /
+  `dualstore_*` / `e2e_*` 测试，从 Scene 层锁定：默认显示默认关闭
+  native 直渲的路径、块内容可见、paper-space 切换可见、VIEWPORT 跨
+  布局投射、hatch 缓存、IMAGE+WIPEOUT 桥接、真实 PNG 像素解码、
+  copy/transform/erase 双存储同步、BYLAYER 颜色继承、INSERT 镜像/
+  旋转显示、冻结/关闭图层隐藏、嵌套块引用（2/3 层）、循环块引用
+  保护（A↔B 不无限递归）、自定义 hatch 图案名回退、SVG 导出落盘
+  冒烟、端到端读-写-桥-显示 + 编辑-保存-重开。
+
+**受影响包 & 数量**
+
+- `h7cad-native-dxf`：entity roundtrip 13 → 38（含 ProxyEntity/Layer/
+  XData/DIMSTYLE/base_point/全字段保活 + 二次 roundtrip 结构稳定）。
+- `H7CAD`：357 → 370+ 测试；其中 scene::tests 增加 25 条，
+  涵盖 display_scene / dualstore / e2e / fixture 四大类。
+
+**测试指令**
+
+```bash
+cargo test -p h7cad-native-dxf --quiet
+cargo check -p H7CAD
+cargo test --workspace --quiet   # 唯一失败 real_dwg_samples_baseline_m3b 为
+                                  # 既存 DWG 读取回归，与本轮收口无关
+```
+
+### 2026-04-24（三十）：write_dxf_strict + LAYOUT 修复 + TABLE 增强 + Wipeout 验证
+
+**Phase 1：write_dxf_strict（路线图 Path E-1 落地）**
+
+新增 `write_dxf_strict(doc) -> Result<String, DxfWriteError>` 公有 API，
+返回结构化 `DxfWriteError` enum（`InvalidDocument / Unsupported / Io`），
+支持 pattern match。既有 `write_dxf_string` 签名不变（向后兼容）。
+`DxfWriteError` 和 `write_dxf_strict` 从 `lib.rs` 公有导出。
+
+- 新增 3 条测试（`tests/writer_error_types.rs`）
+- DxfWriteError 已有 `From<String>`, `From<&str>`, `Display`, `Error` 实现
+
+**Bug fix：LAYOUT writer code 330 → 340**
+
+修复 LAYOUT 对象 `block_record_handle` 使用错误的 DXF group code：
+writer 原来输出 code 330（owner pointer），但 DXF 规范要求 code 340
+（hard reference to block record）。reader 已正确读取 code 340，所以
+此 bug 导致 LAYOUT 的 block_record_handle 在 roundtrip 后丢失。
+
+- 修复 `writer.rs` LAYOUT arm：`w.pair_handle(330, ...)` → `w.pair_handle(340, ...)`
+- 更新 `scene/mod.rs` 中过时的注释（原文称 DXF reader 不读 code 340，
+  实际 reader 已实现）
+- 新增 1 条 roundtrip 测试（`tests/layout_block_record_roundtrip.rs`）
+
+**TABLE 实体增强（row_heights / column_widths）**
+
+`EntityData::Table` 新增 `row_heights: Vec<f64>` 和 `column_widths: Vec<f64>`
+字段（DXF code 141 / 142），解决 ACAD_TABLE 在 roundtrip 后丢失行高/列宽的问题。
+
+- model: `EntityData::Table` 新增 2 个字段
+- reader: `parse_acad_table` 解析 code 141/142
+- writer: TABLE arm 写出 code 141/142
+- bridge: `native_bridge.rs` 更新 nm↔ar 转换（新字段初始化为空 Vec）
+- table_cmd: 创建 TABLE 时初始化空 Vec
+- 新增 2 条测试（`tests/table_roundtrip.rs`）
+
+**Wipeout roundtrip 验证**
+
+新增 2 条 Wipeout roundtrip 测试（`tests/wipeout_roundtrip.rs`），
+验证 clip_vertices 和 elevation 在 read→write→read 后保真。
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **169 → 180 / 180 全绿**（+11 新测试）
+- `cargo check -p H7CAD` 通过，零新 warning
+- `cargo check -p h7cad-native-facade` 通过
+- 零 lint
+
+**DIM 箭头 / 符号家族 6 变量扩充（HEADER 112 → 118）**
+
+新增 6 个 HEADER 变量支持 DIM 箭头和符号配置：
+
+| 字段 | 变量 | 语义 |
+|---|---|---|
+| `dim_blk` | `$DIMBLK` | 全局箭头块名 |
+| `dim_blk1` | `$DIMBLK1` | 第一箭头块名 |
+| `dim_blk2` | `$DIMBLK2` | 第二箭头块名 |
+| `dim_ldrblk` | `$DIMLDRBLK` | 引线箭头块名 |
+| `dim_arcsym` | `$DIMARCSYM` | 弧长符号显示模式 |
+| `dim_jogang` | `$DIMJOGANG` | 折弯标注折角 |
+
+- 新增 4 条测试（`tests/header_dim_arrow.rs`）
+- DIM 子系统覆盖：24 → **30** 字段
+
+**DIM 视觉控制家族 9 变量扩充（HEADER 118 → 127）**
+
+新增 9 个 HEADER 变量支持 DIM 视觉控制：`$DIMJUST`（文字对齐）、
+`$DIMSD1/$DIMSD2`（标注线抑制）、`$DIMSE1/$DIMSE2`（延伸线抑制）、
+`$DIMSOXD`（外部延伸线抑制）、`$DIMATFIT`（文字箭头拟合方式）、
+`$DIMAZIN`（角度零压缩）、`$DIMTIX`（强制文字内置）。
+
+- 新增 4 条测试（`tests/header_dim_visual.rs`）
+- DIM 子系统覆盖：30 → **39** 字段
+
+**Paper Space + 杂项 flag 8 变量扩充（HEADER 127 → 135）**
+
+新增 8 个 HEADER 变量：`$PSTYLEMODE`（图形样式类型）、`$TILEMODE`
+（模型/图纸空间切换）、`$MAXACTVP`（最大活跃视口数）、`$PSVPSCALE`
+（图纸空间视口比例）、`$TREEDEPTH`（空间索引树深度）、`$VISRETAIN`
+（保留 xref 可见性）、`$DELOBJ`（删除源对象）、`$PROXYGRAPHICS`
+（保存代理图形）。
+
+- 新增 4 条测试（`tests/header_paper_space_misc.rs`）
+
+**3D Surface 6 变量 + 常用 5 变量扩充（HEADER 135 → 146）**
+
+新增 11 个 HEADER 变量：
+- 3D 表面：`$SURFTAB1/$SURFTAB2`（曲面分段数）、`$SURFTYPE`（平滑类型）、
+  `$SURFU/$SURFV`（曲面密度）、`$PFACEVMAX`（多面体最大顶点数）
+- 常用：`$MEASUREMENT`（公制/英制）、`$EXTNAMES`（扩展符号名）、
+  `$WORLDVIEW`（世界坐标系跟随）、`$UNITMODE`（单位显示格式）、
+  `$SPLMAXDEG`（NURBS 最大阶数）
+
+- 新增 4 条测试（`tests/header_surface_common.rs`）
+
+**DIM 渲染属性 11 变量扩充（HEADER 146 → 157）**
+
+新增 11 个 DIM 渲染 HEADER 变量：`$DIMCLRD/$DIMCLRE/$DIMCLRT`（标注线/
+延伸线/文字颜色）、`$DIMLWD/$DIMLWE`（标注线/延伸线线宽）、`$DIMTAD`
+（文字在标注线上方）、`$DIMTIH/$DIMTOH`（文字内/外水平）、`$DIMDLE`
+（标注线延伸量）、`$DIMCEN`（中心标记大小）、`$DIMTSZ`（刻度大小）。
+
+- 新增 3 条测试（`tests/header_dim_render.rs`）
+- DIM 子系统覆盖：39 → **50** 字段（越过 50 门槛）
+
+**Paper Space UCS + DIM 补充 + 对象捕捉 10 变量（HEADER 157 → 167）**
+
+新增 10 个 HEADER 变量：
+- Paper space UCS：`$PUCSBASE/$PUCSNAME/$PUCSORG/$PUCSXDIR/$PUCSYDIR`
+- DIM 补充：`$DIMPOST`（主标注前后缀）、`$DIMLUNIT`（线性单位格式）
+- 对象捕捉：`$OSMODE`（对象捕捉模式 bitfield）、`$PICKSTYLE`（组选择模式）、
+  `$LIMCHECK`（限制检查）
+
+- 新增 3 条测试（`tests/header_pucs_osmode.rs`）
+- DIM 子系统：50 → **52** 字段
+
+**渲染/显示/元数据 10 变量（HEADER 167 → 177）**
+
+新增 10 个 HEADER 变量：`$PELEVATION`（图纸空间高程）、`$FACETRES`
+（ACIS 实体分面分辨率）、`$ISOLINES`（等值线数量）、`$TEXTQLTY`
+（TrueType 字体品质）、`$TSTACKALIGN/$TSTACKSIZE`（MText 堆叠对齐/大小）、
+`$ACADMAINTVER`（维护版本号）、`$CDATE`（日历日期）、`$LASTSAVEDBY`
+（最后保存者）、`$MENU`（菜单文件名）。
+
+- 新增 3 条测试（`tests/header_render_meta.rs`）
+
+**DIM 公差 7 变量 + 常用 3 变量（HEADER 177 → 187）**
+
+新增 10 个 HEADER 变量：
+- DIM 公差：`$DIMTP/$DIMTM`（正负公差值）、`$DIMTOL/$DIMLIM`
+  （公差/极限生成开关）、`$DIMTVP`（文字垂直位置）、`$DIMTFAC`
+  （公差文字比例）、`$DIMTOLJ`（公差垂直对齐）
+- 常用：`$COORDS`（坐标显示模式）、`$SPLTKNOTS`（样条节点方法）、
+  `$BLIPMODE`（闪烁显示）
+
+- 新增 3 条测试（`tests/header_dim_tolerance.rs`）
+- DIM 子系统：52 → **59** 字段
+
+**用户变量 $USERI1-5 + $USERR1-5（HEADER 187 → 197）**
+
+新增 10 个 HEADER 用户变量（`$USERI1`-`$USERI5` i16 整数 + `$USERR1`-`$USERR5` f64 实数）。这些变量供用户自定义用途，AutoCAD 不直接使用但会在 HEADER 中持久保存。
+
+- 新增 3 条测试（`tests/header_user_vars.rs`）
+
+**地理定位 / 3D 视图 / 杂项 7 变量（HEADER 197 → 204）**
+
+新增 7 个 HEADER 变量：`$LATITUDE/$LONGITUDE`（站点经纬度）、
+`$TIMEZONE`（时区）、`$STEPSPERSEC/$STEPSIZE`（3D 漫游步速/步幅）、
+`$LENSLENGTH`（镜头焦距 mm）、`$SKETCHINC`（草图记录增量）。
+
+**DXF HEADER 覆盖增量**：112 → **204** 个变量（**~68%**）。
+**DXF 测试数**：169 → **211** 全绿（+42 新测试）。
+
+plan：`docs/plans/2026-04-24-write-dxf-strict-plan.md`,
+`docs/plans/2026-04-24-table-wipeout-improvements-plan.md`,
+`docs/plans/2026-04-24-dim-arrow-symbol-plan.md`
+
+---
+
+### 2026-04-22（二十九）：DIMALT 家族 9 变量扩充（单轮最大规模 + arm-wiring 压测）
+
+上一轮（二十八）LOFT 6 变量让 HEADER 覆盖越过 100 门槛到 103。本轮
+走 plan §9 下一轮候选的最后一项——**DIM 替代单位家族 9 变量**，
+是二十轮以来**单轮最大规模**（比之前平均 5 vars 多 80%），同时也是
+**arm-wiring 压测极限**：6 个字段共享 code 70 + 2 个共享 code 40
++ 1 个 code 1，9 个 arm 必须全部不串，否则 6×5/2 = 15 对 code-70
+字段里至少 1 对会相等。
+
+**字段**（`DocumentHeader`，紧跟 Tier-2 dim numerics 子组尾
+`dimzin` 之后、`splframe` 之前，首次引入 `dim_alt_*` / `dim_apost`
+**独立命名子组**，与既有 `dim*` 字段区分开以避免 prefix 混淆）：
+
+| 字段 | 类型 | `$` 变量 | DXF code | Default | 语义 |
+|---|---|---|---|---|---|
+| `dim_alt` | `i16` | `$DIMALT` | 70 | `0` | 替代单位主开关（0 = 关，1 = 开） |
+| `dim_altd` | `i16` | `$DIMALTD` | 70 | `2` | 替代值小数位数 |
+| `dim_altf` | `f64` | `$DIMALTF` | 40 | `25.4` | primary → alt 换算因子（inch → mm） |
+| `dim_altrnd` | `f64` | `$DIMALTRND` | 40 | `0.0` | 替代值舍入值（0 = 不舍入） |
+| `dim_alttd` | `i16` | `$DIMALTTD` | 70 | `2` | 替代**公差**文本小数位 |
+| `dim_alttz` | `i16` | `$DIMALTTZ` | 70 | `0` | 替代公差零压缩 bitfield（bit1-8 = 前导零 / 尾零 / 0 英尺 / 0 英寸） |
+| `dim_altu` | `i16` | `$DIMALTU` | 70 | `2` | 替代单位格式枚举（1 科学 / 2 小数（默认）/ 3 工程 / 4-8 其他） |
+| `dim_altz` | `i16` | `$DIMALTZ` | 70 | `0` | 替代值主体零压缩 bitfield（与 dim_alttz 同结构） |
+| `dim_apost` | `String` | `$DIMAPOST` | 1 | `""` | 替代单位前后缀（`"<>"` 占位符，例：`"<> mm"`） |
+
+**策略**：io 层**纯透传**——`dim_altu` 枚举含义 / `dim_alttz` /
+`dim_altz` 位拆解 / `dim_apost` 的 `"<>"` 占位符语义、`dim_alt=0`
+时其余字段是否需要清零，全部由 UI / dim 渲染层决定。`dim_alt` 按
+DIM 家族惯例存 `i16`（非 bool）——AutoCAD 整个 DIM 家族的"开关"
+都是 `i16 != 0`，保持**家族内签名一致**优于跨家族 bool 化。
+
+**reader / writer 同步**：9 arm + 9 对 pair，紧跟 `$DIMZIN` 输出，
+在 HEADER 里形成 "Tier 1 dim → Tier 2 dim → DIMALT dim → Spline"
+的完整 DIM 子系统片段（DIM 字段从 15 扩到 24 = +60%）。
+
+**测试**（新增 `tests/header_dim_alt.rs`，4 条 + **15 条 arm-串位
+regression assertion**）：
+
+ground-truth 值选型按"6 个 code-70 字段**两两互不相等**"原则锁死：
+`dim_alt=1, dim_altd=3, dim_alttd=4, dim_alttz=12, dim_altu=6,
+dim_altz=5`。任一 arm 串位会让其中两字段相等，立刻触发
+6-choose-2 = 15 对 assert_ne! 矩阵里至少一条（`vals[i] != vals[j]`
+双层循环生成）。
+
+- `dim_altf = 2.54`（≠ default 25.4）—— 倒数关系，同时做
+  `format_f64` shortest round-trip 烟测
+- `dim_altrnd = 0.5`（≠ 0.0）
+- `dim_apost = "<> mm"` —— 保真 `<>` 占位符（任何 escape 路径的
+  bug 会立刻暴露）
+
+测试项：
+
+- `header_reads_dim_alt_family`：9 字段精确恢复 + **15 条
+  arm-wiring regression assertion**（6 个 code-70 字段的所有两两组合）
+- `header_writes_dim_alt_family`：9 个 `$VAR` 按 reader arm 顺序
+  出现 + `<>` 占位符 verbatim
+- `header_roundtrip_preserves_dim_alt_family`：read → write → read
+  9 字段 bit-identical；`dim_altf=2.54` 哨兵二十五轮精度升级
+- `header_legacy_file_without_dim_alt_loads_with_defaults`：缺省
+  legacy HEADER 读出 9 字段命中 AutoCAD 出厂默认
+  (`0 / 2 / 25.4 / 0.0 / 2 / 0 / 2 / 0 / ""`)
+
+**验证**：
+
+- `cargo test -p h7cad-native-dxf` **165 / 165 → 169 / 169 全绿**
+  （+4 header_dim_alt，0 现存用例回归；15 条 arm-串位断言全通过）
+- `cargo test --bin H7CAD io::native_bridge` 25 / 25 不受影响
+- `cargo check -p H7CAD` 通过，零新 warning
+- `cargo check -p h7cad-native-facade` 通过
+- `ReadLints` 改动的 4 个文件（model lib.rs、dxf lib.rs、writer.rs、
+  新 test）零 lint
+
+**DXF HEADER 覆盖增量**：103 → **112** 个变量（~37%）。
+**DIM 子系统覆盖**：15 → **24** 字段（+60%），Tier 1 + Tier 2 +
+DIMALT 三大族齐了。本轮结束后 plan §9 的"下一轮候选"队列清空，
+后续需要出一份 roadmap 文档评估"继续 HEADER 长尾 vs 转 entity 覆盖
+vs 修 DWG AC1015 红灯"三条路径的 ROI。
+
+plan：`docs/plans/2026-04-22-dimalt-family-plan.md`
+
+---
+
 ### 2026-04-22（二十八）：LOFT 3D 默认家族 6 变量扩充（跨过 100 门槛）
 
 上一轮（二十七）首次混三类型、补完 drawing 元数据附加 4 变量，

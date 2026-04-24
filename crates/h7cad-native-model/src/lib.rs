@@ -899,6 +899,257 @@ pub struct DocumentHeader {
     /// combine; value range is 0–15. Default 0.
     pub dimzin: i16,
 
+    // Dimension alternate units (DIMALT*) — 9-var family driving the
+    // "[metric]"-in-brackets parallel display alongside the primary
+    // imperial value. io layer is pure passthrough; semantic decoding
+    // (enum meaning of `dim_altu`, bit unpacking of the two `*tz / *z`
+    // bitfields, validation of `dim_apost`'s "<>" placeholder) is all
+    // a UI / dim-renderer concern.
+    /// `$DIMALT` (code 70): master on/off for alternate units.
+    /// 0 = disabled (default), 1 = enabled.
+    pub dim_alt: i16,
+    /// `$DIMALTD` (code 70): decimal places for the alt value.
+    /// Default 2.
+    pub dim_altd: i16,
+    /// `$DIMALTF` (code 40): primary → alt conversion factor. Default
+    /// 25.4 (inch → mm — AutoCAD's historical factory default for
+    /// mixed imperial / metric dimensioning).
+    pub dim_altf: f64,
+    /// `$DIMALTRND` (code 40): round-off applied to the alt value.
+    /// 0.0 = no rounding (default).
+    pub dim_altrnd: f64,
+    /// `$DIMALTTD` (code 70): decimal places for the alt **tolerance**
+    /// text (distinct from `dim_altd` which governs the main alt
+    /// value). Default 2.
+    pub dim_alttd: i16,
+    /// `$DIMALTTZ` (code 70): alt tolerance zero-suppression bitfield.
+    /// bit 1 = suppress leading zero, bit 2 = suppress trailing zero,
+    /// bit 4 = suppress 0-feet, bit 8 = suppress 0-inches. Bits may
+    /// combine; 0..=15. Default 0.
+    pub dim_alttz: i16,
+    /// `$DIMALTU` (code 70): alt-unit format enum.
+    /// 1 = scientific, 2 = decimal (default), 3 = engineering,
+    /// 4 = architectural stacked, 5 = fractional stacked,
+    /// 6 = architectural, 7 = fractional, 8 = Windows desktop.
+    pub dim_altu: i16,
+    /// `$DIMALTZ` (code 70): alt-value zero-suppression bitfield.
+    /// Same bit layout as `dim_alttz`. Default 0.
+    pub dim_altz: i16,
+    /// `$DIMAPOST` (code 1): alt-unit text prefix / suffix. `"<>"` is
+    /// the placeholder for the numeric value (e.g. `"<> mm"` appends
+    /// " mm" after the value). Default empty — no pre/suffix.
+    pub dim_apost: String,
+
+    // Dimension arrow / symbol names.
+    /// `$DIMBLK` (code 1): global arrowhead block name.
+    /// Empty = standard filled arrowhead.
+    pub dim_blk: String,
+    /// `$DIMBLK1` (code 1): first arrowhead block name (overrides dim_blk).
+    pub dim_blk1: String,
+    /// `$DIMBLK2` (code 1): second arrowhead block name (overrides dim_blk).
+    pub dim_blk2: String,
+    /// `$DIMLDRBLK` (code 1): leader arrowhead block name.
+    pub dim_ldrblk: String,
+    /// `$DIMARCSYM` (code 70): arc length symbol display
+    /// (0=before text, 1=above text, 2=none). Default 0.
+    pub dim_arcsym: i16,
+    /// `$DIMJOGANG` (code 40): jog angle for jogged dimension lines
+    /// (radians). Default π/4 ≈ 0.7854.
+    pub dim_jogang: f64,
+
+    // Dimension visual control.
+    /// `$DIMJUST` (code 70): text horizontal justification.
+    /// 0=centered, 1=at first ext line, 2=at second, 3=over first, 4=over second.
+    pub dim_just: i16,
+    /// `$DIMSD1` (code 70): suppress first dimension line. 0=show, 1=hide.
+    pub dim_sd1: i16,
+    /// `$DIMSD2` (code 70): suppress second dimension line.
+    pub dim_sd2: i16,
+    /// `$DIMSE1` (code 70): suppress first extension line.
+    pub dim_se1: i16,
+    /// `$DIMSE2` (code 70): suppress second extension line.
+    pub dim_se2: i16,
+    /// `$DIMSOXD` (code 70): suppress outside-extension dimension lines.
+    pub dim_soxd: i16,
+    /// `$DIMATFIT` (code 70): text & arrows fit method when space is tight.
+    /// 0=text+arrows, 1=arrows only, 2=text only, 3=best fit. Default 3.
+    pub dim_atfit: i16,
+    /// `$DIMAZIN` (code 70): angular zero suppression bitfield.
+    pub dim_azin: i16,
+    /// `$DIMTIX` (code 70): force text inside extension lines.
+    /// 0=no, 1=yes.
+    pub dim_tix: i16,
+
+    // Dimension rendering attributes.
+    /// `$DIMCLRD` (code 70): dimension line color. Default 0 (BYBLOCK).
+    pub dim_clrd: i16,
+    /// `$DIMCLRE` (code 70): extension line color. Default 0 (BYBLOCK).
+    pub dim_clre: i16,
+    /// `$DIMCLRT` (code 70): dimension text color. Default 0 (BYBLOCK).
+    pub dim_clrt: i16,
+    /// `$DIMLWD` (code 70): dimension line weight. Default -2 (BYBLOCK).
+    pub dim_lwd: i16,
+    /// `$DIMLWE` (code 70): extension line weight. Default -2 (BYBLOCK).
+    pub dim_lwe: i16,
+    /// `$DIMTAD` (code 70): text placement above dim line. 0=centered, 1=above. Default 0.
+    pub dim_tad: i16,
+    /// `$DIMTIH` (code 70): text inside horizontal. Default 1.
+    pub dim_tih: i16,
+    /// `$DIMTOH` (code 70): text outside horizontal. Default 1.
+    pub dim_toh: i16,
+    /// `$DIMDLE` (code 40): dim line extension beyond extension lines. Default 0.0.
+    pub dim_dle: f64,
+    /// `$DIMCEN` (code 40): center mark size. Default 2.5.
+    pub dim_cen: f64,
+    /// `$DIMTSZ` (code 40): tick size (0=use arrows). Default 0.0.
+    pub dim_tsz: f64,
+
+    // Paper space control.
+    /// `$PSTYLEMODE` (code 70): plot style type. 0=color-dependent, 1=named. Default 1.
+    pub pstylemode: i16,
+    /// `$TILEMODE` (code 70): 1=Model space active, 0=Paper space active. Default 1.
+    pub tilemode: i16,
+    /// `$MAXACTVP` (code 70): maximum active viewports. Default 64.
+    pub maxactvp: i16,
+    /// `$PSVPSCALE` (code 40): paper space viewport scale factor. Default 0.0.
+    pub psvpscale: f64,
+
+    // Miscellaneous flags.
+    /// `$TREEDEPTH` (code 70): spatial index tree depth. Default 3020.
+    pub treedepth: i16,
+    /// `$VISRETAIN` (code 70): retain xref visibility settings. Default 1.
+    pub visretain: i16,
+    /// `$DELOBJ` (code 70): delete source objects after explode / etc. Default 1.
+    pub delobj: i16,
+    /// `$PROXYGRAPHICS` (code 70): save proxy entity graphics. Default 1.
+    pub proxygraphics: i16,
+
+    // 3D Surface defaults.
+    /// `$SURFTAB1` (code 70): surface tabulations in first direction. Default 6.
+    pub surftab1: i16,
+    /// `$SURFTAB2` (code 70): surface tabulations in second direction. Default 6.
+    pub surftab2: i16,
+    /// `$SURFTYPE` (code 70): PEDIT smooth surface type. Default 6 (cubic B-spline).
+    pub surftype: i16,
+    /// `$SURFU` (code 70): surface density in M direction. Default 6.
+    pub surfu: i16,
+    /// `$SURFV` (code 70): surface density in N direction. Default 6.
+    pub surfv: i16,
+    /// `$PFACEVMAX` (code 70): max vertices per polyface mesh face. Default 4.
+    pub pfacevmax: i16,
+
+    // Additional common variables.
+    /// `$MEASUREMENT` (code 70): drawing units. 0=Imperial, 1=Metric. Default 0.
+    pub measurement: i16,
+    /// `$EXTNAMES` (code 290): use extended symbol names. Default true for AC1018+.
+    pub extnames: bool,
+    /// `$WORLDVIEW` (code 70): 1=UCS follows when entering new viewpoint. Default 1.
+    pub worldview: i16,
+    /// `$UNITMODE` (code 70): unit display format mode. Default 0.
+    pub unitmode: i16,
+    /// `$SPLMAXDEG` (code 70): maximum NURBS spline degree. Default 5 (quintic).
+    pub splmaxdeg: i16,
+
+    // Paper space UCS.
+    /// `$PUCSBASE` (code 2): paper space UCS base. Default "".
+    pub pucsbase: String,
+    /// `$PUCSNAME` (code 2): paper space UCS name. Default "".
+    pub pucsname: String,
+    /// `$PUCSORG` (codes 10/20/30): paper space UCS origin.
+    pub pucsorg: [f64; 3],
+    /// `$PUCSXDIR` (codes 10/20/30): paper space UCS X direction.
+    pub pucsxdir: [f64; 3],
+    /// `$PUCSYDIR` (codes 10/20/30): paper space UCS Y direction.
+    pub pucsydir: [f64; 3],
+
+    // Additional DIM controls.
+    /// `$DIMPOST` (code 1): primary dim text prefix/suffix. Default "".
+    pub dim_post: String,
+    /// `$DIMLUNIT` (code 70): linear unit format. Default 2 (decimal).
+    pub dim_lunit: i16,
+
+    // Object snap / selection.
+    /// `$OSMODE` (code 70): object snap modes bitfield. Default 4133.
+    pub osmode: i16,
+    /// `$PICKSTYLE` (code 70): group/hatch selection mode. Default 1.
+    pub pickstyle: i16,
+    /// `$LIMCHECK` (code 70): limits checking. Default 0 (off).
+    pub limcheck: i16,
+
+    // Rendering / display / metadata.
+    /// `$PELEVATION` (code 40): paper space default elevation. Default 0.0.
+    pub pelevation: f64,
+    /// `$FACETRES` (code 40): facet resolution for ACIS solids. Default 0.5.
+    pub facetres: f64,
+    /// `$ISOLINES` (code 70): isolines on ACIS surfaces. Default 4.
+    pub isolines: i16,
+    /// `$TEXTQLTY` (code 70): text quality for TrueType fonts. Default 50.
+    pub textqlty: i16,
+    /// `$TSTACKALIGN` (code 70): MText stack alignment (1=bottom, 2=center, 3=top). Default 1.
+    pub tstackalign: i16,
+    /// `$TSTACKSIZE` (code 70): MText stack text size percentage. Default 70.
+    pub tstacksize: i16,
+    /// `$ACADMAINTVER` (code 70): maintenance version number. Default 0.
+    pub acadmaintver: i16,
+    /// `$CDATE` (code 40): calendar date/time (Julian date format). Default 0.0.
+    pub cdate: f64,
+    /// `$LASTSAVEDBY` (code 1): user who last saved the file. Default "".
+    pub lastsavedby: String,
+    /// `$MENU` (code 1): menu file name. Default ".".
+    pub menu: String,
+
+    // Dimension tolerance.
+    /// `$DIMTP` (code 40): plus tolerance value. Default 0.0.
+    pub dim_tp: f64,
+    /// `$DIMTM` (code 40): minus tolerance value. Default 0.0.
+    pub dim_tm: f64,
+    /// `$DIMTOL` (code 70): generate dimension tolerances. Default 0.
+    pub dim_tol: i16,
+    /// `$DIMLIM` (code 70): generate dimension limits. Default 0.
+    pub dim_lim: i16,
+    /// `$DIMTVP` (code 40): text vertical position factor. Default 0.0.
+    pub dim_tvp: f64,
+    /// `$DIMTFAC` (code 40): tolerance text size scaling factor. Default 1.0.
+    pub dim_tfac: f64,
+    /// `$DIMTOLJ` (code 70): tolerance vertical justification. Default 1 (middle).
+    pub dim_tolj: i16,
+
+    // Additional UI / legacy.
+    /// `$COORDS` (code 70): coordinate display mode. Default 1.
+    pub coords: i16,
+    /// `$SPLTKNOTS` (code 70): spline knot parametrization method. Default 0.
+    pub spltknots: i16,
+    /// `$BLIPMODE` (code 70): blip display mode. Default 0.
+    pub blipmode: i16,
+
+    // User variables.
+    pub useri1: i16,
+    pub useri2: i16,
+    pub useri3: i16,
+    pub useri4: i16,
+    pub useri5: i16,
+    pub userr1: f64,
+    pub userr2: f64,
+    pub userr3: f64,
+    pub userr4: f64,
+    pub userr5: f64,
+
+    // Geolocation / 3D walk / misc.
+    /// `$LATITUDE` (code 40): site latitude. Default 37.795.
+    pub latitude: f64,
+    /// `$LONGITUDE` (code 40): site longitude. Default -122.394.
+    pub longitude: f64,
+    /// `$TIMEZONE` (code 70): timezone enum (IANA offset * 1000). Default -8000 (PST).
+    pub timezone: i16,
+    /// `$STEPSPERSEC` (code 40): 3D walk steps per second. Default 2.0.
+    pub stepspersec: f64,
+    /// `$STEPSIZE` (code 40): 3D walk step size. Default 6.0.
+    pub stepsize: f64,
+    /// `$LENSLENGTH` (code 40): lens focal length (mm). Default 50.0.
+    pub lenslength: f64,
+    /// `$SKETCHINC` (code 40): sketch record increment. Default 0.1.
+    pub sketchinc: f64,
+
     // Spline defaults.
     /// `$SPLFRAME` (code 70): show spline control polygon. Default false.
     pub splframe: bool,
@@ -1124,6 +1375,115 @@ impl Default for DocumentHeader {
             dimfrac: 0,
             dimdsep: 46,
             dimzin: 0,
+
+            dim_alt: 0,
+            dim_altd: 2,
+            dim_altf: 25.4,
+            dim_altrnd: 0.0,
+            dim_alttd: 2,
+            dim_alttz: 0,
+            dim_altu: 2,
+            dim_altz: 0,
+            dim_apost: String::new(),
+
+            dim_blk: String::new(),
+            dim_blk1: String::new(),
+            dim_blk2: String::new(),
+            dim_ldrblk: String::new(),
+            dim_arcsym: 0,
+            dim_jogang: std::f64::consts::FRAC_PI_4,
+
+            dim_just: 0,
+            dim_sd1: 0,
+            dim_sd2: 0,
+            dim_se1: 0,
+            dim_se2: 0,
+            dim_soxd: 0,
+            dim_atfit: 3,
+            dim_azin: 0,
+            dim_tix: 0,
+
+            dim_clrd: 0,
+            dim_clre: 0,
+            dim_clrt: 0,
+            dim_lwd: -2,
+            dim_lwe: -2,
+            dim_tad: 0,
+            dim_tih: 1,
+            dim_toh: 1,
+            dim_dle: 0.0,
+            dim_cen: 2.5,
+            dim_tsz: 0.0,
+
+            pstylemode: 1,
+            tilemode: 1,
+            maxactvp: 64,
+            psvpscale: 0.0,
+
+            treedepth: 3020,
+            visretain: 1,
+            delobj: 1,
+            proxygraphics: 1,
+
+            surftab1: 6,
+            surftab2: 6,
+            surftype: 6,
+            surfu: 6,
+            surfv: 6,
+            pfacevmax: 4,
+
+            measurement: 0,
+            extnames: true,
+            worldview: 1,
+            unitmode: 0,
+            splmaxdeg: 5,
+
+            pucsbase: String::new(),
+            pucsname: String::new(),
+            pucsorg: [0.0, 0.0, 0.0],
+            pucsxdir: [1.0, 0.0, 0.0],
+            pucsydir: [0.0, 1.0, 0.0],
+
+            dim_post: String::new(),
+            dim_lunit: 2,
+
+            osmode: 4133,
+            pickstyle: 1,
+            limcheck: 0,
+
+            pelevation: 0.0,
+            facetres: 0.5,
+            isolines: 4,
+            textqlty: 50,
+            tstackalign: 1,
+            tstacksize: 70,
+            acadmaintver: 0,
+            cdate: 0.0,
+            lastsavedby: String::new(),
+            menu: ".".into(),
+
+            dim_tp: 0.0,
+            dim_tm: 0.0,
+            dim_tol: 0,
+            dim_lim: 0,
+            dim_tvp: 0.0,
+            dim_tfac: 1.0,
+            dim_tolj: 1,
+
+            coords: 1,
+            spltknots: 0,
+            blipmode: 0,
+
+            useri1: 0, useri2: 0, useri3: 0, useri4: 0, useri5: 0,
+            userr1: 0.0, userr2: 0.0, userr3: 0.0, userr4: 0.0, userr5: 0.0,
+
+            latitude: 37.795,
+            longitude: -122.394,
+            timezone: -8000,
+            stepspersec: 2.0,
+            stepsize: 6.0,
+            lenslength: 50.0,
+            sketchinc: 0.1,
 
             splframe: false,
             splinesegs: 8,
@@ -1661,6 +2021,8 @@ pub enum EntityData {
         horizontal_direction: [f64; 3],
         version: i16,
         value_flag: i32,
+        row_heights: Vec<f64>,
+        column_widths: Vec<f64>,
     },
     Mesh {
         vertex_count: i32,
