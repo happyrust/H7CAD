@@ -47,13 +47,7 @@ pub struct SplineGeometry {
 pub fn read_spline_geometry(reader: &mut BitReader<'_>) -> Result<SplineGeometry, DwgReadError> {
     let scenario = reader.read_bit_long()?;
 
-    let degree = if scenario == 2 {
-        reader.read_bit_long()?
-    } else if scenario == 1 {
-        reader.read_bit_long()?
-    } else {
-        reader.read_bit_long()?
-    };
+    let degree = reader.read_bit_long()?;
 
     let mut fit_points = Vec::new();
     let mut start_tangent = [0.0; 3];
