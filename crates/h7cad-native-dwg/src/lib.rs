@@ -136,6 +136,7 @@ struct SymbolNameMaps {
     layer_by_handle: std::collections::BTreeMap<Handle, String>,
     style_by_handle: std::collections::BTreeMap<Handle, String>,
     linetype_by_handle: std::collections::BTreeMap<Handle, String>,
+    block_by_handle: std::collections::BTreeMap<Handle, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1358,6 +1359,13 @@ fn collect_symbol_name_maps(bytes: &[u8], pending: &pending::PendingDocument) ->
                     maps.style_by_handle.insert(header.handle, name);
                 }
             }
+            49 => {
+                if let Ok(name) =
+                    read_block_header_name(&mut main_reader, &mut handle_reader, header.handle)
+                {
+                    maps.block_by_handle.insert(header.handle, name);
+                }
+            }
             57 => {
                 if let Ok(name) =
                     read_linetype_name(&mut main_reader, &mut handle_reader, header.handle)
@@ -1402,6 +1410,16 @@ fn read_text_style_name(
     Ok(main_reader.read_text_ascii()?)
 }
 
+fn read_block_header_name(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+) -> Result<String, DwgReadError> {
+    let _common =
+        entity_common::parse_ac1015_non_entity_common(main_reader, handle_reader, object_handle)?;
+    Ok(main_reader.read_text_ascii()?)
+}
+
 fn read_linetype_name(
     main_reader: &mut BitReader<'_>,
     handle_reader: &mut BitReader<'_>,
@@ -1436,11 +1454,15 @@ fn resolve_style_name(handle: Handle, symbol_names: &SymbolNameMaps) -> String {
     }
 }
 
-fn resolve_block_name(handle: Handle, _symbol_names: &SymbolNameMaps) -> String {
+fn resolve_block_name(handle: Handle, symbol_names: &SymbolNameMaps) -> String {
     if handle == Handle::NULL {
         String::new()
     } else {
-        format!("$BLOCK_{:X}", handle.value())
+        symbol_names
+            .block_by_handle
+            .get(&handle)
+            .cloned()
+            .unwrap_or_else(|| format!("$BLOCK_{:X}", handle.value()))
     }
 }
 
