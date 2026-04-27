@@ -1,7 +1,9 @@
 mod bit_reader;
 mod entity_arc;
+mod entity_attrib;
 mod entity_circle;
 mod entity_common;
+mod entity_dimension;
 mod entity_ellipse;
 mod entity_hatch;
 mod entity_insert;
@@ -41,6 +43,10 @@ pub use entity_common::{
     probe_ac1015_entity_common, skip_ac1015_entity_common_main_stream, Ac1015EntityCommonData,
     Ac1015EntityCommonProbeFailure, Ac1015EntityCommonProbeStage, Ac1015NonEntityCommonData,
 };
+pub use entity_attrib::{
+    read_attdef_geometry, read_attrib_geometry, AttDefGeometry, AttribGeometry,
+};
+pub use entity_dimension::{read_dimension_geometry, DimensionGeometry};
 pub use entity_ellipse::{read_ellipse_geometry, EllipseGeometry};
 pub use entity_hatch::{read_hatch_geometry, HatchGeometry};
 pub use entity_insert::{read_insert_geometry, InsertGeometry};
@@ -100,10 +106,19 @@ pub fn read_dwg(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
 /// 2. an additional arm in [`try_decode_entity_body`],
 /// 3. a new case in the `EntityData` construction below.
 const TEXT_OBJECT_TYPE: i16 = 1;
+const ATTRIB_OBJECT_TYPE: i16 = 2;
+const ATTDEF_OBJECT_TYPE: i16 = 3;
 const INSERT_OBJECT_TYPE: i16 = 7;
 const ARC_OBJECT_TYPE: i16 = 17;
 const CIRCLE_OBJECT_TYPE: i16 = 18;
 const LINE_OBJECT_TYPE: i16 = 19;
+const DIM_ORDINATE_OBJECT_TYPE: i16 = 20;
+const DIM_LINEAR_OBJECT_TYPE: i16 = 21;
+const DIM_ALIGNED_OBJECT_TYPE: i16 = 22;
+const DIM_ANG3PT_OBJECT_TYPE: i16 = 23;
+const DIM_ANG2LN_OBJECT_TYPE: i16 = 24;
+const DIM_RADIUS_OBJECT_TYPE: i16 = 25;
+const DIM_DIAMETER_OBJECT_TYPE: i16 = 26;
 const POINT_OBJECT_TYPE: i16 = 27;
 const FACE3D_OBJECT_TYPE: i16 = 28;
 const SOLID_OBJECT_TYPE: i16 = 31;
@@ -755,6 +770,79 @@ fn try_decode_entity_body_with_reason(
                 geom.extrusion,
             )
         }
+        ATTRIB_OBJECT_TYPE => {
+            let geom =
+                entity_attrib::read_attrib_geometry(main_reader, handle_reader, object_handle)
+                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Attrib {
+                    tag: geom.tag,
+                    value: geom.value,
+                    insertion: geom.insertion,
+                    height: geom.height,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        ATTDEF_OBJECT_TYPE => {
+            let geom =
+                entity_attrib::read_attdef_geometry(main_reader, handle_reader, object_handle)
+                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::AttDef {
+                    tag: geom.tag,
+                    prompt: geom.prompt,
+                    default_value: geom.default_value,
+                    insertion: geom.insertion,
+                    height: geom.height,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        DIM_ORDINATE_OBJECT_TYPE
+        | DIM_LINEAR_OBJECT_TYPE
+        | DIM_ALIGNED_OBJECT_TYPE
+        | DIM_ANG3PT_OBJECT_TYPE
+        | DIM_ANG2LN_OBJECT_TYPE
+        | DIM_RADIUS_OBJECT_TYPE
+        | DIM_DIAMETER_OBJECT_TYPE => {
+            let geom = entity_dimension::read_dimension_geometry(
+                object_type,
+                main_reader,
+                handle_reader,
+                object_handle,
+            )
+            .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            let block_name = resolve_block_name(geom.block_handle, symbol_names);
+            let style_name = resolve_style_name(geom.style_handle, symbol_names);
+            (
+                EntityData::Dimension {
+                    dim_type: geom.dim_type,
+                    block_name,
+                    style_name,
+                    definition_point: geom.definition_point,
+                    text_midpoint: geom.text_midpoint,
+                    text_override: geom.text_override,
+                    attachment_point: geom.attachment_point,
+                    measurement: geom.measurement,
+                    text_rotation: geom.text_rotation,
+                    horizontal_direction: geom.horizontal_direction,
+                    flip_arrow1: geom.flip_arrow1,
+                    flip_arrow2: geom.flip_arrow2,
+                    first_point: geom.first_point,
+                    second_point: geom.second_point,
+                    angle_vertex: geom.angle_vertex,
+                    dimension_arc: geom.dimension_arc,
+                    leader_length: geom.leader_length,
+                    rotation: geom.rotation,
+                    ext_line_rotation: geom.ext_line_rotation,
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
         INSERT_OBJECT_TYPE => {
             let geom =
                 entity_insert::read_insert_geometry(main_reader, handle_reader, object_handle)
@@ -913,11 +1001,20 @@ fn try_decode_entity_body_with_reason(
 fn object_type_family(object_type: i16) -> Option<&'static str> {
     match object_type {
         TEXT_OBJECT_TYPE => Some("TEXT"),
+        ATTRIB_OBJECT_TYPE => Some("ATTRIB"),
+        ATTDEF_OBJECT_TYPE => Some("ATTDEF"),
         INSERT_OBJECT_TYPE => Some("INSERT"),
         LINE_OBJECT_TYPE => Some("LINE"),
         CIRCLE_OBJECT_TYPE => Some("CIRCLE"),
         ARC_OBJECT_TYPE => Some("ARC"),
         POINT_OBJECT_TYPE => Some("POINT"),
+        DIM_ORDINATE_OBJECT_TYPE
+        | DIM_LINEAR_OBJECT_TYPE
+        | DIM_ALIGNED_OBJECT_TYPE
+        | DIM_ANG3PT_OBJECT_TYPE
+        | DIM_ANG2LN_OBJECT_TYPE
+        | DIM_RADIUS_OBJECT_TYPE
+        | DIM_DIAMETER_OBJECT_TYPE => Some("DIMENSION"),
         FACE3D_OBJECT_TYPE => Some("3DFACE"),
         SOLID_OBJECT_TYPE => Some("SOLID"),
         VIEWPORT_OBJECT_TYPE => Some("VIEWPORT"),
@@ -1205,7 +1302,10 @@ fn semantic_supported_family_hint(
     symbol_names: &SymbolNameMaps,
 ) -> Option<&'static str> {
     let family = object_type_family(object_type)?;
-    if matches!(family, "TEXT" | "HATCH" | "MTEXT" | "INSERT") {
+    if matches!(
+        family,
+        "TEXT" | "HATCH" | "MTEXT" | "INSERT" | "DIMENSION" | "ATTRIB" | "ATTDEF"
+    ) {
         return None;
     }
 
