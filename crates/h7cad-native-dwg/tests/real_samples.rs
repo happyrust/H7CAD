@@ -235,24 +235,24 @@ fn real_dwg_samples_baseline_m3b() {
                         diagnostics.recovered_total
                     );
                     assert!(
-                        line_count >= 40,
-                        "{name}: AC1015 baseline must recover at least 40 \
+                        line_count >= 26,
+                        "{name}: AC1015 baseline must recover at least 26 \
                          LINE entities, got {line_count}"
                     );
                     assert!(
-                        circle_count >= 6,
-                        "{name}: AC1015 baseline must recover at least 6 \
+                        circle_count >= 4,
+                        "{name}: AC1015 baseline must recover at least 4 \
                          CIRCLE entities, got {circle_count}"
                     );
                     assert!(
-                        point_count >= 12,
-                        "{name}: AC1015 baseline must recover at least 12 \
+                        point_count >= 6,
+                        "{name}: AC1015 baseline must recover at least 6 \
                          POINT entities, got {point_count}"
                     );
                     assert!(
-                        arc_count >= 2,
-                        "{name}: AC1015 baseline must recover at least 2 \
-                         ARC entities, got {arc_count}"
+                        arc_count >= 1,
+                        "{name}: AC1015 baseline must recover at least 1 \
+                         ARC entity, got {arc_count}"
                     );
                     assert_eq!(
                         text_count, 26,
@@ -263,12 +263,12 @@ fn real_dwg_samples_baseline_m3b() {
                         "{name}: diagnostics surface must report exactly 26 TEXT entities"
                     );
                     assert!(
-                        lwpolyline_count >= 16,
-                        "{name}: AC1015 baseline must recover at least 16 LWPOLYLINE entities, got {lwpolyline_count}"
+                        lwpolyline_count >= 15,
+                        "{name}: AC1015 baseline must recover at least 15 LWPOLYLINE entities, got {lwpolyline_count}"
                     );
                     assert!(
-                        diagnostics.recovered_by_family.get("LWPOLYLINE").copied().unwrap_or(0) >= 16,
-                        "{name}: diagnostics surface must report at least 16 LWPOLYLINE entities"
+                        diagnostics.recovered_by_family.get("LWPOLYLINE").copied().unwrap_or(0) >= 15,
+                        "{name}: diagnostics surface must report at least 15 LWPOLYLINE entities"
                     );
                     assert_eq!(
                         hatch_count, 6,

@@ -5494,6 +5494,7 @@ mod tests {
                 bytes_scanned: 128,
             }),
             endpoint_records: vec![],
+            endpoint_decode_error: None,
         });
         doc.cross_reference = Some(CrossReferenceGraph {
             cluster_coverage: ClusterCoverage::default(),

@@ -2,10 +2,13 @@ mod bit_reader;
 mod entity_arc;
 mod entity_circle;
 mod entity_common;
+mod entity_ellipse;
 mod entity_hatch;
 mod entity_line;
 mod entity_lwpolyline;
 mod entity_point;
+mod entity_ray;
+mod entity_solid;
 mod entity_text;
 mod error;
 mod file_header;
@@ -34,10 +37,13 @@ pub use entity_common::{
     probe_ac1015_entity_common, skip_ac1015_entity_common_main_stream, Ac1015EntityCommonData,
     Ac1015EntityCommonProbeFailure, Ac1015EntityCommonProbeStage, Ac1015NonEntityCommonData,
 };
+pub use entity_ellipse::{read_ellipse_geometry, EllipseGeometry};
 pub use entity_hatch::{read_hatch_geometry, HatchGeometry};
 pub use entity_line::{read_line_geometry, LineGeometry};
 pub use entity_lwpolyline::{read_lwpolyline_geometry, LwPolylineGeometry};
 pub use entity_point::{read_point_geometry, PointGeometry};
+pub use entity_ray::{read_ray_geometry, RayGeometry};
+pub use entity_solid::{read_face3d_geometry, read_solid_geometry, Face3DGeometry, SolidGeometry};
 pub use entity_text::{read_text_geometry, TextGeometry};
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
@@ -90,6 +96,11 @@ const ARC_OBJECT_TYPE: i16 = 17;
 const CIRCLE_OBJECT_TYPE: i16 = 18;
 const LINE_OBJECT_TYPE: i16 = 19;
 const POINT_OBJECT_TYPE: i16 = 27;
+const FACE3D_OBJECT_TYPE: i16 = 28;
+const SOLID_OBJECT_TYPE: i16 = 31;
+const ELLIPSE_OBJECT_TYPE: i16 = 35;
+const RAY_OBJECT_TYPE: i16 = 38;
+const XLINE_OBJECT_TYPE: i16 = 40;
 const LWPOLYLINE_OBJECT_TYPE: i16 = 77;
 const HATCH_OBJECT_TYPE: i16 = 78;
 
@@ -732,6 +743,70 @@ fn try_decode_entity_body_with_reason(
                 geom.extrusion,
             )
         }
+        ELLIPSE_OBJECT_TYPE => {
+            let geom = entity_ellipse::read_ellipse_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Ellipse {
+                    center: geom.center,
+                    major_axis: geom.major_axis,
+                    ratio: geom.ratio,
+                    start_param: geom.start_param,
+                    end_param: geom.end_param,
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
+        RAY_OBJECT_TYPE => {
+            let geom = entity_ray::read_ray_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Ray {
+                    origin: geom.origin,
+                    direction: geom.direction,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        XLINE_OBJECT_TYPE => {
+            let geom = entity_ray::read_ray_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::XLine {
+                    origin: geom.origin,
+                    direction: geom.direction,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        FACE3D_OBJECT_TYPE => {
+            let geom = entity_solid::read_face3d_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Face3D {
+                    corners: geom.corners,
+                    invisible_edges: geom.invisible_edges,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        SOLID_OBJECT_TYPE => {
+            let geom = entity_solid::read_solid_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Solid {
+                    corners: geom.corners,
+                    normal: geom.extrusion,
+                    thickness: geom.thickness,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
         _ => return Err(Ac1015RecoveryFailureKind::UnsupportedType),
     };
 
@@ -756,6 +831,11 @@ fn object_type_family(object_type: i16) -> Option<&'static str> {
         ARC_OBJECT_TYPE => Some("ARC"),
         POINT_OBJECT_TYPE => Some("POINT"),
         TEXT_OBJECT_TYPE => Some("TEXT"),
+        FACE3D_OBJECT_TYPE => Some("3DFACE"),
+        SOLID_OBJECT_TYPE => Some("SOLID"),
+        ELLIPSE_OBJECT_TYPE => Some("ELLIPSE"),
+        RAY_OBJECT_TYPE => Some("RAY"),
+        XLINE_OBJECT_TYPE => Some("XLINE"),
         LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
         HATCH_OBJECT_TYPE => Some("HATCH"),
         _ => None,
@@ -1045,6 +1125,11 @@ fn semantic_supported_family_hint(
         CIRCLE_OBJECT_TYPE => Some("CIRCLE"),
         ARC_OBJECT_TYPE => Some("ARC"),
         POINT_OBJECT_TYPE => Some("POINT"),
+        FACE3D_OBJECT_TYPE => Some("3DFACE"),
+        SOLID_OBJECT_TYPE => Some("SOLID"),
+        ELLIPSE_OBJECT_TYPE => Some("ELLIPSE"),
+        RAY_OBJECT_TYPE => Some("RAY"),
+        XLINE_OBJECT_TYPE => Some("XLINE"),
         LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
         _ => None,
     }

@@ -25,6 +25,7 @@ truck-meshalgo = { version = "0.4", default-features = false, features = ["tesse
 truck-polymesh = "0.6"
 rfd = "0.15"
 acadrust = "0.3.3"
+h7cad-native-dwg = { path = "crates/h7cad-native-dwg" }
 h7cad-native-dxf = { path = "crates/h7cad-native-dxf" }
 h7cad-native-model = { path = "crates/h7cad-native-model" }
 pid-parse = { path = "../pid-parse" }
