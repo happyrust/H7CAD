@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>H7CAD — Workspace crate 分层</title>
+  <style>
+    :root { --paper: #faf7f2; --ink: #1c1917; --muted: #57534e; --accent: #b5523a; --border: #d6d3d1; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--paper); color: var(--ink); padding: 2rem; max-width: 520px; }
+    h1 { font-size: 1.2rem; margin: 0 0 0.5rem; }
+    p { color: var(--muted); font-size: 0.9rem; margin: 0 0 1rem; }
+    figure { margin: 0; border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 1rem; }
+    figcaption { font-size: 0.75rem; color: var(--muted); margin-top: 0.6rem; }
+    svg { display: block; width: 100%; height: auto; }
+    .layer { fill: #fff; stroke: var(--border); stroke-width: 1.2; }
+    .layer-a { fill: #fff8f5; stroke: var(--accent); stroke-width: 1.35; }
+    .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
+    .st { fill: var(--muted); font-size: 11px; }
+    .a { fill: none; stroke: var(--muted); stroke-width: 1; marker-end: url(#ar); }
+  </style>
+</head>
+<body>
+  <h1>Workspace crate 分层</h1>
+  <p>自顶向下：可执行应用依赖 facade 与模型；DXF/DWG 实现 crate 只依赖 model / 彼此，不依赖 Iced。</p>
+  <figure>
+    <svg viewBox="0 0 400 320" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="ar" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534e"/></marker></defs>
+      <rect class="layer-a" x="40" y="20" width="320" height="48" rx="6" />
+      <text class="t" x="200" y="46" text-anchor="middle">H7CAD（二进制 / iced）</text>
+      <text class="st" x="200" y="62" text-anchor="middle">app · scene · ui · io · store · modules</text>
+      <path class="a" d="M200 68 V88" />
+      <rect class="layer" x="40" y="88" width="320" height="44" rx="6" />
+      <text class="t" x="200" y="116" text-anchor="middle">h7cad-native-facade</text>
+      <path class="a" d="M200 132 V152" />
+      <rect class="layer" x="40" y="152" width="150" height="44" rx="6" />
+      <text class="t" x="115" y="180" text-anchor="middle">h7cad-native-dxf</text>
+      <rect class="layer" x="210" y="152" width="150" height="44" rx="6" />
+      <text class="t" x="285" y="180" text-anchor="middle">h7cad-native-dwg</text>
+      <path class="a" d="M115 196 V216" />
+      <path class="a" d="M285 196 V216" />
+      <rect class="layer" x="40" y="216" width="320" height="44" rx="6" />
+      <text class="t" x="200" y="244" text-anchor="middle">h7cad-native-model</text>
+      <path class="a" d="M200 260 V280" />
+      <rect class="layer" x="100" y="280" width="200" height="36" rx="6" />
+      <text class="st" x="200" y="303" text-anchor="middle">builder / testkit（构建与测试）</text>
+    </svg>
+    <figcaption>facade 聚合 DXF 读写；DWG crate 独立演进，运行时加载仍由 facade 策略控制。</figcaption>
+  </figure>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>H7CAD — 系统架构总览</title>
+  <style>
+    :root {
+      --paper: #faf7f2;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --accent: #b5523a;
+      --border: #d6d3d1;
+      --zone: #e7e5e4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      line-height: 1.55;
+      padding: 2rem clamp(1rem, 4vw, 3rem);
+      max-width: 960px;
+    }
+    h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 0.5rem; }
+    p.lead { color: var(--muted); margin: 0 0 1.25rem; font-size: 0.95rem; }
+    figure {
+      margin: 0 0 2rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      padding: 1rem 1rem 0.75rem;
+    }
+    figcaption {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.75rem;
+    }
+    svg { display: block; width: 100%; height: auto; }
+    .node {
+      fill: #fff;
+      stroke: var(--border);
+      stroke-width: 1.25;
+    }
+    .node-accent {
+      fill: #fff8f5;
+      stroke: var(--accent);
+      stroke-width: 1.5;
+    }
+    .zone {
+      fill: var(--zone);
+      stroke: var(--border);
+      stroke-width: 1;
+      stroke-dasharray: 6 4;
+    }
+    .label { fill: var(--ink); font-size: 13px; font-weight: 600; }
+    .sublabel { fill: var(--muted); font-size: 11px; font-weight: 500; }
+    .arrow {
+      fill: none;
+      stroke: var(--ink);
+      stroke-width: 1.1;
+      marker-end: url(#m-arrow);
+    }
+    .arrow-muted {
+      stroke: var(--muted);
+      stroke-dasharray: 4 3;
+      marker-end: url(#m-arrow-muted);
+    }
+  </style>
+</head>
+<body>
+  <h1>H7CAD 系统架构总览</h1>
+  <p class="lead">主流程自左向右：Iced UI → 应用状态与命令分发 → 场景与渲染 → 文档存储；下方为工作区 crate 与外部依赖。</p>
+
+  <figure aria-label="架构图">
+    <svg viewBox="0 0 820 420" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="m-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#1c1917" />
+        </marker>
+        <marker id="m-arrow-muted" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="#57534e" />
+        </marker>
+      </defs>
+
+      <!-- Zones -->
+      <rect class="zone" x="12" y="16" width="190" height="200" rx="6" />
+      <text class="sublabel" x="24" y="36">表现层 · Iced 0.14</text>
+
+      <rect class="zone" x="218" y="16" width="200" height="200" rx="6" />
+      <text class="sublabel" x="230" y="36">应用核心</text>
+
+      <rect class="zone" x="432" y="16" width="190" height="200" rx="6" />
+      <text class="sublabel" x="444" y="36">场景 Scene</text>
+
+      <rect class="zone" x="636" y="16" width="172" height="200" rx="6" />
+      <text class="sublabel" x="648" y="36">存储</text>
+
+      <rect class="zone" x="12" y="232" width="796" height="168" rx="6" />
+      <text class="sublabel" x="24" y="252">工作区 crates &amp; 外部库</text>
+
+      <!-- Nodes: UI -->
+      <rect class="node" x="28" y="52" width="158" height="44" rx="5" />
+      <text class="label" x="107" y="78" text-anchor="middle">Ribbon / 菜单 / 状态栏</text>
+
+      <rect class="node" x="28" y="108" width="158" height="44" rx="5" />
+      <text class="label" x="107" y="134" text-anchor="middle">视口 + Canvas</text>
+
+      <rect class="node" x="28" y="164" width="158" height="44" rx="5" />
+      <text class="label" x="107" y="190" text-anchor="middle">命令行 / 浮动面板</text>
+
+      <!-- App -->
+      <rect class="node-accent" x="234" y="52" width="168" height="52" rx="5" />
+      <text class="label" x="318" y="78" text-anchor="middle">H7CAD 状态</text>
+      <text class="sublabel" x="318" y="94" text-anchor="middle">多标签 · 捕捉 · 历史</text>
+
+      <rect class="node" x="234" y="118" width="168" height="44" rx="5" />
+      <text class="label" x="318" y="144" text-anchor="middle">modules / CadModule</text>
+
+      <rect class="node" x="234" y="174" width="168" height="44" rx="5" />
+      <text class="label" x="318" y="200" text-anchor="middle">dispatch_command</text>
+
+      <!-- Scene -->
+      <rect class="node-accent" x="448" y="52" width="158" height="52" rx="5" />
+      <text class="label" x="527" y="78" text-anchor="middle">Scene</text>
+      <text class="sublabel" x="527" y="94" text-anchor="middle">相机 · 选择 · GPU 缓存</text>
+
+      <rect class="node" x="448" y="118" width="158" height="44" rx="5" />
+      <text class="label" x="527" y="144" text-anchor="middle">pipeline / render</text>
+
+      <rect class="node" x="448" y="174" width="158" height="44" rx="5" />
+      <text class="label" x="527" y="200" text-anchor="middle">hit_test · grips</text>
+
+      <!-- Store -->
+      <rect class="node" x="652" y="52" width="140" height="52" rx="5" />
+      <text class="label" x="722" y="78" text-anchor="middle">NativeStore</text>
+      <text class="sublabel" x="722" y="94" text-anchor="middle">CadStore trait</text>
+
+      <rect class="node" x="652" y="118" width="140" height="44" rx="5" />
+      <text class="label" x="722" y="144" text-anchor="middle">CadDocument (nm)</text>
+
+      <rect class="node" x="652" y="174" width="140" height="44" rx="5" />
+      <text class="label" x="722" y="200" text-anchor="middle">迁移期 acadrust</text>
+
+      <!-- Arrows L→R -->
+      <path class="arrow" d="M186 74 H218" />
+      <path class="arrow" d="M186 130 H218" />
+      <path class="arrow" d="M186 186 H218" />
+      <path class="arrow" d="M402 100 H432" />
+      <path class="arrow" d="M622 100 H636" />
+
+      <path class="arrow-muted" d="M527 230 V248 H722" />
+      <text class="sublabel" x="600" y="242" text-anchor="middle">实体与表数据</text>
+
+      <!-- Bottom crates -->
+      <rect class="node" x="32" y="276" width="118" height="40" rx="5" />
+      <text class="label" x="91" y="301" text-anchor="middle">h7cad-native-model</text>
+
+      <rect class="node" x="162" y="276" width="118" height="40" rx="5" />
+      <text class="label" x="221" y="301" text-anchor="middle">h7cad-native-dxf</text>
+
+      <rect class="node" x="292" y="276" width="118" height="40" rx="5" />
+      <text class="label" x="351" y="301" text-anchor="middle">h7cad-native-dwg</text>
+
+      <rect class="node" x="422" y="276" width="128" height="40" rx="5" />
+      <text class="label" x="486" y="301" text-anchor="middle">h7cad-native-builder</text>
+
+      <rect class="node" x="562" y="276" width="118" height="40" rx="5" />
+      <text class="label" x="621" y="301" text-anchor="middle">h7cad-native-facade</text>
+
+      <rect class="node" x="692" y="276" width="100" height="40" rx="5" />
+      <text class="label" x="742" y="301" text-anchor="middle">testkit</text>
+
+      <rect class="node" x="32" y="332" width="140" height="40" rx="5" />
+      <text class="label" x="102" y="357" text-anchor="middle">acadrust</text>
+
+      <rect class="node" x="186" y="332" width="140" height="40" rx="5" />
+      <text class="label" x="256" y="357" text-anchor="middle">pid-parse（兄弟仓）</text>
+
+      <rect class="node" x="340" y="332" width="140" height="40" rx="5" />
+      <text class="label" x="410" y="357" text-anchor="middle">truck-* 网格</text>
+
+      <rect class="node" x="494" y="332" width="140" height="40" rx="5" />
+      <text class="label" x="564" y="357" text-anchor="middle">cli 批处理导出</text>
+
+      <path class="arrow-muted" d="M91 276 V260 H722 V276" />
+    </svg>
+    <figcaption>主数据路径：UI → 应用 → Scene；持久模型经 NativeStore 映射到 <code>h7cad_native_model::CadDocument</code>。Scene 仍保留 <code>acadrust::CadDocument</code> 以兼容迁移中的渲染与命令逻辑。</figcaption>
+  </figure>
+</body>
+</html>

@@ -2,6 +2,36 @@
 
 ## [未发布]
 
+### 2026-04-28（四十五）：文档中枢与架构图示基线
+
+本轮补齐面向用户、产品和开发者的文档入口，让仓库不再只依赖 README
+和历史轮次记录来理解当前能力边界。
+
+**新增文档**
+
+- `docs/README.md`：新增 docs 目录索引，汇总教程、PRD、架构教程、
+  开发计划、图示和既有专题计划入口。
+- `docs/TUTORIAL.md`：新增用户上手教程，覆盖安装启动、GUI 巡礼、
+  基础绘图、修改、标注、块、3D、PDF/SVG、批处理 CLI 与 PID 入门。
+- `docs/PRD.md`：新增产品需求文档，记录 v0.1.x 范围、非目标、
+  用户场景、架构、功能 / 非功能需求、里程碑和风险。
+- `docs/ARCHITECTURE-TUTORIAL.md`：新增开发者向架构教程，说明
+  workspace 分层、双入口、App / Scene / Store、IO 与扩展阅读顺序。
+- `docs/DEVELOPMENT-PLAN.md`：新增 P0–P3 分阶段开发计划，先把文档、
+  native 数据路径、DWG 运行时和质量自动化目标落到可追踪文本。
+
+**新增图示**
+
+- `docs/diagrams/h7cad-architecture.html`：系统分层总览。
+- `docs/diagrams/h7cad-startup-flow.html`：`main` 入口在批处理导出与
+  GUI `app::run()` 之间的分流。
+- `docs/diagrams/h7cad-crates-layers.html`：workspace native crate 的
+  应用 / facade / DXF-DWG / model 分层关系。
+
+本轮为 docs-only，不改 lib API、CLI surface 和运行时行为。
+
+---
+
 ### 2026-04-25（三十九）：PDF + SVG Gradient HATCH（Phase 3 收口）
 
 > 三十二轮 PDF Phase 1 / 三十三轮 Phase 2 收口 solid + pattern HATCH 之
