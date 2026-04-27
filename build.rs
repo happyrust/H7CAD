@@ -25,6 +25,14 @@ use std::path::Path;
 const PRIORITY: &[&str] = &["home", "insert", "annotate", "view", "manage"];
 
 fn main() {
+    if let Ok(target) = std::env::var("TARGET") {
+        if target.contains("windows-msvc") {
+            println!("cargo:rustc-link-arg-bin=H7CAD=/STACK:16777216");
+        } else if target.contains("windows-gnu") {
+            println!("cargo:rustc-link-arg-bin=H7CAD=-Wl,--stack,16777216");
+        }
+    }
+
     let mods_dir = Path::new("src/modules");
     println!("cargo:rerun-if-changed=src/modules");
 
