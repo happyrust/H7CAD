@@ -10,6 +10,7 @@ pub mod hit_test;
 pub mod image_model;
 pub mod mesh_model;
 pub mod object;
+pub mod paper_canvas;
 pub mod pipeline;
 pub mod properties;
 mod render;
@@ -18,6 +19,7 @@ pub mod solid3d_tess;
 pub mod tessellate;
 pub mod transform;
 pub mod truck_tess;
+pub mod viewport_pane;
 pub mod wire_model;
 
 use camera::Camera;
@@ -48,6 +50,14 @@ use iced::time::Duration;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+/// Global counter so every Scene and every geometry mutation gets a
+/// process-wide unique epoch. This prevents two different tabs (Scenes)
+/// from ever sharing the same epoch value, which would cause the shared
+/// GPU Pipeline to skip re-uploading geometry when switching tabs.
+static GEOMETRY_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 pub struct Scene {
     pub camera: Rc<RefCell<Camera>>,
@@ -65,6 +75,40 @@ pub struct Scene {
     /// Committed-segment wire drawn during multi-point commands (normal colour).
     pub interim_wire: Option<WireModel>,
     pub camera_generation: u64,
+    /// Incremented whenever geometry-affecting state changes (entities, selection,
+    /// preview wires, layer visibility, layout). The GPU pipeline uses this to
+    /// skip re-uploading unchanged geometry buffers every frame.
+    pub geometry_epoch: u64,
+    /// Cached tessellation of all visible entity wires for the current layout.
+    /// Keyed by `geometry_epoch`; invalidated automatically when the epoch changes.
+    /// Uses `Arc` so `build_primitive()` avoids a full Vec clone during navigation.
+    wire_cache: RefCell<Option<(u64, Arc<Vec<WireModel>>)>>,
+    /// Index built from every SortEntitiesTable in the document.
+    /// Maps block_handle → (entity_handle.value() → sort_handle.value()).
+    /// Replaces the O(objects) linear scan inside `wires_for_block()` with an O(1) lookup.
+    sort_cache: RefCell<Option<(u64, HashMap<Handle, HashMap<u64, u64>>)>>,
+    /// Cached hatch fill models, keyed by geometry_epoch.
+    hatch_cache: RefCell<Option<(u64, Arc<Vec<HatchModel>>)>>,
+    /// Cached wipeout fill models, keyed by geometry_epoch.
+    wipeout_cache: RefCell<Option<(u64, Arc<Vec<HatchModel>>)>>,
+    /// Cached image models, keyed by geometry_epoch.
+    image_cache: RefCell<Option<(u64, Arc<Vec<ImageModel>>)>>,
+    /// Cached mesh models, keyed by geometry_epoch.
+    mesh_cache: RefCell<Option<(u64, Arc<Vec<MeshModel>>)>>,
+    /// Per-viewport wire cache for paper-space rendering.
+    /// Maps vp_handle → (geometry_epoch, Arc<Vec<WireModel>>).
+    viewport_wire_cache: RefCell<HashMap<Handle, (u64, Arc<Vec<WireModel>>)>>,
+    /// Cached tessellation of paper-space layout block entities (title block, annotations, etc.).
+    /// Separate from `wire_cache` so paper_canvas_wires() doesn't re-tessellate on every frame.
+    paper_sheet_cache: RefCell<Option<(u64, Arc<Vec<WireModel>>)>>,
+    /// Per-viewport projected wire cache for the paper canvas (2-D Iced widget).
+    /// Stores projected + clipped wires in paper-space coordinates.
+    /// Maps vp_handle → (geometry_epoch, Vec<WireModel>).
+    paper_projected_cache: RefCell<HashMap<Handle, (u64, Vec<WireModel>)>>,
+    /// Full paper-canvas wire list (sheet + inactive-viewport projections + interim/preview).
+    /// Keyed by geometry_epoch — valid for all navigation frames (pan/zoom do not bump epoch).
+    /// Returns Arc so paper_canvas_wires() is O(1) on cache hits.
+    paper_canvas_cache: RefCell<Option<(u64, Arc<Vec<WireModel>>)>>,
     /// Active layout name — "Model" or a paper space layout name.
     pub current_layout: String,
     /// GPU render data for hatch fills, keyed by the DXF entity Handle.
@@ -104,6 +148,17 @@ impl Scene {
             preview_wires: vec![],
             interim_wire: None,
             camera_generation: 0,
+            geometry_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
+            wire_cache: RefCell::new(None),
+            sort_cache: RefCell::new(None),
+            hatch_cache: RefCell::new(None),
+            wipeout_cache: RefCell::new(None),
+            image_cache: RefCell::new(None),
+            mesh_cache: RefCell::new(None),
+            viewport_wire_cache: RefCell::new(HashMap::new()),
+            paper_sheet_cache: RefCell::new(None),
+            paper_projected_cache: RefCell::new(HashMap::new()),
+            paper_canvas_cache: RefCell::new(None),
             current_layout: "Model".to_string(),
             hatches: HashMap::new(),
             meshes: HashMap::new(),
@@ -127,6 +182,10 @@ impl Scene {
 
     pub fn set_native_doc(&mut self, doc: Option<nm::CadDocument>) {
         self.native_store = doc.map(NativeStore::new);
+    }
+
+    pub fn bump_geometry(&mut self) {
+        self.geometry_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Public accessor for the block-record handle of the current layout.
@@ -231,11 +290,9 @@ impl Scene {
             if let ObjectType::Layout(l) = obj {
                 if l.name == self.current_layout {
                     let (min, max) = (l.min_limits, l.max_limits);
-                    // Guard against degenerate limits.
                     let w = (max.0 - min.0).abs();
                     let h = (max.1 - min.1).abs();
                     if w < 1e-6 || h < 1e-6 {
-                        // Default to A4 landscape (mm).
                         return Some(((0.0, 0.0), (297.0, 210.0)));
                     }
                     return Some((min, max));
@@ -243,6 +300,8 @@ impl Scene {
             }
             None
         })
+        // No Layout object found for the current layout — default to A4 landscape.
+        .or(Some(((0.0, 0.0), (297.0, 210.0))))
     }
 
     /// Scale of the first user viewport (id > 1) in the current paper layout,
@@ -373,18 +432,107 @@ impl Scene {
             .collect()
     }
 
+    /// Cached tessellation of the current layout block's paper-space entities.
+    /// Shared by both `entity_wires_arc()` and `paper_canvas_wires()` so a single
+    /// cache miss triggers only one tessellation pass, not two.
+    fn paper_sheet_wires_arc(&self) -> Arc<Vec<WireModel>> {
+        {
+            let cache = self.paper_sheet_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = *cache {
+                if cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+        let layout_block = self.current_layout_block_handle();
+        let arc = Arc::new(self.wires_for_block(layout_block));
+        *self.paper_sheet_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Build WireModels from all document entities for the current layout.
+    /// Returns a shared `Arc` so `build_primitive()` can skip the clone during
+    /// navigation frames where no preview wires are active.
+    pub(super) fn entity_wires_arc(&self) -> Arc<Vec<WireModel>> {
+        {
+            let cache = self.wire_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = *cache {
+                if cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+        let layout_block = self.current_layout_block_handle();
+        // Reuse the paper_sheet_cache to avoid a duplicate tessellation pass
+        // when both entity_wires_arc() and paper_canvas_wires() are called in the same frame.
+        let mut wires = (*self.paper_sheet_wires_arc()).clone();
+        if self.current_layout != "Model" {
+            wires.extend(self.viewport_content_wires(layout_block, None, None));
+        }
+        let arc = Arc::new(wires);
+        *self.wire_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
     /// Build WireModels from all document entities + optional preview wire.
     pub fn entity_wires(&self) -> Vec<WireModel> {
-        let layout_block = self.current_layout_block_handle();
-        let mut wires: Vec<WireModel> = self.wires_for_block(layout_block);
-        if self.current_layout != "Model" {
-            // Draw the paper boundary rectangle first (rendered beneath everything else).
-            if let Some(((x0, y0), (x1, y1))) = self.paper_limits() {
-                wires.insert(0, paper_boundary_wire(x0 as f32, y0 as f32, x1 as f32, y1 as f32));
+        (*self.entity_wires_arc()).clone()
+    }
+
+    pub(super) fn hatch_models_arc(&self) -> Arc<Vec<HatchModel>> {
+        {
+            let cache = self.hatch_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = *cache {
+                if cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
             }
-            wires.extend(self.viewport_content_wires(layout_block, None));
         }
-        wires
+        let arc = Arc::new(self.synced_hatch_models());
+        *self.hatch_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    pub(super) fn wipeout_models_arc(&self) -> Arc<Vec<HatchModel>> {
+        {
+            let cache = self.wipeout_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = *cache {
+                if cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+        let arc = Arc::new(self.wipeout_models());
+        *self.wipeout_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    pub(super) fn images_arc(&self) -> Arc<Vec<ImageModel>> {
+        {
+            let cache = self.image_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = *cache {
+                if cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+        let arc = Arc::new(self.images.values().cloned().collect());
+        *self.image_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    pub(super) fn meshes_arc(&self) -> Arc<Vec<MeshModel>> {
+        {
+            let cache = self.mesh_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = *cache {
+                if cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+        let arc = Arc::new(self.meshes.values().cloned().collect());
+        *self.mesh_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
     }
 
     /// Wires that should participate in hit-testing, snapping, and selection.
@@ -394,19 +542,15 @@ impl Scene {
     ///   viewport content is NOT interactive.
     /// - MSPACE (active viewport set): model-space content of the active viewport
     ///   only — paper-space entities are NOT interactive.
-    pub fn hit_test_wires(&self) -> Vec<WireModel> {
+    pub fn hit_test_wires(&self) -> Arc<Vec<WireModel>> {
         if self.current_layout == "Model" {
-            return self.entity_wires();
+            return self.entity_wires_arc();
         }
         let layout_block = self.current_layout_block_handle();
         match self.active_viewport {
-            None => {
-                // PSPACE: only paper-space entities (viewport borders, title blocks…)
-                self.wires_for_block(layout_block)
-            }
+            None => Arc::new(self.wires_for_block(layout_block)),
             Some(vp_handle) => {
-                // MSPACE: only model content visible through the active viewport
-                self.viewport_content_wires(layout_block, Some(vp_handle))
+                Arc::new(self.viewport_content_wires(layout_block, Some(vp_handle), None))
             }
         }
     }
@@ -415,15 +559,9 @@ impl Scene {
     fn wires_for_block(&self, block_handle: Handle) -> Vec<WireModel> {
         use acadrust::objects::ObjectType;
 
-        // Find the SortEntitiesTable for this block (if any).
-        let sort_table = self.document.objects.values().find_map(|obj| {
-            if let ObjectType::SortEntitiesTable(t) = obj {
-                if t.block_owner_handle == block_handle { Some(t) } else { None }
-            } else {
-                None
-            }
-        });
-
+        // ── Ensure sort-order index is current ────────────────────────────
+        // Replaces the old O(objects) find_map with one rebuild per epoch,
+        // after which every wires_for_block call is an O(1) HashMap lookup.
         let (mut native_wires, native_handles) = if self.native_render_active_for_block(block_handle)
         {
             self.native_wires_for_model_space()
@@ -431,7 +569,30 @@ impl Scene {
             (Vec::new(), HashSet::new())
         };
 
-        let mut wires: Vec<WireModel> = self.document
+        {
+            let needs_rebuild = self.sort_cache.borrow()
+                .as_ref()
+                .map(|(e, _)| *e != self.geometry_epoch)
+                .unwrap_or(true);
+
+            if needs_rebuild {
+                let mut idx: HashMap<Handle, HashMap<u64, u64>> = HashMap::new();
+                for obj in self.document.objects.values() {
+                    if let ObjectType::SortEntitiesTable(t) = obj {
+                        if !t.is_empty() {
+                            let map = t.entries()
+                                .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+                                .collect();
+                            idx.insert(t.block_owner_handle, map);
+                        }
+                    }
+                }
+                *self.sort_cache.borrow_mut() = Some((self.geometry_epoch, idx));
+            }
+        }
+
+        // Collect visible entities sequentially (filter needs &self).
+        let visible: Vec<&EntityType> = self.document
             .entities()
             .filter(|e| {
                 let c = e.common();
@@ -458,14 +619,19 @@ impl Scene {
                 }
                 self.belongs_to_visible_block(e.common().handle, c.owner_handle, block_handle)
             })
+            .collect();
+
+        // Tessellate in parallel across all available CPU cores.
+        use rayon::prelude::*;
+        let doc = &self.document;
+        let sel = &self.selected;
+        let avp = self.active_viewport;
+        let underlay_snap_enabled = self.underlay_snap_enabled;
+        let mut wires: Vec<WireModel> = visible
+            .into_par_iter()
             .flat_map(|e| {
-                let mut tessellated = self.tessellate_one(e);
-                // UOSNAP OFF: strip snap points from Underlay tessellation so
-                // object snap never targets Underlay geometry (the frame stays
-                // visible for rendering, just non-snappable).
-                if !self.underlay_snap_enabled
-                    && matches!(e, acadrust::EntityType::Underlay(_))
-                {
+                let mut tessellated = tessellate_entity(doc, sel, avp, e);
+                if !underlay_snap_enabled && matches!(e, acadrust::EntityType::Underlay(_)) {
                     for w in &mut tessellated {
                         w.snap_pts.clear();
                     }
@@ -477,27 +643,24 @@ impl Scene {
         native_wires.append(&mut wires);
         let mut wires = native_wires;
 
-        // Apply draw order if a SortEntitiesTable exists and has entries.
-        if let Some(table) = sort_table {
-            if !table.is_empty() {
-                wires.sort_by_key(|w| {
-                    let handle = Self::handle_from_wire_name(&w.name)
-                        .unwrap_or(Handle::NULL);
-                    table.get_sort_handle(handle)
-                        .map(|sh| sh.value())
-                        .unwrap_or(u64::MAX / 2) // unsorted entities draw in the middle
-                });
+        // Apply draw order via the cached index (O(1) block lookup).
+        {
+            let cache = self.sort_cache.borrow();
+            if let Some((_, ref idx)) = *cache {
+                if let Some(sort_map) = idx.get(&block_handle) {
+                    wires.sort_by_key(|w| {
+                        let key = Self::handle_from_wire_name(&w.name)
+                            .map(|h| h.value())
+                            .unwrap_or(u64::MAX);
+                        sort_map.get(&key).copied().unwrap_or(u64::MAX / 2)
+                    });
+                }
             }
         }
         wires
     }
 
     /// Decide whether an entity should be drawn as direct content of `block_handle`.
-    ///
-    /// Normal case: entity.owner_handle equals the active layout/model block.
-    /// Fallback: if owner is null, allow it only when the handle is not listed
-    /// under any other block record. This prevents block-definition geometry
-    /// from leaking into the viewport when malformed files omit owner handles.
     fn belongs_to_visible_block(
         &self,
         entity_handle: Handle,
@@ -514,6 +677,17 @@ impl Scene {
             return false;
         }
 
+        // owner_handle is null (common in DXF files that omit group code 330).
+        // Use the current layout's entity_handles as the authoritative list when
+        // available — this prevents block-definition geometry from leaking into
+        // the viewport even when owner handles are missing.
+        if let Some(br) = self.document.block_records.iter().find(|br| br.handle == block_handle) {
+            if !br.entity_handles.is_empty() {
+                return br.entity_handles.contains(&entity_handle);
+            }
+        }
+
+        // entity_handles not populated: fall back to "not listed in any other block".
         !self
             .document
             .block_records
@@ -1042,117 +1216,7 @@ impl Scene {
 
     /// Full tessellation pipeline for one entity.
     fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
-        let h = e.common().handle;
-        let sel = self.selected.contains(&h);
-
-        if let EntityType::Viewport(vp) = e {
-            let is_active = self.active_viewport == Some(h);
-            let is_locked = vp.status.locked;
-            let color = if sel && vp.id != 1 {
-                // Selected viewport — bright white highlight.
-                [1.0, 1.0, 1.0, 1.0]
-            } else if vp.id == 1 {
-                // Overall paper-space viewport — subtle grey.
-                [0.40, 0.40, 0.40, 1.0]
-            } else if is_active {
-                // Active (entered) viewport — bright yellow.
-                [1.0, 0.90, 0.20, 1.0]
-            } else if is_locked {
-                // Locked viewport — orange tint to indicate scale is frozen.
-                [0.90, 0.55, 0.10, 1.0]
-            } else {
-                // Normal user viewport — cyan.
-                [0.0, 0.75, 0.75, 1.0]
-            };
-            // Active viewport gets a dashed border to visually indicate MSPACE.
-            let (pattern_length, pattern) = if is_active {
-                (1.5_f32, [0.8, -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0_f32])
-            } else {
-                (0.0_f32, [0.0f32; 8])
-            };
-            return vec![tessellate::tessellate(
-                &self.document,
-                h,
-                e,
-                sel,
-                color,
-                pattern_length,
-                pattern,
-                1.5,
-            )];
-        }
-
-        let (entity_color, pattern_length, pattern, line_weight_px, aci) = self.render_style(e);
-        let lt_scale = e.common().linetype_scale as f32;
-        let lt_name = self.resolved_linetype_name(e);
-
-        if let EntityType::Dimension(dim) = e {
-            let mut wires = tessellate::tessellate_dimension(
-                &self.document,
-                h,
-                dim,
-                sel,
-                entity_color,
-                line_weight_px,
-            );
-            for w in &mut wires { w.aci = aci; }
-            return wires;
-        }
-
-        if let EntityType::Insert(ins) = e {
-            return ins
-                .explode_from_document(&self.document)
-                .iter()
-                .cloned()
-                .map(crate::modules::home::modify::explode::normalize_insert_entity)
-                .flat_map(|sub| {
-                    let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
-                        self.render_style(&sub);
-                    let mut wire = tessellate::tessellate(
-                        &self.document,
-                        h,
-                        &sub,
-                        sel,
-                        sub_color,
-                        sub_pattern_length,
-                        sub_pattern,
-                        sub_line_weight_px,
-                    );
-                    wire.name = h.value().to_string();
-                    wire.aci = sub_aci;
-                    vec![wire]
-                })
-                .collect();
-        }
-
-        let mut base = tessellate::tessellate(
-            &self.document,
-            h,
-            e,
-            sel,
-            entity_color,
-            pattern_length,
-            pattern,
-            line_weight_px,
-        );
-        base.aci = aci;
-
-        if let Some(clt) = crate::linetypes::complex_lt(lt_name) {
-            let wires = complex_lt::apply_along(
-                &base.name,
-                &base.points,
-                clt,
-                lt_scale.max(1e-4),
-                entity_color,
-                sel,
-                base.line_weight_px,
-            );
-            if !wires.is_empty() {
-                return wires;
-            }
-        }
-
-        vec![base]
+        tessellate_entity(&self.document, &self.selected, self.active_viewport, e)
     }
 
     fn model_space_block_handle(&self) -> Handle {
@@ -1240,9 +1304,13 @@ impl Scene {
 
     /// Collect model-space wires projected into paper space for all (or one specific)
     /// user viewports.  `only_vp = Some(h)` restricts output to that viewport.
-    fn viewport_content_wires(&self, paper_block: Handle, only_vp: Option<Handle>) -> Vec<WireModel> {
+    fn viewport_content_wires(
+        &self,
+        paper_block: Handle,
+        only_vp: Option<Handle>,
+        exclude_vp: Option<Handle>,
+    ) -> Vec<WireModel> {
         use acadrust::entities::Viewport;
-        use std::collections::HashSet as HSet;
 
         let viewports: Vec<&Viewport> = self
             .document
@@ -1255,6 +1323,7 @@ impl Scene {
                     && vp.common.owner_handle == paper_block
                     && vp.status.is_on
                     && only_vp.map_or(true, |h| vp.common.handle == h)
+                    && exclude_vp.map_or(true, |h| vp.common.handle != h)
             })
             .collect();
 
@@ -1262,29 +1331,31 @@ impl Scene {
             return vec![];
         }
 
-        let model_block = self.model_space_block_handle();
         let mut result = Vec::new();
 
         for vp in viewports {
-            // ── Per-viewport frozen layer set ─────────────────────────────
-            let frozen: HSet<Handle> = vp.frozen_layers.iter().cloned().collect();
+            let vp_handle = vp.common.handle;
 
-            // ── View direction coordinate frame ───────────────────────────
-            let vd = glam::Vec3::new(
-                vp.view_direction.x as f32,
-                vp.view_direction.y as f32,
-                vp.view_direction.z as f32,
-            ).normalize_or(glam::Vec3::Z);
+            // ── Fast path: return cached projected wires ──────────────────
+            {
+                let cache = self.paper_projected_cache.borrow();
+                if let Some((cached_epoch, ref wires)) = cache.get(&vp_handle) {
+                    if *cached_epoch == self.geometry_epoch {
+                        result.extend_from_slice(wires);
+                        continue;
+                    }
+                }
+            }
 
-            // Compute view_right and view_up from the direction vector.
-            let world_z = glam::Vec3::Z;
-            let view_right = if (vd.dot(world_z)).abs() > 0.99 {
-                // Looking straight up/down: use X as right.
-                glam::Vec3::X
-            } else {
-                world_z.cross(vd).normalize()
+            // ── Cache miss: compute projection ────────────────────────────
+
+            // Use camera_for_viewport so the axes match the GPU renderer exactly.
+            let cam_frame = match self.camera_for_viewport(vp_handle) {
+                Some(c) => c,
+                None => continue,
             };
-            let view_up = vd.cross(view_right).normalize();
+            let view_right = cam_frame.rotation * glam::Vec3::X;
+            let view_up    = cam_frame.rotation * glam::Vec3::Y;
 
             // ── Scale & viewport parameters ───────────────────────────────
             let scale = if vp.custom_scale.abs() > 1e-9 {
@@ -1306,69 +1377,10 @@ impl Scene {
             let hw = (vp.width / 2.0) as f32;
             let hh = (vp.height / 2.0) as f32;
 
-            let frozen_layer_names: HSet<String> = vp
-                .frozen_layers
-                .iter()
-                .filter_map(|&handle| {
-                    self.document
-                        .layers
-                        .iter()
-                        .find(|layer| layer.handle == handle)
-                        .map(|layer| layer.name.clone())
-                })
-                .collect();
-
-            // ── Collect model wires with per-vp layer freeze ──────────────
-            let model_wires: Vec<WireModel> =
-                if self.native_render_enabled && self.native_store.is_some() {
-                    let native_doc = self.native_doc().expect("checked");
-                    let selected_handles: HSet<u64> =
-                        self.selected.iter().map(|h| h.value()).collect();
-                    native_doc
-                        .model_space_entities()
-                        .filter(|entity| {
-                            Self::native_entity_visible(native_doc, entity)
-                                && !frozen_layer_names.contains(&entity.layer_name)
-                        })
-                        .flat_map(|entity| {
-                            self.native_render_entity_wires(
-                                native_doc,
-                                entity,
-                                entity.handle,
-                                selected_handles.contains(&entity.handle.value()),
-                                &mut HashSet::new(),
-                            )
-                            .unwrap_or_default()
-                        })
-                        .collect()
-                } else {
-                    self.document
-                        .entities()
-                        .filter(|e| {
-                            let c = e.common();
-                            if c.invisible || matches!(e, EntityType::Viewport(_)) {
-                                return false;
-                            }
-                            // Global layer visibility.
-                            if self.document.layers.get(&c.layer)
-                                .map(|l| l.flags.off || l.flags.frozen)
-                                .unwrap_or(false)
-                            {
-                                return false;
-                            }
-                            // Per-viewport frozen layers.
-                            if !frozen.is_empty() {
-                                if let Some(lh) = self.document.layers.get(&c.layer).map(|l| l.handle) {
-                                    if frozen.contains(&lh) {
-                                        return false;
-                                    }
-                                }
-                            }
-                            self.belongs_to_visible_block(c.handle, c.owner_handle, model_block)
-                        })
-                        .flat_map(|e| self.tessellate_one(e))
-                        .collect()
-                };
+            // ── Use cached tessellation (model_wires_for_viewport_arc) ────
+            // This eliminates the per-frame tessellate_one() loop that was here
+            // previously; tessellation is now O(1) on navigation frames.
+            let model_wires = self.model_wires_for_viewport_arc(vp_handle);
 
             // ── Project and clip wires into viewport ──────────────────────
             let vp_x0 = pcx - hw;
@@ -1376,10 +1388,7 @@ impl Scene {
             let vp_y0 = pcy - hh;
             let vp_y1 = pcy + hh;
 
-            // ── Perspective setup ─────────────────────────────────────────
             // camera_dist: how far the camera is from the target plane.
-            // Derived from lens_length (mm, 35mm-film equiv.) and view_height:
-            //   tan(fov_v/2) = 12 / lens_length  →  camera_dist = view_height * lens_length / 24
             let use_perspective = vp.status.perspective && vp.lens_length > 1.0;
             let camera_dist = if use_perspective {
                 (vp.view_height as f32 * vp.lens_length as f32 / 24.0).max(0.001)
@@ -1387,7 +1396,9 @@ impl Scene {
                 0.0
             };
 
-            for wire in &model_wires {
+            let mut projected: Vec<WireModel> = Vec::new();
+
+            for wire in model_wires.iter() {
                 // Project 3-D model points onto view plane → paper space.
                 let projected_pts: Vec<[f32; 3]> = wire.points.iter().map(|&[mx, my, mz]| {
                     if mx.is_nan() || my.is_nan() || mz.is_nan() {
@@ -1397,13 +1408,9 @@ impl Scene {
                     let u = mp.dot(view_right);
                     let v = mp.dot(view_up);
                     if use_perspective {
-                        // vd points from target toward camera, so depth along vd is the
-                        // distance from the target plane toward the camera.
-                        let d_vd = mp.dot(vd);
-                        // Forward distance from camera (positive = in front of camera).
+                        let d_vd = mp.dot(cam_frame.rotation * glam::Vec3::Z);
                         let fwd = camera_dist - d_vd;
                         if fwd <= 0.001 {
-                            // Point is behind or at the camera — discard.
                             return [f32::NAN; 3];
                         }
                         let factor = camera_dist / fwd;
@@ -1413,14 +1420,12 @@ impl Scene {
                     }
                 }).collect();
 
-                // Fast AABB pre-reject: skip entirely if no finite point is
-                // anywhere near the viewport.
+                // Fast AABB pre-reject.
                 let any_near = projected_pts.iter().any(|&[x, y, _]| {
                     x.is_finite() && y.is_finite()
                         && x >= vp_x0 - 1.0 && x <= vp_x1 + 1.0
                         && y >= vp_y0 - 1.0 && y <= vp_y1 + 1.0
                 });
-                // Also keep wires whose AABB overlaps the viewport (partial overlap).
                 let (min_x, max_x, min_y, max_y) = projected_pts.iter()
                     .filter(|p| p[0].is_finite())
                     .fold(
@@ -1435,7 +1440,6 @@ impl Scene {
                     continue;
                 }
 
-                // Cohen-Sutherland clipping: clip every segment to the viewport.
                 let clipped = clip_polyline_to_rect(
                     &projected_pts, vp_x0, vp_y0, vp_x1, vp_y1, pcz,
                 );
@@ -1447,10 +1451,14 @@ impl Scene {
                 let mut out = wire.clone();
                 out.points = clipped;
                 out.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
-                // Line weights are paper-space pen widths — independent of viewport scale.
                 out.line_weight_px = wire.line_weight_px;
-                result.push(out);
+                projected.push(out);
             }
+
+            // Store in cache, then extend result.
+            self.paper_projected_cache.borrow_mut()
+                .insert(vp_handle, (self.geometry_epoch, projected.clone()));
+            result.extend(projected);
         }
 
         result
@@ -1499,28 +1507,23 @@ impl Scene {
             Some(h) => h,
             None => return,
         };
-        // Convert screen pixels → paper-space delta using the camera.
-        let cam = self.camera.borrow();
-        let paper_delta = cam.screen_delta_to_world(screen_dx, screen_dy, bounds);
-        drop(cam);
+        // Use the viewport's own camera so that the pan axes match the 3-D view
+        // orientation (important for tilted/rotated MSPACE views).
+        // camera_for_viewport already encodes the correct distance/scale via view_height,
+        // so no additional scale division is needed.
+        let vp_cam = match self.camera_for_viewport(vp_handle) {
+            Some(c) => c,
+            None => return,
+        };
+        let model_delta = vp_cam.screen_delta_to_world(screen_dx, screen_dy, bounds);
 
         if let Some(acadrust::EntityType::Viewport(vp)) =
             self.document.get_entity_mut(vp_handle)
         {
             if vp.status.locked { return; }
-            let scale = if vp.custom_scale.abs() > 1e-9 {
-                vp.custom_scale
-            } else if vp.view_height.abs() > 1e-9 {
-                vp.height / vp.view_height
-            } else {
-                1.0
-            };
-            if scale.abs() < 1e-12 { return; }
-            // screen_delta_to_world returns the same delta that cam.pan() ADDS to its
-            // target, so we add it here too (dividing by viewport scale to convert from
-            // paper-space to model-space).  Using -= would invert the drag direction.
-            vp.view_target.x += (paper_delta.x / scale as f32) as f64;
-            vp.view_target.y += (paper_delta.y / scale as f32) as f64;
+            vp.view_target.x += model_delta.x as f64;
+            vp.view_target.y += model_delta.y as f64;
+            vp.view_target.z += model_delta.z as f64;
         }
     }
 
@@ -1576,6 +1579,75 @@ impl Scene {
                 }
             }
         }
+    }
+
+    /// Orbit the active viewport's view direction by the given screen-pixel delta.
+    /// No-op when there is no active viewport or it is locked.
+    pub fn orbit_active_viewport(&mut self, delta_x: f32, delta_y: f32) {
+        let vp_handle = match self.active_viewport {
+            Some(h) => h,
+            None => return,
+        };
+        let mut cam = match self.camera_for_viewport(vp_handle) {
+            Some(c) => c,
+            None => return,
+        };
+        cam.orbit(delta_x, delta_y);
+        // yaw_pitch_to_quat(y,p)*Z = (cos(p)*sin(y), -cos(p)*cos(y), sin(p))
+        // but view_direction convention (matching snap_active_viewport_to_angles) is
+        //   (cos(p)*sin(y), +cos(p)*cos(y), sin(p))  ← Y has opposite sign.
+        // Negate Y when writing back so camera_for_viewport round-trips correctly.
+        let eye = cam.rotation * glam::Vec3::Z;
+        if let Some(acadrust::EntityType::Viewport(vp)) =
+            self.document.get_entity_mut(vp_handle)
+        {
+            if vp.status.locked {
+                return;
+            }
+            vp.view_direction.x = eye.x as f64;
+            vp.view_direction.y = -eye.y as f64;
+            vp.view_direction.z = eye.z as f64;
+        }
+    }
+
+    /// Snap the active viewport's view direction to a canonical yaw/pitch.
+    /// No-op when there is no active viewport or it is locked.
+    pub fn snap_active_viewport_to_angles(&mut self, yaw: f32, pitch: f32) {
+        let vp_handle = match self.active_viewport {
+            Some(h) => h,
+            None => return,
+        };
+        let cos_p = pitch.cos();
+        let eye = glam::Vec3::new(cos_p * yaw.sin(), cos_p * yaw.cos(), pitch.sin());
+        if let Some(acadrust::EntityType::Viewport(vp)) =
+            self.document.get_entity_mut(vp_handle)
+        {
+            if vp.status.locked {
+                return;
+            }
+            vp.view_direction.x = eye.x as f64;
+            vp.view_direction.y = eye.y as f64;
+            vp.view_direction.z = eye.z as f64;
+        }
+    }
+
+    /// View-rotation matrix for the active viewport (MSPACE), or the
+    /// paper-space camera's matrix when not in MSPACE.
+    /// Used by ViewCube hit-testing so clicks map to the correct camera.
+    pub fn active_view_rotation_mat(&self) -> glam::Mat4 {
+        if let Some(h) = self.active_viewport {
+            if let Some(cam) = self.camera_for_viewport(h) {
+                return cam.view_rotation_mat();
+            }
+        }
+        self.camera.borrow().view_rotation_mat()
+    }
+
+    /// Return (yaw, pitch) of the active viewport's camera, or None if PSPACE.
+    pub fn active_viewport_yaw_pitch(&self) -> Option<(f32, f32)> {
+        let h = self.active_viewport?;
+        let cam = self.camera_for_viewport(h)?;
+        Some((cam.yaw, cam.pitch))
     }
 
     /// Return the handle of the user viewport whose bounding rectangle contains
@@ -1671,6 +1743,7 @@ impl Scene {
             self.current_layout = "Model".to_string();
         }
 
+        self.bump_geometry();
         true
     }
 
@@ -1786,6 +1859,7 @@ impl Scene {
             if let Some(model) = mesh_seed {
                 self.meshes.insert(handle, model);
             }
+            self.bump_geometry();
         }
         handle
     }
@@ -1880,9 +1954,28 @@ impl Scene {
     }
 
     pub(crate) fn synced_hatch_entries(&self) -> Vec<(Handle, HatchModel)> {
+        let layout_block = self.current_layout_block_handle();
+
+        let layer_hidden = |layer: &str| {
+            self.document
+                .layers
+                .get(layer)
+                .map(|l| l.flags.off || l.flags.frozen)
+                .unwrap_or(false)
+        };
+
         let mut models: Vec<(Handle, HatchModel)> = self
             .hatches
             .iter()
+            .filter(|(&handle, _)| {
+                let Some(entity) = self.document.get_entity(handle) else {
+                    return true;
+                };
+                let c = entity.common();
+                !c.invisible
+                    && !layer_hidden(&c.layer)
+                    && self.belongs_to_visible_block(handle, c.owner_handle, layout_block)
+            })
             .map(|(&handle, model)| {
                 let mut m = if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(handle) {
                     let mut m = model.clone();
@@ -1964,6 +2057,16 @@ impl Scene {
             if native_insert_hatch_handles.contains(&ins.common.handle) {
                 continue;
             }
+            if ins.common.invisible || layer_hidden(&ins.common.layer) {
+                continue;
+            }
+            if !self.belongs_to_visible_block(
+                ins.common.handle,
+                ins.common.owner_handle,
+                layout_block,
+            ) {
+                continue;
+            }
             let selected = self.selected.contains(&ins.common.handle);
             for sub in ins
                 .explode_from_document(&self.document)
@@ -1973,6 +2076,9 @@ impl Scene {
                 let EntityType::Hatch(dxf) = sub else {
                     continue;
                 };
+                if dxf.common.invisible || layer_hidden(&dxf.common.layer) {
+                    continue;
+                }
                 let color = self.render_style(&EntityType::Hatch(dxf.clone())).0;
                 if let Some(mut model) = Self::hatch_model_from_dxf(&dxf, color) {
                     if selected {
@@ -2446,6 +2552,7 @@ impl Scene {
                 self.images.insert(handle, model);
             }
         }
+        self.bump_geometry();
     }
 
     pub fn populate_hatches_from_document(&mut self) {
@@ -2477,6 +2584,7 @@ impl Scene {
                 self.hatches.insert(handle, m);
             }
         }
+        self.bump_geometry();
     }
 
     /// Tessellate all `Solid3D` entities in the current document into
@@ -2512,6 +2620,7 @@ impl Scene {
                 self.meshes.insert(handle, m);
             }
         }
+        self.bump_geometry();
     }
 
     /// Rebuild hatch / image / mesh caches after the document is modified
@@ -2583,17 +2692,20 @@ impl Scene {
         self.meshes = HashMap::new();
         *self.camera.borrow_mut() = Camera::default();
         self.camera_generation += 1;
+        self.bump_geometry();
     }
 
     // ── Preview wire ──────────────────────────────────────────────────────
 
     pub fn set_preview_wires(&mut self, wires: Vec<WireModel>) {
         self.preview_wires = wires;
+        self.bump_geometry();
     }
 
     pub fn clear_preview_wire(&mut self) {
         self.preview_wires = vec![];
         self.interim_wire = None;
+        self.bump_geometry();
     }
 
     pub fn wire_models_for(&self, handles: &[acadrust::Handle]) -> Vec<WireModel> {
@@ -2620,6 +2732,7 @@ impl Scene {
 
     pub fn set_interim_wire(&mut self, w: WireModel) {
         self.interim_wire = Some(w);
+        self.bump_geometry();
     }
 
     // ── Selection ─────────────────────────────────────────────────────────
@@ -2629,10 +2742,12 @@ impl Scene {
             self.selected.clear();
         }
         self.selected.insert(handle);
+        self.bump_geometry();
     }
 
     pub fn deselect_all(&mut self) {
         self.selected.clear();
+        self.bump_geometry();
     }
 
     pub fn selected_entities(&self) -> Vec<(Handle, &EntityType)> {
@@ -2687,6 +2802,7 @@ impl Scene {
             }
             self.document.objects.remove(gh);
         }
+        self.bump_geometry();
     }
 
     // ── Group helpers ──────────────────────────────────────────────────────
@@ -2769,6 +2885,7 @@ impl Scene {
         for h in to_add {
             self.selected.insert(h);
         }
+        self.bump_geometry();
     }
 
     // ── Layer helpers ──────────────────────────────────────────────────────
@@ -2777,6 +2894,7 @@ impl Scene {
         if let Some(layer) = self.document.layers.get_mut(name) {
             layer.flags.off = !layer.flags.off;
         }
+        self.bump_geometry();
     }
 
     pub fn toggle_layer_lock(&mut self, name: &str) {
@@ -2827,6 +2945,7 @@ impl Scene {
                 }
             }
         }
+        self.bump_geometry();
     }
 
     pub fn copy_entities(&mut self, handles: &[Handle], t: &EntityTransform) -> Vec<Handle> {
@@ -2869,6 +2988,7 @@ impl Scene {
             }
             new_handles.push(h);
         }
+        self.bump_geometry();
         new_handles
     }
 
@@ -2889,6 +3009,7 @@ impl Scene {
             }
             _ => {}
         }
+        self.bump_geometry();
     }
 
     // ── Hit-test convenience: wire name → Handle ──────────────────────────
@@ -3071,6 +3192,241 @@ impl Scene {
     }
 
     pub fn update(&mut self, _dt: Duration) {}
+
+    // ── Paper-space coordinate helpers ───────────────────────────────────
+
+    /// Convert a paper-space Viewport entity's position/size into a pixel
+    /// `Rectangle` relative to the top-left of the paper canvas.
+    ///
+    /// Uses the same camera-based ortho transform as `PaperCanvas::draw()` so
+    /// that the overlay lands exactly over the drawn viewport border regardless
+    /// of zoom or pan level.
+    pub fn viewport_screen_rect(
+        &self,
+        vp_handle: Handle,
+        canvas_px: (f32, f32),
+    ) -> Option<iced::Rectangle> {
+        let vp = match self.document.get_entity(vp_handle) {
+            Some(EntityType::Viewport(vp)) => vp,
+            _ => return None,
+        };
+
+        let (canvas_w, canvas_h) = canvas_px;
+        if canvas_w < 1.0 || canvas_h < 1.0 {
+            return None;
+        }
+
+        let cam = self.camera.borrow();
+        let aspect = canvas_w / canvas_h;
+        let half_h = cam.ortho_size();
+        let half_w = half_h * aspect;
+        let tx = cam.target.x;
+        let ty = cam.target.y;
+        drop(cam);
+
+        // Mirror the to_px closure in PaperCanvas::draw().
+        let to_px = |wx: f32, wy: f32| -> (f32, f32) {
+            let x = (wx - tx + half_w) / (2.0 * half_w) * canvas_w;
+            let y = (ty + half_h - wy) / (2.0 * half_h) * canvas_h;
+            (x, y)
+        };
+
+        let cx = vp.center.x as f32;
+        let cy = vp.center.y as f32;
+        let hw = (vp.width / 2.0) as f32;
+        let hh = (vp.height / 2.0) as f32;
+
+        let (x0, y0) = to_px(cx - hw, cy + hh); // top-left in screen
+        let (x1, y1) = to_px(cx + hw, cy - hh); // bottom-right in screen
+
+        let w = (x1 - x0).max(1.0);
+        let h = (y1 - y0).max(1.0);
+
+        Some(iced::Rectangle { x: x0, y: y0, width: w, height: h })
+    }
+
+    // ── ViewportPane helpers ──────────────────────────────────────────────
+
+    /// Paper-space entity wires only (title blocks, frames, borders).
+    /// Does NOT include viewport content projection — that is handled by
+    /// individual ViewportPane::Paper widgets layered on top.
+    /// All wires needed to render the paper-space canvas (2D widget path).
+    /// Includes paper entities, paper boundary, inactive viewport projections
+    /// (excluding the active MSPACE viewport), plus interim/preview wires.
+    pub fn paper_canvas_wires(&self) -> Arc<Vec<WireModel>> {
+        {
+            let cache = self.paper_canvas_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = *cache {
+                if cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+        let layout_block = self.current_layout_block_handle();
+        let mut wires = self.paper_sheet_wires();
+        wires.extend(self.viewport_content_wires(layout_block, None, self.active_viewport));
+        if let Some(iw) = &self.interim_wire {
+            wires.push(iw.clone());
+        }
+        wires.extend(self.preview_wires.iter().cloned());
+        let arc = Arc::new(wires);
+        *self.paper_canvas_cache.borrow_mut() = Some((self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
+
+    /// Hatch fills for the paper-space canvas.
+    pub fn paper_canvas_hatches(&self) -> Arc<Vec<HatchModel>> {
+        self.hatch_models_arc()
+    }
+
+    /// Wipeout (opaque background fill) models for the paper-space canvas.
+    pub fn paper_canvas_wipeouts(&self) -> Arc<Vec<HatchModel>> {
+        self.wipeout_models_arc()
+    }
+
+    pub(super) fn paper_sheet_wires(&self) -> Vec<WireModel> {
+        (*self.paper_sheet_wires_arc()).clone()
+    }
+
+
+    /// Build a Camera oriented and scaled to match a paper-space Viewport entity.
+    /// Used by `ViewportPane::Paper` to render model-space content through the
+    /// viewport's own view direction and scale.
+    fn camera_for_viewport(&self, vp_handle: Handle) -> Option<camera::Camera> {
+        let vp = match self.document.get_entity(vp_handle) {
+            Some(EntityType::Viewport(vp)) => vp,
+            _ => return None,
+        };
+
+        let vd = glam::Vec3::new(
+            vp.view_direction.x as f32,
+            vp.view_direction.y as f32,
+            vp.view_direction.z as f32,
+        )
+        .normalize_or(glam::Vec3::Z);
+
+        let pitch = vd.z.clamp(-0.999, 0.999).asin();
+        let yaw = vd.x.atan2(vd.y);
+
+        let target = glam::Vec3::new(
+            vp.view_target.x as f32,
+            vp.view_target.y as f32,
+            vp.view_target.z as f32,
+        );
+
+        let fov_y = 45.0_f32.to_radians();
+        let view_height = if vp.view_height.abs() > 1e-9 {
+            vp.view_height as f32
+        } else {
+            vp.height as f32
+        };
+        // ortho_size = distance * tan(fov_y/2)  =>  distance = view_height/2 / tan(fov_y/2)
+        let distance = ((view_height / 2.0) / (fov_y * 0.5).tan()).max(0.001);
+
+        Some(camera::Camera {
+            target,
+            rotation: camera::yaw_pitch_to_quat(yaw, pitch),
+            distance,
+            fov_y,
+            projection: camera::Projection::Orthographic,
+            yaw,
+            pitch,
+        })
+    }
+
+    /// Collect model-space WireModels visible through `vp_handle`, respecting
+    /// global layer visibility and the viewport's per-viewport layer freeze list.
+    fn model_wires_for_viewport(&self, vp_handle: Handle) -> Vec<WireModel> {
+        use std::collections::HashSet as HSet;
+
+        let frozen: HSet<Handle> = match self.document.get_entity(vp_handle) {
+            Some(EntityType::Viewport(vp)) => vp.frozen_layers.iter().cloned().collect(),
+            _ => HSet::new(),
+        };
+
+        let model_block = self.model_space_block_handle();
+
+        if self.native_render_enabled && self.native_store.is_some() {
+            let native_doc = self.native_doc().expect("checked");
+            let frozen_layer_names: HSet<String> = frozen
+                .iter()
+                .filter_map(|&handle| {
+                    self.document
+                        .layers
+                        .iter()
+                        .find(|layer| layer.handle == handle)
+                        .map(|layer| layer.name.clone())
+                })
+                .collect();
+            let selected_handles: HSet<u64> =
+                self.selected.iter().map(|h| h.value()).collect();
+
+            return native_doc
+                .model_space_entities()
+                .filter(|entity| {
+                    Self::native_entity_visible(native_doc, entity)
+                        && !frozen_layer_names.contains(&entity.layer_name)
+                })
+                .flat_map(|entity| {
+                    self.native_render_entity_wires(
+                        native_doc,
+                        entity,
+                        entity.handle,
+                        selected_handles.contains(&entity.handle.value()),
+                        &mut HashSet::new(),
+                    )
+                    .unwrap_or_default()
+                })
+                .collect();
+        }
+
+        self.document
+            .entities()
+            .filter(|e| {
+                let c = e.common();
+                if c.invisible || matches!(e, EntityType::Viewport(_)) {
+                    return false;
+                }
+                if !self.belongs_to_visible_block(c.handle, c.owner_handle, model_block) {
+                    return false;
+                }
+                if self
+                    .document
+                    .layers
+                    .get(&c.layer)
+                    .map(|l| l.flags.off || l.flags.frozen)
+                    .unwrap_or(false)
+                {
+                    return false;
+                }
+                if !frozen.is_empty() {
+                    if let Some(lh) = self.document.layers.get(&c.layer).map(|l| l.handle) {
+                        if frozen.contains(&lh) {
+                            return false;
+                        }
+                    }
+                }
+                true
+            })
+            .flat_map(|e| self.tessellate_one(e))
+            .collect()
+    }
+
+    pub(super) fn model_wires_for_viewport_arc(&self, vp_handle: Handle) -> Arc<Vec<WireModel>> {
+        {
+            let cache = self.viewport_wire_cache.borrow();
+            if let Some((cached_epoch, ref arc)) = cache.get(&vp_handle) {
+                if *cached_epoch == self.geometry_epoch {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+        let arc = Arc::new(self.model_wires_for_viewport(vp_handle));
+        self.viewport_wire_cache
+            .borrow_mut()
+            .insert(vp_handle, (self.geometry_epoch, Arc::clone(&arc)));
+        arc
+    }
 }
 
 /// Extract the bbox-contributing points of an entity for
@@ -5785,6 +6141,137 @@ fn paper_boundary_wire(x0: f32, y0: f32, x1: f32, y1: f32) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
     }
 }
+
+// ── Parallel tessellation free function ──────────────────────────────────────
+//
+// Takes only the `Send + Sync` data needed for tessellation so that
+// `wires_for_block` can dispatch work across rayon's thread pool without
+// requiring `Scene` (which contains `Rc<RefCell<...>>` and is `!Send`) to
+// cross thread boundaries.
+
+fn tessellate_entity(
+    document: &acadrust::CadDocument,
+    selected: &HashSet<Handle>,
+    active_viewport: Option<Handle>,
+    e: &EntityType,
+) -> Vec<WireModel> {
+    let h = e.common().handle;
+    let sel = selected.contains(&h);
+
+    if let EntityType::Viewport(vp) = e {
+        let is_active = active_viewport == Some(h);
+        let is_locked = vp.status.locked;
+        let color = if sel && vp.id != 1 {
+            [1.0, 1.0, 1.0, 1.0]
+        } else if vp.id == 1 {
+            [0.40, 0.40, 0.40, 1.0]
+        } else if is_active {
+            [1.0, 0.90, 0.20, 1.0]
+        } else if is_locked {
+            [0.90, 0.55, 0.10, 1.0]
+        } else {
+            [0.0, 0.75, 0.75, 1.0]
+        };
+        let (pattern_length, pattern) = if is_active {
+            (1.5_f32, [0.8, -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0_f32])
+        } else {
+            (0.0_f32, [0.0f32; 8])
+        };
+        let mut wire = tessellate::tessellate(
+            document, h, e, sel, color, pattern_length, pattern, 1.5,
+        );
+        wire.aabb = entity_aabb(e);
+        return vec![wire];
+    }
+
+    let (entity_color, pattern_length, pattern, line_weight_px, aci) =
+        render::render_style_for(document, e);
+    let lt_scale = e.common().linetype_scale as f32;
+    let lt_name = render::linetype_name_for(document, e);
+
+    if let EntityType::Dimension(dim) = e {
+        let aabb = entity_aabb(e);
+        let mut wires = tessellate::tessellate_dimension(
+            document, h, dim, sel, entity_color, line_weight_px,
+        );
+        for w in &mut wires {
+            w.aci = aci;
+            w.aabb = aabb;
+        }
+        return wires;
+    }
+
+    if let EntityType::Insert(ins) = e {
+        let is_mirrored = ins.x_scale() * ins.y_scale() < 0.0;
+        return ins
+            .explode_from_document(document)
+            .iter()
+            .cloned()
+            .map(crate::modules::home::modify::explode::normalize_insert_entity)
+            .map(|sub| crate::modules::home::modify::explode::fix_mirrored_arc(sub, is_mirrored))
+            .flat_map(|sub| {
+                let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
+                    render::render_style_for(document, &sub);
+                let sub_aabb = entity_aabb(&sub);
+                let mut wire = tessellate::tessellate(
+                    document,
+                    h,
+                    &sub,
+                    sel,
+                    sub_color,
+                    sub_pattern_length,
+                    sub_pattern,
+                    sub_line_weight_px,
+                );
+                wire.name = h.value().to_string();
+                wire.aci = sub_aci;
+                wire.aabb = sub_aabb;
+                vec![wire]
+            })
+            .collect();
+    }
+
+    let aabb = entity_aabb(e);
+    let mut base = tessellate::tessellate(
+        document, h, e, sel, entity_color, pattern_length, pattern, line_weight_px,
+    );
+    base.aci = aci;
+    base.aabb = aabb;
+
+    if let Some(clt) = crate::linetypes::complex_lt(lt_name) {
+        let mut wires = complex_lt::apply_along(
+            &base.name,
+            &base.points,
+            clt,
+            lt_scale.max(1e-4),
+            entity_color,
+            sel,
+            base.line_weight_px,
+        );
+        if !wires.is_empty() {
+            for w in &mut wires { w.aabb = aabb; }
+            return wires;
+        }
+    }
+
+    vec![base]
+}
+
+fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
+    let bbox = e.as_entity().bounding_box();
+    let min_x = bbox.min.x as f32;
+    let min_y = bbox.min.y as f32;
+    let max_x = bbox.max.x as f32;
+    let max_y = bbox.max.y as f32;
+    // A degenerate box (min == max == 0) means bounding_box() returned Default —
+    // use UNBOUNDED so the wire is never wrongly pre-rejected.
+    if min_x == 0.0 && min_y == 0.0 && max_x == 0.0 && max_y == 0.0 {
+        return WireModel::UNBOUNDED_AABB;
+    }
+    [min_x, min_y, max_x, max_y]
+}
+

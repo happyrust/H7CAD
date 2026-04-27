@@ -20,10 +20,8 @@ pub fn to_truck(
         .map(|p| Point3::new(p[0], p[1], p[2]))
         .collect();
     if ctrl_pts.len() < 2 {
-        let v = builder::vertex(Point3::new(0.0, 0.0, 0.0));
-        let edge = builder::line(&v, &v);
         return TruckEntity {
-            object: TruckObject::Curve(edge),
+            object: TruckObject::Point(builder::vertex(Point3::new(0.0, 0.0, 0.0))),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],

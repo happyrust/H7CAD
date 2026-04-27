@@ -436,13 +436,18 @@ impl H7CAD {
                 vp.id = (max_id + 1).max(2);
             }
 
-            let new_handle = self.tabs[i].scene.add_entity(entity);
-            if !new_handle.is_null() {
-                // Auto-fit the new viewport to show model-space content.
-                self.tabs[i].scene.auto_fit_viewport(new_handle);
-            } else {
-                self.command_line
-                    .push_error("Viewport could not be added.");
+            let layout = self.tabs[i].scene.current_layout.clone();
+            match self.tabs[i]
+                .scene
+                .document
+                .add_entity_to_layout(entity, &layout)
+            {
+                Ok(new_handle) => {
+                    self.tabs[i].scene.auto_fit_viewport(new_handle);
+                }
+                Err(e) => self
+                    .command_line
+                    .push_error(&format!("Viewport could not be added: {e}")),
             }
         } else {
             self.tabs[i].scene.add_entity(entity);

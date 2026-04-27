@@ -160,6 +160,7 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         tangent_geoms: vec![],
         aci: 0,
             key_vertices: vec![],
+            aabb: WireModel::UNBOUNDED_AABB,
     }
 }
 

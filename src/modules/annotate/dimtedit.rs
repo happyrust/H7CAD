@@ -101,6 +101,7 @@ impl CadCommand for DimTeditCommand {
             tangent_geoms: vec![],
             aci: 0,
             key_vertices: vec![],
+            aabb: WireModel::UNBOUNDED_AABB,
         })
     }
 

@@ -97,6 +97,7 @@ pub fn tessellate(
                     tangent_geoms: te.tangent_geoms,
                     aci: 0,
             key_vertices: te.key_vertices,
+            aabb: WireModel::UNBOUNDED_AABB,
                 };
             }
 
@@ -123,6 +124,7 @@ pub fn tessellate(
                             tangent_geoms: te.tangent_geoms,
                             aci: 0,
             key_vertices: te.key_vertices,
+            aabb: WireModel::UNBOUNDED_AABB,
                         };
                     }
                     _ => {}
@@ -143,6 +145,7 @@ pub fn tessellate(
                         tangent_geoms: te.tangent_geoms,
                         aci: 0,
             key_vertices: te.key_vertices,
+            aabb: WireModel::UNBOUNDED_AABB,
                     };
                 }
             }
@@ -161,6 +164,7 @@ pub fn tessellate(
                         tangent_geoms: te.tangent_geoms,
                         aci: 0,
             key_vertices: te.key_vertices,
+            aabb: WireModel::UNBOUNDED_AABB,
                     };
                 }
             }
@@ -178,6 +182,7 @@ pub fn tessellate(
                     tangent_geoms: te.tangent_geoms,
                     aci: 0,
             key_vertices: te.key_vertices,
+            aabb: WireModel::UNBOUNDED_AABB,
                 };
             }
 
@@ -206,6 +211,7 @@ pub fn tessellate(
         snap_pts,
         tangent_geoms,
         key_vertices,
+        aabb: WireModel::UNBOUNDED_AABB,
     }
 }
 
@@ -276,6 +282,7 @@ pub fn tessellate_native_dimension(
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices,
+        aabb: WireModel::UNBOUNDED_AABB,
     }];
 
     if let Some(mut wire) = native_dimension_text_wire(
@@ -367,6 +374,7 @@ pub fn tessellate_dimension(
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices,
+        aabb: WireModel::UNBOUNDED_AABB,
     }];
 
     if let Some(text) = dimension_text_entity(dim) {
@@ -737,6 +745,7 @@ fn tessellate_leader(
             tangent_geoms: vec![],
             aci: 0,
             key_vertices: vec![],
+            aabb: WireModel::UNBOUNDED_AABB,
         }];
     }
 
@@ -804,6 +813,7 @@ fn tessellate_leader(
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices,
+        aabb: WireModel::UNBOUNDED_AABB,
     }]
 }
 
@@ -910,6 +920,7 @@ fn tessellate_multileader(
         tangent_geoms: vec![],
         aci: 0,
             key_vertices: key_verts,
+            aabb: WireModel::UNBOUNDED_AABB,
     }];
 
     // Render text content as MText wire
@@ -1014,6 +1025,7 @@ fn truck_wire_from_entity(
                 tangent_geoms: te.tangent_geoms,
                 aci: 0,
                 key_vertices: te.key_vertices,
+                aabb: WireModel::UNBOUNDED_AABB,
             }
         }
         TruckObject::Point(v) => match tessellate_vertex(&v) {
@@ -1031,6 +1043,7 @@ fn truck_wire_from_entity(
                     tangent_geoms: te.tangent_geoms,
                     aci: 0,
                     key_vertices: te.key_vertices,
+                    aabb: WireModel::UNBOUNDED_AABB,
                 }
             }
             _ => WireModel::solid(name, vec![], color, selected),
@@ -1048,6 +1061,7 @@ fn truck_wire_from_entity(
                 tangent_geoms: te.tangent_geoms,
                 aci: 0,
                 key_vertices: te.key_vertices,
+                aabb: WireModel::UNBOUNDED_AABB,
             },
             _ => WireModel::solid(name, vec![], color, selected),
         },
@@ -1064,6 +1078,7 @@ fn truck_wire_from_entity(
                 tangent_geoms: te.tangent_geoms,
                 aci: 0,
                 key_vertices: te.key_vertices,
+                aabb: WireModel::UNBOUNDED_AABB,
             },
             _ => WireModel::solid(name, vec![], color, selected),
         },
@@ -1079,6 +1094,7 @@ fn truck_wire_from_entity(
             tangent_geoms: te.tangent_geoms,
             aci: 0,
             key_vertices: te.key_vertices,
+            aabb: WireModel::UNBOUNDED_AABB,
         },
         TruckObject::Volume(_) => WireModel::solid(name, volume_fallback, color, selected),
     }
@@ -1498,9 +1514,9 @@ fn append_linear_dimension(
     flip_arrow2: bool,
 ) {
     let perp = Vec3::new(-axis.y, axis.x, 0.0);
-    let offset = (def - first).dot(perp);
-    let d1 = first + perp * offset;
-    let d2 = second + perp * offset;
+    let dim_line_pos = def.dot(perp);
+    let d1 = first + perp * (dim_line_pos - first.dot(perp));
+    let d2 = second + perp * (dim_line_pos - second.dot(perp));
     add_segment(points, first, d1);
     add_segment(points, second, d2);
     add_segment(points, d1, d2);
@@ -1616,12 +1632,42 @@ fn dimension_text_entity(dim: &Dimension) -> Option<Text> {
     let value = dimension_text_value(dim)?;
     let pos = dimension_text_position(dim);
     let base = dim.base();
+    // acadrust's DXF reader never parses group code 53 (text rotation), so
+    // base.text_rotation is always 0 for DXF files.  Fall back to the natural
+    // axis-aligned rotation derived from geometry; only use the stored value
+    // when it represents a genuine user override (non-zero).
+    let rotation = if base.text_rotation.abs() > 1e-9 {
+        base.text_rotation
+    } else {
+        dimension_text_natural_rotation(dim)
+    };
     let mut text = Text::with_value(value, Vector3::new(pos.x as f64, pos.y as f64, pos.z as f64))
         .with_height(dimension_text_height(dim))
-        .with_rotation(base.text_rotation);
+        .with_rotation(rotation);
     text.style = base.style_name.clone();
     text.common = base.common.clone();
     Some(text)
+}
+
+fn dimension_text_natural_rotation(dim: &Dimension) -> f64 {
+    let angle = match dim {
+        Dimension::Linear(d) => d.rotation,
+        Dimension::Aligned(d) => {
+            let dx = d.second_point.x - d.first_point.x;
+            let dy = d.second_point.y - d.first_point.y;
+            dy.atan2(dx)
+        }
+        _ => 0.0,
+    };
+    // Clamp to (-π/2, π/2] so text never appears upside-down.
+    let pi = std::f64::consts::PI;
+    if angle > pi / 2.0 {
+        angle - pi
+    } else if angle <= -pi / 2.0 {
+        angle + pi
+    } else {
+        angle
+    }
 }
 
 fn dimension_text_value(dim: &Dimension) -> Option<String> {

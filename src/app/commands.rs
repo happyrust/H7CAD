@@ -199,7 +199,7 @@ impl H7CAD {
                 if args.first().map(|s| s.eq_ignore_ascii_case("RESET")).unwrap_or(false) {
                     if is_paper {
                         self.tabs[i].paper_bg_color = None;
-                        self.tabs[i].scene.paper_bg_color = [0.22, 0.24, 0.28, 1.0];
+                        self.tabs[i].scene.paper_bg_color = [1.0, 1.0, 1.0, 1.0];
                     } else {
                         self.tabs[i].bg_color = None;
                         self.tabs[i].scene.bg_color = [0.11, 0.11, 0.11, 1.0];
@@ -2249,6 +2249,20 @@ impl H7CAD {
             "DONATE" => {
                 let _ = open::that("https://patreon.com/HakanSeven12");
                 self.command_line.push_info("Opening Patreon page...");
+            }
+
+            "REPORT" => {
+                let _ = open::that("https://github.com/HakanSeven12/H7CAD/issues/new");
+                self.command_line.push_info("Opening GitHub issue page...");
+            }
+
+            "ABOUT" => {
+                return Task::done(Message::AboutOpen);
+            }
+
+            "CHANGELOG" => {
+                let _ = open::that("https://github.com/HakanSeven12/H7CAD/releases");
+                self.command_line.push_info("Opening release notes...");
             }
 
             // ── Keyboard Shortcuts panel ──────────────────────────────────
@@ -6496,10 +6510,59 @@ impl H7CAD {
                             "UCSICON {sub}: updated {count} viewport(s) + model space."
                         ));
                     }
+                    "" => {
+                        // Bare UCSICON toggles visibility.
+                        self.push_undo_snapshot(i, "UCSICON");
+                        let visible = !self.show_ucs_icon;
+                        self.show_ucs_icon = visible;
+                        for entity in self.tabs[i].scene.document.entities_mut() {
+                            if let acadrust::EntityType::Viewport(vp) = entity {
+                                vp.status.ucs_icon_visible = visible;
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        let state = if visible { "ON" } else { "OFF" };
+                        self.command_line.push_output(&format!("UCSICON {state}"));
+                    }
                     _ => {
                         self.command_line.push_info("Usage: UCSICON ON | OFF | NOORIGIN | ORIGIN");
                     }
                 }
+            }
+
+            // ── NAVVCUBE — toggle ViewCube visibility ────────────────────────────
+            "NAVVCUBE" => {
+                return Task::done(Message::ToggleViewCube);
+            }
+
+            // ── NAVBAR — toggle navigation toolbar visibility ────────────────────
+            "NAVBAR" => {
+                return Task::done(Message::ToggleNavbar);
+            }
+
+            // ── PROPERTIES — toggle Properties panel visibility ──────────────────
+            "PROPERTIES" | "PR" | "PROPS" => {
+                return Task::done(Message::ToggleProperties);
+            }
+
+            // ── FILETAB — toggle file/document tabs ──────────────────────────────
+            "FILETAB" => {
+                return Task::done(Message::ToggleFileTabs);
+            }
+
+            // ── LAYOUTTAB — toggle layout/paper-space tabs ───────────────────────
+            "LAYOUTTAB" => {
+                return Task::done(Message::ToggleLayoutTabs);
+            }
+
+            // ── TOOLPALETTES — not yet implemented ───────────────────────────────
+            "TOOLPALETTES" | "TP" => {
+                self.command_line.push_info("TOOLPALETTES: Tool Palettes not yet implemented.");
+            }
+
+            // ── SHEETSET — not yet implemented ───────────────────────────────────
+            "SHEETSET" | "SSM" => {
+                self.command_line.push_info("SHEETSET: Sheet Set Manager not yet implemented.");
             }
 
             // ── XDATA — read/write extended entity data ──────────────────────────

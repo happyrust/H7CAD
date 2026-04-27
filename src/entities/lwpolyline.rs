@@ -18,10 +18,8 @@ pub type NmLwVertex = h7cad_native_model::LwVertex;
 
 pub fn to_truck(vertices: &[NmLwVertex], closed: bool, elevation: f64) -> TruckEntity {
     if vertices.is_empty() {
-        let v = builder::vertex(Point3::new(0.0, 0.0, 0.0));
-        let edge = builder::line(&v, &v);
         return TruckEntity {
-            object: TruckObject::Contour(std::iter::once(edge).collect()),
+            object: TruckObject::Point(builder::vertex(Point3::new(0.0, 0.0, 0.0))),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],

@@ -146,6 +146,7 @@ impl CadCommand for TableCommand {
                 tangent_geoms: vec![],
                 aci: 0,
             key_vertices: vec![],
+            aabb: WireModel::UNBOUNDED_AABB,
             })
         } else {
             None

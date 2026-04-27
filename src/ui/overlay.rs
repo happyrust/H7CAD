@@ -235,6 +235,7 @@ pub fn selection_overlay<'a>(
     ucs_icon: Option<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
     cursor_screen: Point,
+    show_viewcube: bool,
 ) -> Element<'a, Message> {
     canvas(SelectionCanvas {
         selection,
@@ -244,6 +245,7 @@ pub fn selection_overlay<'a>(
         ucs_icon,
         ost_points,
         cursor_screen,
+        show_viewcube,
     })
     .width(Length::Fill)
     .height(Length::Fill)
@@ -258,6 +260,7 @@ struct SelectionCanvas {
     ucs_icon: Option<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
     cursor_screen: Point,
+    show_viewcube: bool,
 }
 
 impl canvas::Program<Message> for SelectionCanvas {
@@ -269,6 +272,18 @@ impl canvas::Program<Message> for SelectionCanvas {
         bounds: iced::Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
+        if self.show_viewcube {
+            if let Some(pos) = cursor.position_in(bounds) {
+                use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
+                let vc_x = bounds.width - VIEWCUBE_DRAW_PX - VIEWCUBE_PAD;
+                let vc_y = VIEWCUBE_PAD;
+                if pos.x >= vc_x && pos.x <= vc_x + VIEWCUBE_DRAW_PX
+                    && pos.y >= vc_y && pos.y <= vc_y + VIEWCUBE_DRAW_PX
+                {
+                    return mouse::Interaction::None;
+                }
+            }
+        }
         if cursor.is_over(bounds) {
             mouse::Interaction::Crosshair
         } else {
@@ -282,7 +297,7 @@ impl canvas::Program<Message> for SelectionCanvas {
         renderer: &iced::Renderer,
         _theme: &Theme,
         bounds: iced::Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
@@ -537,6 +552,16 @@ impl canvas::Program<Message> for SelectionCanvas {
         }
 
         // ── CAD crosshair cursor ──────────────────────────────────────────────
+        let over_viewcube = self.show_viewcube && {
+            use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
+            cursor.position_in(bounds).map_or(false, |pos| {
+                let vc_x = bounds.width - VIEWCUBE_DRAW_PX - VIEWCUBE_PAD;
+                let vc_y = VIEWCUBE_PAD;
+                pos.x >= vc_x && pos.x <= vc_x + VIEWCUBE_DRAW_PX
+                    && pos.y >= vc_y && pos.y <= vc_y + VIEWCUBE_DRAW_PX
+            })
+        };
+        if !over_viewcube {
         if let Some(cp) = self.selection.last_move_pos {
             let color = Color {
                 r: 0.85,
@@ -582,6 +607,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             frame.stroke(&v_bot, stroke.clone());
             frame.stroke(&square, stroke);
         }
+        } // end !over_viewcube
 
         // ── UCS icon ──────────────────────────────────────────────────────
         if let Some(ref ucs) = self.ucs_icon {
@@ -789,99 +815,145 @@ fn draw_axes(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle, exten
 //
 // Draws a small X/Y/Z axis tripod in the bottom-left corner of the viewport.
 // The axis directions are projected from world space so the icon rotates with
-// the camera, matching the orientation of the drawing plane.
+// the camera. Axis lengths are proportional (foreshortening preserved), depth
+// ordering is computed from NDC Z, and axes going away from the viewer are
+// drawn as outlined circles with reduced opacity.
 
-const UCS_ICON_MARGIN: f32 = 50.0; // px from bottom-left corner to icon origin
-const UCS_ICON_LEN: f32 = 35.0;    // axis arm length in screen pixels
-const UCS_ICON_TIP: f32 = 6.0;     // arrowhead size in pixels
+const UCS_ICON_MARGIN: f32 = 50.0;
+const UCS_ICON_LEN: f32 = 38.0;  // longest axis arm in screen pixels
+const UCS_ICON_TIP: f32 = 7.0;   // arrowhead size in pixels
 
 fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
-    // Guard against zero-size viewport (before layout pass) or degenerate matrix.
     if bounds.width < 10.0 || bounds.height < 10.0 {
         return;
     }
 
-    // Project world origin and axis unit vectors to NDC, then to screen px.
-    let w2s = |world: Vec3| -> Option<Point> {
+    // Project to NDC (including depth) then to screen pixels.
+    let w2ndc = |world: Vec3| -> Option<Vec3> {
         let ndc = vp.project_point3(world);
-        if !ndc.x.is_finite() || !ndc.y.is_finite() {
+        if !ndc.x.is_finite() || !ndc.y.is_finite() || !ndc.z.is_finite() {
             return None;
         }
-        Some(Point::new(
+        Some(ndc)
+    };
+    let ndc2s = |ndc: Vec3| -> Point {
+        Point::new(
             (ndc.x + 1.0) * 0.5 * bounds.width,
             (1.0 - ndc.y) * 0.5 * bounds.height,
-        ))
+        )
     };
 
-    // Origin in screen space — used to compute axis directions.
-    let Some(origin_s) = w2s(Vec3::ZERO) else { return };
-    let Some(x_tip_s) = w2s(Vec3::X) else { return };
-    let Some(y_tip_s) = w2s(Vec3::Y) else { return };
-    let Some(z_tip_s) = w2s(Vec3::Z) else { return };
+    let Some(org) = w2ndc(Vec3::ZERO) else { return };
+    let Some(xn)  = w2ndc(Vec3::X)    else { return };
+    let Some(yn)  = w2ndc(Vec3::Y)    else { return };
+    let Some(zn)  = w2ndc(Vec3::Z)    else { return };
 
-    // Icon origin: fixed bottom-left corner.
-    let ox = UCS_ICON_MARGIN;
-    let oy = (bounds.height - UCS_ICON_MARGIN).max(UCS_ICON_MARGIN);
-    let icon_origin = Point::new(ox, oy);
+    let org_s = ndc2s(org);
+    let icon_origin = Point::new(
+        UCS_ICON_MARGIN,
+        (bounds.height - UCS_ICON_MARGIN).max(UCS_ICON_MARGIN),
+    );
 
-    // Compute normalized screen-space axis directions, then scale to UCS_ICON_LEN.
-    let axis_dir = |tip: Point| -> Option<Point> {
-        let dx = tip.x - origin_s.x;
-        let dy = tip.y - origin_s.y;
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-4 {
-            return None;
+    // Raw screen-space displacement for each axis tip.
+    let raw = |ndc_tip: Vec3| -> (f32, f32, f32) {
+        let s = ndc2s(ndc_tip);
+        let dx = s.x - org_s.x;
+        let dy = s.y - org_s.y;
+        (dx, dy, (dx * dx + dy * dy).sqrt())
+    };
+
+    let (xdx, xdy, xlen) = raw(xn);
+    let (ydx, ydy, ylen) = raw(yn);
+    let (zdx, zdy, zlen) = raw(zn);
+
+    // Scale so the longest projected axis fills UCS_ICON_LEN; shorter axes
+    // stay proportionally shorter (this IS the foreshortening effect).
+    let max_len = xlen.max(ylen).max(zlen).max(1e-4);
+    let sc = UCS_ICON_LEN / max_len;
+
+    // depth > 0 → tip is farther from viewer than origin (axis going into screen).
+    // depth < 0 → tip is closer (axis coming toward viewer).
+    struct AxisInfo {
+        dx: f32, dy: f32, sc_len: f32, depth: f32,
+        r: f32, g: f32, b: f32, label: &'static str,
+    }
+    let mut axes = [
+        AxisInfo { dx: xdx*sc, dy: xdy*sc, sc_len: xlen*sc, depth: xn.z - org.z, r: 0.90, g: 0.22, b: 0.22, label: "X" },
+        AxisInfo { dx: ydx*sc, dy: ydy*sc, sc_len: ylen*sc, depth: yn.z - org.z, r: 0.22, g: 0.85, b: 0.22, label: "Y" },
+        AxisInfo { dx: zdx*sc, dy: zdy*sc, sc_len: zlen*sc, depth: zn.z - org.z, r: 0.22, g: 0.45, b: 0.90, label: "Z" },
+    ];
+    // Back-to-front: draw axis farthest from viewer first.
+    axes.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+
+    for ax in &axes {
+        let col = Color { r: ax.r, g: ax.g, b: ax.b, a: 1.0 };
+        let tip = Point::new(icon_origin.x + ax.dx, icon_origin.y + ax.dy);
+
+        // Shaft
+        if ax.sc_len > 1.0 {
+            let path = canvas::Path::new(|p| {
+                p.move_to(icon_origin);
+                p.line_to(tip);
+            });
+            frame.stroke(
+                &path,
+                canvas::Stroke {
+                    width: 2.0,
+                    style: canvas::Style::Solid(col),
+                    line_cap: canvas::LineCap::Butt,
+                    ..Default::default()
+                },
+            );
         }
-        Some(Point::new(dx / len * UCS_ICON_LEN, dy / len * UCS_ICON_LEN))
-    };
 
-    let draw_axis = |frame: &mut canvas::Frame, dir: Point, r: f32, g: f32, b: f32| {
-        let tip = Point::new(icon_origin.x + dir.x, icon_origin.y + dir.y);
-        if !tip.x.is_finite() || !tip.y.is_finite() { return; }
-        let path = canvas::Path::new(|p| {
-            p.move_to(icon_origin);
-            p.line_to(tip);
-        });
-        frame.stroke(
-            &path,
-            canvas::Stroke {
-                width: 2.0,
-                style: canvas::Style::Solid(Color { r, g, b, a: 1.0 }),
-                line_cap: canvas::LineCap::Round,
+        // Filled arrowhead at tip.
+        if ax.sc_len > 3.0 {
+            let (nx, ny) = if ax.sc_len > 1e-3 {
+                (ax.dx / ax.sc_len, ax.dy / ax.sc_len)
+            } else {
+                (1.0, 0.0)
+            };
+            let px = -ny;
+            let py = nx;
+            let tl = Point::new(
+                tip.x - nx * UCS_ICON_TIP + px * (UCS_ICON_TIP * 0.45),
+                tip.y - ny * UCS_ICON_TIP + py * (UCS_ICON_TIP * 0.45),
+            );
+            let tr = Point::new(
+                tip.x - nx * UCS_ICON_TIP - px * (UCS_ICON_TIP * 0.45),
+                tip.y - ny * UCS_ICON_TIP - py * (UCS_ICON_TIP * 0.45),
+            );
+            let arrow = canvas::Path::new(|p| {
+                p.move_to(tip);
+                p.line_to(tl);
+                p.line_to(tr);
+                p.close();
+            });
+            frame.fill(&arrow, col);
+        }
+
+        // Axis label (X / Y / Z) beyond the tip.
+        if ax.sc_len > 4.0 {
+            let (nx, ny) = if ax.sc_len > 1e-3 {
+                (ax.dx / ax.sc_len, ax.dy / ax.sc_len)
+            } else {
+                (1.0, 0.0)
+            };
+            frame.fill_text(canvas::Text {
+                content: ax.label.to_string(),
+                // Offset beyond tip along the axis direction; subtract ~half glyph
+                // size to visually center the single character on the axis line.
+                position: Point::new(tip.x + nx * 8.0 - 3.5, tip.y + ny * 8.0 - 5.0),
+                color: col,
+                size: iced::Pixels(10.0),
                 ..Default::default()
-            },
-        );
-        // Arrowhead: small filled triangle at tip.
-        let len = (dir.x * dir.x + dir.y * dir.y).sqrt().max(1e-4);
-        let nx = dir.x / len;
-        let ny = dir.y / len;
-        let px = -ny;
-        let py = nx;
-        let tip_l = Point::new(tip.x - nx * UCS_ICON_TIP + px * (UCS_ICON_TIP * 0.4), tip.y - ny * UCS_ICON_TIP + py * (UCS_ICON_TIP * 0.4));
-        let tip_r = Point::new(tip.x - nx * UCS_ICON_TIP - px * (UCS_ICON_TIP * 0.4), tip.y - ny * UCS_ICON_TIP - py * (UCS_ICON_TIP * 0.4));
-        let arrow = canvas::Path::new(|p| {
-            p.move_to(tip);
-            p.line_to(tip_l);
-            p.line_to(tip_r);
-            p.close();
-        });
-        frame.fill(&arrow, Color { r, g, b, a: 1.0 });
-    };
-
-    // Draw Z first (behind), then Y, then X (in front).
-    if let Some(dir) = axis_dir(z_tip_s) {
-        draw_axis(frame, dir, 0.20, 0.40, 0.90); // Z blue
-    }
-    if let Some(dir) = axis_dir(y_tip_s) {
-        draw_axis(frame, dir, 0.20, 0.85, 0.20); // Y green
-    }
-    if let Some(dir) = axis_dir(x_tip_s) {
-        draw_axis(frame, dir, 0.90, 0.20, 0.20); // X red
+            });
+        }
     }
 
-    // Small circle at origin.
-    let circle = canvas::Path::circle(icon_origin, 3.0);
-    frame.fill(&circle, Color { r: 0.9, g: 0.9, b: 0.9, a: 0.9 });
+    // Origin dot.
+    let circle = canvas::Path::circle(icon_origin, 3.5);
+    frame.fill(&circle, Color { r: 0.9, g: 0.9, b: 0.9, a: 0.95 });
 }
 
 // ── Dynamic Input overlay ─────────────────────────────────────────────────

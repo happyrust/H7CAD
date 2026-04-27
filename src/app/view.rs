@@ -4,8 +4,10 @@ use super::history::history_dropdown_labels;
 use super::helpers::grid_plane_from_camera;
 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
 use crate::scene::grip::grips_to_screen;
+use crate::scene::paper_canvas::PaperCanvas;
+use crate::scene::viewport_pane::{PaperViewportPane, ViewportPane};
 use crate::ui::overlay;
-use iced::widget::{button, column, container, mouse_area, row, shader, stack, text, Row, Space};
+use iced::widget::{button, canvas, column, container, mouse_area, row, shader, stack, text, Row, Space};
 use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 
@@ -110,11 +112,21 @@ impl H7CAD {
         if Some(window_id) == self.shortcuts_window {
             return crate::ui::shortcuts::view_window(&self.shortcut_overrides);
         }
+        if Some(window_id) == self.about_window {
+            return crate::ui::about::view_window();
+        }
 
         let i = self.active_tab;
         let tab = &self.tabs[i];
         let is_paper = tab.scene.current_layout != "Model";
-        let viewport_3d = shader(&tab.scene).width(Fill).height(Fill);
+        let viewport_3d: Element<'_, Message> = if is_paper {
+            paper_canvas_view(tab)
+        } else {
+            shader(ViewportPane::model(&tab.scene, self.show_viewcube))
+                .width(Fill)
+                .height(Fill)
+                .into()
+        };
 
         let selection_overlay = {
             let sel = tab.scene.selection.borrow().clone();
@@ -191,19 +203,7 @@ impl H7CAD {
                 vec![]
             };
 
-            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon, ost_points, tab.last_cursor_screen)
-        };
-
-        let nav: Option<Element<'_, Message>> = if self.show_navbar {
-            Some(
-                container(overlay::nav_toolbar())
-                    .align_right(Fill)
-                    .align_top(Fill)
-                    .padding(iced::Padding { top: 148.0, right: 8.0, bottom: 0.0, left: 0.0 })
-                    .into(),
-            )
-        } else {
-            None
+            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon, ost_points, tab.last_cursor_screen, !is_paper && self.show_viewcube)
         };
 
         let info = container(overlay::info_bar(
@@ -225,32 +225,9 @@ impl H7CAD {
         .on_scroll(Message::ViewportScroll)
         .on_exit(Message::ViewportExit);
 
-        let cube_click: Option<Element<'_, Message>> = if self.show_viewcube {
-            let hit = mouse_area(container(
-                iced::widget::Space::new()
-                    .width(iced::Length::Fixed(VIEWCUBE_HIT_SIZE))
-                    .height(iced::Length::Fixed(VIEWCUBE_HIT_SIZE)),
-            ))
-            .on_move(Message::CursorMoved)
-            .on_press(Message::ViewportClick);
-
-            Some(
-                container(hit)
-                    .align_right(Fill)
-                    .align_top(Fill)
-                    .padding(iced::Padding { top: VIEWCUBE_PAD, right: VIEWCUBE_PAD, bottom: 0.0, left: 0.0 })
-                    .width(Fill)
-                    .height(Fill)
-                    .into(),
-            )
-        } else {
-            None
-        };
-
         let bg_color = if is_paper {
-            tab.paper_bg_color
-                .map(|[r, g, b, a]| Color { r, g, b, a })
-                .unwrap_or(Color { r: 0.22, g: 0.24, b: 0.28, a: 1.0 })
+            // Desk color — matches the DESK constant in paper_canvas.rs.
+            Color { r: 0.22, g: 0.24, b: 0.28, a: 1.0 }
         } else {
             tab.bg_color
                 .map(|[r, g, b, a]| Color { r, g, b, a })
@@ -290,12 +267,34 @@ impl H7CAD {
         ]
         .width(Fill)
         .height(Fill);
-        if let Some(n) = nav {
-            viewport_stack = viewport_stack.push(n);
+
+        if self.show_navbar {
+            let nav = container(overlay::nav_toolbar())
+                .align_right(Fill)
+                .align_top(Fill)
+                .padding(iced::Padding { top: 148.0, right: 8.0, bottom: 0.0, left: 0.0 });
+            viewport_stack = viewport_stack.push(nav);
         }
-        if let Some(cc) = cube_click {
-            viewport_stack = viewport_stack.push(cc);
+
+        if self.show_viewcube && !is_paper {
+            let cube_click: Element<'_, Message> = container(
+                mouse_area(container(
+                    iced::widget::Space::new()
+                        .width(iced::Length::Fixed(VIEWCUBE_HIT_SIZE))
+                        .height(iced::Length::Fixed(VIEWCUBE_HIT_SIZE)),
+                ))
+                .on_move(Message::CursorMoved)
+                .on_press(Message::ViewportClick),
+            )
+            .align_right(Fill)
+            .align_top(Fill)
+            .padding(iced::Padding { top: VIEWCUBE_PAD, right: VIEWCUBE_PAD, bottom: 0.0, left: 0.0 })
+            .width(Fill)
+            .height(Fill)
+            .into();
+            viewport_stack = viewport_stack.push(cube_click);
         }
+
         if let Some(dyn_ol) = dyn_input_overlay {
             viewport_stack = viewport_stack.push(dyn_ol);
         }
@@ -343,51 +342,58 @@ impl H7CAD {
 
             let graph_column: Element<'_, Message> =
                 column![toolbar, viewport_stack].width(Fill).height(Fill).into();
+            let properties_el: Element<'_, Message> = if self.show_properties {
+                tab.properties.view()
+            } else {
+                Space::new().into()
+            };
 
             if let Some(wp) = ws_panel {
-                row![wp, browser, graph_column, tab.properties.view()]
+                row![wp, browser, graph_column, properties_el]
                     .width(Fill)
                     .height(Fill)
                     .into()
             } else {
-                row![browser, graph_column, tab.properties.view()]
+                row![browser, graph_column, properties_el]
                     .width(Fill)
                     .height(Fill)
                     .into()
             }
-        } else if let Some(wp) = ws_panel {
-            row![wp, tab.properties.view(), viewport_stack]
-                .width(Fill)
-                .height(Fill)
-                .into()
         } else {
-            row![tab.properties.view(), viewport_stack]
-                .width(Fill)
-                .height(Fill)
-                .into()
+            let properties_el: Element<'_, Message> = if self.show_properties {
+                tab.properties.view()
+            } else {
+                Space::new().into()
+            };
+            if let Some(wp) = ws_panel {
+                row![wp, properties_el, viewport_stack]
+                    .width(Fill)
+                    .height(Fill)
+                    .into()
+            } else {
+                row![properties_el, viewport_stack]
+                    .width(Fill)
+                    .height(Fill)
+                    .into()
+            }
         };
 
         let center_stack = iced::widget::stack![center_row]
             .width(Fill)
             .height(Fill);
 
-        let tab_bar: Element<'_, Message> = if self.show_file_tabs {
-            doc_tab_bar(&self.tabs, self.active_tab)
-        } else {
-            iced::widget::Space::new().width(0).height(0).into()
-        };
-
-        let main_ui = container(
-            column![
-                self.ribbon.view(
-                    is_paper,
-                    self.tabs[self.active_tab].history.undo_stack.len(),
-                    self.tabs[self.active_tab].history.redo_stack.len(),
-                ),
-                tab_bar,
-                center_stack,
-                self.command_line.view(),
-                self.status_bar.view(
+        let main_ui = container({
+            let mut col = column![self.ribbon.view(
+                is_paper,
+                self.tabs[self.active_tab].history.undo_stack.len(),
+                self.tabs[self.active_tab].history.redo_stack.len(),
+            )];
+            if self.show_file_tabs {
+                col = col.push(doc_tab_bar(&self.tabs, self.active_tab));
+            }
+            col.push(center_stack)
+               .push(self.command_line.view())
+               .push(self.status_bar.view(
                     &self.snapper,
                     self.snap_popup_open,
                     self.ortho_mode,
@@ -401,12 +407,12 @@ impl H7CAD {
                     self.layout_rename_state.as_ref(),
                     tab.scene.first_viewport_scale(),
                     tab.scene.viewport_count(),
+                    tab.scene.active_viewport.is_some(),
                     self.show_layout_tabs,
-                )
-            ]
-            .width(Fill)
-            .height(Fill),
-        )
+               ))
+               .width(Fill)
+               .height(Fill)
+        })
         .style(|_: &Theme| container::Style {
             background: Some(Background::Color(Color { r: 0.11, g: 0.11, b: 0.11, a: 1.0 })),
             ..Default::default()
@@ -542,6 +548,87 @@ impl H7CAD {
         let op = iced::advanced::widget::operation::focusable::unfocus::<Message>();
         iced::advanced::widget::operate(op)
     }
+}
+
+// ── Paper canvas ──────────────────────────────────────────────────────────
+//
+// PSPACE: single full-canvas PaperSheet widget — renders paper entities plus
+//   model content of all viewports via CPU projection.
+//
+// MSPACE (active viewport): PaperSheet widget (excludes the active viewport
+//   from its CPU projection) + a PaperViewportPane widget overlaid at the
+//   active viewport's screen-space position.  PaperViewportPane uses a
+//   distinct pipeline type (PaperViewportPipeline) so Iced's per-type storage
+//   keeps the two prepare() calls from overwriting each other.
+
+fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, Message> {
+    let scene = &tab.scene;
+
+    // 2-D canvas for the paper sheet — paper entities, viewport borders, and
+    // inactive viewport projections are rendered as vector paths.  This lets
+    // users select/edit paper-space entities directly without entering MSPACE.
+    let paper_sheet = canvas(PaperCanvas::new(scene))
+        .width(Fill)
+        .height(Fill);
+
+    if let Some(vp_handle) = scene.active_viewport {
+        let (canvas_w, canvas_h) = scene.selection.borrow().vp_size;
+        if let Some(rect) = scene.viewport_screen_rect(vp_handle, (canvas_w, canvas_h)) {
+            // Clamp to canvas bounds so Space widgets never get negative size.
+            let x = rect.x.max(0.0).min(canvas_w);
+            let y = rect.y.max(0.0).min(canvas_h);
+            let w = rect.width.clamp(1.0, canvas_w - x);
+            let h = rect.height.clamp(1.0, canvas_h - y);
+
+            let vp_widget = shader(PaperViewportPane::new(scene, vp_handle))
+                .width(iced::Length::Fixed(w))
+                .height(iced::Length::Fixed(h));
+
+            let positioned = column![
+                Space::new().height(iced::Length::Fixed(y)),
+                row![
+                    Space::new().width(iced::Length::Fixed(x)),
+                    vp_widget,
+                ],
+            ]
+            .width(Fill)
+            .height(Fill);
+
+            // Blue border drawn on top of the 3-D overlay so the viewport
+            // boundary is always visible even when the shader fills the area.
+            const VP_BORDER: Color = Color { r: 0.18, g: 0.52, b: 0.95, a: 1.0 };
+            let border_frame = container(
+                Space::new()
+                    .width(iced::Length::Fixed(w))
+                    .height(iced::Length::Fixed(h)),
+            )
+            .style(move |_: &Theme| container::Style {
+                border: iced::Border {
+                    color: VP_BORDER,
+                    width: 2.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+
+            let border_layer = column![
+                Space::new().height(iced::Length::Fixed(y)),
+                row![
+                    Space::new().width(iced::Length::Fixed(x)),
+                    border_frame,
+                ],
+            ]
+            .width(Fill)
+            .height(Fill);
+
+            return stack![paper_sheet, positioned, border_layer]
+                .width(Fill)
+                .height(Fill)
+                .into();
+        }
+    }
+
+    paper_sheet.into()
 }
 
 // ── Document tab bar ───────────────────────────────────────────────────────
