@@ -4,8 +4,10 @@ mod entity_circle;
 mod entity_common;
 mod entity_ellipse;
 mod entity_hatch;
+mod entity_insert;
 mod entity_line;
 mod entity_lwpolyline;
+mod entity_mtext;
 mod entity_point;
 mod entity_ray;
 mod entity_solid;
@@ -39,8 +41,10 @@ pub use entity_common::{
 };
 pub use entity_ellipse::{read_ellipse_geometry, EllipseGeometry};
 pub use entity_hatch::{read_hatch_geometry, HatchGeometry};
+pub use entity_insert::{read_insert_geometry, InsertGeometry};
 pub use entity_line::{read_line_geometry, LineGeometry};
 pub use entity_lwpolyline::{read_lwpolyline_geometry, LwPolylineGeometry};
+pub use entity_mtext::{read_mtext_geometry, MTextGeometry};
 pub use entity_point::{read_point_geometry, PointGeometry};
 pub use entity_ray::{read_ray_geometry, RayGeometry};
 pub use entity_solid::{read_face3d_geometry, read_solid_geometry, Face3DGeometry, SolidGeometry};
@@ -92,6 +96,7 @@ pub fn read_dwg(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
 /// 2. an additional arm in [`try_decode_entity_body`],
 /// 3. a new case in the `EntityData` construction below.
 const TEXT_OBJECT_TYPE: i16 = 1;
+const INSERT_OBJECT_TYPE: i16 = 7;
 const ARC_OBJECT_TYPE: i16 = 17;
 const CIRCLE_OBJECT_TYPE: i16 = 18;
 const LINE_OBJECT_TYPE: i16 = 19;
@@ -101,6 +106,7 @@ const SOLID_OBJECT_TYPE: i16 = 31;
 const ELLIPSE_OBJECT_TYPE: i16 = 35;
 const RAY_OBJECT_TYPE: i16 = 38;
 const XLINE_OBJECT_TYPE: i16 = 40;
+const MTEXT_OBJECT_TYPE: i16 = 44;
 const LWPOLYLINE_OBJECT_TYPE: i16 = 77;
 const HATCH_OBJECT_TYPE: i16 = 78;
 
@@ -743,6 +749,49 @@ fn try_decode_entity_body_with_reason(
                 geom.extrusion,
             )
         }
+        INSERT_OBJECT_TYPE => {
+            let geom =
+                entity_insert::read_insert_geometry(main_reader, handle_reader, object_handle)
+                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            let block_name = resolve_block_name(geom.block_header_handle, symbol_names);
+            (
+                EntityData::Insert {
+                    block_name,
+                    insertion: geom.insertion,
+                    scale: geom.scale,
+                    rotation: geom.rotation,
+                    has_attribs: geom.has_attribs,
+                    attribs: Vec::new(),
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
+        MTEXT_OBJECT_TYPE => {
+            let geom =
+                entity_mtext::read_mtext_geometry(main_reader, handle_reader, object_handle)
+                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::MText {
+                    insertion: geom.insertion,
+                    height: geom.height,
+                    width: geom.rect_width,
+                    rectangle_height: if geom.rect_height > 0.0 {
+                        Some(geom.rect_height)
+                    } else {
+                        None
+                    },
+                    value: geom.value,
+                    rotation: geom.rotation,
+                    style_name: resolve_style_name(geom.style_handle, symbol_names),
+                    attachment_point: geom.attachment_point,
+                    line_spacing_factor: geom.line_spacing_factor,
+                    drawing_direction: geom.drawing_direction,
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
         ELLIPSE_OBJECT_TYPE => {
             let geom = entity_ellipse::read_ellipse_geometry(main_reader)
                 .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
@@ -826,16 +875,18 @@ fn try_decode_entity_body_with_reason(
 
 fn object_type_family(object_type: i16) -> Option<&'static str> {
     match object_type {
+        TEXT_OBJECT_TYPE => Some("TEXT"),
+        INSERT_OBJECT_TYPE => Some("INSERT"),
         LINE_OBJECT_TYPE => Some("LINE"),
         CIRCLE_OBJECT_TYPE => Some("CIRCLE"),
         ARC_OBJECT_TYPE => Some("ARC"),
         POINT_OBJECT_TYPE => Some("POINT"),
-        TEXT_OBJECT_TYPE => Some("TEXT"),
         FACE3D_OBJECT_TYPE => Some("3DFACE"),
         SOLID_OBJECT_TYPE => Some("SOLID"),
         ELLIPSE_OBJECT_TYPE => Some("ELLIPSE"),
         RAY_OBJECT_TYPE => Some("RAY"),
         XLINE_OBJECT_TYPE => Some("XLINE"),
+        MTEXT_OBJECT_TYPE => Some("MTEXT"),
         LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
         HATCH_OBJECT_TYPE => Some("HATCH"),
         _ => None,
@@ -1115,7 +1166,7 @@ fn semantic_supported_family_hint(
     symbol_names: &SymbolNameMaps,
 ) -> Option<&'static str> {
     let family = object_type_family(object_type)?;
-    if matches!(family, "TEXT" | "HATCH") {
+    if matches!(family, "TEXT" | "HATCH" | "MTEXT" | "INSERT") {
         return None;
     }
 
@@ -1241,6 +1292,14 @@ fn resolve_style_name(handle: Handle, symbol_names: &SymbolNameMaps) -> String {
             .get(&handle)
             .cloned()
             .unwrap_or_else(|| format!("$STYLE_{:X}", handle.value()))
+    }
+}
+
+fn resolve_block_name(handle: Handle, _symbol_names: &SymbolNameMaps) -> String {
+    if handle == Handle::NULL {
+        String::new()
+    } else {
+        format!("$BLOCK_{:X}", handle.value())
     }
 }
 
