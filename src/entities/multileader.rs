@@ -10,6 +10,34 @@ use crate::scene::wire_model::TangentGeom;
 
 // ── TruckConvertible ────────────────────────────────────────────────────────
 
+/// Catmull-Rom spline tessellation through `ctrl` points, `segs_per_span` segments each.
+fn catmull_rom_pts(ctrl: &[[f32; 3]], segs_per_span: u32) -> Vec<[f32; 3]> {
+    let n = ctrl.len();
+    let mut out = Vec::new();
+    for i in 0..n.saturating_sub(1) {
+        let p0 = if i == 0 { ctrl[0] } else { ctrl[i - 1] };
+        let p1 = ctrl[i];
+        let p2 = ctrl[i + 1];
+        let p3 = if i + 2 < n { ctrl[i + 2] } else { ctrl[n - 1] };
+        for j in 0..=segs_per_span {
+            let t = j as f32 / segs_per_span as f32;
+            let t2 = t * t;
+            let t3 = t2 * t;
+            let mut pt = [0.0_f32; 3];
+            for k in 0..3 {
+                pt[k] = 0.5 * (
+                    (2.0 * p1[k])
+                    + (-p0[k] + p2[k]) * t
+                    + (2.0 * p0[k] - 5.0 * p1[k] + 4.0 * p2[k] - p3[k]) * t2
+                    + (-p0[k] + 3.0 * p1[k] - 3.0 * p2[k] + p3[k]) * t3
+                );
+            }
+            out.push(pt);
+        }
+    }
+    out
+}
+
 fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckEntity> {
     let nan = [f32::NAN; 3];
     let p3 = |v: &crate::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
@@ -34,25 +62,31 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
                 if !first { points.push(nan); }
                 first = false;
 
-                for p in &line.points {
-                    points.push(p3(p));
-                    key_verts.push(p3(p));
-                }
-
-                // Closing segment: last bend → connection_point
-                let last = line.points.last().unwrap();
-                let last_f = p3(last);
+                // Build the full control-point list: line.points + connection_point
+                let mut ctrl: Vec<[f32; 3]> = line.points.iter().map(|p| p3(p)).collect();
+                let last_f = *ctrl.last().unwrap_or(&cp_f);
                 let dist = ((last_f[0]-cp_f[0]).powi(2) + (last_f[1]-cp_f[1]).powi(2)).sqrt();
                 if dist > 1e-9 {
-                    points.push(cp_f);
-                    key_verts.push(cp_f);
+                    ctrl.push(cp_f);
+                }
+                for &c in &ctrl {
+                    key_verts.push(c);
                 }
 
-                for i in 0..line.points.len().saturating_sub(1) {
-                    tangents.push(TangentGeom::Line {
-                        p1: p3(&line.points[i]),
-                        p2: p3(&line.points[i + 1]),
-                    });
+                if ml.path_type == MultiLeaderPathType::Spline && ctrl.len() >= 2 {
+                    // Catmull-Rom spline through the bend points.
+                    let pts = catmull_rom_pts(&ctrl, 8);
+                    for &pt in &pts {
+                        points.push(pt);
+                    }
+                } else {
+                    for &c in &ctrl {
+                        points.push(c);
+                    }
+                }
+
+                for i in 0..ctrl.len().saturating_sub(1) {
+                    tangents.push(TangentGeom::Line { p1: ctrl[i], p2: ctrl[i + 1] });
                 }
             }
 

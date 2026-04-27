@@ -396,13 +396,22 @@ pub fn save_dxf(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
 
 // ── DXF post-load fixups ──────────────────────────────────────────────────
 
-/// The acadrust DXF reader stores LinearDimension.rotation directly from DXF
-/// group code 50, which is in degrees.  DWG and our own dimension-creation code
-/// store it in radians.  Convert so tessellation can call cos/sin uniformly.
+/// The acadrust DXF reader stores several rotation fields directly from DXF
+/// group code 50 in degrees, while DWG and our own creation code store radians.
+/// Apply to_radians() on load so tessellation can call cos/sin uniformly.
 fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
     for entity in doc.entities_mut() {
-        if let EntityType::Dimension(Dimension::Linear(d)) = entity {
-            d.rotation = d.rotation.to_radians();
+        match entity {
+            EntityType::Dimension(Dimension::Linear(d)) => {
+                d.rotation = d.rotation.to_radians();
+            }
+            EntityType::AttributeDefinition(a) => {
+                a.rotation = a.rotation.to_radians();
+            }
+            EntityType::AttributeEntity(a) => {
+                a.rotation = a.rotation.to_radians();
+            }
+            _ => {}
         }
     }
 }

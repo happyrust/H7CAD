@@ -409,6 +409,7 @@ impl H7CAD {
                     ));
                 }
                 self.app_menu.push_recent(path.clone());
+                self.tabs[i].scene.compute_and_set_world_offset();
                 self.tabs[i].scene.populate_hatches_from_document();
                 self.tabs[i].scene.populate_images_from_document();
                 self.tabs[i].scene.populate_meshes_from_document();

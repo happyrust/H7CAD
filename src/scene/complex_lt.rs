@@ -9,6 +9,7 @@
 use crate::linetypes::{ComplexLt, LtSegment};
 use crate::scene::cxf;
 use crate::scene::wire_model::WireModel;
+use crate::entities::text_support::resolve_dxf_special_chars;
 
 // ── Public entry point ────────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@ pub fn apply_along(
         .iter()
         .map(|s| match s {
             LtSeg::Dash(l) | LtSeg::Space(l) => *l,
-            LtSeg::Dot | LtSeg::Shape { .. } => 0.0,
+            LtSeg::Dot | LtSeg::Shape { .. } | LtSeg::Text { .. } => 0.0,
         })
         .sum();
     if pattern_len < 1e-10 {
@@ -140,6 +141,45 @@ pub fn apply_along(
                         break;
                     }
                 }
+                LtSeg::Text {
+                    text,
+                    style,
+                    x,
+                    y,
+                    scale: tx_scale,
+                    rot_deg,
+                } => {
+                    flush(&mut cur_stroke, &mut strokes);
+
+                    let insert = lerp(ps, pe, pos / seg_len);
+                    let insert = offset_pt(insert, fwd, perp, *x, *y);
+                    let fwd_angle = fwd[1].atan2(fwd[0]) + rot_deg.to_radians();
+                    let resolved = resolve_dxf_special_chars(text);
+                    let text_strokes = cxf::tessellate_text_ex(
+                        [insert[0], insert[1]],
+                        *tx_scale,
+                        fwd_angle,
+                        1.0,
+                        0.0,
+                        style,
+                        &resolved,
+                    );
+                    for stroke in &text_strokes {
+                        if stroke.len() >= 2 {
+                            let pts: Vec<[f32; 3]> = stroke
+                                .iter()
+                                .map(|&[sx, sy]| [sx, sy, insert[2]])
+                                .collect();
+                            strokes.push(pts);
+                        }
+                    }
+
+                    elem_idx += 1;
+                    elem_consumed = 0.0;
+                    if pos < 1e-6 {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -180,6 +220,14 @@ enum LtSeg {
         scale: f32,
         rot_deg: f32,
     },
+    Text {
+        text: String,
+        style: String,
+        x: f32,
+        y: f32,
+        scale: f32,
+        rot_deg: f32,
+    },
 }
 
 fn scale_segments(segs: &[LtSegment], scale: f32) -> Vec<LtSeg> {
@@ -188,17 +236,19 @@ fn scale_segments(segs: &[LtSegment], scale: f32) -> Vec<LtSeg> {
             LtSegment::Dash(l) => LtSeg::Dash(l * scale),
             LtSegment::Space(l) => LtSeg::Space(l * scale),
             LtSegment::Dot => LtSeg::Dot,
-            LtSegment::Shape {
-                name,
-                x,
-                y,
-                scale: sh_scale,
-                rot_deg,
-            } => LtSeg::Shape {
+            LtSegment::Shape { name, x, y, scale: sh_scale, rot_deg } => LtSeg::Shape {
                 name: name.clone(),
                 x: x * scale,
                 y: y * scale,
                 scale: *sh_scale * scale,
+                rot_deg: *rot_deg,
+            },
+            LtSegment::Text { text, style, x, y, scale: tx_scale, rot_deg } => LtSeg::Text {
+                text: text.clone(),
+                style: style.clone(),
+                x: x * scale,
+                y: y * scale,
+                scale: *tx_scale * scale,
                 rot_deg: *rot_deg,
             },
         })

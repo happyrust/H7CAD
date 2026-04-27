@@ -1,6 +1,6 @@
 # H7CAD
 
-<img width="1920" height="940" alt="resim" src="https://github.com/user-attachments/assets/25bc2bb2-c35c-477d-a3e9-45c86690b5c9" />
+<img width="1920" height="940" alt="resim" src="https://github.com/user-attachments/assets/e80191a4-d14c-4b3e-ae72-3b1a7c0be418" />
 
 A CAD application for 2D/3D drawing and design, built with Rust.
 

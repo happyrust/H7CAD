@@ -35,6 +35,21 @@ pub enum LtSegment {
         /// Optional rotation in degrees (0 = along the line).
         rot_deg: f32,
     },
+    /// Draw a text string at the current pen position.
+    Text {
+        /// The string to render.
+        text: String,
+        /// Text style / font name.
+        style: String,
+        /// X offset along the linetype direction.
+        x: f32,
+        /// Y offset perpendicular to the linetype direction.
+        y: f32,
+        /// Height scale factor.
+        scale: f32,
+        /// Rotation in degrees (0 = along the line).
+        rot_deg: f32,
+    },
 }
 
 /// A complex linetype — ordered elements for one pattern repeat.
@@ -307,13 +322,12 @@ fn parse_complex_elements(s: &str) -> Vec<LtSegment> {
     segs
 }
 
-/// Try to parse `SHAPENAME,font,x=v,s=v,r=v` into an `LtSegment::Shape`.
-/// Text elements (start with `"`) are skipped → `None`.
+/// Parse a bracketed linetype element.
+/// Handles both shape (`SHAPENAME,...`) and text (`"string",...`) elements.
 fn parse_shape_element(inner: &str) -> Option<LtSegment> {
     let inner = inner.trim();
-    // Skip text elements.
     if inner.starts_with('"') {
-        return None;
+        return parse_text_element(inner);
     }
 
     let mut parts = inner.split(',');
@@ -352,6 +366,44 @@ fn parse_shape_element(inner: &str) -> Option<LtSegment> {
         scale,
         rot_deg,
     })
+}
+
+/// Parse `"TEXT",STYLE,x=v,y=v,s=v,r=v` into an `LtSegment::Text`.
+fn parse_text_element(inner: &str) -> Option<LtSegment> {
+    // Find the closing quote.
+    let rest = inner.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let text = rest[..end].to_string();
+    let after = rest[end + 1..].trim().trim_start_matches(',');
+
+    let mut parts = after.split(',');
+    let style = parts.next().map(|s| s.trim().to_string()).unwrap_or_default();
+    let style = if style.is_empty() { "Standard".to_string() } else { style };
+
+    let mut x = 0.0f32;
+    let mut y = 0.0f32;
+    let mut scale = 1.0f32;
+    let mut rot_deg = 0.0f32;
+
+    for part in parts {
+        let p = part.trim();
+        if let Some(v) = p.strip_prefix("x=").or_else(|| p.strip_prefix("X=")) {
+            x = v.parse().unwrap_or(0.0);
+        } else if let Some(v) = p.strip_prefix("y=").or_else(|| p.strip_prefix("Y=")) {
+            y = v.parse().unwrap_or(0.0);
+        } else if let Some(v) = p.strip_prefix("s=").or_else(|| p.strip_prefix("S=")) {
+            scale = v.parse().unwrap_or(1.0);
+        } else if let Some(v) = p
+            .strip_prefix("r=")
+            .or_else(|| p.strip_prefix("R="))
+            .or_else(|| p.strip_prefix("u="))
+            .or_else(|| p.strip_prefix("U="))
+        {
+            rot_deg = v.parse().unwrap_or(0.0);
+        }
+    }
+
+    Some(LtSegment::Text { text, style, x, y, scale, rot_deg })
 }
 
 fn push_lt_segment(token: &str, out: &mut Vec<LtSegment>) {

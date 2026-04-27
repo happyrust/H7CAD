@@ -1245,6 +1245,7 @@ impl H7CAD {
                 let entity_opt = self.source_entity_for_geom(i, handle);
                 if let Some(entity) = entity_opt {
                     let truck_entity = entity.to_truck_entity(&self.tabs[i].scene.document);
+                    let woff = self.tabs[i].scene.world_offset;
                     let result = truck_entity.and_then(|te| {
                         match te.object {
                             TruckObject::Contour(wire) => {
@@ -1252,7 +1253,7 @@ impl H7CAD {
                                 let face = builder::try_attach_plane(&[wire]).ok()?;
                                 // tsweep(Face) → Solid
                                 let solid = builder::tsweep(&face, TruckVec3::new(0.0, 0.0, height as f64));
-                                match truck_tess::tessellate_solid(&solid) {
+                                match truck_tess::tessellate_solid(&solid, woff) {
                                     truck_tess::TruckTessResult::Mesh { verts, normals, indices } => {
                                         Some(crate::scene::mesh_model::MeshModel {
                                             name: String::new(),
@@ -1299,6 +1300,7 @@ impl H7CAD {
                 let entity_opt = self.source_entity_for_geom(i, handle);
                 if let Some(entity) = entity_opt {
                     let truck_entity = entity.to_truck_entity(&self.tabs[i].scene.document);
+                    let woff = self.tabs[i].scene.world_offset;
                     let result = truck_entity.and_then(|te| {
                         let wire: Option<truck_modeling::Wire> = match te.object {
                             TruckObject::Contour(w) => Some(w),
@@ -1314,7 +1316,7 @@ impl H7CAD {
                         let dir = (axis_end - axis_start).normalize();
                         let axis = TruckVec3::new(dir.x as f64, dir.z as f64, dir.y as f64);
                         let shell = builder::rsweep(&wire, origin, axis, Rad(angle_deg.to_radians() as f64));
-                        match truck_tess::tessellate_shell(&shell) {
+                        match truck_tess::tessellate_shell(&shell, woff) {
                             truck_tess::TruckTessResult::Mesh { verts, normals, indices } => {
                                 Some(crate::scene::mesh_model::MeshModel {
                                     name: String::new(),
@@ -1357,6 +1359,7 @@ impl H7CAD {
 
                 let profile_ent = self.source_entity_for_geom(i, profile_handle);
                 let path_ent = self.source_entity_for_geom(i, path_handle);
+                let woff = self.tabs[i].scene.world_offset;
 
                 let result = profile_ent.zip(path_ent).and_then(|(prof_e, path_e)| {
                     let prof_truck = prof_e.to_truck_entity(&self.tabs[i].scene.document)?;
@@ -1384,7 +1387,7 @@ impl H7CAD {
                             // wire we get a Solid, otherwise a Shell.
                             if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
                                 let solid = builder::tsweep(&face, dir);
-                                match truck_tess::tessellate_solid(&solid) {
+                                match truck_tess::tessellate_solid(&solid, woff) {
                                     truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
                                         Some(crate::scene::mesh_model::MeshModel {
                                             name: String::new(), verts, normals, indices, color, selected: false,
@@ -1393,7 +1396,7 @@ impl H7CAD {
                                 }
                             } else {
                                 let shell = builder::tsweep(&profile_wire, dir);
-                                match truck_tess::tessellate_shell(&shell) {
+                                match truck_tess::tessellate_shell(&shell, woff) {
                                     truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
                                         Some(crate::scene::mesh_model::MeshModel {
                                             name: String::new(), verts, normals, indices, color, selected: false,
@@ -1417,7 +1420,7 @@ impl H7CAD {
                             );
                             if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
                                 let solid = builder::tsweep(&face, dir);
-                                match truck_tess::tessellate_solid(&solid) {
+                                match truck_tess::tessellate_solid(&solid, woff) {
                                     truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
                                         Some(crate::scene::mesh_model::MeshModel {
                                             name: String::new(), verts, normals, indices, color, selected: false,
@@ -1426,7 +1429,7 @@ impl H7CAD {
                                 }
                             } else {
                                 let shell = builder::tsweep(&profile_wire, dir);
-                                match truck_tess::tessellate_shell(&shell) {
+                                match truck_tess::tessellate_shell(&shell, woff) {
                                     truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
                                         Some(crate::scene::mesh_model::MeshModel {
                                             name: String::new(), verts, normals, indices, color, selected: false,
@@ -1481,6 +1484,7 @@ impl H7CAD {
                     }
                 }
 
+                let woff = self.tabs[i].scene.world_offset;
                 let result: Option<crate::scene::mesh_model::MeshModel> = (|| {
                     if wires.len() < 2 { return None; }
 
@@ -1501,7 +1505,7 @@ impl H7CAD {
                     }
 
                     let shell = truck_modeling::Shell::from(all_faces);
-                    match truck_tess::tessellate_shell(&shell) {
+                    match truck_tess::tessellate_shell(&shell, woff) {
                         truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
                             Some(crate::scene::mesh_model::MeshModel {
                                 name: String::new(), verts, normals, indices, color, selected: false,

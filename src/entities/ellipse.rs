@@ -64,9 +64,24 @@ pub fn to_truck(
         let edge_upper = Edge::new(&v_pos, &v_neg, Curve::BSplineCurve(spl_u));
         let edge_lower = Edge::new(&v_neg, &v_pos, Curve::BSplineCurve(spl_l));
         let wire: Wire = [edge_upper, edge_lower].into_iter().collect();
+        // Quadrant points at ±major and ±minor axis endpoints.
+        let q = |lx: f64, lz: f64| {
+            Vec3::new(
+                (cx + lx * u.x as f64 + lz * v_axis.x as f64) as f32,
+                (cy + lx * u.y as f64 + lz * v_axis.y as f64) as f32,
+                cz as f32,
+            )
+        };
+        let snap_pts = vec![
+            (center_v3, SnapHint::Center),
+            (q(r_major, 0.0),  SnapHint::Quadrant),
+            (q(-r_major, 0.0), SnapHint::Quadrant),
+            (q(0.0, r_minor),  SnapHint::Quadrant),
+            (q(0.0, -r_minor), SnapHint::Quadrant),
+        ];
         TruckEntity {
             object: TruckObject::Contour(wire),
-            snap_pts: vec![(center_v3, SnapHint::Center)],
+            snap_pts,
             tangent_geoms: vec![],
             key_vertices: vec![],
         }
@@ -89,11 +104,17 @@ pub fn to_truck(
         let v_start = builder::vertex(*ctrl_pts.first().unwrap());
         let v_end = builder::vertex(*ctrl_pts.last().unwrap());
         let edge = Edge::new(&v_start, &v_end, Curve::BSplineCurve(bspline));
+        let pt_start = ctrl_pts.first().unwrap();
+        let pt_end = ctrl_pts.last().unwrap();
+        let key_vertices = vec![
+            [pt_start.x as f32, pt_start.y as f32, pt_start.z as f32],
+            [pt_end.x as f32, pt_end.y as f32, pt_end.z as f32],
+        ];
         TruckEntity {
             object: TruckObject::Curve(edge),
             snap_pts: vec![(center_v3, SnapHint::Center)],
             tangent_geoms: vec![],
-            key_vertices: vec![],
+            key_vertices,
         }
     }
 }

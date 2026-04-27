@@ -7,6 +7,8 @@ pub struct ResolvedTextStyle {
     pub font_name: String,
     pub width_factor: f32,
     pub oblique_angle: f32,
+    pub is_backward: bool,
+    pub is_upside_down: bool,
 }
 
 pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedTextStyle {
@@ -46,6 +48,8 @@ pub fn resolve_text_style(style_name: &str, document: &CadDocument) -> ResolvedT
         font_name,
         width_factor: style.map(|s| s.width_factor as f32).unwrap_or(1.0),
         oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
+        is_backward: style.map(|s| s.is_backward()).unwrap_or(false),
+        is_upside_down: style.map(|s| s.is_upside_down()).unwrap_or(false),
     }
 }
 
@@ -85,6 +89,8 @@ pub fn resolve_text_style_native(
         font_name,
         width_factor: style.map(|s| s.width_factor as f32).unwrap_or(1.0),
         oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
+        is_backward: false,
+        is_upside_down: false,
     }
 }
 
@@ -101,7 +107,7 @@ pub fn text_local_bounds(
 
     let font = cxf::get_font(font_name);
     let scale = height / 9.0;
-    let wf = width_factor.clamp(0.01, 100.0);
+    let wf = width_factor.abs().clamp(0.01, 100.0);
     let ob = oblique_angle.tan();
     let mut cursor_x = 0.0_f32;
     let mut min_x = f32::INFINITY;
@@ -141,6 +147,58 @@ pub fn text_local_bounds(
     }
 }
 
+/// Expand DXF `%%x` special-character sequences that appear in both TEXT and MTEXT values:
+/// - `%%d` / `%%D` → `°`
+/// - `%%p` / `%%P` → `±`
+/// - `%%c` / `%%C` → `⌀`
+/// - `%%u` / `%%U` → underline toggle (stripped — not renderable with stroke fonts)
+/// - `%%o` / `%%O` → overline toggle (stripped)
+/// - `%%%%` → `%`
+/// - `%%nnn` (3 decimal digits) → Unicode scalar `nnn`
+/// Any unrecognised `%%x` is passed through unchanged.
+pub fn resolve_dxf_special_chars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '%' || chars.peek() != Some(&'%') {
+            out.push(c);
+            continue;
+        }
+        chars.next(); // consume second '%'
+        match chars.peek().map(|c| c.to_ascii_lowercase()) {
+            Some('d') => { chars.next(); out.push('°'); }
+            Some('p') => { chars.next(); out.push('±'); }
+            Some('c') => { chars.next(); out.push('⌀'); }
+            Some('u') | Some('o') => { chars.next(); } // toggle codes — strip silently
+            Some('%') => { chars.next(); out.push('%'); }
+            Some(d) if d.is_ascii_digit() => {
+                let mut digits = String::with_capacity(3);
+                for _ in 0..3 {
+                    match chars.peek() {
+                        Some(&ch) if ch.is_ascii_digit() => { digits.push(chars.next().unwrap()); }
+                        _ => break,
+                    }
+                }
+                if digits.len() == 3 {
+                    if let Ok(n) = digits.parse::<u32>() {
+                        if let Some(ch) = char::from_u32(n) {
+                            out.push(ch);
+                            continue;
+                        }
+                    }
+                }
+                out.push('%');
+                out.push('%');
+                out.push_str(&digits);
+            }
+            _ => { out.push('%'); out.push('%'); }
+        }
+    }
+
+    out
+}
+
 pub fn strip_mtext_codes(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -156,7 +214,14 @@ pub fn strip_mtext_codes(s: &str) -> String {
                     chars.next();
                     out.push(' ');
                 }
-                Some(c) if "pHWQTACcLOKlfFUu".contains(c) => {
+                // Decoration toggles — standalone (no args, no ';'). Keep as \X markers
+                // so tessellate_text_ex can emit underline/overline/strikethrough strokes.
+                Some('L') | Some('l') | Some('O') | Some('o') | Some('K') | Some('k') => {
+                    out.push('\\');
+                    out.push(chars.next().unwrap());
+                }
+                // Codes with semicolon-terminated arguments — strip entirely.
+                Some(c) if "pHWQTACcfFUu".contains(c) => {
                     chars.next();
                     for c in chars.by_ref() {
                         if c == ';' {
@@ -179,7 +244,7 @@ pub fn strip_mtext_codes(s: &str) -> String {
         }
     }
 
-    out
+    resolve_dxf_special_chars(&out)
 }
 
 pub fn split_mtext_lines(s: &str) -> Vec<String> {
@@ -189,32 +254,42 @@ pub fn split_mtext_lines(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// Measure the advance width of an MText line (after strip_mtext_codes), correctly
+/// skipping decoration toggle markers (`\L`, `\l`, `\O`, `\o`, `\K`, `\k`).
+pub fn measure_mtext_chars(text: &str, scale: f32, font: &cxf::CxfFile) -> f32 {
+    let mut width = 0.0_f32;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && matches!(chars.peek(), Some('L' | 'l' | 'O' | 'o' | 'K' | 'k')) {
+            chars.next();
+            continue;
+        }
+        if c == ' ' {
+            width += font.word_spacing * scale;
+        } else {
+            width += font
+                .glyph(c)
+                .map(|g| (g.advance + font.letter_spacing) * scale)
+                .unwrap_or(scale * 6.0);
+        }
+    }
+    width
+}
+
 pub fn word_wrap(text: &str, max_w: f32, scale: f32, font: &'static cxf::CxfFile) -> Vec<String> {
     if max_w <= 0.0 || text.is_empty() {
         return vec![text.to_string()];
     }
 
-    let glyph_w = |c: char| -> f32 {
-        if c == ' ' {
-            return font.word_spacing * scale;
-        }
-        font.glyph(c)
-            .map(|g| (g.advance + font.letter_spacing) * scale)
-            .unwrap_or(scale * 6.0)
-    };
-
+    let space_w = font.word_spacing * scale;
     let mut lines = Vec::new();
     let mut current = String::new();
     let mut current_w = 0.0_f32;
 
     for word in text.split(' ') {
-        let word_w: f32 = word.chars().map(glyph_w).sum();
-        let space_w = if current.is_empty() {
-            0.0
-        } else {
-            glyph_w(' ')
-        };
-        if !current.is_empty() && current_w + space_w + word_w > max_w {
+        let word_w = measure_mtext_chars(word, scale, font);
+        let gap = if current.is_empty() { 0.0 } else { space_w };
+        if !current.is_empty() && current_w + gap + word_w > max_w {
             lines.push(std::mem::take(&mut current));
             current_w = 0.0;
         }

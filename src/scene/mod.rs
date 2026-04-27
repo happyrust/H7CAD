@@ -39,6 +39,10 @@ use wire_model::TangentGeom;
 use crate::command::EntityTransform;
 use crate::store::NativeStore;
 use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid};
+use truck_modeling::{
+    base::{BoundedCurve, ParametricCurve},
+    BSplineCurve as TruckBSpline, KnotVec, Point3,
+};
 use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
 use acadrust::objects::ObjectType;
 use crate::types::Vector2;
@@ -134,6 +138,9 @@ pub struct Scene {
     /// Whether object snap targets Underlay entities (UOSNAP command,
     /// mirrors `H7CAD.uosnap`).
     pub underlay_snap_enabled: bool,
+    /// Scene centroid subtracted from all coordinates before f32 conversion.
+    /// Eliminates f32 precision loss at large world coordinates (e.g. UTM 4,000,000 m).
+    pub world_offset: [f64; 3],
 }
 
 impl Scene {
@@ -169,6 +176,7 @@ impl Scene {
             show_viewcube: true,
             underlay_frames_mode: 1,
             underlay_snap_enabled: true,
+            world_offset: [0.0; 3],
         }
     }
 
@@ -186,6 +194,26 @@ impl Scene {
 
     pub fn bump_geometry(&mut self) {
         self.geometry_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Compute scene centroid from DXF header extents and store as world_offset.
+    /// Must be called after `self.document` is set so all geometry is offset-corrected.
+    pub fn compute_and_set_world_offset(&mut self) {
+        let h = &self.document.header;
+        let min = h.model_space_extents_min;
+        let max = h.model_space_extents_max;
+        // Sentinel: DXF files with no geometry have EXTMIN = 1e20, EXTMAX = -1e20.
+        // Fall back to no offset so the scene stays at the origin.
+        let valid = min.x < max.x && min.y < max.y;
+        self.world_offset = if valid {
+            [
+                (min.x + max.x) * 0.5,
+                (min.y + max.y) * 0.5,
+                (min.z + max.z) * 0.5,
+            ]
+        } else {
+            [0.0; 3]
+        };
     }
 
     /// Public accessor for the block-record handle of the current layout.
@@ -627,10 +655,11 @@ impl Scene {
         let sel = &self.selected;
         let avp = self.active_viewport;
         let underlay_snap_enabled = self.underlay_snap_enabled;
+        let woff = self.world_offset;
         let mut wires: Vec<WireModel> = visible
             .into_par_iter()
             .flat_map(|e| {
-                let mut tessellated = tessellate_entity(doc, sel, avp, e);
+                let mut tessellated = tessellate_entity(doc, sel, avp, woff, e);
                 if !underlay_snap_enabled && matches!(e, acadrust::EntityType::Underlay(_)) {
                     for w in &mut tessellated {
                         w.snap_pts.clear();
@@ -1216,7 +1245,7 @@ impl Scene {
 
     /// Full tessellation pipeline for one entity.
     fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
-        tessellate_entity(&self.document, &self.selected, self.active_viewport, e)
+        tessellate_entity(&self.document, &self.selected, self.active_viewport, self.world_offset, e)
     }
 
     fn model_space_block_handle(&self) -> Handle {
@@ -2089,6 +2118,40 @@ impl Scene {
             }
         }
 
+        // Wide LWPolyline and Polyline2D fills
+        for entity in self.document.entities() {
+            let (common, fills) = match entity {
+                EntityType::LwPolyline(pl) => {
+                    (&pl.common, wide_lwpolyline_fills(pl))
+                }
+                EntityType::Polyline2D(pl) => {
+                    (&pl.common, wide_polyline2d_fills(pl))
+                }
+                _ => continue,
+            };
+            if fills.is_empty() { continue; }
+            if common.invisible || layer_hidden(&common.layer) { continue; }
+            if !self.belongs_to_visible_block(common.handle, common.owner_handle, layout_block) {
+                continue;
+            }
+            let base_color = self.render_style(entity).0;
+            let selected = self.selected.contains(&common.handle);
+            let color = if selected { [0.15, 0.55, 1.00, 1.0] } else { base_color };
+            for boundary in fills {
+                models.push((
+                    common.handle,
+                    HatchModel {
+                        boundary,
+                        pattern: hatch_model::HatchPattern::Solid,
+                        name: "SOLID".into(),
+                        color,
+                        angle_offset: 0.0,
+                        scale: 1.0,
+                    },
+                ));
+            }
+        }
+
         models
     }
 
@@ -2301,12 +2364,35 @@ impl Scene {
                     }
                 }
                 BoundaryEdge::Spline(spline) => {
-                    for cp in &spline.control_points {
-                        boundary.push([cp.x as f32, cp.y as f32]);
-                    }
-                    if boundary.len() > 1 {
-                        if let Some(&first) = boundary.first() {
-                            boundary.push(first);
+                    // Evaluate the B-spline curve into smooth boundary points.
+                    // Fall back to control-point polyline for degenerate inputs.
+                    let degree = spline.degree as usize;
+                    let cps: Vec<Point3> = spline.control_points
+                        .iter()
+                        .map(|p| Point3::new(p.x, p.y, 0.0))
+                        .collect();
+                    let knot_vec = if !spline.knots.is_empty() {
+                        KnotVec::from(spline.knots.clone())
+                    } else if cps.len() >= 2 {
+                        KnotVec::uniform_knot(degree, cps.len() - 1)
+                    } else {
+                        KnotVec::from(vec![])
+                    };
+                    let ok = cps.len() >= 2
+                        && degree >= 1
+                        && knot_vec.len() == cps.len() + degree + 1;
+                    if ok {
+                        let bspl = TruckBSpline::new(knot_vec, cps);
+                        let (t0, t1) = bspl.range_tuple();
+                        let segs = 16u32;
+                        for i in 0..=segs {
+                            let t = t0 + (t1 - t0) * (i as f64 / segs as f64);
+                            let p = bspl.subs(t);
+                            boundary.push([p.x as f32, p.y as f32]);
+                        }
+                    } else {
+                        for cp in &spline.control_points {
+                            boundary.push([cp.x as f32, cp.y as f32]);
                         }
                     }
                 }
@@ -6157,6 +6243,7 @@ fn tessellate_entity(
     document: &acadrust::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
+    world_offset: [f64; 3],
     e: &EntityType,
 ) -> Vec<WireModel> {
     let h = e.common().handle;
@@ -6182,9 +6269,9 @@ fn tessellate_entity(
             (0.0_f32, [0.0f32; 8])
         };
         let mut wire = tessellate::tessellate(
-            document, h, e, sel, color, pattern_length, pattern, 1.5,
+            document, h, e, sel, color, pattern_length, pattern, 1.5, world_offset,
         );
-        wire.aabb = entity_aabb(e);
+        wire.aabb = entity_aabb(e, world_offset);
         return vec![wire];
     }
 
@@ -6194,9 +6281,9 @@ fn tessellate_entity(
     let lt_name = render::linetype_name_for(document, e);
 
     if let EntityType::Dimension(dim) = e {
-        let aabb = entity_aabb(e);
+        let aabb = entity_aabb(e, world_offset);
         let mut wires = tessellate::tessellate_dimension(
-            document, h, dim, sel, entity_color, line_weight_px,
+            document, h, dim, sel, entity_color, line_weight_px, world_offset,
         );
         for w in &mut wires {
             w.aci = aci;
@@ -6207,6 +6294,9 @@ fn tessellate_entity(
 
     if let EntityType::Insert(ins) = e {
         let is_mirrored = ins.x_scale() * ins.y_scale() < 0.0;
+        // Resolve the INSERT's own style so ByBlock sub-entities can inherit it.
+        let (ins_color, ins_pat_len, ins_pat, ins_lw_px, _) =
+            render::render_style_for(document, e);
         return ins
             .explode_from_document(document)
             .iter()
@@ -6215,8 +6305,11 @@ fn tessellate_entity(
             .map(|sub| crate::modules::home::modify::explode::fix_mirrored_arc(sub, is_mirrored))
             .flat_map(|sub| {
                 let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
-                    render::render_style_for(document, &sub);
-                let sub_aabb = entity_aabb(&sub);
+                    render::render_style_for_block_sub(
+                        document, &sub,
+                        ins_color, ins_pat_len, ins_pat, ins_lw_px,
+                    );
+                let sub_aabb = entity_aabb(&sub, world_offset);
                 let mut wire = tessellate::tessellate(
                     document,
                     h,
@@ -6226,6 +6319,7 @@ fn tessellate_entity(
                     sub_pattern_length,
                     sub_pattern,
                     sub_line_weight_px,
+                    world_offset,
                 );
                 wire.name = h.value().to_string();
                 wire.aci = sub_aci;
@@ -6235,9 +6329,9 @@ fn tessellate_entity(
             .collect();
     }
 
-    let aabb = entity_aabb(e);
+    let aabb = entity_aabb(e, world_offset);
     let mut base = tessellate::tessellate(
-        document, h, e, sel, entity_color, pattern_length, pattern, line_weight_px,
+        document, h, e, sel, entity_color, pattern_length, pattern, line_weight_px, world_offset,
     );
     base.aci = aci;
     base.aabb = aabb;
@@ -6261,17 +6355,151 @@ fn tessellate_entity(
     vec![base]
 }
 
-fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
+fn entity_aabb(e: &acadrust::EntityType, world_offset: [f64; 3]) -> [f32; 4] {
     let bbox = e.as_entity().bounding_box();
-    let min_x = bbox.min.x as f32;
-    let min_y = bbox.min.y as f32;
-    let max_x = bbox.max.x as f32;
-    let max_y = bbox.max.y as f32;
+    let [ox, oy, _] = world_offset;
+    let min_x = (bbox.min.x - ox) as f32;
+    let min_y = (bbox.min.y - oy) as f32;
+    let max_x = (bbox.max.x - ox) as f32;
+    let max_y = (bbox.max.y - oy) as f32;
     // A degenerate box (min == max == 0) means bounding_box() returned Default —
     // use UNBOUNDED so the wire is never wrongly pre-rejected.
-    if min_x == 0.0 && min_y == 0.0 && max_x == 0.0 && max_y == 0.0 {
+    if min_x == max_x && min_y == max_y {
         return WireModel::UNBOUNDED_AABB;
     }
     [min_x, min_y, max_x, max_y]
+}
+
+/// Generate solid-fill boundary polygons for each wide segment of an LWPolyline.
+/// Returns one polygon per segment that has non-zero width; empty if the polyline
+/// has zero `constant_width` and all vertex widths are zero.
+fn wide_lwpolyline_fills(
+    pl: &acadrust::entities::LwPolyline,
+) -> Vec<Vec<[f32; 2]>> {
+    let hw_const = (pl.constant_width / 2.0) as f32;
+    let verts = &pl.vertices;
+    let n = verts.len();
+    if n < 2 {
+        return vec![];
+    }
+    let seg_count = if pl.is_closed { n } else { n - 1 };
+    let mut out = Vec::new();
+    for i in 0..seg_count {
+        let v0 = &verts[i];
+        let v1 = &verts[(i + 1) % n];
+        let hw0 = if v0.start_width > 1e-9 { v0.start_width as f32 / 2.0 } else { hw_const };
+        let hw1 = if v0.end_width > 1e-9 { v0.end_width as f32 / 2.0 } else { hw_const };
+        if hw0 < 1e-6 && hw1 < 1e-6 {
+            continue;
+        }
+        let p0 = [v0.location.x as f32, v0.location.y as f32];
+        let p1 = [v1.location.x as f32, v1.location.y as f32];
+        if let Some(poly) = polyline_segment_fill(p0, p1, hw0, hw1, v0.bulge as f32) {
+            out.push(poly);
+        }
+    }
+    out
+}
+
+/// Generate solid-fill boundary polygons for each wide segment of a Polyline2D.
+fn wide_polyline2d_fills(
+    pl: &acadrust::entities::Polyline2D,
+) -> Vec<Vec<[f32; 2]>> {
+    let hw_default = (pl.start_width.max(pl.end_width) / 2.0) as f32;
+    let verts = &pl.vertices;
+    let n = verts.len();
+    if n < 2 {
+        return vec![];
+    }
+    let seg_count = if pl.is_closed() { n } else { n - 1 };
+    let mut out = Vec::new();
+    for i in 0..seg_count {
+        let v0 = &verts[i];
+        let v1 = &verts[(i + 1) % n];
+        let hw0 = if v0.start_width > 1e-9 { v0.start_width as f32 / 2.0 } else { hw_default };
+        let hw1 = if v0.end_width > 1e-9 { v0.end_width as f32 / 2.0 } else { hw_default };
+        if hw0 < 1e-6 && hw1 < 1e-6 {
+            continue;
+        }
+        let p0 = [v0.location.x as f32, v0.location.y as f32];
+        let p1 = [v1.location.x as f32, v1.location.y as f32];
+        if let Some(poly) = polyline_segment_fill(p0, p1, hw0, hw1, v0.bulge as f32) {
+            out.push(poly);
+        }
+    }
+    out
+}
+
+/// Compute the filled boundary polygon for one polyline segment.
+/// For straight segments: a rectangle/trapezoid.
+/// For arc segments: an arc band (outer arc + reversed inner arc).
+/// Returns `None` if the segment is degenerate.
+fn polyline_segment_fill(
+    p0: [f32; 2],
+    p1: [f32; 2],
+    hw0: f32,
+    hw1: f32,
+    bulge: f32,
+) -> Option<Vec<[f32; 2]>> {
+    if bulge.abs() < 1e-9 {
+        // Straight segment — rectangle or trapezoid
+        let dx = p1[0] - p0[0];
+        let dy = p1[1] - p0[1];
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-9 {
+            return None;
+        }
+        let nx = -dy / len;
+        let ny = dx / len;
+        Some(vec![
+            [p0[0] + hw0 * nx, p0[1] + hw0 * ny],
+            [p1[0] + hw1 * nx, p1[1] + hw1 * ny],
+            [p1[0] - hw1 * nx, p1[1] - hw1 * ny],
+            [p0[0] - hw0 * nx, p0[1] - hw0 * ny],
+        ])
+    } else {
+        // Arc segment — arc band polygon
+        let angle = 4.0 * (bulge as f64).atan();
+        let dx = (p1[0] - p0[0]) as f64;
+        let dy = (p1[1] - p0[1]) as f64;
+        let d = (dx * dx + dy * dy).sqrt();
+        if d < 1e-9 {
+            return None;
+        }
+        let r = (d / 2.0) / (angle / 2.0).sin().abs();
+        let mx = ((p0[0] + p1[0]) * 0.5) as f64;
+        let my = ((p0[1] + p1[1]) * 0.5) as f64;
+        let px = -dy / d;
+        let py = dx / d;
+        let sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
+        let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
+        let cx = (mx - sign * px * (r - h)) as f32;
+        let cy = (my - sign * py * (r - h)) as f32;
+        let a0 = ((p0[1] - cy) as f32).atan2((p0[0] - cx) as f32);
+        let a1 = ((p1[1] - cy) as f32).atan2((p1[0] - cx) as f32);
+        let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
+        if ea < sa {
+            ea += std::f32::consts::TAU;
+        }
+        let span = ea - sa;
+        let segs = ((span.abs() / std::f32::consts::TAU) * 12.0)
+            .ceil()
+            .max(4.0) as u32;
+        let r = r as f32;
+        let hw = (hw0 + hw1) * 0.5;
+        let r_outer = r + hw;
+        let r_inner = (r - hw).max(0.0);
+        let mut boundary = Vec::with_capacity((segs as usize + 1) * 2);
+        for j in 0..=segs {
+            let t = sa + span * (j as f32 / segs as f32);
+            boundary.push([cx + r_outer * t.cos(), cy + r_outer * t.sin()]);
+        }
+        for j in (0..=segs).rev() {
+            let t = sa + span * (j as f32 / segs as f32);
+            boundary.push([cx + r_inner * t.cos(), cy + r_inner * t.sin()]);
+        }
+        boundary.truncate(64);
+        Some(boundary)
+    }
 }
 
