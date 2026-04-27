@@ -11,7 +11,9 @@ mod entity_mtext;
 mod entity_point;
 mod entity_ray;
 mod entity_solid;
+mod entity_spline;
 mod entity_text;
+mod entity_viewport;
 mod error;
 mod file_header;
 mod handle_map;
@@ -48,7 +50,9 @@ pub use entity_mtext::{read_mtext_geometry, MTextGeometry};
 pub use entity_point::{read_point_geometry, PointGeometry};
 pub use entity_ray::{read_ray_geometry, RayGeometry};
 pub use entity_solid::{read_face3d_geometry, read_solid_geometry, Face3DGeometry, SolidGeometry};
+pub use entity_spline::{read_spline_geometry, SplineGeometry};
 pub use entity_text::{read_text_geometry, TextGeometry};
+pub use entity_viewport::{read_viewport_geometry, ViewportGeometry};
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
 pub use handle_map::{parse_handle_map, HandleMapEntry};
@@ -103,7 +107,9 @@ const LINE_OBJECT_TYPE: i16 = 19;
 const POINT_OBJECT_TYPE: i16 = 27;
 const FACE3D_OBJECT_TYPE: i16 = 28;
 const SOLID_OBJECT_TYPE: i16 = 31;
+const VIEWPORT_OBJECT_TYPE: i16 = 34;
 const ELLIPSE_OBJECT_TYPE: i16 = 35;
+const SPLINE_OBJECT_TYPE: i16 = 36;
 const RAY_OBJECT_TYPE: i16 = 38;
 const XLINE_OBJECT_TYPE: i16 = 40;
 const MTEXT_OBJECT_TYPE: i16 = 44;
@@ -856,6 +862,37 @@ fn try_decode_entity_body_with_reason(
                 geom.extrusion,
             )
         }
+        VIEWPORT_OBJECT_TYPE => {
+            let geom = entity_viewport::read_viewport_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Viewport {
+                    center: geom.center,
+                    width: geom.width,
+                    height: geom.height,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        SPLINE_OBJECT_TYPE => {
+            let geom = entity_spline::read_spline_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Spline {
+                    degree: geom.degree,
+                    closed: geom.closed,
+                    knots: geom.knots,
+                    control_points: geom.control_points,
+                    weights: geom.weights,
+                    fit_points: geom.fit_points,
+                    start_tangent: geom.start_tangent,
+                    end_tangent: geom.end_tangent,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
         _ => return Err(Ac1015RecoveryFailureKind::UnsupportedType),
     };
 
@@ -883,7 +920,9 @@ fn object_type_family(object_type: i16) -> Option<&'static str> {
         POINT_OBJECT_TYPE => Some("POINT"),
         FACE3D_OBJECT_TYPE => Some("3DFACE"),
         SOLID_OBJECT_TYPE => Some("SOLID"),
+        VIEWPORT_OBJECT_TYPE => Some("VIEWPORT"),
         ELLIPSE_OBJECT_TYPE => Some("ELLIPSE"),
+        SPLINE_OBJECT_TYPE => Some("SPLINE"),
         RAY_OBJECT_TYPE => Some("RAY"),
         XLINE_OBJECT_TYPE => Some("XLINE"),
         MTEXT_OBJECT_TYPE => Some("MTEXT"),
@@ -1178,7 +1217,9 @@ fn semantic_supported_family_hint(
         POINT_OBJECT_TYPE => Some("POINT"),
         FACE3D_OBJECT_TYPE => Some("3DFACE"),
         SOLID_OBJECT_TYPE => Some("SOLID"),
+        VIEWPORT_OBJECT_TYPE => Some("VIEWPORT"),
         ELLIPSE_OBJECT_TYPE => Some("ELLIPSE"),
+        SPLINE_OBJECT_TYPE => Some("SPLINE"),
         RAY_OBJECT_TYPE => Some("RAY"),
         XLINE_OBJECT_TYPE => Some("XLINE"),
         LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
