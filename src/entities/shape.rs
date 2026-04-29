@@ -1,4 +1,5 @@
 use glam::Vec3;
+use h7cad_native_model::geom_ocs::{arbitrary_axis, ocs_to_wcs};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -10,27 +11,62 @@ use crate::scene::wire_model::SnapHint;
 
 // ── Marker geometry ─────────────────────────────────────────────────────
 
-fn shape_marker(ox: f32, oy: f32, oz: f32, size: f32) -> Vec<[f32; 3]> {
+/// Build a diamond-shaped marker centred at `o` with half-extent
+/// `size/2` along the local OCS axes `ax` and `ay`.
+fn shape_marker_ocs(
+    o: [f32; 3],
+    ax: [f32; 3],
+    ay: [f32; 3],
+    size: f32,
+) -> Vec<[f32; 3]> {
     let s = size * 0.5;
+    let pt = |dx: f32, dy: f32| -> [f32; 3] {
+        [
+            o[0] + dx * ax[0] + dy * ay[0],
+            o[1] + dx * ax[1] + dy * ay[1],
+            o[2] + dx * ax[2] + dy * ay[2],
+        ]
+    };
     vec![
-        [ox, oy + s, oz],
-        [ox + s, oy, oz],
-        [ox, oy - s, oz],
-        [ox - s, oy, oz],
-        [ox, oy + s, oz],
+        pt(0.0, s),
+        pt(s, 0.0),
+        pt(0.0, -s),
+        pt(-s, 0.0),
+        pt(0.0, s),
         [f32::NAN; 3],
     ]
 }
 
 // ── Free functions ──────────────────────────────────────────────────────
 
+/// Tessellate a SHAPE marker assuming OCS == WCS. Legacy path.
+#[allow(dead_code)]
 pub fn to_truck(insertion: &[f64; 3], size: f64) -> TruckEntity {
-    let ox = insertion[0] as f32;
-    let oy = insertion[1] as f32;
-    let oz = insertion[2] as f32;
+    to_truck_with_normal(insertion, size, [0.0, 0.0, 1.0])
+}
+
+/// Tessellate a SHAPE marker with the DXF arbitrary-axis algorithm.
+///
+/// `insertion` is the OCS insertion point; the diamond marker is
+/// drawn in the OCS plane defined by `normal`.
+pub fn to_truck_with_normal(
+    insertion: &[f64; 3],
+    size: f64,
+    normal: [f64; 3],
+) -> TruckEntity {
+    let (ax, ay, _n) = arbitrary_axis(normal);
+    let wcs_insertion = ocs_to_wcs(*insertion, [0.0, 0.0, 0.0], normal);
+    let ox = wcs_insertion[0] as f32;
+    let oy = wcs_insertion[1] as f32;
+    let oz = wcs_insertion[2] as f32;
     let sz = (size as f32).abs().max(0.5);
     let snap_pt = Vec3::new(ox, oy, oz);
-    let pts = shape_marker(ox, oy, oz, sz);
+    let pts = shape_marker_ocs(
+        [ox, oy, oz],
+        [ax[0] as f32, ax[1] as f32, ax[2] as f32],
+        [ay[0] as f32, ay[1] as f32, ay[2] as f32],
+        sz,
+    );
     TruckEntity {
         object: TruckObject::Lines(pts),
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],

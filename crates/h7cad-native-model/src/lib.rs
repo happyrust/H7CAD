@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod geom_ocs;
 pub mod julian;
+pub use geom_ocs::{arbitrary_axis, is_world_normal, ocs2d_to_wcs, ocs_to_wcs};
 pub use julian::{
     format_iso8601, julian_date_to_utc, parse_iso8601, utc_to_julian_date, DateTimeUtc,
 };

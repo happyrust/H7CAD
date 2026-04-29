@@ -2,6 +2,7 @@ use std::f64::consts::TAU;
 
 use acadrust::entities::{Polyline, Polyline2D, Polyline3D};
 use glam::Vec3;
+use h7cad_native_model::geom_ocs::ocs2d_to_wcs;
 use truck_modeling::{builder, Edge, Point3, Wire};
 
 use crate::command::EntityTransform;
@@ -131,21 +132,29 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
     }
 
     let elev = pl.elevation;
+    let normal = [pl.normal.x, pl.normal.y, pl.normal.z];
     let count = verts.len();
     let seg_count = if pl.is_closed() { count } else { count - 1 };
     let mut edges: Vec<Edge> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
     let mut key_verts: Vec<[f32; 3]> = Vec::new();
 
-    let to_pt = |v: &acadrust::entities::Vertex2D| -> Point3 {
-        Point3::new(v.location.x, v.location.y, elev)
+    let lift = |x: f64, y: f64| -> [f64; 3] {
+        ocs2d_to_wcs(x, y, elev, [0.0, 0.0, 0.0], normal)
+    };
+    let lift_pt = |x: f64, y: f64| -> Point3 {
+        let p = lift(x, y);
+        Point3::new(p[0], p[1], p[2])
     };
 
     for i in 0..seg_count {
         let v0 = &verts[i];
         let v1 = &verts[(i + 1) % count];
-        let p0 = to_pt(v0);
-        let p1 = to_pt(v1);
+        // OCS planar coordinates (z = elevation, implicit).
+        let p0_ocs = (v0.location.x, v0.location.y);
+        let p1_ocs = (v1.location.x, v1.location.y);
+        let p0 = lift_pt(p0_ocs.0, p0_ocs.1);
+        let p1 = lift_pt(p1_ocs.0, p1_ocs.1);
         let bulge = v0.bulge;
 
         if bulge.abs() < 1e-9 {
@@ -158,34 +167,39 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             });
         } else {
             let angle = 4.0 * bulge.atan();
-            let dx = p1.x - p0.x;
-            let dy = p1.y - p0.y;
+            // Bulge arc geometry computed in the OCS plane; final
+            // vertices and the arc center are lifted to WCS.
+            let dx = p1_ocs.0 - p0_ocs.0;
+            let dy = p1_ocs.1 - p0_ocs.1;
             let d = (dx * dx + dy * dy).sqrt();
             let r = (d / 2.0) / (angle / 2.0).sin().abs();
-            let mx = (p0.x + p1.x) * 0.5;
-            let my = (p0.y + p1.y) * 0.5;
+            let mx = (p0_ocs.0 + p1_ocs.0) * 0.5;
+            let my = (p0_ocs.1 + p1_ocs.1) * 0.5;
             let len = d.max(1e-12);
             let px = -dy / len;
             let py = dx / len;
             let sagitta_sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
             let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-            let cx = mx - sagitta_sign * px * (r - h);
-            let cy = my - sagitta_sign * py * (r - h);
+            let cx_ocs = mx - sagitta_sign * px * (r - h);
+            let cy_ocs = my - sagitta_sign * py * (r - h);
             let mid_a = {
-                let a0 = (p0.y - cy).atan2(p0.x - cx);
-                let a1 = (p1.y - cy).atan2(p1.x - cx);
+                let a0 = (p0_ocs.1 - cy_ocs).atan2(p0_ocs.0 - cx_ocs);
+                let a1 = (p1_ocs.1 - cy_ocs).atan2(p1_ocs.0 - cx_ocs);
                 let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
                 if ea < sa {
                     ea += TAU;
                 }
                 sa + (ea - sa) * 0.5
             };
-            let p_mid = Point3::new(cx + r * mid_a.cos(), cy + r * mid_a.sin(), p0.z);
+            let mid_x_ocs = cx_ocs + r * mid_a.cos();
+            let mid_y_ocs = cy_ocs + r * mid_a.sin();
+            let p_mid = lift_pt(mid_x_ocs, mid_y_ocs);
+            let center_wcs = lift(cx_ocs, cy_ocs);
             let tv0 = builder::vertex(p0);
             let tv1 = builder::vertex(p1);
             edges.push(builder::circle_arc(&tv0, &tv1, p_mid));
             tangents.push(TangentGeom::Circle {
-                center: [cx as f32, cy as f32, p0.z as f32],
+                center: [center_wcs[0] as f32, center_wcs[1] as f32, center_wcs[2] as f32],
                 radius: r as f32,
             });
         }

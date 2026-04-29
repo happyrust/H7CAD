@@ -35,15 +35,30 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
     match &entity.data {
         nm::EntityData::Point { position } => Some(point::to_truck(position)),
         nm::EntityData::Line { start, end } => Some(line::to_truck(start, end)),
-        nm::EntityData::Circle { center, radius } => Some(circle::to_truck(center, *radius)),
+        nm::EntityData::Circle { center, radius } => Some(circle::to_truck_with_normal(
+            center,
+            *radius,
+            entity.extrusion,
+        )),
         nm::EntityData::Arc {
             center,
             radius,
             start_angle,
             end_angle,
-        } => Some(arc::to_truck(center, *radius, *start_angle, *end_angle)),
+        } => Some(arc::to_truck_with_normal(
+            center,
+            *radius,
+            *start_angle,
+            *end_angle,
+            entity.extrusion,
+        )),
         nm::EntityData::LwPolyline { vertices, closed, .. } => {
-            Some(lwpolyline::to_truck(vertices, *closed, 0.0))
+            Some(lwpolyline::to_truck_with_normal(
+                vertices,
+                *closed,
+                0.0,
+                entity.extrusion,
+            ))
         }
         nm::EntityData::Text {
             insertion,

@@ -230,15 +230,18 @@ impl EntityTypeOps for EntityType {
             }
             EntityType::Circle(c) => {
                 let center = [c.center.x, c.center.y, c.center.z];
-                Some(circle::to_truck(&center, c.radius))
+                let normal = [c.normal.x, c.normal.y, c.normal.z];
+                Some(circle::to_truck_with_normal(&center, c.radius, normal))
             }
             EntityType::Arc(a) => {
                 let center = [a.center.x, a.center.y, a.center.z];
-                Some(arc::to_truck(
+                let normal = [a.normal.x, a.normal.y, a.normal.z];
+                Some(arc::to_truck_with_normal(
                     &center,
                     a.radius,
                     a.start_angle.to_radians(),
                     a.end_angle.to_radians(),
+                    normal,
                 ))
             }
             EntityType::Ellipse(e) => {
@@ -259,7 +262,13 @@ impl EntityTypeOps for EntityType {
                     .iter()
                     .map(|p| [p.x, p.y, p.z])
                     .collect();
-                Some(spline::to_truck(sp.degree, &sp.knots, &cps))
+                let normal = [sp.normal.x, sp.normal.y, sp.normal.z];
+                Some(spline::to_truck_with_normal(
+                    sp.degree,
+                    &sp.knots,
+                    &cps,
+                    normal,
+                ))
             }
             EntityType::Ray(r) => {
                 let o = [r.base_point.x, r.base_point.y, r.base_point.z];
@@ -286,12 +295,19 @@ impl EntityTypeOps for EntityType {
                     shp.insertion_point.y,
                     shp.insertion_point.z,
                 ];
-                Some(shape::to_truck(&ins, shp.size))
+                let normal = [shp.normal.x, shp.normal.y, shp.normal.z];
+                Some(shape::to_truck_with_normal(&ins, shp.size, normal))
             }
             // ── 其余类型暂走 acadrust adapter（B5 后续批次扩展） ────────────
             EntityType::LwPolyline(pline) => {
                 let verts = lwv_ar_to_nm(&pline.vertices);
-                Some(lwpolyline::to_truck(&verts, pline.is_closed, pline.elevation))
+                let normal = [pline.normal.x, pline.normal.y, pline.normal.z];
+                Some(lwpolyline::to_truck_with_normal(
+                    &verts,
+                    pline.is_closed,
+                    pline.elevation,
+                    normal,
+                ))
             }
             EntityType::Polyline(pl) => TruckConvertible::to_truck(pl, document),
             EntityType::Polyline2D(pl) => TruckConvertible::to_truck(pl, document),
