@@ -5762,3 +5762,29 @@ fn clip_polygon_to_rect(
         [a[0] + (b[0] - a[0]) * t, ymax]
     })
 }
+
+/// A thin white rectangle wire that represents the printable-area boundary
+/// of the active paper layout.  Rendered beneath all other paper-space
+/// geometry so it acts as a visual "page" backdrop.
+fn paper_boundary_wire(x0: f32, y0: f32, x1: f32, y1: f32) -> WireModel {
+    WireModel {
+        name: "__paper_boundary__".to_string(),
+        points: vec![
+            [x0, y0, 0.0],
+            [x1, y0, 0.0],
+            [x1, y1, 0.0],
+            [x0, y1, 0.0],
+            [x0, y0, 0.0],
+        ],
+        // Near-white so it stands out against the dark paper-space background.
+        color: [0.95, 0.95, 0.95, 1.0],
+        selected: false,
+        pattern_length: 0.0,
+        pattern: [0.0; 8],
+        line_weight_px: 1.5,
+        snap_pts: vec![],
+        tangent_geoms: vec![],
+        aci: 0,
+            key_vertices: vec![],
+    }
+}
