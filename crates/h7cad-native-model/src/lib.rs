@@ -464,7 +464,7 @@ impl CadDocument {
         }
     }
 
-    fn store_entity(&mut self, entity: Entity) -> Result<(), String> {
+    fn store_entity(&mut self, mut entity: Entity) -> Result<(), String> {
         let owner_handle = entity.owner_handle;
         if owner_handle == Handle::NULL {
             self.entities.push(entity);
@@ -472,11 +472,27 @@ impl CadDocument {
         }
 
         let owner_br_handle = self.block_record_by_any_handle(owner_handle).map(|br| br.handle);
-        let Some(owner_br_handle) = owner_br_handle else {
-            return Err(format!(
-                "owner handle {:X} does not resolve to a block record",
-                owner_handle.value()
-            ));
+        let owner_br_handle = match owner_br_handle {
+            Some(handle) => handle,
+            None => {
+                // R50-LINE-HANDLE-RECOVERY (2026-04-28): native DWG recovery
+                // can surface entities whose decoded `owner_handle` does not
+                // resolve to any known block record (e.g. when the AC1015
+                // recovery pipeline finds 82 LINE entities in
+                // `pending.handle_offsets` but only 26 have owner handles
+                // pointing at the resolved block-record table). Hard-erroring
+                // here used to drop those 56 entities silently, leaving the
+                // user with `read_dwg recovered 26 LINE` instead of 82.
+                //
+                // Graceful fallback: route the orphan into model space so the
+                // entity is still rendered/exported. The original
+                // `owner_handle` would otherwise alias an invalid block-record
+                // handle, so we rewrite it to the model-space handle so later
+                // ownership repair / round-trip writes stay consistent.
+                entity.owner_handle = self.model_space_handle();
+                self.entities.push(entity);
+                return Ok(());
+            }
         };
 
         let is_layout_block = self
