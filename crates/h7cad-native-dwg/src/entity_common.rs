@@ -82,29 +82,27 @@ pub struct Ac1015EntityCommonProbeFailure {
 }
 
 fn skip_extended_entity_data(reader: &mut BitReader<'_>) -> Result<(), DwgReadError> {
+    // R47-DWG-HANDOFF cleanup (2026-04-28): removed the legacy fake-xdata
+    // sentinel that compared `declared_payload_bytes` against
+    // `reader.bits_remaining() / 8` and rewound the reader on mismatch.
+    // It never fired on `sample_AC1015.dwg` (verified by toggling the
+    // sentinel and re-running `real_dwg_samples_baseline_m3b` — entity
+    // counts unchanged), and ACadSharp's `readExtendedData`
+    // (`DwgObjectReader.cs:505+`) trusts the declared BS size
+    // unconditionally — letting EED records walk to `position + size`
+    // bytes and surfacing a real EOF on truly malformed input — which is
+    // already handled upstream as `CommonDecodeFail`. See
+    // `docs/plans/2026-04-28-native-dwg-line-body-decode-plan.md` §1 / §2
+    // for the dead-code analysis and why the original 8-bit handoff
+    // hypothesis it was meant to guard turned out to be a diagnostics
+    // statistical artefact rather than a real production bug.
     loop {
-        let block_start = reader.position_in_bits();
         let size = reader.read_bit_short()?;
         if size <= 0 {
             break;
         }
         let _ = reader.read_handle()?;
-        let available_payload_bytes = reader.bits_remaining() / 8;
-        let declared_payload_bytes = size as usize;
-
-        // The blocked AC1015 LINE/POINT handles show a distinctive pattern:
-        // the first "xdata" block declares far more payload bytes than remain
-        // in the main stream, while the inline application handle is just the
-        // NULL marker (code=3,len=0). Recovered LINE/POINT/TEXT/HATCH examples
-        // do not exhibit this combination. Treat that shape as a selective
-        // false-positive xdata sentinel so we can continue with the normal
-        // common/entity decode path instead of consuming the entire main stream.
-        if declared_payload_bytes > available_payload_bytes {
-            reader.set_position_in_bits(block_start)?;
-            break;
-        }
-
-        for _ in 0..declared_payload_bytes {
+        for _ in 0..(size as usize) {
             reader.read_raw_u8()?;
         }
     }
