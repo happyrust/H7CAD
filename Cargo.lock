@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "H7CAD"
-version = "0.1.3"
+version = "0.1.7"
 dependencies = [
  "acadrust",
  "bytemuck",
@@ -19,6 +19,7 @@ dependencies = [
  "open",
  "pid-parse",
  "printpdf",
+ "rayon",
  "rfd",
  "roxmltree 0.20.0",
  "serde",
@@ -47,9 +48,9 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "acadrust"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d453db969e840f4ca27205376d8b66f5467dc7611b475ed51cd421d6aca9cc0e"
+checksum = "2545729000aceb2c30e7002bdc26050532d5fa806bb6a6fef37175ebe6c8c5d2"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -4272,7 +4273,7 @@ checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 
 [[package]]
 name = "pid-parse"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "base64",
  "cfb 0.14.0",

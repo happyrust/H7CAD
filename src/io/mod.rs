@@ -15,6 +15,7 @@ pub mod step;
 pub mod stl;
 pub mod xref;
 
+use acadrust::entities::{Dimension, EntityType};
 use acadrust::io::dwg::DwgReader;
 use acadrust::{CadDocument, DwgWriter};
 use h7cad_native_model::CadDocument as NativeCadDocument;
@@ -413,15 +414,26 @@ fn load_dxf_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError>
 }
 
 /// Write the document to a DXF file at `path`.
-///
-/// The DXF writer (`h7cad-native-dxf`) emits a single target syntax
-/// regardless of the picked filter label; historic revisions of
-/// `pick_save_path` exposed 8 "DXF Files (2018/.../R13)" entries that
-/// could never actually influence the output (rfd's API does not
-/// return the selected filter). The dialog now advertises a single
-/// "DXF File" option to stay honest.
 pub fn save_dxf(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let text = h7cad_native_dxf::write_dxf(doc)?;
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
+// ── DXF post-load fixups ──────────────────────────────────────────────────
+
+fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
+    for entity in doc.entities_mut() {
+        match entity {
+            EntityType::Dimension(Dimension::Linear(d)) => {
+                d.rotation = d.rotation.to_radians();
+            }
+            EntityType::AttributeDefinition(a) => {
+                a.rotation = a.rotation.to_radians();
+            }
+            EntityType::AttributeEntity(a) => {
+                a.rotation = a.rotation.to_radians();
+            }
+            _ => {}
+        }
+    }
+}

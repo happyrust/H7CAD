@@ -367,15 +367,34 @@ impl H7CAD {
             self.tabs[i].selected_grips.clear();
             return;
         }
+        let wo = self.tabs[i].scene.world_offset;
         let (new_handle, new_grips) = {
             let selected = selected_entity_refs(&self.tabs[i].scene);
             if selected.len() == 1 {
                 match selected[0] {
                     SelectedEntityRef::Compat(handle, entity) => {
-                        (Some(handle), dispatch::grips(entity))
+                        let grips = dispatch::grips(entity)
+                            .into_iter()
+                            .map(|mut g| {
+                                g.world.x -= wo[0] as f32;
+                                g.world.y -= wo[1] as f32;
+                                g.world.z -= wo[2] as f32;
+                                g
+                            })
+                            .collect();
+                        (Some(handle), grips)
                     }
                     SelectedEntityRef::Native(handle, entity) => {
-                        (Some(handle), dispatch::grips_native(entity))
+                        let grips = dispatch::grips_native(entity)
+                            .into_iter()
+                            .map(|mut g| {
+                                g.world.x -= wo[0] as f32;
+                                g.world.y -= wo[1] as f32;
+                                g.world.z -= wo[2] as f32;
+                                g
+                            })
+                            .collect();
+                        (Some(handle), grips)
                     }
                 }
             } else {
@@ -436,13 +455,18 @@ impl H7CAD {
                 vp.id = (max_id + 1).max(2);
             }
 
-            let new_handle = self.tabs[i].scene.add_entity(entity);
-            if !new_handle.is_null() {
-                // Auto-fit the new viewport to show model-space content.
-                self.tabs[i].scene.auto_fit_viewport(new_handle);
-            } else {
-                self.command_line
-                    .push_error("Viewport could not be added.");
+            let layout = self.tabs[i].scene.current_layout.clone();
+            match self.tabs[i]
+                .scene
+                .document
+                .add_entity_to_layout(entity, &layout)
+            {
+                Ok(new_handle) => {
+                    self.tabs[i].scene.auto_fit_viewport(new_handle);
+                }
+                Err(e) => self
+                    .command_line
+                    .push_error(&format!("Viewport could not be added: {e}")),
             }
         } else {
             self.tabs[i].scene.add_entity(entity);

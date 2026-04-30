@@ -53,13 +53,15 @@ pub(super) struct H7CAD {
     dyn_input: bool,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
-    /// Show the ViewCube in the top-right of the viewport (NAVVCUBE).
+    /// Whether the ViewCube 3D gizmo is visible in model space (NAVVCUBE).
     show_viewcube: bool,
-    /// Show the vertical navigation toolbar (pan/zoom/orbit) in the viewport (NAVBAR).
+    /// Whether the navigation toolbar is shown in the viewport (NAVBAR).
     show_navbar: bool,
-    /// Show the document file tab bar between the ribbon and viewport (FILETAB).
+    /// Whether the Properties panel is shown on the left (PROPERTIES).
+    show_properties: bool,
+    /// Whether the document file tabs are shown at the top (FILETAB).
     show_file_tabs: bool,
-    /// Show the layout tab strip inside the status bar (LAYOUTTAB).
+    /// Whether the layout/paper-space tabs are shown at the bottom (LAYOUTTAB).
     show_layout_tabs: bool,
     /// Underlay frame visibility (FRAMES0 / FRAMES1 / FRAMES2): 0 = hidden,
     /// 1 = on, 2 = on + print.  Mirrored into `Scene.underlay_frames_mode`.
@@ -86,6 +88,7 @@ pub(super) struct H7CAD {
     plotstyle_window:       Option<window::Id>,
     dimstyle_window:        Option<window::Id>,
     shortcuts_window:       Option<window::Id>,
+    about_window:           Option<window::Id>,
     /// In-memory clipboard: cloned entities waiting to be pasted.
     clipboard: Vec<acadrust::EntityType>,
     /// Centroid of the clipboard entities (XZ plane, Y-up).
@@ -330,6 +333,16 @@ pub enum Message {
     ToggleSnapEnabled,
     /// Toggle grid-snap on/off — F9 / SNAP status-bar button.
     ToggleGridSnap,
+    /// Toggle the ViewCube 3D gizmo visibility (NAVVCUBE).
+    ToggleViewCube,
+    /// Toggle the navigation toolbar visibility (NAVBAR).
+    ToggleNavbar,
+    /// Toggle the Properties panel visibility (PROPERTIES).
+    ToggleProperties,
+    /// Toggle the document file tabs at the top (FILETAB).
+    ToggleFileTabs,
+    /// Toggle the layout tabs at the bottom (LAYOUTTAB).
+    ToggleLayoutTabs,
     /// Toggle grid display in the viewport — F7 / GRID status-bar button.
     ToggleGrid,
     /// Toggle orthogonal drawing constraint — F8 / ORTHO status-bar button.
@@ -455,6 +468,9 @@ pub enum Message {
     ShortcutsPanelOpen,
     #[allow(dead_code)]
     ShortcutsPanelClose,
+    // ── About window ────────────────────────────────────────────────────
+    AboutOpen,
+    AboutCopyInfo,
     /// Close the viewport right-click context menu without performing any action.
     ViewportContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
@@ -689,6 +705,7 @@ impl H7CAD {
             show_ucs_icon: true,
             show_viewcube: true,
             show_navbar: true,
+            show_properties: true,
             show_file_tabs: true,
             show_layout_tabs: true,
             frames_mode: 1,
@@ -705,6 +722,7 @@ impl H7CAD {
             plotstyle_window:      None,
             dimstyle_window:       None,
             shortcuts_window:      None,
+            about_window:          None,
             clipboard: Vec::new(),
             clipboard_centroid: glam::Vec3::ZERO,
             layout_context_menu: None,
@@ -834,6 +852,7 @@ pub fn run() -> iced::Result {
             if Some(window_id) == state.shortcuts_window     { return "Keyboard Shortcuts".into(); }
             if Some(window_id) == state.svg_export_window    { return "SVG Export Options".into(); }
             if Some(window_id) == state.pdf_export_window    { return "PDF Export Options".into(); }
+            if Some(window_id) == state.about_window         { return "About H7CAD".into(); }
             if let Some(tab) = state.tabs.get(state.active_tab) {
                 let dot = if tab.dirty { "● " } else { "" };
                 let name = tab.tab_display_name();

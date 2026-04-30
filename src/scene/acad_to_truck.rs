@@ -9,12 +9,20 @@ use crate::entities::{arc, circle, line, lwpolyline, mtext, point, text};
 use crate::entities::traits::EntityTypeOps;
 use crate::scene::wire_model::{SnapHint, TangentGeom};
 
+/// One group of glyph strokes with its world-space origin stored in f64.
+/// Strokes are in glyph-local space (origin = [0,0]) so that the large
+/// world offset can be subtracted with f64 precision in tessellate.rs.
+pub struct TextStroke {
+    pub strokes: Vec<Vec<[f32; 2]>>,
+    pub origin:  [f64; 2],
+}
+
 #[allow(dead_code)]
 pub enum TruckObject {
     Point(Vertex),
     Curve(Edge),
     Contour(Wire),
-    Text(Vec<Vec<[f32; 2]>>),
+    Text(Vec<TextStroke>),
     /// Pre-computed NaN-separated 3-D point list (leader lines, arrowheads, etc.).
     Lines(Vec<[f32; 3]>),
     Volume(Solid),
@@ -212,14 +220,16 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
                         document,
                     );
                     match text.object {
-                        TruckObject::Text(strokes) => {
-                            for stroke in strokes {
-                                if stroke.len() < 2 {
-                                    continue;
-                                }
-                                points.push([f32::NAN; 3]);
-                                for [x, y] in stroke {
-                                    points.push([x, y, loc[2] as f32]);
+                        TruckObject::Text(text_strokes) => {
+                            for ts in text_strokes {
+                                for polyline in &ts.strokes {
+                                    if polyline.len() < 2 {
+                                        continue;
+                                    }
+                                    points.push([f32::NAN; 3]);
+                                    for [x, y] in polyline {
+                                        points.push([*x, *y, loc[2] as f32]);
+                                    }
                                 }
                             }
                         }

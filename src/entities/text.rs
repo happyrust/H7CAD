@@ -4,9 +4,9 @@ use glam::Vec3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
-use crate::entities::text_support::{resolve_text_style, resolve_text_style_native, text_local_bounds};
+use crate::entities::text_support::{resolve_dxf_special_chars, resolve_text_style, resolve_text_style_native, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
 use crate::scene::cxf;
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::wire_model::SnapHint;
@@ -55,12 +55,17 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
     );
     let resolved_style = resolve_text_style(&t.style, document);
     let font_name = resolved_style.font_name;
-    let width_factor = (if t.width_factor > 0.0 {
-        t.width_factor as f32
-    } else {
-        1.0
-    } * resolved_style.width_factor.max(0.01))
+    let base_wf = (if t.width_factor > 0.0 { t.width_factor as f32 } else { 1.0 }
+        * resolved_style.width_factor.max(0.01))
     .clamp(0.01, 100.0);
+    // is_backward mirrors text left-right via negative width factor.
+    let width_factor = if resolved_style.is_backward { -base_wf } else { base_wf };
+    // is_upside_down rotates 180° around the insertion point.
+    let rotation = if resolved_style.is_upside_down {
+        t.rotation as f32 + std::f32::consts::PI
+    } else {
+        t.rotation as f32
+    };
     let oblique_angle = t.oblique_angle as f32 + resolved_style.oblique_angle;
     let anchor = match (
         &t.horizontal_alignment,
@@ -72,9 +77,11 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
         (_, VA::Bottom | VA::Middle | VA::Top, Some(a)) => [a.x as f32, a.y as f32],
         _ => [t.insertion_point.x as f32, t.insertion_point.y as f32],
     };
+    // Strip %%u/%%o for bounds (they add no width); resolve %%d/%%c/%%p for correct advance.
+    let value_for_bounds = resolve_dxf_special_chars(&t.value);
     let bounds = text_local_bounds(
         &font_name,
-        &t.value,
+        &value_for_bounds,
         t.height as f32,
         width_factor,
         oblique_angle,
@@ -95,22 +102,26 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
     } else {
         (0.0, 0.0)
     };
-    let (cos_r, sin_r) = ((t.rotation as f32).cos(), (t.rotation as f32).sin());
-    let origin = [
-        anchor[0] - (anchor_local_x * cos_r - anchor_local_y * sin_r),
-        anchor[1] - (anchor_local_x * sin_r + anchor_local_y * cos_r),
+    let (cos_r, sin_r) = (rotation.cos() as f64, rotation.sin() as f64);
+    // Keep origin as f64 — large coordinates (UTM etc.) must not be cast to
+    // f32 here; world_offset subtraction happens later in tessellate.rs.
+    let anchor_f64 = [anchor[0] as f64, anchor[1] as f64];
+    let origin: [f64; 2] = [
+        anchor_f64[0] - (anchor_local_x as f64 * cos_r - anchor_local_y as f64 * sin_r),
+        anchor_f64[1] - (anchor_local_x as f64 * sin_r + anchor_local_y as f64 * cos_r),
     ];
-    let strokes_2d = cxf::tessellate_text_ex(
-        origin,
+    // Strokes are in glyph-local space (origin = [0,0]).
+    let strokes = cxf::tessellate_text_ex(
+        [0.0, 0.0],
         t.height as f32,
-        t.rotation as f32,
+        rotation,
         width_factor,
         oblique_angle,
         &font_name,
         &t.value,
     );
     TruckEntity {
-        object: TruckObject::Text(strokes_2d),
+        object: TruckObject::Text(vec![TextStroke { strokes, origin }]),
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],
@@ -222,7 +233,10 @@ pub fn to_truck_native(
         value,
     );
     TruckEntity {
-        object: TruckObject::Text(strokes_2d),
+        object: TruckObject::Text(vec![TextStroke {
+            strokes: strokes_2d,
+            origin: [origin[0] as f64, origin[1] as f64],
+        }]),
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],

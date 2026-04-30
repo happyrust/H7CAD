@@ -348,7 +348,7 @@ impl EntityTypeOps for EntityType {
             // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::LwPolyline(pline) => {
                 let verts = lwv_ar_to_nm(&pline.vertices);
-                lwpolyline::grips(&verts, pline.elevation)
+                lwpolyline::grips(&verts, pline.is_closed, pline.elevation)
             }
             // ── B5e: Ray/XLine/Solid/Spline/Shape inline ──────────────────
             EntityType::Ray(r) => {

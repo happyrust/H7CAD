@@ -317,6 +317,17 @@ impl DocumentTab {
     pub(super) fn new_drawing(n: usize) -> Self {
         let mut scene = Scene::new();
         linetypes::populate_document(&mut scene.document);
+        // Override acadrust's imperial default limits (12×9) with A4 landscape.
+        for obj in scene.document.objects.values_mut() {
+            if let acadrust::objects::ObjectType::Layout(l) = obj {
+                if l.name != "Model" {
+                    l.min_limits = (0.0, 0.0);
+                    l.max_limits = (297.0, 210.0);
+                    l.min_extents = (0.0, 0.0, 0.0);
+                    l.max_extents = (297.0, 210.0, 0.0);
+                }
+            }
+        }
         Self {
             tab_mode: DocumentTabMode::Cad,
             pid_state: None,

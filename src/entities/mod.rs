@@ -22,7 +22,7 @@ pub mod shape;
 pub mod solid;
 pub mod spline;
 pub mod text;
-mod text_support;
+pub(crate) mod text_support;
 pub mod table;
 pub mod tolerance;
 pub mod traits;

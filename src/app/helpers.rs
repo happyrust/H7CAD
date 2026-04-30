@@ -244,40 +244,53 @@ pub(super) fn next_group_auto_name(scene: &crate::scene::Scene) -> String {
 // ── Entity type labels ─────────────────────────────────────────────────────
 
 pub(super) fn entity_type_label(entity: &acadrust::EntityType) -> String {
-    use acadrust::EntityType::*;
-    match entity {
-        Line(_) => "Line",
-        Circle(_) => "Circle",
-        Arc(_) => "Arc",
-        Ellipse(_) => "Ellipse",
-        Spline(_) => "Spline",
-        LwPolyline(_) => "Polyline",
-        Text(_) => "Text",
-        MText(_) => "MText",
-        Dimension(_) => "Dimension",
-        Insert(_) => "Block Reference",
-        Point(_) => "Point",
-        Hatch(_) => "Hatch",
-        _ => "Entity",
-    }
-    .to_string()
+    crate::scene::properties::entity_type_name(entity).to_string()
 }
 
 pub(super) fn entity_type_key(entity: &acadrust::EntityType) -> String {
+    use acadrust::EntityType::*;
     match entity {
-        acadrust::EntityType::LwPolyline(_) => "pline",
-        acadrust::EntityType::Circle(_) => "circle",
-        acadrust::EntityType::Line(_) => "line",
-        acadrust::EntityType::Arc(_) => "arc",
-        acadrust::EntityType::Ellipse(_) => "ellipse",
-        acadrust::EntityType::Spline(_) => "spline",
-        acadrust::EntityType::Text(_) => "text",
-        acadrust::EntityType::MText(_) => "mtext",
-        acadrust::EntityType::Dimension(_) => "dimension",
-        acadrust::EntityType::Insert(_) => "insert",
-        acadrust::EntityType::Point(_) => "point",
-        acadrust::EntityType::Hatch(_) => "hatch",
-        _ => "entity",
+        Point(_) => "point",
+        Line(_) => "line",
+        Circle(_) => "circle",
+        Arc(_) => "arc",
+        Ellipse(_) => "ellipse",
+        Spline(_) => "spline",
+        LwPolyline(_) | Polyline(_) => "pline",
+        Polyline2D(_) => "pline2d",
+        Polyline3D(_) => "pline3d",
+        PolyfaceMesh(_) => "polyface",
+        PolygonMesh(_) => "polymesh",
+        Text(_) => "text",
+        MText(_) => "mtext",
+        Dimension(_) => "dimension",
+        Leader(_) => "leader",
+        MultiLeader(_) => "multileader",
+        Tolerance(_) => "tolerance",
+        Insert(_) => "insert",
+        Block(_) => "block",
+        BlockEnd(_) => "blockend",
+        Hatch(_) => "hatch",
+        Solid(_) => "solid",
+        Face3D(_) => "face3d",
+        Solid3D(_) => "solid3d",
+        Region(_) => "region",
+        Body(_) => "body",
+        Mesh(_) => "mesh",
+        Ray(_) => "ray",
+        XLine(_) => "xline",
+        MLine(_) => "mline",
+        Viewport(_) => "viewport",
+        RasterImage(_) => "rasterimage",
+        Wipeout(_) => "wipeout",
+        Underlay(_) => "underlay",
+        Shape(_) => "shape",
+        Table(_) => "table",
+        AttributeDefinition(_) => "attdef",
+        AttributeEntity(_) => "attrib",
+        Ole2Frame(_) => "ole2frame",
+        Seqend(_) => "seqend",
+        Unknown(_) => "unknown",
     }
     .to_string()
 }

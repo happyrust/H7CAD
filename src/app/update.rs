@@ -409,6 +409,7 @@ impl H7CAD {
                     ));
                 }
                 self.app_menu.push_recent(path.clone());
+                self.tabs[i].scene.compute_and_set_world_offset();
                 self.tabs[i].scene.populate_hatches_from_document();
                 self.tabs[i].scene.populate_images_from_document();
                 self.tabs[i].scene.populate_meshes_from_document();
@@ -1282,6 +1283,7 @@ impl H7CAD {
                 if self.shortcuts_window     == Some(id) { self.shortcuts_window     = None; }
                 if self.svg_export_window    == Some(id) { self.svg_export_window    = None; }
                 if self.pdf_export_window    == Some(id) { self.pdf_export_window    = None; }
+                if self.about_window         == Some(id) { self.about_window         = None; }
                 Task::none()
             }
 
@@ -1329,6 +1331,7 @@ impl H7CAD {
                     if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
                         if frozen { dl.freeze(); } else { dl.thaw(); }
                     }
+                    self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;
                 }
                 Task::none()
@@ -1365,6 +1368,7 @@ impl H7CAD {
                         let vp_info = self.tabs[i].scene.viewport_list();
                         let doc_layers = self.tabs[i].scene.document.layers.clone();
                         self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
+                        self.tabs[i].scene.bump_geometry();
                         self.tabs[i].dirty = true;
                     }
                 }
@@ -1639,9 +1643,19 @@ impl H7CAD {
                     if sel.right_dragging {
                         if let Some(last) = sel.right_last_pos {
                             let (dx, dy) = (p.x - last.x, p.y - last.y);
-                            self.tabs[i].scene.camera.borrow_mut().orbit(dx, dy);
+                            if self.tabs[i].scene.active_viewport.is_some() {
+                                // Update position before dropping the borrow.
+                                sel.right_last_pos = Some(p);
+                                drop(sel);
+                                self.tabs[i].scene.orbit_active_viewport(dx, dy);
+                                return Task::none();
+                            } else {
+                                self.tabs[i].scene.camera.borrow_mut().orbit(dx, dy);
+                                sel.right_last_pos = Some(p);
+                            }
+                        } else {
+                            sel.right_last_pos = Some(p);
                         }
-                        sel.right_last_pos = Some(p);
                     }
                 }
 
@@ -1697,10 +1711,12 @@ impl H7CAD {
                         }
                     }
 
+                    let wo = self.tabs[i].scene.world_offset;
+                    let wo_vec = glam::Vec3::new(wo[0] as f32, wo[1] as f32, wo[2] as f32);
                     let apply = if grip.is_translate {
                         GripApply::Translate(snapped - grip.last_world)
                     } else {
-                        GripApply::Absolute(snapped)
+                        GripApply::Absolute(snapped + wo_vec)
                     };
                     if self.apply_active_grip_edit(i, &grip, apply) {
                         self.tabs[i].dirty = true;
@@ -1743,9 +1759,9 @@ impl H7CAD {
                     self.tabs[i].snap_result = if needs_entity || is_gathering {
                         None
                     } else if needs_tan {
-                        self.snapper.snap_tangent_only(cursor_world, p, &all_wires, view_proj, bounds)
+                        self.snapper.snap_tangent_only(cursor_world, p, &all_wires[..], view_proj, bounds)
                     } else {
-                        self.snapper.snap(cursor_world, p, &all_wires, view_proj, bounds)
+                        self.snapper.snap(cursor_world, p, &all_wires[..], view_proj, bounds)
                     };
 
                     // Object Snap Tracking: update dwell and override snap if tracking.
@@ -1790,7 +1806,7 @@ impl H7CAD {
 
                     let mut previews = if needs_entity {
                         let hover_handle =
-                            scene::hit_test::click_hit(p, &all_wires, view_proj, bounds)
+                            scene::hit_test::click_hit(p, &all_wires[..], view_proj, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
                                 .unwrap_or(acadrust::Handle::NULL);
                         self.tabs[i].active_cmd.as_mut()
@@ -1827,6 +1843,7 @@ impl H7CAD {
                                     snap_pts: vec![],
                                     tangent_geoms: vec![],
                                     key_vertices: vec![],
+                                    aabb: crate::scene::WireModel::UNBOUNDED_AABB,
                                 };
                                 previews.push(guide);
                             }
@@ -1961,9 +1978,9 @@ impl H7CAD {
                         let snap_hit = if needs_entity_click {
                             None
                         } else if needs_tan {
-                            self.snapper.snap_tangent_only(raw, p, &all_wires, vp_mat, bounds)
+                            self.snapper.snap_tangent_only(raw, p, &all_wires[..], vp_mat, bounds)
                         } else {
-                            self.snapper.snap(raw, p, &all_wires, vp_mat, bounds)
+                            self.snapper.snap(raw, p, &all_wires[..], vp_mat, bounds)
                         };
                         // snap.world is in paper-space (projected wire coords in MSPACE);
                         // convert to model-space so commands receive consistent coordinates.
@@ -2080,23 +2097,23 @@ impl H7CAD {
                 if is_down2 {
                     let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vp_size.0, height: vp_size.1 };
 
-                        if is_dragging {
-                            if elapsed_ms < POLY_START_DELAY_MS {
-                                if let Some(a) = box_anchor {
-                                    let crossing = box_crossing;
-                                    let all_wires = self.tabs[i].scene.hit_test_wires();
-                                    let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
-                                    let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                                    let mut handles: Vec<Handle> = scene::hit_test::box_hit(
-                                        a, p, crossing, &all_wires, vp_mat, bounds,
-                                    ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
-                                    handles.extend(scene::hit_test::box_hit_hatch_entries(
-                                        a, p, crossing, &hatch_entries, vp_mat, bounds,
-                                    ));
-                                    self.tabs[i].scene.deselect_all();
-                                    for h in &handles { self.tabs[i].scene.select_entity(*h, false); }
-                                    self.tabs[i].scene.expand_selection_for_groups(&handles);
-                                    self.refresh_properties();
+                    if is_dragging {
+                        if elapsed_ms < POLY_START_DELAY_MS {
+                            if let Some(a) = box_anchor {
+                                let crossing = box_crossing;
+                                let all_wires = self.tabs[i].scene.hit_test_wires();
+                                let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
+                                let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
+                                let mut handles: Vec<Handle> = scene::hit_test::box_hit(
+                                    a, p, crossing, &all_wires, vp_mat, bounds,
+                                ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
+                                handles.extend(scene::hit_test::box_hit_hatch_entries(
+                                    a, p, crossing, &hatch_entries, vp_mat, bounds,
+                                ));
+                                self.tabs[i].scene.deselect_all();
+                                for h in &handles { self.tabs[i].scene.select_entity(*h, false); }
+                                self.tabs[i].scene.expand_selection_for_groups(&handles);
+                                self.refresh_properties();
                                 selection_just_completed = true;
                             }
                         } else {
@@ -2109,7 +2126,7 @@ impl H7CAD {
                             let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let mut handles: Vec<Handle> = scene::hit_test::poly_hit(
-                                &poly_pts, crossing, &all_wires, vp_mat, bounds,
+                                &poly_pts, crossing, &all_wires[..], vp_mat, bounds,
                             ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
                             handles.extend(scene::hit_test::poly_hit_hatch_entries(
                                 &poly_pts, crossing, &hatch_entries, vp_mat, bounds,
@@ -2131,7 +2148,7 @@ impl H7CAD {
                             let all_wires = self.tabs[i].scene.hit_test_wires();
                             let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
-                            let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
+                            let hit = scene::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
                                 .or_else(|| scene::hit_test::click_hit_hatch_entries(
                                     p, &hatch_entries, vp_mat, bounds,
@@ -2156,7 +2173,7 @@ impl H7CAD {
                             let hatch_entries = self.tabs[i].scene.synced_hatch_entries();
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let mut handles: Vec<Handle> = scene::hit_test::box_hit(
-                                a, p, crossing, &all_wires, vp_mat, bounds,
+                                a, p, crossing, &all_wires[..], vp_mat, bounds,
                             ).into_iter().filter_map(|s| Scene::handle_from_wire_name(s)).collect();
                             handles.extend(scene::hit_test::box_hit_hatch_entries(
                                 a, p, crossing, &hatch_entries, vp_mat, bounds,
@@ -2216,7 +2233,7 @@ impl H7CAD {
                         let bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
                         let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                         let all_wires = self.tabs[i].scene.hit_test_wires();
-                        let hit = scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
+                        let hit = scene::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
                             .and_then(|s| Scene::handle_from_wire_name(s));
                         if let Some(handle) = hit {
                             use crate::modules::annotate::ddedit::{
@@ -2274,7 +2291,7 @@ impl H7CAD {
                         let hit_vp: Option<acadrust::Handle> = {
                             let vp_mat = self.tabs[i].scene.camera.borrow().view_proj(bounds);
                             let all_wires = self.tabs[i].scene.hit_test_wires();
-                            scene::hit_test::click_hit(p, &all_wires, vp_mat, bounds)
+                            scene::hit_test::click_hit(p, &all_wires[..], vp_mat, bounds)
                                 .and_then(|s| Scene::handle_from_wire_name(s))
                                 .and_then(|h| {
                                     if let Some(AcadEntityType::Viewport(vp)) =
@@ -2403,10 +2420,10 @@ impl H7CAD {
 
             Message::ViewportClick => {
                 let i = self.active_tab;
-                let cam = self.tabs[i].scene.camera.borrow();
+                let rot = self.tabs[i].scene.active_view_rotation_mat();
                 let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
                 if let Some(region) = scene::hit_test(
-                    self.cursor_pos.x, self.cursor_pos.y, vw, vh, cam.view_rotation_mat(), VIEWCUBE_PX,
+                    self.cursor_pos.x, self.cursor_pos.y, vw, vh, rot, VIEWCUBE_PX,
                 ) {
                     return Task::done(Message::ViewCubeSnap(region));
                 }
@@ -2421,15 +2438,31 @@ impl H7CAD {
             Message::ViewCubeSnap(region) => {
                 let i = self.active_tab;
                 let mut region = region;
-                {
-                    let mut cam = self.tabs[i].scene.camera.borrow_mut();
+                let (yaw, pitch) = {
                     let (target_yaw, target_pitch) = region.snap_angles();
-                    if angle_close(cam.yaw, target_yaw, 0.01)
-                        && angle_close(cam.pitch, target_pitch, 0.01)
+                    // Check current orientation to detect "already there → flip to opposite".
+                    let already_there = if let Some((cur_yaw, cur_pitch)) =
+                        self.tabs[i].scene.active_viewport_yaw_pitch()
                     {
+                        angle_close(cur_yaw, target_yaw, 0.01)
+                            && angle_close(cur_pitch, target_pitch, 0.01)
+                    } else if self.tabs[i].scene.active_viewport.is_some() {
+                        false
+                    } else {
+                        let cam = self.tabs[i].scene.camera.borrow();
+                        angle_close(cam.yaw, target_yaw, 0.01)
+                            && angle_close(cam.pitch, target_pitch, 0.01)
+                    };
+                    if already_there {
                         region = region.opposite();
                     }
-                    let (yaw, pitch) = region.snap_angles();
+                    region.snap_angles()
+                };
+
+                if self.tabs[i].scene.active_viewport.is_some() {
+                    self.tabs[i].scene.snap_active_viewport_to_angles(yaw, pitch);
+                } else {
+                    let mut cam = self.tabs[i].scene.camera.borrow_mut();
                     cam.snap_to_angles(yaw, pitch);
                 }
                 self.tabs[i].scene.camera_generation += 1;
@@ -2452,6 +2485,11 @@ impl H7CAD {
                 Task::none()
             }
             Message::ToggleDynInput => { self.dyn_input ^= true; Task::none() }
+            Message::ToggleViewCube => { self.show_viewcube ^= true; Task::none() }
+            Message::ToggleNavbar => { self.show_navbar ^= true; Task::none() }
+            Message::ToggleProperties => { self.show_properties ^= true; Task::none() }
+            Message::ToggleFileTabs => { self.show_file_tabs ^= true; Task::none() }
+            Message::ToggleLayoutTabs => { self.show_layout_tabs ^= true; Task::none() }
             Message::ToggleOTrack => {
                 self.snapper.otrack_enabled ^= true;
                 if !self.snapper.otrack_enabled {
@@ -2878,6 +2916,18 @@ impl H7CAD {
                 self.push_undo_snapshot(i, "LAYOUT");
                 match self.tabs[i].scene.document.add_layout(&new_name) {
                     Ok(_) => {
+                        // Override the acadrust default limits (12×9 imperial) with A4 landscape.
+                        for obj in self.tabs[i].scene.document.objects.values_mut() {
+                            if let acadrust::objects::ObjectType::Layout(l) = obj {
+                                if l.name == new_name {
+                                    l.min_limits = (0.0, 0.0);
+                                    l.max_limits = (297.0, 210.0);
+                                    l.min_extents = (0.0, 0.0, 0.0);
+                                    l.max_extents = (297.0, 210.0, 0.0);
+                                    break;
+                                }
+                            }
+                        }
                         self.tabs[i].scene.current_layout = new_name.clone();
                         self.tabs[i].scene.deselect_all();
                         self.tabs[i].scene.fit_all();
@@ -3063,6 +3113,7 @@ impl H7CAD {
                     // Switch to Model if active layout was deleted.
                     if self.tabs[i].scene.current_layout == name {
                         self.tabs[i].scene.current_layout = "Model".to_string();
+                        self.tabs[i].scene.bump_geometry();
                     }
                     self.layout_manager_selected = "Model".to_string();
                     self.layout_manager_rename_buf = String::new();
@@ -3109,6 +3160,7 @@ impl H7CAD {
                 let i = self.active_tab;
                 let name = self.layout_manager_selected.clone();
                 self.tabs[i].scene.current_layout = name.clone();
+                self.tabs[i].scene.bump_geometry();
                 self.command_line.push_output(&format!("Switched to layout '{name}'."));
                 Task::none()
             }
@@ -3137,6 +3189,30 @@ impl H7CAD {
                 } else {
                     Task::none()
                 }
+            }
+
+            // ── About window ──────────────────────────────────────────────
+            Message::AboutOpen => {
+                if let Some(id) = self.about_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(340.0, 240.0),
+                    resizable: false,
+                    ..Default::default()
+                });
+                self.about_window = Some(id);
+                task.map(|_| Message::Noop)
+            }
+
+            Message::AboutCopyInfo => {
+                let info = format!(
+                    "H7CAD v{}\nOS: {}\nArch: {}",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    std::env::consts::ARCH,
+                );
+                iced::clipboard::write(info)
             }
 
             Message::ViewportContextMenuClose => {

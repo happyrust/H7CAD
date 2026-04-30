@@ -115,6 +115,101 @@ pub struct WireGpu {
 
 impl WireGpu {
     pub fn new(device: &wgpu::Device, wire: &WireModel) -> Self {
+        Self::build(device, wire, wire.color)
+    }
+
+    /// Creates a ghost copy with `alpha` applied on top of the wire's own alpha.
+    #[allow(dead_code)]
+    pub fn new_ghost(device: &wgpu::Device, wire: &WireModel, alpha: f32) -> Self {
+        let [r, g, b, a] = wire.color;
+        Self::build(device, wire, [r, g, b, a * alpha])
+    }
+
+    /// Merge multiple WireModels into GPU buffers chunked to fit the 256 MB GPU limit.
+    /// Each wire keeps its own color and pattern — they're stored per-vertex.
+    /// Returns an empty Vec if the combined vertex list is empty.
+    pub fn from_batch(device: &wgpu::Device, wires: &[WireModel]) -> Vec<Self> {
+        let total_segs: usize = wires.iter().map(|w| w.points.len().saturating_sub(1)).sum();
+        if total_segs == 0 {
+            return vec![];
+        }
+        let mut vertices: Vec<WireVertex> = Vec::with_capacity(total_segs * 6);
+
+        for wire in wires {
+            let color = wire.color;
+            let pat0 = [wire.pattern[0], wire.pattern[1], wire.pattern[2], wire.pattern[3]];
+            let pat1 = [wire.pattern[4], wire.pattern[5], wire.pattern[6], wire.pattern[7]];
+            let half_width = wire.line_weight_px * 0.5;
+            let n = wire.points.len();
+
+            // Cumulative arc-length per point.
+            let mut dists = vec![0.0_f32; n];
+            for i in 1..n {
+                let p = wire.points[i - 1];
+                let q = wire.points[i];
+                if !p[0].is_finite() || !q[0].is_finite() {
+                    dists[i] = dists[i - 1];
+                } else {
+                    let dx = q[0] - p[0];
+                    let dy = q[1] - p[1];
+                    let dz = q[2] - p[2];
+                    dists[i] = dists[i - 1] + (dx * dx + dy * dy + dz * dz).sqrt();
+                }
+            }
+
+            for i in 0..n.saturating_sub(1) {
+                let a = wire.points[i];
+                let b = wire.points[i + 1];
+                if !a[0].is_finite() || !a[1].is_finite() || !a[2].is_finite()
+                    || !b[0].is_finite() || !b[1].is_finite() || !b[2].is_finite()
+                {
+                    continue;
+                }
+                let dist_a = dists[i];
+                let dist_b = dists[i + 1];
+                let make = |which_end: f32, side: f32| -> WireVertex {
+                    let dist = if which_end < 0.5 { dist_a } else { dist_b };
+                    WireVertex {
+                        pos_a: a, pos_b: b, which_end, side, color,
+                        distance: dist, half_width,
+                        pattern_length: wire.pattern_length,
+                        _pad: 0.0, pat0, pat1,
+                    }
+                };
+                vertices.push(make(0.0, -1.0));
+                vertices.push(make(1.0, -1.0));
+                vertices.push(make(1.0,  1.0));
+                vertices.push(make(0.0, -1.0));
+                vertices.push(make(1.0,  1.0));
+                vertices.push(make(0.0,  1.0));
+            }
+        }
+
+        if vertices.is_empty() {
+            return vec![];
+        }
+
+        // GPU max buffer size is 256 MB; chunk to stay within the limit.
+        const MAX_VERTS: usize = 268_435_456 / std::mem::size_of::<WireVertex>();
+
+        vertices
+            .chunks(MAX_VERTS)
+            .enumerate()
+            .map(|(i, chunk)| {
+                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("wire.batch.vbuf.{i}")),
+                    contents: bytemuck::cast_slice(chunk),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                Self {
+                    vertex_buffer,
+                    vertex_count: chunk.len() as u32,
+                }
+            })
+            .collect()
+    }
+
+    fn build(device: &wgpu::Device, wire: &WireModel, color: [f32; 4]) -> Self {
         let pat0 = [
             wire.pattern[0],
             wire.pattern[1],
@@ -139,9 +234,9 @@ impl WireGpu {
         for i in 1..n {
             let p = wire.points[i - 1];
             let q = wire.points[i];
-            // If either point is a NaN sentinel, keep the same distance
-            // (the segment will be skipped anyway).
-            if p[0].is_nan() || q[0].is_nan() {
+            // If either point is non-finite (NaN sentinel or ±inf from overflow),
+            // keep the same distance — the segment will be skipped anyway.
+            if !p[0].is_finite() || !q[0].is_finite() {
                 dists[i] = dists[i - 1];
             } else {
                 let dx = q[0] - p[0];
@@ -155,15 +250,15 @@ impl WireGpu {
             let a = wire.points[i];
             let b = wire.points[i + 1];
 
-            // Skip any segment that involves a NaN sentinel point.
-            // NaN sentinels are inserted between disconnected glyph strokes
-            // by tessellate.rs so that multiple strokes can share one WireModel.
-            if a[0].is_nan()
-                || a[1].is_nan()
-                || a[2].is_nan()
-                || b[0].is_nan()
-                || b[1].is_nan()
-                || b[2].is_nan()
+            // Skip segments where either endpoint is non-finite (NaN sentinels
+            // from disconnected glyph strokes, or ±inf from Ray/XLine far-point
+            // overflow when the direction vector is very large).
+            if !a[0].is_finite()
+                || !a[1].is_finite()
+                || !a[2].is_finite()
+                || !b[0].is_finite()
+                || !b[1].is_finite()
+                || !b[2].is_finite()
             {
                 continue;
             }
@@ -178,7 +273,7 @@ impl WireGpu {
                     pos_b: b,
                     which_end,
                     side,
-                    color: wire.color,
+                    color,
                     distance: dist,
                     half_width,
                     pattern_length: wire.pattern_length,

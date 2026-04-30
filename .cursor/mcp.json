@@ -1,0 +1,163 @@
+{
+  "mcpServers": {
+    "my-mcp-1": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "1",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-2": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "2",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-3": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "3",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-4": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "4",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-5": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "5",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-6": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "6",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-7": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "7",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-8": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "8",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-9": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "9",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-10": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "10",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-11": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "11",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-12": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "12",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-13": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "13",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-14": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "14",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "my-mcp-15": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/lingxi.lingxi-mcp-1.0.30/dist/server.mjs"
+      ],
+      "env": {
+        "XIAOYEZI_SESSION": "15",
+        "XIAOYEZI_WORKSPACE": "/Volumes/DPC/work/cad/H7CAD"
+      }
+    },
+    "best-mcp-14": {
+      "command": "node",
+      "args": [
+        "/Users/dongpengcheng/.cursor/extensions/best-mcp.best-mcp-window-bridge-dev-1.5.12/dist/server.mjs"
+      ],
+      "env": {
+        "BEST_MCP_SESSION": "14"
+      }
+    }
+  }
+}

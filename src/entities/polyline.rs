@@ -169,8 +169,8 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             let py = dx / len;
             let sagitta_sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
             let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-            let cx = mx - sagitta_sign * px * (r - h);
-            let cy = my - sagitta_sign * py * (r - h);
+            let cx = mx + sagitta_sign * px * (r - h);
+            let cy = my + sagitta_sign * py * (r - h);
             let mid_a = {
                 let a0 = (p0.y - cy).atan2(p0.x - cx);
                 let a1 = (p1.y - cy).atan2(p1.x - cx);
@@ -298,18 +298,30 @@ impl Transformable for Polyline2D {
 // ── Polyline3D ────────────────────────────────────────────────────────────────
 
 fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
-    let pts: Vec<[f32; 3]> = pl
-        .vertices
-        .iter()
-        .map(|v| [v.position.x as f32, v.position.y as f32, v.position.z as f32])
-        .collect();
+    let to_pt = |v: &acadrust::entities::Vertex3DPolyline| -> [f32; 3] {
+        [v.position.x as f32, v.position.y as f32, v.position.z as f32]
+    };
 
-    let mut points = pts.clone();
-    if pl.is_closed() && pts.len() >= 2 {
-        points.push(pts[0]);
+    // DXF vertex flags:  8 = spline-fit curve point,  16 = spline frame control point.
+    // When spline-fit vertices are present use them for the wire and control points for snap;
+    // otherwise treat all vertices uniformly.
+    let spline_curve: Vec<_> = pl.vertices.iter().filter(|v| v.flags & 8 != 0).collect();
+    let ctrl_pts: Vec<_>     = pl.vertices.iter().filter(|v| v.flags & 16 != 0).collect();
+
+    let (wire_pts, key_verts) = if !spline_curve.is_empty() {
+        let wire: Vec<[f32; 3]> = spline_curve.iter().map(|v| to_pt(v)).collect();
+        let ctrl: Vec<[f32; 3]> = ctrl_pts.iter().map(|v| to_pt(v)).collect();
+        (wire, ctrl)
+    } else {
+        let pts: Vec<[f32; 3]> = pl.vertices.iter().map(to_pt).collect();
+        (pts.clone(), pts)
+    };
+
+    let mut points = wire_pts.clone();
+    if pl.is_closed() && wire_pts.len() >= 2 {
+        points.push(wire_pts[0]);
     }
 
-    let key_verts = pts.clone();
     TruckEntity {
         object: TruckObject::Lines(points),
         snap_pts: vec![],

@@ -55,12 +55,20 @@ pub struct WireModel {
     /// Non-empty only for entities with distinct vertex positions (Line, LwPolyline).
     /// Empty for tessellated curves (Circle, Arc, Ellipse) which use snap_pts instead.
     pub key_vertices: Vec<[f32; 3]>,
+    /// World-space 2-D bounding box [min_x, min_y, max_x, max_y].
+    /// Set from acadrust `bounding_box()` in `tessellate_entity()`.
+    /// Preview / interim wires use `UNBOUNDED_AABB` so they are never pre-rejected
+    /// by the snap world-space filter.
+    pub aabb: [f32; 4],
 }
 
 impl WireModel {
     pub const WHITE: [f32; 4] = [1.00, 1.00, 1.00, 1.0];
     pub const CYAN: [f32; 4] = [0.25, 0.85, 1.00, 1.0];
     pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
+    /// Sentinel AABB that never rejects any snap query.
+    pub const UNBOUNDED_AABB: [f32; 4] =
+        [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY];
 
     /// Create a solid wire (no dash pattern, 1px weight).
     pub fn solid(name: String, points: Vec<[f32; 3]>, color: [f32; 4], selected: bool) -> Self {
@@ -76,6 +84,7 @@ impl WireModel {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            aabb: Self::UNBOUNDED_AABB,
         }
     }
 
@@ -157,5 +166,24 @@ impl WireModel {
                 (dx * dx + dy * dy + dz * dz).sqrt()
             })
             .sum()
+    }
+}
+
+impl Default for WireModel {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            points: Vec::new(),
+            color: Self::WHITE,
+            selected: false,
+            pattern_length: 0.0,
+            pattern: [0.0; 8],
+            line_weight_px: 1.0,
+            aci: 0,
+            snap_pts: Vec::new(),
+            tangent_geoms: Vec::new(),
+            key_vertices: Vec::new(),
+            aabb: Self::UNBOUNDED_AABB,
+        }
     }
 }

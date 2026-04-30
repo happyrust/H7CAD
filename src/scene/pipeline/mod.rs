@@ -1,3 +1,4 @@
+pub mod face3d_gpu;
 pub mod hatch_gpu;
 pub mod image_gpu;
 pub mod mesh_gpu;
@@ -8,6 +9,7 @@ pub mod wire_gpu;
 use iced::wgpu;
 use iced::{Rectangle, Size};
 
+pub use face3d_gpu::Face3DGpu;
 pub use hatch_gpu::HatchGpu;
 pub use image_gpu::ImageGpu;
 pub use mesh_gpu::MeshGpu;
@@ -25,9 +27,13 @@ const MSAA_SAMPLES: u32 = 4;
 
 pub struct Pipeline {
     wire_pipeline: wgpu::RenderPipeline,
+    /// Same shader as wire_pipeline but depth_compare=Greater, depth_write_enabled=false.
+    /// Used to draw ghost copies of selected wires through occluding geometry.
+    wire_xray_pipeline: wgpu::RenderPipeline,
     hatch_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
+    face3d_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     hatch_bgl1: wgpu::BindGroupLayout,
@@ -46,12 +52,20 @@ pub struct Pipeline {
     /// Cached texture format (needed to recreate MSAA / depth textures on resize).
     surface_format: wgpu::TextureFormat,
     gpu_wires: Vec<WireGpu>,
+    /// Ghost copies (25% alpha) of selected wires for the X-ray depth pass.
+    gpu_selected_wires: Vec<WireGpu>,
     gpu_hatches: Vec<HatchGpu>,
     /// Wipeout fills — rendered after wires in a separate pass.
     gpu_wipeouts: Vec<HatchGpu>,
     gpu_images: Vec<ImageGpu>,
     gpu_meshes: Vec<MeshGpu>,
+    /// Batched 3DFACE fill (all faces in one buffer) and edges (merged wire).
+    gpu_face3d_fill: Option<Face3DGpu>,
+    gpu_face3d_edges: Vec<WireGpu>,
     pub viewcube: ViewCubePipeline,
+    /// Last geometry epoch for which GPU buffers were uploaded.
+    /// Initialized to u64::MAX so the first frame always uploads.
+    pub cached_epoch: u64,
 }
 
 impl Pipeline {
@@ -123,6 +137,49 @@ impl Pipeline {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLES,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &wire_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        // Selection overlay variant: renders selected wires on top of everything
+        // (depth_compare=Always), without writing depth. Ensures selected entities
+        // are always fully visible regardless of occluding geometry.
+        let wire_xray_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wire_xray.pipeline"),
+            layout: Some(&wire_layout),
+            vertex: wgpu::VertexState {
+                module: &wire_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wire_gpu::WireVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -256,6 +313,60 @@ impl Pipeline {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        // ── Face3D pipeline ────────────────────────────────────────────────
+        let face3d_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("face3d.shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "../../shaders/face3d.wgsl"
+            ))),
+        });
+
+        let face3d_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("face3d.pipeline_layout"),
+            bind_group_layouts: &[&frame_bgl],
+            push_constant_ranges: &[],
+        });
+
+        let face3d_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("face3d.pipeline"),
+            layout: Some(&face3d_layout),
+            vertex: wgpu::VertexState {
+                module: &face3d_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[face3d_gpu::Face3DVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: MSAA_SAMPLES,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &face3d_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -454,9 +565,11 @@ impl Pipeline {
 
         Self {
             wire_pipeline,
+            wire_xray_pipeline,
             hatch_pipeline,
             image_pipeline,
             mesh_pipeline,
+            face3d_pipeline,
             uniform_buffer,
             uniform_bind_group,
             hatch_bgl1,
@@ -471,16 +584,40 @@ impl Pipeline {
             blit_bind_group,
             surface_format: format,
             gpu_wires: vec![],
+            gpu_selected_wires: vec![],
             gpu_hatches: vec![],
             gpu_wipeouts: vec![],
             gpu_images: vec![],
             gpu_meshes: vec![],
+            gpu_face3d_fill: None,
+            gpu_face3d_edges: vec![],
             viewcube,
+            cached_epoch: u64::MAX,
         }
     }
 
     pub fn upload_wires(&mut self, device: &wgpu::Device, wires: &[WireModel]) {
         self.gpu_wires = wires.iter().map(|w| WireGpu::new(device, w)).collect();
+        // Full-brightness copies of selected wires, drawn on top of everything
+        // in the selection overlay pass so they're always visible.
+        self.gpu_selected_wires = wires
+            .iter()
+            .filter(|w| w.selected)
+            .map(|w| WireGpu::new(device, w))
+            .collect();
+    }
+
+    /// Upload all 3DFACE entities as two batched GPU objects:
+    /// - `gpu_face3d_fill`: filled triangles (1 buffer, 1 draw call)
+    /// - `gpu_face3d_edges`: merged edge wires (1 buffer, 1 draw call)
+    pub fn upload_face3d(&mut self, device: &wgpu::Device, face3d_wires: &[WireModel]) {
+        if face3d_wires.is_empty() {
+            self.gpu_face3d_fill = None;
+            self.gpu_face3d_edges = vec![];
+            return;
+        }
+        self.gpu_face3d_fill = Some(Face3DGpu::from_wires(device, face3d_wires));
+        self.gpu_face3d_edges = WireGpu::from_batch(device, face3d_wires);
     }
 
     pub fn upload_meshes(&mut self, device: &wgpu::Device, meshes: &[MeshModel]) {
@@ -643,6 +780,74 @@ impl Pipeline {
             }
         }
 
+        // ── Pass 5a: 3DFACE fills ─────────────────────────────────────────
+        if let Some(ref fill) = self.gpu_face3d_fill {
+            if fill.vertex_count > 0 {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("face3d.render_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: msaa,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
+                pass.set_pipeline(&self.face3d_pipeline);
+                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                pass.set_vertex_buffer(0, fill.vertex_buffer.slice(..));
+                pass.draw(0..fill.vertex_count, 0..1);
+            }
+        }
+
+        // ── Pass 5b: 3DFACE edges (batched, possibly multiple chunks) ────
+        if !self.gpu_face3d_edges.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("face3d_edges.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
+            pass.set_pipeline(&self.wire_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            for edges in &self.gpu_face3d_edges {
+                if edges.vertex_count >= 6 {
+                    pass.set_vertex_buffer(0, edges.vertex_buffer.slice(..));
+                    pass.draw(0..edges.vertex_count, 0..1);
+                }
+            }
+        }
+
         // ── Pass 5: wires ─────────────────────────────────────────────────
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -709,6 +914,43 @@ impl Pipeline {
                 pass.set_bind_group(1, &wipeout.bind_group, &[]);
                 pass.set_vertex_buffer(0, wipeout.vertex_buffer.slice(..));
                 pass.draw(0..6, 0..1);
+            }
+        }
+
+        // ── Pass 7: selected wire overlay pass ───────────────────────────
+        // Redraws selected wires with depth_compare=Always so they appear on
+        // top of all other geometry at full brightness.
+        if !self.gpu_selected_wires.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("wire_xray.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
+            pass.set_pipeline(&self.wire_xray_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            for wire in &self.gpu_selected_wires {
+                if wire.vertex_count >= 6 {
+                    pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
+                    pass.draw(0..wire.vertex_count, 0..1);
+                }
             }
         }
 
