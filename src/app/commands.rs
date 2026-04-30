@@ -4119,12 +4119,12 @@ impl H7CAD {
                 }
             }
 
-            // ── TOOLPALETTES: informational — H7CAD uses the ribbon ────────
+            // ── TOOLPALETTES / TP: informational — H7CAD uses the ribbon ────
             // AutoCAD's Tool Palettes is a floating panel with drag-and-drop
             // tool tiles.  H7CAD's ribbon tabs (Home / Annotate / Insert /
             // View / Manage) already provide the equivalent surface; emit an
             // info message rather than a no-op.
-            "TOOLPALETTES" => {
+            "TOOLPALETTES" | "TP" => {
                 self.command_line.push_output(
                     "TOOLPALETTES: H7CAD uses the ribbon tabs (Home / Annotate / Insert / View / Manage) as the tool surface.",
                 );
@@ -6553,11 +6553,6 @@ impl H7CAD {
             // ── LAYOUTTAB — toggle layout/paper-space tabs ───────────────────────
             "LAYOUTTAB" => {
                 return Task::done(Message::ToggleLayoutTabs);
-            }
-
-            // ── TOOLPALETTES — not yet implemented ───────────────────────────────
-            "TOOLPALETTES" | "TP" => {
-                self.command_line.push_info("TOOLPALETTES: Tool Palettes not yet implemented.");
             }
 
             // ── SHEETSET — not yet implemented ───────────────────────────────────

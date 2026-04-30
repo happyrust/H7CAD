@@ -15,7 +15,6 @@ pub mod step;
 pub mod stl;
 pub mod xref;
 
-use acadrust::entities::{Dimension, EntityType};
 use acadrust::io::dwg::DwgReader;
 use acadrust::{CadDocument, DwgWriter};
 use h7cad_native_model::CadDocument as NativeCadDocument;
@@ -392,26 +391,4 @@ fn load_dxf_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError>
 pub fn save_dxf(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let text = h7cad_native_dxf::write_dxf(doc)?;
     std::fs::write(path, text).map_err(|e| e.to_string())
-}
-
-// ── DXF post-load fixups ──────────────────────────────────────────────────
-
-/// The acadrust DXF reader stores several rotation fields directly from DXF
-/// group code 50 in degrees, while DWG and our own creation code store radians.
-/// Apply to_radians() on load so tessellation can call cos/sin uniformly.
-fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
-    for entity in doc.entities_mut() {
-        match entity {
-            EntityType::Dimension(Dimension::Linear(d)) => {
-                d.rotation = d.rotation.to_radians();
-            }
-            EntityType::AttributeDefinition(a) => {
-                a.rotation = a.rotation.to_radians();
-            }
-            EntityType::AttributeEntity(a) => {
-                a.rotation = a.rotation.to_radians();
-            }
-            _ => {}
-        }
-    }
 }

@@ -436,18 +436,20 @@ impl H7CAD {
                 vp.id = (max_id + 1).max(2);
             }
 
-            let layout = self.tabs[i].scene.current_layout.clone();
-            match self.tabs[i]
-                .scene
-                .document
-                .add_entity_to_layout(entity, &layout)
-            {
-                Ok(new_handle) => {
-                    self.tabs[i].scene.auto_fit_viewport(new_handle);
-                }
-                Err(e) => self
-                    .command_line
-                    .push_error(&format!("Viewport could not be added: {e}")),
+            // R49-VIEWPORT-PAPER-SPACE-SYNC: route through `scene.add_entity`
+            // so the paper-space viewport is added to the layout block AND
+            // mirrored into `native_store`. Calling `document.add_entity_to_layout`
+            // directly previously bypassed the native mirror step
+            // (`scene::add_entity` line 1876+ does that automatically).
+            // `scene.add_entity` already detects paper-space layouts when
+            // `current_layout != "Model" && active_viewport.is_none()`, which
+            // matches the precondition that brought us into this branch.
+            let new_handle = self.tabs[i].scene.add_entity(entity);
+            if new_handle.is_null() {
+                self.command_line
+                    .push_error("Viewport could not be added to the active layout.");
+            } else {
+                self.tabs[i].scene.auto_fit_viewport(new_handle);
             }
         } else {
             self.tabs[i].scene.add_entity(entity);
