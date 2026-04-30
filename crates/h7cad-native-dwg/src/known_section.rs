@@ -38,6 +38,28 @@ impl KnownSection {
         }
     }
 
+    /// Inverse of [`KnownSection::name`]: turn the canonical
+    /// ObjectDBX name (e.g. `"AcDb:Header"`) into the AC1015 locator
+    /// record number it occupies. Returns `None` for unknown names
+    /// (including the empty-name `""` section that AC1018 uses for
+    /// the conventional "section 0" empty descriptor).
+    ///
+    /// R46-E2 uses this to bridge AC1018 [`crate::Ac1018SectionDescriptor`]
+    /// entries (keyed by name) into AC1015-style locator records
+    /// (keyed by `record_number`), letting the existing
+    /// [`crate::build_pending_document`] consume both versions.
+    pub fn record_number_from_name(name: &str) -> Option<u8> {
+        match name {
+            "AcDb:Header" => Some(0),
+            "AcDb:Classes" => Some(1),
+            "AcDb:Handles" => Some(2),
+            "AcDb:ObjFreeSpace" => Some(3),
+            "AcDb:Template" => Some(4),
+            "AcDb:AuxHeader" => Some(5),
+            _ => None,
+        }
+    }
+
     /// Canonical section name used in DWG ObjectDBX documentation
     /// (`AcDb:Header`, `AcDb:Classes`, ...).
     pub fn name(self) -> &'static str {
@@ -108,6 +130,30 @@ mod tests {
     fn unknown_record_numbers_are_reported_as_none() {
         assert_eq!(KnownSection::from_record_number(6), None);
         assert_eq!(KnownSection::from_record_number(255), None);
+    }
+
+    #[test]
+    fn record_number_from_name_round_trips_documented_pairs() {
+        let cases = [
+            ("AcDb:Header", 0_u8),
+            ("AcDb:Classes", 1),
+            ("AcDb:Handles", 2),
+            ("AcDb:ObjFreeSpace", 3),
+            ("AcDb:Template", 4),
+            ("AcDb:AuxHeader", 5),
+        ];
+        for (name, n) in cases {
+            assert_eq!(KnownSection::record_number_from_name(name), Some(n));
+            assert_eq!(KnownSection::from_record_number(n).unwrap().name(), name);
+        }
+    }
+
+    #[test]
+    fn record_number_from_name_rejects_unknown_names() {
+        assert_eq!(KnownSection::record_number_from_name(""), None);
+        assert_eq!(KnownSection::record_number_from_name("AcDb:AppInfo"), None);
+        assert_eq!(KnownSection::record_number_from_name("AcDb:Preview"), None);
+        assert_eq!(KnownSection::record_number_from_name("AcDb:SummaryInfo"), None);
     }
 
     #[test]
