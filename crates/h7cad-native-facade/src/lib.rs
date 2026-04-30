@@ -30,14 +30,25 @@ pub fn save(format: NativeFormat, doc: &CadDocument) -> Result<Vec<u8>, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::{load, NativeFormat};
+    use super::{load, save, NativeFormat};
+    use h7cad_native_model::CadDocument;
 
     #[test]
-    fn dwg_load_delegates_to_native_parser() {
-        let result = load(NativeFormat::Dwg, b"AC1015");
-        assert!(
-            result.is_ok() || result.is_err(),
-            "facade DWG load should delegate to h7cad_native_dwg::read_dwg"
+    fn dwg_runtime_load_rejects_truncated_signature_with_real_error() {
+        let err = load(NativeFormat::Dwg, b"AC1015")
+            .expect_err("DWG runtime load on a 6-byte signature must surface an error");
+        assert_ne!(
+            err, "native DWG reader not implemented yet",
+            "facade DWG load should no longer return the legacy placeholder"
         );
+        assert!(!err.is_empty(), "DWG reader error message should be non-empty");
+    }
+
+    #[test]
+    fn dwg_runtime_save_is_unavailable() {
+        let doc = CadDocument::new();
+        let err = save(NativeFormat::Dwg, &doc)
+            .expect_err("DWG runtime save should remain unavailable on the facade");
+        assert_eq!(err, "native DWG writer not implemented yet");
     }
 }
