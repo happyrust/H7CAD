@@ -2,6 +2,43 @@
 
 ## [未发布]
 
+### 2026-04-30（四十六）：Native DWG 分层收口（R46 / R48 / R50）
+
+本轮把原本混在 dirty worktree 里的 Native DWG 相关改动拆成可审查的 stacked PR，
+避免把 AC1018 reader、facade 接线、viewport 同步、model fallback 和后续文档归档
+揉成一个不可回滚的大提交。
+
+**PR 拆分**
+
+- PR #1 `r46-ac1018-batch-a`：接通 AC1018 native reader 的核心字节层路径，
+  覆盖 encrypted metadata、page map、section map、LZ77 section payload 重组，
+  并把 `read_dwg` 接到真实样本 smoke test。
+- PR #2 `r48-facade-viewport-sync`：强化 `h7cad-native-facade` 的 DWG load/save
+  测试契约，补 `TOOLPALETTES` 的 `TP` alias，并归档 R48/R49 计划。
+- PR #3 `r50-model-owner-fallback`：`h7cad-native-model::CadDocument::store_entity`
+  对无法解析到 block record 的 recovered DWG entity 改为落入 model space，
+  不再把可恢复实体静默丢弃。
+
+**验证结果**
+
+- AC1015 real sample 在 R50 后恢复到 238 个 document entities；diagnostics
+  recovered total 为 177，`LINE` 从 26 提升到 82。
+- 已在 clean publish worktree 通过：
+  - `cargo test -p h7cad-native-dwg --test real_samples -- --nocapture`
+  - `cargo test -p h7cad-native-facade`
+  - `cargo test -p H7CAD --bin H7CAD commit_entity_syncs_native_viewport_in_paper_space`
+  - `RUSTFLAGS=-Dwarnings cargo check --locked --workspace --all-targets`
+
+**工程边界**
+
+- 没有 force-push `main`；本地分叉用 clean worktree + stacked branch 发布。
+- `SPPID_SOFTWARE_VERSION = "0.1.7"` 暂未发布：当前 stack 的 package version
+  仍是 `0.1.3`，该改动需跟随后续 version bump。
+- `svg_export.rs` 的 `WireModel::aabb` fixture 暂未发布：它依赖尚未进入
+  stacked PR 的 geometry/schema 变更。
+
+---
+
 ### 2026-04-28（四十五）：文档中枢与架构图示基线
 
 本轮补齐面向用户、产品和开发者的文档入口，让仓库不再只依赖 README
