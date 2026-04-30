@@ -4105,12 +4105,12 @@ impl H7CAD {
                 }
             }
 
-            // ── TOOLPALETTES: informational — H7CAD uses the ribbon ────────
+            // ── TOOLPALETTES / TP: informational — H7CAD uses the ribbon ────
             // AutoCAD's Tool Palettes is a floating panel with drag-and-drop
             // tool tiles.  H7CAD's ribbon tabs (Home / Annotate / Insert /
             // View / Manage) already provide the equivalent surface; emit an
             // info message rather than a no-op.
-            "TOOLPALETTES" => {
+            "TOOLPALETTES" | "TP" => {
                 self.command_line.push_output(
                     "TOOLPALETTES: H7CAD uses the ribbon tabs (Home / Annotate / Insert / View / Manage) as the tool surface.",
                 );
