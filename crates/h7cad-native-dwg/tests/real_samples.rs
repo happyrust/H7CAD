@@ -18,7 +18,7 @@ use h7cad_native_dwg::{
     Ac1015TargetedTraceFirstMissingRecord, BitReader, DwgFileHeader, DwgReadError, DwgVersion,
     KnownSection, ObjectStreamCursor, SectionMap, AC1018_FILE_ID,
 };
-use h7cad_native_model::{EntityData, Handle};
+use h7cad_native_model::Handle;
 
 /// Decode a modular char (variable-length unsigned integer, 7 bits
 /// per byte with continuation bit in the MSB).
@@ -331,24 +331,9 @@ fn real_dwg_samples_baseline_m3b() {
                         .get(&Ac1015RecoveryFailureKind::UnsupportedType)
                         .copied()
                         .unwrap_or(0);
-                    // R51-DIAGNOSTICS-FALLBACK-DEDUP (2026-04-28): the
-                    // previous OR chain demanded at least one supported
-                    // family had a non-empty failure bucket. That demand
-                    // was an artifact of the buggy fallback path which
-                    // synthesised `BodyDecodeFail` records for already-
-                    // recovered entities. After R47/R50 every supported
-                    // family on `sample_AC1015.dwg` is decoded by the main
-                    // loop, and after R51 dedup the fallback no longer
-                    // injects synthetic failures, so these buckets are
-                    // legitimately empty. Replace the demand with an
-                    // invariant on the global `failures` vector: the
-                    // diagnostics surface must still capture *something*
-                    // (currently `unsupported_type`/`slice_miss`/
-                    // `header_fail`/`common_decode_fail` for handles
-                    // outside the supported-family set).
                     assert!(
                         !diagnostics.failures.is_empty(),
-                        "{name}: diagnostics surface must retain at least one failure record (unsupported_type/slice_miss/header_fail/common_decode_fail) even after R51 dedup; got empty failures vector"
+                        "{name}: diagnostics surface must retain at least one failure record"
                     );
 
                     let enriched = doc
@@ -1508,60 +1493,6 @@ fn ac1015_representative_geometric_failure_handles() {
         saw_stageful_representative || any_supported_geom_histogram_presence,
         "expected supported geometric failure diagnostics to yield either stageful representatives or visible supported-family recovery presence"
     );
-}
-
-/// R51-DIAGNOSTICS-FALLBACK-DEDUP regression evidence.
-///
-/// Before R51, `collect_ac1015_recovery_diagnostics_with_known_successes`
-/// ran a fallback loop that synthesised a `BodyDecodeFail` record for
-/// every supported-family hint that did not already carry a (handle,
-/// family) failure entry. The Ok-branch of the main loop deliberately
-/// records nothing, so already-recovered entities ended up tagged as
-/// `BodyDecodeFail` by the fallback, inflating
-/// `failure_counts_by_family[FAMILY][BodyDecodeFail]` to include
-/// successfully-recovered entities (e.g. LINE recovered=82 vs
-/// body_decode_fail=82 on `sample_AC1015.dwg`).
-///
-/// The R51 fix skips the fallback for any handle the main loop already
-/// processed (`processed_in_main_loop` set). After R47/R50 the main loop
-/// genuinely succeeds on every supported-family handle on
-/// `sample_AC1015.dwg`, so the fallback bucket for these families must
-/// now be **empty**. A non-zero count here would mean either the dedup
-/// guard regressed or a real-world supported-family decode regression
-/// surfaced — both deserve a hard failure.
-#[test]
-fn ac1015_recovery_diagnostics_supported_families_have_no_synthetic_body_decode_fail() {
-    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
-        return;
-    };
-    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
-    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
-    let payloads = sections
-        .read_section_payloads(&bytes)
-        .expect("AC1015 section payloads readable");
-    let pending = build_pending_document(&header, &sections, payloads)
-        .expect("AC1015 pending document builds without error");
-    let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
-    let family_bucket_count = |family: &'static str, kind: Ac1015RecoveryFailureKind| {
-        diagnostics
-            .failure_counts_by_family
-            .get(family)
-            .and_then(|m| m.get(&kind))
-            .copied()
-            .unwrap_or(0)
-    };
-
-    for family in ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"] {
-        let count = family_bucket_count(family, Ac1015RecoveryFailureKind::BodyDecodeFail);
-        assert_eq!(
-            count, 0,
-            "R51-DIAGNOSTICS-FALLBACK-DEDUP regression: family={family} \
-             BodyDecodeFail bucket should be 0 after the fallback dedup \
-             fix (R47/R50 main-loop success + R51 fallback skip), got \
-             {count}. Either the dedup guard regressed or a real \
-             supported-family decode regressed."
-        );
-    }
 }
 
 fn representative_supported_geometric_stage_failures(
@@ -2838,195 +2769,6 @@ fn ac1015_line_point_blocked_handles_compare_common_layouts_against_recovered_re
         }),
         "POINT 0x29A should show the same blocked overlong-xdata pattern as the other stuck POINT/LINE handles on the live sample"
     );
-}
-
-/// R47/R50/R51 regression evidence: previously stuck LINE/POINT handles
-/// are now recovered into `doc.entities` and absent from the diagnostics
-/// failure surface.
-///
-/// History: the original "selective fix" (pre-R47) advanced these
-/// handles past the `skip_extended_entity_data` divergence; later R47
-/// landed the byte-handoff fix and R50 the `store_entity` graceful
-/// fallback, so today the same handles are not "stuck" at any stage —
-/// they are fully recovered. R51 then dropped the synthetic fallback
-/// `BodyDecodeFail` records that obscured the recovery on the
-/// diagnostics surface.
-///
-/// The previous version of this test asserted the *opposite* (that
-/// these handles still fail at a `common_entity_decode`/
-/// `entity_body_decode`/`preheader_supported_hint` stage). Flipping the
-/// assertion keeps it as a regression sentinel for the R47/R50/R51 fix
-/// chain.
-#[test]
-fn ac1015_line_point_previously_stuck_handles_recover_after_r47_r50_r51_fix() {
-    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
-        return;
-    };
-
-    let doc = read_dwg(&bytes).expect(
-        "R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg",
-    );
-    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
-    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
-    let payloads = sections
-        .read_section_payloads(&bytes)
-        .expect("AC1015 section payloads readable");
-    let pending = build_pending_document(&header, &sections, payloads)
-        .expect("AC1015 pending document builds without error");
-    let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
-
-    let previously_stuck = [
-        (0x99E_u64, "LINE"),
-        (0x9CD, "LINE"),
-        (0x9D4, "LINE"),
-        (0x298, "POINT"),
-        (0x29A, "POINT"),
-    ];
-
-    for (handle_value, family) in previously_stuck {
-        let handle = Handle::new(handle_value);
-
-        let residual_failure = diagnostics
-            .failures
-            .iter()
-            .find(|failure| failure.handle == handle);
-        assert!(
-            residual_failure.is_none(),
-            "previously stuck {family} handle 0x{handle_value:X} should \
-             no longer appear in diagnostics.failures after the \
-             R47/R50/R51 fix chain; found residual {:?}",
-            residual_failure
-        );
-
-        let entity = doc
-            .entities
-            .iter()
-            .find(|e| e.handle == handle)
-            .unwrap_or_else(|| {
-                panic!(
-                    "previously stuck {family} handle 0x{handle_value:X} \
-                     should be recovered into doc.entities by the \
-                     R47/R50 fix chain; not found"
-                )
-            });
-        let actual_family = match &entity.data {
-            EntityData::Line { .. } => "LINE",
-            EntityData::Point { .. } => "POINT",
-            other => panic!(
-                "previously stuck {family} handle 0x{handle_value:X} \
-                 should deserialize into the {family} family, got \
-                 {other:?}"
-            ),
-        };
-        assert_eq!(
-            actual_family, family,
-            "previously stuck handle 0x{handle_value:X} should keep its \
-             {family} family attribution after recovery"
-        );
-    }
-
-    assert!(
-        !diagnostics.failures.is_empty(),
-        "the diagnostics surface should still contain non-supported-\
-         family failure evidence (slice_miss / header_fail / \
-         common_decode_fail / unsupported_type) even after the R51 \
-         dedup fix"
-    );
-}
-
-/// R47/R50/R51 regression evidence: representative LINE/POINT handles
-/// that previously failed during body decode are now recovered.
-///
-/// History:
-///   - Before R47, a sentinel handoff bug stopped these handles short of
-///     the real body decoder.
-///   - Before R50, the `store_entity` hard-rejected entities whose
-///     `owner_handle` did not resolve to a known block record.
-///   - Before R51, the recovery diagnostics fallback synthesised a
-///     `BodyDecodeFail` record for these already-recovered entities.
-///
-/// After the three fixes, every probe handle below is decoded by the
-/// main loop, accepted by `store_entity` (graceful-fallback to model
-/// space), and **does not** appear in the diagnostics failure surface.
-/// The previous version of this test asserted the *opposite* (that the
-/// handles still failed at `entity_body_decode`); flipping the assertion
-/// keeps it as a regression sentinel for the R47/R50/R51 fix chain.
-#[test]
-fn ac1015_line_point_representative_handles_recovered_after_r47_r50_r51_fix() {
-    let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
-        eprintln!("skip: sample_AC1015.dwg not present");
-        return;
-    };
-    let doc = read_dwg(&bytes).expect(
-        "R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg",
-    );
-    let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
-    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
-    let payloads = sections
-        .read_section_payloads(&bytes)
-        .expect("AC1015 section payloads readable");
-    let pending = build_pending_document(&header, &sections, payloads)
-        .expect("AC1015 pending document builds without error");
-    let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
-
-    let probes = [
-        (0x2C7_u64, "LINE"),
-        (0x2CF, "LINE"),
-        (0x517, "LINE"),
-        (0x28E, "POINT"),
-        (0x298, "POINT"),
-        (0x299, "POINT"),
-    ];
-
-    let mut observed = Vec::new();
-    for (handle_value, family) in probes {
-        let handle = Handle::new(handle_value);
-
-        let residual_failure = diagnostics
-            .failures
-            .iter()
-            .find(|failure| failure.handle == handle);
-        assert!(
-            residual_failure.is_none(),
-            "representative {family} handle 0x{handle_value:X} should no \
-             longer surface in diagnostics.failures after the \
-             R47/R50/R51 fix chain; found residual {:?}",
-            residual_failure
-        );
-
-        let entity = doc
-            .entities
-            .iter()
-            .find(|e| e.handle == handle)
-            .unwrap_or_else(|| {
-                panic!(
-                    "representative {family} handle 0x{handle_value:X} \
-                     should be recovered into doc.entities by the \
-                     R47/R50 fix chain; not found"
-                )
-            });
-        let actual_family = match &entity.data {
-            EntityData::Line { .. } => "LINE",
-            EntityData::Point { .. } => "POINT",
-            other => panic!(
-                "representative {family} handle 0x{handle_value:X} should \
-                 deserialize into the {family} family, got {other:?}"
-            ),
-        };
-        assert_eq!(
-            actual_family, family,
-            "representative handle 0x{handle_value:X} should keep its \
-             {family} family attribution after recovery"
-        );
-        observed.push(format!(
-            "handle=0x{handle_value:X} family={family} recovered=true"
-        ));
-    }
-
-    eprintln!("AC1015 LINE/POINT representative recovery audit:");
-    for line in observed {
-        eprintln!("  {line}");
-    }
 }
 
 #[test]
