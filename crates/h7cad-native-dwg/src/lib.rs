@@ -18,16 +18,21 @@ mod entity_text;
 mod entity_viewport;
 mod error;
 mod file_header;
+mod file_header_ac1018;
 mod handle_map;
 mod known_section;
+mod lz77_ac18;
 mod modular;
 mod object_header;
 mod object_reader;
 mod object_stream;
+mod page_map_ac1018;
 mod pending;
 mod reader;
 mod resolver;
+mod section_data_ac1018;
 mod section_map;
+mod section_map_ac1018;
 mod version;
 
 use h7cad_native_model::CadDocument;
@@ -61,8 +66,13 @@ pub use entity_text::{read_text_geometry, TextGeometry};
 pub use entity_viewport::{read_viewport_geometry, ViewportGeometry};
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
+pub use file_header_ac1018::{
+    parse_ac1018_encrypted_metadata, Ac1018EncryptedMetadata, AC1018_ENCRYPTED_BLOCK_LEN,
+    AC1018_ENCRYPTED_BLOCK_OFFSET, AC1018_FILE_ID,
+};
 pub use handle_map::{parse_handle_map, HandleMapEntry};
 pub use known_section::KnownSection;
+pub use lz77_ac18::{decompress_ac18_lz77, Lz77DecodeError};
 pub use object_header::{
     read_ac1015_object_header, split_ac1015_object_streams, ObjectHeader,
     HANDLE_CODE_HARD_OWNER,
@@ -72,6 +82,23 @@ pub use object_reader::{
     record_index, record_payload_size, summarize_object, DispatchTarget, ParsedRecordSummary,
 };
 pub use object_stream::ObjectStreamCursor;
+pub use page_map_ac1018::{
+    parse_ac1018_page_map, parse_system_page_header, PageMap, PageMapDecodeError, PageMapRecord,
+    SystemPageHeader, COMPRESSION_TYPE_LZ77, INITIAL_SEEKER, MAX_DECOMPRESSED_SIZE,
+    PAGE_MAP_SECTION_TYPE, SECTION_MAP_SECTION_TYPE, SYSTEM_PAGE_HEADER_LEN,
+};
+pub use section_map_ac1018::{
+    parse_ac1018_section_map, parse_descriptors as parse_ac1018_section_descriptors,
+    LocalSectionMap as Ac1018LocalSectionMap, SectionDescriptor as Ac1018SectionDescriptor,
+    SectionDescriptorMap as Ac1018SectionDescriptorMap, SectionMapDecodeError,
+    LOCAL_SECTION_MAP_LEN, SECTION_DESCRIPTOR_LEN, SECTION_DESCRIPTOR_MAP_HEADER_LEN,
+    SECTION_NAME_LEN,
+};
+pub use section_data_ac1018::{
+    decrypt_page_header as decrypt_ac1018_page_header, read_section_payload as read_ac1018_section_payload,
+    EncryptedPageHeader as Ac1018EncryptedPageHeader, SectionDataDecodeError,
+    DATA_SECTION_PAGE_TYPE, PAGE_HEADER_LEN, PAGE_HEADER_XOR_MAGIC,
+};
 pub use pending::{
     PendingDocument, PendingEntity, PendingLayer, PendingObject, PendingObjectKind, PendingSection,
 };
@@ -91,12 +118,155 @@ pub fn sniff_version(bytes: &[u8]) -> Result<DwgVersion, DwgReadError> {
 }
 
 pub fn read_dwg(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
+    // Dispatch by version sniff so AC1018 can take its own path
+    // through R46-A → R46-E1 instead of bouncing off
+    // `DwgFileHeader::parse(Ac1018) → UnsupportedHeaderLayout`.
+    // AC1015 stays on the original code path with zero behavioural
+    // change. Any other version still bubbles up as
+    // `UnsupportedVersion` from the AC1015 branch's
+    // `DwgFileHeader::parse`.
+    let version = sniff_version(bytes)?;
+    if matches!(version, DwgVersion::Ac1018) {
+        return read_dwg_ac1018(bytes);
+    }
+
     let header = DwgFileHeader::parse(bytes)?;
     let sections = SectionMap::parse(bytes, &header)?;
     let payloads = sections.read_section_payloads(bytes)?;
     let pending = build_pending_document(&header, &sections, payloads)?;
     let mut doc = resolve_document(&pending)?;
     enrich_with_real_entities(&mut doc, bytes, &pending);
+    Ok(doc)
+}
+
+/// AC1018 (R2004) end-to-end read path. R46-E2 wires R46-A
+/// (encrypted metadata) → R46-C (page map) → R46-D (section
+/// descriptors map) → R46-E1 (per-section payload reassembly) into
+/// the existing AC1015 [`build_pending_document`] +
+/// [`resolve_document`] + [`enrich_with_real_entities`] pipeline.
+///
+/// AC1018 descriptors that map to one of the six well-known AC1015
+/// section names (`AcDb:Header`, `AcDb:Classes`, `AcDb:Handles`,
+/// `AcDb:ObjFreeSpace`, `AcDb:Template`, `AcDb:AuxHeader`) are
+/// promoted into a synthetic AC1015-style [`SectionMap`] so the
+/// downstream pipeline can consume them as-is. Other descriptors
+/// (`AcDb:AppInfo`, `AcDb:Preview`, `AcDb:SummaryInfo`,
+/// `AcDb:RevHistory`, `AcDb:AppInfoHistory`, the empty-name section
+/// 0) are silently dropped — R46-F-and-beyond may pull them in once
+/// the AC1018 entity recovery proves stable on the core six.
+fn read_dwg_ac1018(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
+    let metadata = file_header_ac1018::parse_ac1018_encrypted_metadata(bytes).map_err(|e| {
+        // R46-A returns a `DwgReadError` already (it predates R46-E2's
+        // `Ac1018Decode` variant), so propagate verbatim.
+        e
+    })?;
+    let page_map_offset = metadata.page_map_address() as usize;
+    let page_map = page_map_ac1018::parse_ac1018_page_map(bytes, page_map_offset)
+        .map_err(|e| DwgReadError::Ac1018Decode {
+            stage: "page_map",
+            reason: e.to_string(),
+        })?;
+    let descriptor_map = section_map_ac1018::parse_ac1018_section_map(
+        bytes,
+        &page_map,
+        metadata.section_map_id,
+    )
+    .map_err(|e| DwgReadError::Ac1018Decode {
+        stage: "section_descriptor_map",
+        reason: e.to_string(),
+    })?;
+
+    // Walk the descriptor map in on-disk order and keep only the
+    // entries that map to an AC1015 well-known record number.
+    //
+    // Empty descriptors (`page_count == 0`, `local_sections.is_empty()`)
+    // are legal on AC1018 — `sample_AC1018.dwg` ships AcDb:Template as
+    // an empty section because the file carries no template metadata.
+    // R46-E1's `read_section_payload` rejects them with `EmptyDescriptor`
+    // (because synthetic / mistaken descriptors should not silently
+    // produce empty payloads), so we special-case that path here and
+    // emit an empty payload for `build_pending_document` to consume —
+    // exactly what AC1015 would do for a zero-byte locator entry.
+    let mut bridged: Vec<(u8, Vec<u8>)> = Vec::new();
+    for name in &descriptor_map.order {
+        let Some(record_number) = KnownSection::record_number_from_name(name) else {
+            continue;
+        };
+        let Some(descriptor) = descriptor_map.lookup(name) else {
+            continue;
+        };
+        let payload = if descriptor.local_sections.is_empty() {
+            Vec::new()
+        } else {
+            section_data_ac1018::read_section_payload(bytes, descriptor).map_err(|e| {
+                DwgReadError::Ac1018Decode {
+                    stage: "section_payload",
+                    reason: format!("{name}: {e}"),
+                }
+            })?
+        };
+        bridged.push((record_number, payload));
+    }
+
+    // Reassemble the AcDb:AcDbObjects section payload too — AC1018
+    // entity recovery needs it as the "object stream" buffer. On
+    // AC1015 the entire file is plaintext so `handle_offsets[i].offset`
+    // is a file-absolute offset and `enrich_with_real_entities` reads
+    // straight from `bytes`. On AC1018 the AcDbObjects bytes live
+    // inside a (possibly multi-page, LZ77-compressed, XOR-encrypted)
+    // section; once R46-E1 reassembles them, the same `handle_offsets`
+    // values become AcDbObjects-relative offsets that
+    // `enrich_with_real_entities` can chew through as if they were a
+    // mini AC1015 file.
+    //
+    // If `AcDb:AcDbObjects` is absent or empty (extremely unusual —
+    // sample_AC1018.dwg always has it), fall back to a zero-length
+    // buffer so `enrich_with_real_entities` short-circuits and the
+    // pipeline still produces a (possibly entity-less) `CadDocument`.
+    let acdb_objects_payload = match descriptor_map.lookup("AcDb:AcDbObjects") {
+        Some(descriptor) if !descriptor.local_sections.is_empty() => {
+            section_data_ac1018::read_section_payload(bytes, descriptor).map_err(|e| {
+                DwgReadError::Ac1018Decode {
+                    stage: "section_payload",
+                    reason: format!("AcDb:AcDbObjects: {e}"),
+                }
+            })?
+        }
+        _ => Vec::new(),
+    };
+
+    // Synthesise the AC1015-style header + section map. `offset` /
+    // `size` are diagnostic placeholders on this path because we
+    // already own the per-section payload bytes; `build_pending_document`
+    // routes by `record_number` (via `KnownSection::from_record_number`)
+    // and consumes `payloads` directly.
+    let synthetic_header = DwgFileHeader {
+        version: DwgVersion::Ac1018,
+        magic: "AC1018".to_string(),
+        section_directory_offset: 0,
+        section_count: bridged.len() as u32,
+    };
+    let synthetic_descriptors: Vec<SectionDescriptor> = bridged
+        .iter()
+        .enumerate()
+        .map(|(index, (record_number, payload))| SectionDescriptor {
+            index: index as u32,
+            record_number: *record_number,
+            offset: 0,
+            size: payload.len() as u32,
+        })
+        .collect();
+    let synthetic_section_map = SectionMap {
+        version: DwgVersion::Ac1018,
+        descriptors: synthetic_descriptors,
+    };
+    let payloads: Vec<Vec<u8>> = bridged.into_iter().map(|(_, p)| p).collect();
+
+    let pending = build_pending_document(&synthetic_header, &synthetic_section_map, payloads)?;
+    let mut doc = resolve_document(&pending)?;
+    // Use the AcDbObjects payload as the "object stream bytes" rather
+    // than the raw file bytes. See the long comment above for why.
+    enrich_with_real_entities(&mut doc, &acdb_objects_payload, &pending);
     Ok(doc)
 }
 
@@ -428,10 +598,29 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
         }
     }
     diagnostics.promote_header_failures_to_supported_families(&supported_family_hints);
+    // R51-DIAGNOSTICS-FALLBACK-DEDUP (2026-04-28): build the set of handles
+    // the main loop already iterated over so the fallback below can skip
+    // them. The previous logic used `has_family_failure` as the only guard,
+    // which mis-classified handles that the main loop processed
+    // **successfully** (Ok branch records nothing). Those handles ended up
+    // double-tagged as `BodyDecodeFail` by the fallback even though they
+    // appeared in `doc.entities`, inflating `body_decode_fail` numbers
+    // (e.g. LINE recovered=82 vs body_decode_fail=82 on sample_AC1015.dwg).
+    let processed_in_main_loop: std::collections::BTreeSet<Handle> = pending
+        .handle_offsets
+        .iter()
+        .map(|entry| entry.handle)
+        .collect();
     for (handle, hint) in supported_family_hints.iter() {
         let Some(family) = hint.family else {
             continue;
         };
+        if processed_in_main_loop.contains(handle) {
+            // Main loop already saw this handle; either it failed (recorded
+            // above) or it succeeded silently — either way the fallback must
+            // not invent a synthetic failure record.
+            continue;
+        }
         let has_family_failure = diagnostics
             .failures
             .iter()

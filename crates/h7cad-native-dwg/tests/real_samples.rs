@@ -12,11 +12,13 @@ use std::path::{Path, PathBuf};
 use h7cad_native_dwg::{
     build_pending_document, collect_ac1015_recovery_diagnostics,
     collect_ac1015_recovery_diagnostics_with_known_successes, collect_ac1015_preheader_object_type_hints,
-    read_ac1015_object_header, read_dwg, sniff_version, trace_ac1015_targeted_failure_before_fallback,
-    Ac1015RecoveryFailureKind, Ac1015TargetedTraceFirstMissingRecord, BitReader, DwgFileHeader, DwgReadError,
-    DwgVersion, KnownSection, ObjectStreamCursor, SectionMap,
+    parse_ac1018_encrypted_metadata, parse_ac1018_page_map, parse_ac1018_section_map,
+    read_ac1015_object_header, read_ac1018_section_payload, read_dwg, sniff_version,
+    trace_ac1015_targeted_failure_before_fallback, Ac1015RecoveryFailureKind,
+    Ac1015TargetedTraceFirstMissingRecord, BitReader, DwgFileHeader, DwgReadError, DwgVersion,
+    KnownSection, ObjectStreamCursor, SectionMap, AC1018_FILE_ID,
 };
-use h7cad_native_model::Handle;
+use h7cad_native_model::{EntityData, Handle};
 
 /// Decode a modular char (variable-length unsigned integer, 7 bits
 /// per byte with continuation bit in the MSB).
@@ -329,15 +331,24 @@ fn real_dwg_samples_baseline_m3b() {
                         .get(&Ac1015RecoveryFailureKind::UnsupportedType)
                         .copied()
                         .unwrap_or(0);
+                    // R51-DIAGNOSTICS-FALLBACK-DEDUP (2026-04-28): the
+                    // previous OR chain demanded at least one supported
+                    // family had a non-empty failure bucket. That demand
+                    // was an artifact of the buggy fallback path which
+                    // synthesised `BodyDecodeFail` records for already-
+                    // recovered entities. After R47/R50 every supported
+                    // family on `sample_AC1015.dwg` is decoded by the main
+                    // loop, and after R51 dedup the fallback no longer
+                    // injects synthetic failures, so these buckets are
+                    // legitimately empty. Replace the demand with an
+                    // invariant on the global `failures` vector: the
+                    // diagnostics surface must still capture *something*
+                    // (currently `unsupported_type`/`slice_miss`/
+                    // `header_fail`/`common_decode_fail` for handles
+                    // outside the supported-family set).
                     assert!(
-                        diagnostics.failure_counts_by_family.contains_key("LINE")
-                            || diagnostics.failure_counts_by_family.contains_key("CIRCLE")
-                            || diagnostics.failure_counts_by_family.contains_key("ARC")
-                            || diagnostics.failure_counts_by_family.contains_key("POINT")
-                            || diagnostics.failure_counts_by_family.contains_key("TEXT")
-                            || diagnostics.failure_counts_by_family.contains_key("LWPOLYLINE")
-                            || diagnostics.failure_counts_by_family.contains_key("HATCH"),
-                        "{name}: diagnostics must attribute at least one supported-family failure bucket"
+                        !diagnostics.failures.is_empty(),
+                        "{name}: diagnostics surface must retain at least one failure record (unsupported_type/slice_miss/header_fail/common_decode_fail) even after R51 dedup; got empty failures vector"
                     );
 
                     let enriched = doc
@@ -1499,8 +1510,27 @@ fn ac1015_representative_geometric_failure_handles() {
     );
 }
 
+/// R51-DIAGNOSTICS-FALLBACK-DEDUP regression evidence.
+///
+/// Before R51, `collect_ac1015_recovery_diagnostics_with_known_successes`
+/// ran a fallback loop that synthesised a `BodyDecodeFail` record for
+/// every supported-family hint that did not already carry a (handle,
+/// family) failure entry. The Ok-branch of the main loop deliberately
+/// records nothing, so already-recovered entities ended up tagged as
+/// `BodyDecodeFail` by the fallback, inflating
+/// `failure_counts_by_family[FAMILY][BodyDecodeFail]` to include
+/// successfully-recovered entities (e.g. LINE recovered=82 vs
+/// body_decode_fail=82 on `sample_AC1015.dwg`).
+///
+/// The R51 fix skips the fallback for any handle the main loop already
+/// processed (`processed_in_main_loop` set). After R47/R50 the main loop
+/// genuinely succeeds on every supported-family handle on
+/// `sample_AC1015.dwg`, so the fallback bucket for these families must
+/// now be **empty**. A non-zero count here would mean either the dedup
+/// guard regressed or a real-world supported-family decode regression
+/// surfaced — both deserve a hard failure.
 #[test]
-fn ac1015_recovery_diagnostics_attribute_supported_families_from_preheader_hints() {
+fn ac1015_recovery_diagnostics_supported_families_have_no_synthetic_body_decode_fail() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
         return;
     };
@@ -1521,17 +1551,15 @@ fn ac1015_recovery_diagnostics_attribute_supported_families_from_preheader_hints
             .unwrap_or(0)
     };
 
-    for (family, kind) in [
-        ("LINE", Ac1015RecoveryFailureKind::BodyDecodeFail),
-        ("POINT", Ac1015RecoveryFailureKind::BodyDecodeFail),
-        ("CIRCLE", Ac1015RecoveryFailureKind::BodyDecodeFail),
-        ("ARC", Ac1015RecoveryFailureKind::BodyDecodeFail),
-        ("LWPOLYLINE", Ac1015RecoveryFailureKind::BodyDecodeFail),
-    ] {
-        assert!(
-            family_bucket_count(family, kind) > 0,
-            "expected non-empty {family} {:?} attribution from parser diagnostics",
-            kind
+    for family in ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"] {
+        let count = family_bucket_count(family, Ac1015RecoveryFailureKind::BodyDecodeFail);
+        assert_eq!(
+            count, 0,
+            "R51-DIAGNOSTICS-FALLBACK-DEDUP regression: family={family} \
+             BodyDecodeFail bucket should be 0 after the fallback dedup \
+             fix (R47/R50 main-loop success + R51 fallback skip), got \
+             {count}. Either the dedup guard regressed or a real \
+             supported-family decode regressed."
         );
     }
 }
@@ -2812,12 +2840,32 @@ fn ac1015_line_point_blocked_handles_compare_common_layouts_against_recovered_re
     );
 }
 
+/// R47/R50/R51 regression evidence: previously stuck LINE/POINT handles
+/// are now recovered into `doc.entities` and absent from the diagnostics
+/// failure surface.
+///
+/// History: the original "selective fix" (pre-R47) advanced these
+/// handles past the `skip_extended_entity_data` divergence; later R47
+/// landed the byte-handoff fix and R50 the `store_entity` graceful
+/// fallback, so today the same handles are not "stuck" at any stage —
+/// they are fully recovered. R51 then dropped the synthetic fallback
+/// `BodyDecodeFail` records that obscured the recovery on the
+/// diagnostics surface.
+///
+/// The previous version of this test asserted the *opposite* (that
+/// these handles still fail at a `common_entity_decode`/
+/// `entity_body_decode`/`preheader_supported_hint` stage). Flipping the
+/// assertion keeps it as a regression sentinel for the R47/R50/R51 fix
+/// chain.
 #[test]
-fn ac1015_line_point_blocked_handles_real_decode_path_advances_after_selective_fix() {
+fn ac1015_line_point_previously_stuck_handles_recover_after_r47_r50_r51_fix() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
         return;
     };
 
+    let doc = read_dwg(&bytes).expect(
+        "R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg",
+    );
     let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
     let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
     let payloads = sections
@@ -2827,7 +2875,7 @@ fn ac1015_line_point_blocked_handles_real_decode_path_advances_after_selective_f
         .expect("AC1015 pending document builds without error");
     let diagnostics = collect_ac1015_recovery_diagnostics(&bytes, &pending);
 
-    let stuck_handles = [
+    let previously_stuck = [
         (0x99E_u64, "LINE"),
         (0x9CD, "LINE"),
         (0x9D4, "LINE"),
@@ -2835,51 +2883,83 @@ fn ac1015_line_point_blocked_handles_real_decode_path_advances_after_selective_f
         (0x29A, "POINT"),
     ];
 
-    for (handle, family) in stuck_handles {
-        let failure = diagnostics
+    for (handle_value, family) in previously_stuck {
+        let handle = Handle::new(handle_value);
+
+        let residual_failure = diagnostics
             .failures
             .iter()
-            .find(|failure| failure.handle.value() == handle)
-            .unwrap_or_else(|| panic!("blocked {family} handle 0x{handle:X} should remain visible on the real decode path after the selective fix"));
+            .find(|failure| failure.handle == handle);
+        assert!(
+            residual_failure.is_none(),
+            "previously stuck {family} handle 0x{handle_value:X} should \
+             no longer appear in diagnostics.failures after the \
+             R47/R50/R51 fix chain; found residual {:?}",
+            residual_failure
+        );
+
+        let entity = doc
+            .entities
+            .iter()
+            .find(|e| e.handle == handle)
+            .unwrap_or_else(|| {
+                panic!(
+                    "previously stuck {family} handle 0x{handle_value:X} \
+                     should be recovered into doc.entities by the \
+                     R47/R50 fix chain; not found"
+                )
+            });
+        let actual_family = match &entity.data {
+            EntityData::Line { .. } => "LINE",
+            EntityData::Point { .. } => "POINT",
+            other => panic!(
+                "previously stuck {family} handle 0x{handle_value:X} \
+                 should deserialize into the {family} family, got \
+                 {other:?}"
+            ),
+        };
         assert_eq!(
-            failure.family,
-            Some(family),
-            "blocked handle 0x{handle:X} should stay attributed to the {family} family on the real decode path"
-        );
-        assert!(
-            matches!(
-                failure.kind,
-                Ac1015RecoveryFailureKind::CommonDecodeFail | Ac1015RecoveryFailureKind::BodyDecodeFail
-            ),
-            "blocked handle 0x{handle:X} should advance past the old skip_extended_entity_data divergence into a later decode stage"
-        );
-        assert!(
-            matches!(
-                failure.stage,
-                Some("common_entity_decode")
-                    | Some("entity_body_decode")
-                    | Some("preheader_supported_hint")
-            ),
-            "blocked handle 0x{handle:X} should stay on the observed post-selective decode path after the selective fix"
-        );
-        assert!(
-            !matches!(failure.stage, Some("skip_extended_entity_data")),
-            "blocked handle 0x{handle:X} should no longer fail inside skip_extended_entity_data after the selective fix"
+            actual_family, family,
+            "previously stuck handle 0x{handle_value:X} should keep its \
+             {family} family attribution after recovery"
         );
     }
 
     assert!(
         !diagnostics.failures.is_empty(),
-        "the diagnostics surface should still contain failure evidence after the selective fix"
+        "the diagnostics surface should still contain non-supported-\
+         family failure evidence (slice_miss / header_fail / \
+         common_decode_fail / unsupported_type) even after the R51 \
+         dedup fix"
     );
 }
 
+/// R47/R50/R51 regression evidence: representative LINE/POINT handles
+/// that previously failed during body decode are now recovered.
+///
+/// History:
+///   - Before R47, a sentinel handoff bug stopped these handles short of
+///     the real body decoder.
+///   - Before R50, the `store_entity` hard-rejected entities whose
+///     `owner_handle` did not resolve to a known block record.
+///   - Before R51, the recovery diagnostics fallback synthesised a
+///     `BodyDecodeFail` record for these already-recovered entities.
+///
+/// After the three fixes, every probe handle below is decoded by the
+/// main loop, accepted by `store_entity` (graceful-fallback to model
+/// space), and **does not** appear in the diagnostics failure surface.
+/// The previous version of this test asserted the *opposite* (that the
+/// handles still failed at `entity_body_decode`); flipping the assertion
+/// keeps it as a regression sentinel for the R47/R50/R51 fix chain.
 #[test]
-fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage() {
+fn ac1015_line_point_representative_handles_recovered_after_r47_r50_r51_fix() {
     let Some(bytes) = try_read_sample("sample_AC1015.dwg") else {
         eprintln!("skip: sample_AC1015.dwg not present");
         return;
     };
+    let doc = read_dwg(&bytes).expect(
+        "R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg",
+    );
     let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
     let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
     let payloads = sections
@@ -2901,49 +2981,49 @@ fn ac1015_line_point_post_common_body_audit_reports_representative_failure_stage
     let mut observed = Vec::new();
     for (handle_value, family) in probes {
         let handle = Handle::new(handle_value);
-        let failures = diagnostics
+
+        let residual_failure = diagnostics
             .failures
             .iter()
-            .filter(|failure| failure.handle == handle)
-            .cloned()
-            .collect::<Vec<_>>();
+            .find(|failure| failure.handle == handle);
         assert!(
-            !failures.is_empty(),
-            "representative {family} handle 0x{handle_value:X} should remain visible on the diagnostics surface"
+            residual_failure.is_none(),
+            "representative {family} handle 0x{handle_value:X} should no \
+             longer surface in diagnostics.failures after the \
+             R47/R50/R51 fix chain; found residual {:?}",
+            residual_failure
         );
 
-        let body_failure = failures
+        let entity = doc
+            .entities
             .iter()
-            .find(|failure| failure.kind == Ac1015RecoveryFailureKind::BodyDecodeFail)
-            .expect("representative handle should still fail during body decode on the live sample");
-
+            .find(|e| e.handle == handle)
+            .unwrap_or_else(|| {
+                panic!(
+                    "representative {family} handle 0x{handle_value:X} \
+                     should be recovered into doc.entities by the \
+                     R47/R50 fix chain; not found"
+                )
+            });
+        let actual_family = match &entity.data {
+            EntityData::Line { .. } => "LINE",
+            EntityData::Point { .. } => "POINT",
+            other => panic!(
+                "representative {family} handle 0x{handle_value:X} should \
+                 deserialize into the {family} family, got {other:?}"
+            ),
+        };
         assert_eq!(
-            body_failure.family,
-            Some(family),
-            "representative handle 0x{handle_value:X} should retain its supported family attribution"
-        );
-        assert_eq!(
-            body_failure.object_type,
-            Some(if family == "LINE" { 19 } else { 27 }),
-            "representative handle 0x{handle_value:X} should keep the truthful supported object type hint"
-        );
-        assert!(
-            matches!(body_failure.stage, Some("entity_body_decode")),
-            "representative handle 0x{handle_value:X} should persist a truthful later-stage failure before the synthetic fallback path"
-        );
-        assert!(
-            matches!(body_failure.kind, Ac1015RecoveryFailureKind::BodyDecodeFail),
-            "representative handle 0x{handle_value:X} should now fail on the real body decode path"
+            actual_family, family,
+            "representative handle 0x{handle_value:X} should keep its \
+             {family} family attribution after recovery"
         );
         observed.push(format!(
-            "handle=0x{handle_value:X} family={family} kind={} stage={} object_type={}",
-            body_failure.kind.as_str(),
-            body_failure.stage.unwrap_or("none"),
-            body_failure.object_type.unwrap_or_default()
+            "handle=0x{handle_value:X} family={family} recovered=true"
         ));
     }
 
-    eprintln!("AC1015 LINE/POINT post-common/body audit:");
+    eprintln!("AC1015 LINE/POINT representative recovery audit:");
     for line in observed {
         eprintln!("  {line}");
     }
@@ -3947,4 +4027,414 @@ fn print_supported_geometric_failure_examples(
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// R46-A: AC1018 encrypted metadata block parsing on real sample bytes.
+// These tests exercise the standalone API exposed by
+// `crate::file_header_ac1018` and do not yet wire AC1018 into
+// `DwgFileHeader::parse` / `read_dwg` (see R46-B/C/D/E/F).
+// ---------------------------------------------------------------------------
+
+/// R46-A end-to-end sanity: the 0x6C-byte encrypted block at offset
+/// 0x80 of `sample_AC1018.dwg` decrypts to the published file id
+/// `"AcFssFcAJMB\0"`. A failure here means either the magic-sequence
+/// LCG drifted from ACadSharp's behaviour or the sample file is not
+/// a real AC1018 stream.
+#[test]
+fn ac1018_encrypted_metadata_decodes_real_sample_file_id() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+
+    assert_eq!(
+        &metadata.file_id, AC1018_FILE_ID,
+        "decrypted AC1018 file id must equal {:?}, got {:?}",
+        AC1018_FILE_ID, &metadata.file_id
+    );
+}
+
+/// R46-A sanity on the AC1018 metadata addresses/IDs that R46-C and
+/// R46-D will need: every field that points into the page map or the
+/// section descriptor map must be non-zero on a real AC1018 stream.
+/// A non-zero check is intentionally loose — the exact addresses are
+/// validated by R46-C/D against the LZ77-decompressed page map.
+#[test]
+fn ac1018_encrypted_metadata_decodes_real_sample_addresses_are_sane() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+
+    assert!(
+        metadata.section_amount > 0,
+        "AC1018 section_amount should be positive on the real sample, got {}",
+        metadata.section_amount
+    );
+    assert!(
+        metadata.section_page_map_id > 0,
+        "AC1018 section_page_map_id should be positive on the real sample, got {}",
+        metadata.section_page_map_id
+    );
+    assert!(
+        metadata.page_map_address_raw > 0,
+        "AC1018 page_map_address_raw should be positive on the real sample, got {}",
+        metadata.page_map_address_raw
+    );
+    let effective = metadata.page_map_address();
+    assert!(
+        (effective as usize) < bytes.len(),
+        "AC1018 effective page_map_address (raw + 0x100 = {}) must lie inside the file ({} bytes)",
+        effective,
+        bytes.len()
+    );
+    assert!(
+        metadata.section_map_id > 0,
+        "AC1018 section_map_id should be positive on the real sample, got {}",
+        metadata.section_map_id
+    );
+
+    eprintln!(
+        "AC1018 metadata: section_amount={} section_page_map_id={} \
+         page_map_address_raw=0x{:X} page_map_address(eff)=0x{:X} \
+         section_map_id={} section_array_page_size={}",
+        metadata.section_amount,
+        metadata.section_page_map_id,
+        metadata.page_map_address_raw,
+        metadata.page_map_address(),
+        metadata.section_map_id,
+        metadata.section_array_page_size,
+    );
+}
+
+/// R46-C smoke: walk R46-A → R46-B → R46-C end-to-end on the real
+/// AC1018 sample. We only assert basic shape (page map decodes,
+/// records exist, lookup of the well-known IDs succeeds) so
+/// future ratchets can tighten without churning this test.
+#[test]
+fn ac1018_page_map_decodes_real_sample() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+    let page_map_offset = metadata.page_map_address() as usize;
+    let map = parse_ac1018_page_map(&bytes, page_map_offset).expect(
+        "AC1018 page map must decode on the real sample (R46-A → R46-B → R46-C end-to-end)",
+    );
+
+    assert!(
+        !map.records.is_empty(),
+        "AC1018 page map must contain at least one record on the real sample"
+    );
+    let valid_count = map.valid_records().count();
+    assert!(
+        valid_count >= 1,
+        "AC1018 page map must contain at least one valid (non-gap) record, got {valid_count}"
+    );
+
+    // Both the page map itself and the section descriptor map are
+    // pages, so they must show up in the page map records.
+    let page_map_self = map.lookup(metadata.section_page_map_id as i32);
+    assert!(
+        page_map_self.is_some(),
+        "AC1018 page map must contain its own page (section_page_map_id={})",
+        metadata.section_page_map_id
+    );
+    let section_descriptor_page = map.lookup(metadata.section_map_id as i32);
+    assert!(
+        section_descriptor_page.is_some(),
+        "AC1018 page map must contain the section descriptor page (section_map_id={})",
+        metadata.section_map_id
+    );
+
+    eprintln!(
+        "AC1018 page map: total_records={} valid_records={} self_seeker=0x{:X} section_map_seeker=0x{:X}",
+        map.records.len(),
+        valid_count,
+        page_map_self.map(|r| r.seeker).unwrap_or_default(),
+        section_descriptor_page
+            .map(|r| r.seeker)
+            .unwrap_or_default(),
+    );
+}
+
+/// R46-C ratchet: the real AC1018 sample's page map must contain at
+/// least `section_amount` valid records (i.e. R46-A's section_amount
+/// is a lower bound on the number of valid pages). Loose-by-design
+/// because the on-disk record count includes gap entries which are
+/// excluded here.
+#[test]
+fn ac1018_page_map_real_sample_records_total_at_least_section_amount() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+    let map = parse_ac1018_page_map(&bytes, metadata.page_map_address() as usize)
+        .expect("AC1018 page map must decode on the real sample");
+
+    let valid_count = map.valid_records().count() as u32;
+    assert!(
+        valid_count >= metadata.section_amount,
+        "AC1018 page map must yield at least section_amount={} valid records, got {}",
+        metadata.section_amount,
+        valid_count
+    );
+}
+
+/// R46-D smoke: walk R46-A → R46-B → R46-C → R46-D end-to-end on the
+/// real AC1018 sample. We assert (a) the section map decodes,
+/// (b) the descriptor count is non-trivial, and (c) descriptors are
+/// indexable by name. Tightening the lower bounds is left to a
+/// separate ratchet test below.
+#[test]
+fn ac1018_section_map_decodes_real_sample() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+    let page_map_offset = metadata.page_map_address() as usize;
+    let page_map = parse_ac1018_page_map(&bytes, page_map_offset)
+        .expect("AC1018 page map must decode on the real sample");
+
+    let descriptor_map = parse_ac1018_section_map(&bytes, &page_map, metadata.section_map_id)
+        .expect("AC1018 section descriptor map must decode end-to-end (R46-A → R46-D)");
+
+    assert!(
+        !descriptor_map.is_empty(),
+        "AC1018 section descriptor map must contain at least one descriptor"
+    );
+
+    eprintln!(
+        "AC1018 section map: descriptor_count={} order_head={:?}",
+        descriptor_map.len(),
+        descriptor_map.order.iter().take(8).collect::<Vec<_>>()
+    );
+}
+
+/// R46-D ratchet: the real AC1018 sample's section descriptor map
+/// must contain at least the eight ODA-spec core sections that R46-E
+/// will consume to drive entity recovery. The real
+/// `sample_AC1018.dwg` ships with all of them; if a future ACadSharp
+/// sample drops one, this test alerts us before R46-E silently
+/// regresses on a missing section.
+///
+/// Keep the required-set conservative: any section ACadSharp's
+/// `DwgReader.cs::readObjects()` directly indexes by name should be
+/// here. Optional sections (Preview / SummaryInfo / VbaProject /
+/// AppInfo) are excluded because they may legitimately be absent on
+/// minimal AC1018 samples.
+#[test]
+fn ac1018_section_map_real_sample_contains_core_sections() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+    let page_map = parse_ac1018_page_map(&bytes, metadata.page_map_address() as usize)
+        .expect("AC1018 page map must decode on the real sample");
+    let descriptor_map = parse_ac1018_section_map(&bytes, &page_map, metadata.section_map_id)
+        .expect("AC1018 section descriptor map must decode on the real sample");
+
+    let required: &[&str] = &[
+        "AcDb:Header",
+        "AcDb:Handles",
+        "AcDb:AcDbObjects",
+        "AcDb:Classes",
+        "AcDb:ObjFreeSpace",
+        "AcDb:Template",
+        "AcDb:AuxHeader",
+    ];
+    let names: Vec<&String> = descriptor_map.descriptors.keys().collect();
+    for required_name in required {
+        assert!(
+            descriptor_map.lookup(required_name).is_some(),
+            "AC1018 section descriptor map must contain {required_name:?} (got {names:?})"
+        );
+    }
+}
+
+/// R46-E1 smoke: walk R46-A → R46-B → R46-C → R46-D → R46-E1
+/// end-to-end on the real AC1018 sample by reassembling the
+/// `AcDb:Header` section payload and asserting its first 16 bytes
+/// match the documented start sentinel
+/// (`KnownSection::Header.start_sentinel()`). This is the strongest
+/// readily-available oracle that the per-page XOR + LZ77 reassembly
+/// is byte-exact, because the sentinel is a fixed 16-byte ODA
+/// constant carried at the very beginning of every conforming
+/// AcDb:Header section.
+#[test]
+fn ac1018_section_data_decompresses_real_acdb_header() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+    let page_map = parse_ac1018_page_map(&bytes, metadata.page_map_address() as usize)
+        .expect("AC1018 page map must decode on the real sample");
+    let descriptor_map = parse_ac1018_section_map(&bytes, &page_map, metadata.section_map_id)
+        .expect("AC1018 section descriptor map must decode on the real sample");
+    let header_descriptor = descriptor_map
+        .lookup("AcDb:Header")
+        .expect("AcDb:Header descriptor must be present");
+
+    let payload = read_ac1018_section_payload(&bytes, header_descriptor)
+        .expect("AcDb:Header payload must reassemble end-to-end (R46-A → R46-E1)");
+
+    let sentinel = KnownSection::Header.start_sentinel().expect(
+        "KnownSection::Header has a documented start sentinel",
+    );
+    assert!(
+        payload.len() >= sentinel.len(),
+        "AcDb:Header payload must be at least {} bytes (got {})",
+        sentinel.len(),
+        payload.len()
+    );
+    assert_eq!(
+        &payload[..sentinel.len()],
+        &sentinel,
+        "AcDb:Header payload's first {} bytes must match KnownSection::Header.start_sentinel()",
+        sentinel.len()
+    );
+
+    eprintln!(
+        "AC1018 AcDb:Header payload: total_bytes={} pages={} compressed_code={}",
+        payload.len(),
+        header_descriptor.local_sections.len(),
+        header_descriptor.compressed_code,
+    );
+}
+
+/// R46-E1 smoke for AcDb:Handles: the handle map section must
+/// reassemble end-to-end and produce a non-trivial payload
+/// (at least 64 bytes, since the smallest real AC1018 still has a
+/// handful of handles and the modular-char encoding cannot pack them
+/// below that). R46-E2 will validate this further by feeding the
+/// payload through `parse_handle_map`.
+#[test]
+fn ac1018_section_data_decompresses_real_acdb_handles() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+    let page_map = parse_ac1018_page_map(&bytes, metadata.page_map_address() as usize)
+        .expect("AC1018 page map must decode on the real sample");
+    let descriptor_map = parse_ac1018_section_map(&bytes, &page_map, metadata.section_map_id)
+        .expect("AC1018 section descriptor map must decode on the real sample");
+    let handles_descriptor = descriptor_map
+        .lookup("AcDb:Handles")
+        .expect("AcDb:Handles descriptor must be present");
+
+    let payload = read_ac1018_section_payload(&bytes, handles_descriptor)
+        .expect("AcDb:Handles payload must reassemble end-to-end (R46-A → R46-E1)");
+
+    assert!(
+        payload.len() >= 64,
+        "AcDb:Handles payload must be at least 64 bytes on the real sample (got {})",
+        payload.len()
+    );
+}
+
+/// R46-E2 smoke: drive `read_dwg(sample_AC1018_bytes)` end-to-end
+/// and assert it returns `Ok(doc)`. This is the moment the AC1018
+/// reader stack stops being a fail-closed `UnsupportedHeaderLayout`
+/// and starts producing a real `CadDocument`. R46-F will tighten
+/// the lower bounds on entity_count / handle_offsets / etc. once
+/// the whole pipeline is stable.
+#[test]
+fn ac1018_read_dwg_decodes_real_sample_to_non_empty_doc() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+    let doc = read_dwg(&bytes).expect(
+        "AC1018 read_dwg must return Ok(doc) once R46-E2 wires the pipeline (R46-A → R46-E1)",
+    );
+    eprintln!(
+        "AC1018 read_dwg: entities={} blocks={} layers={} objects={} handles={}",
+        doc.entities.len(),
+        doc.block_records.len(),
+        doc.layers.len(),
+        doc.objects.len(),
+        doc.next_handle()
+    );
+}
+
+/// R46-E2 weak gate: `read_dwg` must produce at least one entity on
+/// the real AC1018 sample. This is the minimal "the pipeline is not
+/// silently dropping everything" assertion. R46-F will replace this
+/// with a per-family ratchet matching `real_dwg_samples_baseline_m3b`.
+#[test]
+fn ac1018_read_dwg_real_sample_recovers_some_entities() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+    let doc = read_dwg(&bytes).expect("AC1018 read_dwg must succeed");
+    assert!(
+        !doc.entities.is_empty(),
+        "AC1018 read_dwg should recover at least one entity on the real sample (got {})",
+        doc.entities.len()
+    );
+}
+
+/// R46-E2 sanity: the `AcDb:Handles` payload R46-E1 reassembles must
+/// flow through `build_pending_document` and feed `parse_handle_map`,
+/// producing a non-empty `pending.handle_offsets`. We verify this
+/// indirectly by re-running the pipeline up to `build_pending_document`
+/// (factoring out `resolve_document` / `enrich_with_real_entities`)
+/// and inspecting `pending.handle_offsets.len()`.
+#[test]
+fn ac1018_read_dwg_real_sample_handle_offsets_non_empty() {
+    let Some(bytes) = try_read_sample("sample_AC1018.dwg") else {
+        eprintln!("skip: sample_AC1018.dwg not present");
+        return;
+    };
+    let metadata = parse_ac1018_encrypted_metadata(&bytes)
+        .expect("AC1018 encrypted metadata must decode on the real sample");
+    let page_map = parse_ac1018_page_map(&bytes, metadata.page_map_address() as usize)
+        .expect("AC1018 page map must decode on the real sample");
+    let descriptor_map = parse_ac1018_section_map(&bytes, &page_map, metadata.section_map_id)
+        .expect("AC1018 section descriptor map must decode on the real sample");
+    let handles_descriptor = descriptor_map
+        .lookup("AcDb:Handles")
+        .expect("AcDb:Handles descriptor must be present");
+    let handles_payload = read_ac1018_section_payload(&bytes, handles_descriptor)
+        .expect("AcDb:Handles payload must reassemble end-to-end");
+
+    use h7cad_native_dwg::{parse_handle_map, HandleMapEntry};
+    let entries: Vec<HandleMapEntry> = parse_handle_map(&handles_payload)
+        .expect("AcDb:Handles payload must parse as a handle map on the real sample");
+    assert!(
+        !entries.is_empty(),
+        "AcDb:Handles payload must yield at least one handle on the real AC1018 sample (got {})",
+        entries.len()
+    );
+    eprintln!(
+        "AC1018 AcDb:Handles map: entries={} payload_bytes={}",
+        entries.len(),
+        handles_payload.len()
+    );
 }
