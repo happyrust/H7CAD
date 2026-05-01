@@ -6,9 +6,9 @@ use h7cad_native_model as nm;
 use pid_parse::package::{PidPackage, RawStream};
 use pid_parse::writer::{PidWriter, WritePlan};
 use pid_parse::{
-    build_import_view, derive_layout, DrawingMeta, GeneralMeta, ObjectGraph, PidDocument,
-    PidImportView, PidLayoutItem, PidLayoutModel, PidObject, PidParser,
-    PidRelationship, SummaryInfo,
+    build_import_view, build_normalized_geometry, derive_layout, DrawingMeta, GeneralMeta,
+    ObjectGraph, PidDocument, PidGeometryConfidence, PidGraphicKind, PidImportView, PidLayoutItem,
+    PidLayoutModel, PidObject, PidParser, PidRelationship, SummaryInfo,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -158,7 +158,7 @@ const SPPID_TOOL_ID: &str = env!("CARGO_PKG_NAME");
 /// Cargo 升版本会悄悄带到 publish Meta.xml 存在未知兼容风险。改由
 /// `sppid_software_version_tracks_cargo_pkg_version` 测试断言二者一致，
 /// 下次 `cargo release` 忘同步时 CI 显性失败提醒。
-const SPPID_SOFTWARE_VERSION: &str = "0.1.3";
+const SPPID_SOFTWARE_VERSION: &str = "0.1.7";
 const SPPID_REL_DRAWING_ITEMS: &str = "DrawingItems";
 const SPPID_REL_REP_COMPOSITION: &str = "DwgRepresentationComposition";
 const SPPID_REL_END1: &str = "PipingEnd1Conn";
@@ -297,17 +297,11 @@ pub fn edit_pid_drawing_attribute(
     let mut package = (*arc).clone();
     drop(arc);
 
-    let raw = package.get_stream(DRAWING_STREAM_PATH).ok_or_else(|| {
-        format!(
-            "source PID is missing {} stream",
-            DRAWING_STREAM_PATH
-        )
-    })?;
-    let xml = std::str::from_utf8(&raw.data).map_err(|e| {
-        format!(
-            "Drawing XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"
-        )
-    })?;
+    let raw = package
+        .get_stream(DRAWING_STREAM_PATH)
+        .ok_or_else(|| format!("source PID is missing {} stream", DRAWING_STREAM_PATH))?;
+    let xml = std::str::from_utf8(&raw.data)
+        .map_err(|e| format!("Drawing XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
 
     let previous = pid_parse::writer::get_drawing_attribute(xml, attr);
     let new_xml = pid_parse::writer::set_drawing_attribute(xml, attr, value)
@@ -355,12 +349,11 @@ pub fn edit_pid_general_element(
     let mut package = (*arc).clone();
     drop(arc);
 
-    let raw = package.get_stream(GENERAL_STREAM_PATH).ok_or_else(|| {
-        format!("source PID is missing {} stream", GENERAL_STREAM_PATH)
-    })?;
-    let xml = std::str::from_utf8(&raw.data).map_err(|e| {
-        format!("General XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}")
-    })?;
+    let raw = package
+        .get_stream(GENERAL_STREAM_PATH)
+        .ok_or_else(|| format!("source PID is missing {} stream", GENERAL_STREAM_PATH))?;
+    let xml = std::str::from_utf8(&raw.data)
+        .map_err(|e| format!("General XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
 
     let previous = pid_parse::writer::get_general_element_text(xml, element);
     let new_xml = pid_parse::writer::set_element_text(xml, element, value)
@@ -427,20 +420,18 @@ pub fn list_pid_metadata(source: &Path) -> Result<PidPropsListing, String> {
 
     let mut listing = PidPropsListing::default();
 
-    let drawing_raw = arc.get_stream(DRAWING_STREAM_PATH).ok_or_else(|| {
-        format!("source PID is missing {} stream", DRAWING_STREAM_PATH)
-    })?;
-    let drawing_xml = std::str::from_utf8(&drawing_raw.data).map_err(|e| {
-        format!("Drawing XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}")
-    })?;
+    let drawing_raw = arc
+        .get_stream(DRAWING_STREAM_PATH)
+        .ok_or_else(|| format!("source PID is missing {} stream", DRAWING_STREAM_PATH))?;
+    let drawing_xml = std::str::from_utf8(&drawing_raw.data)
+        .map_err(|e| format!("Drawing XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
     listing.drawing_attributes = pid_parse::writer::list_drawing_attributes(drawing_xml);
 
-    let general_raw = arc.get_stream(GENERAL_STREAM_PATH).ok_or_else(|| {
-        format!("source PID is missing {} stream", GENERAL_STREAM_PATH)
-    })?;
-    let general_xml = std::str::from_utf8(&general_raw.data).map_err(|e| {
-        format!("General XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}")
-    })?;
+    let general_raw = arc
+        .get_stream(GENERAL_STREAM_PATH)
+        .ok_or_else(|| format!("source PID is missing {} stream", GENERAL_STREAM_PATH))?;
+    let general_xml = std::str::from_utf8(&general_raw.data)
+        .map_err(|e| format!("General XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
     listing.general_elements = pid_parse::writer::list_general_elements(general_xml);
 
     Ok(listing)
@@ -846,11 +837,10 @@ pub fn list_pid_path(
             source.display()
         )
     })?;
-    let graph = arc
-        .parsed
-        .object_graph
-        .as_ref()
-        .ok_or_else(|| "source PID has no object_graph (P&IDAttributes not parsed)".to_string())?;
+    let graph =
+        arc.parsed.object_graph.as_ref().ok_or_else(|| {
+            "source PID has no object_graph (P&IDAttributes not parsed)".to_string()
+        })?;
     let from_id = resolve_drawing_id_in_graph(graph, from_or_prefix)?;
     let to_id = resolve_drawing_id_in_graph(graph, to_or_prefix)?;
 
@@ -907,17 +897,16 @@ pub fn list_pid_neighbors(
             source.display()
         )
     })?;
-    let graph = arc
-        .parsed
-        .object_graph
-        .as_ref()
-        .ok_or_else(|| "source PID has no object_graph (P&IDAttributes not parsed)".to_string())?;
+    let graph =
+        arc.parsed.object_graph.as_ref().ok_or_else(|| {
+            "source PID has no object_graph (P&IDAttributes not parsed)".to_string()
+        })?;
 
     let resolved_id = resolve_drawing_id_in_graph(graph, drawing_id_or_prefix)?;
 
-    let self_obj = graph.object_by_drawing_id(&resolved_id).expect(
-        "BTreeMap::range invariant: prefix-matched key must exist in by_drawing_id",
-    );
+    let self_obj = graph
+        .object_by_drawing_id(&resolved_id)
+        .expect("BTreeMap::range invariant: prefix-matched key must exist in by_drawing_id");
     let neighbors: Vec<PidNeighborInfo> = graph
         .neighbors_within(&resolved_id, depth)
         .into_iter()
@@ -939,16 +928,13 @@ pub fn list_pid_objects_matching(
             source.display()
         )
     })?;
-    let graph = arc
-        .parsed
-        .object_graph
-        .as_ref()
-        .ok_or_else(|| "source PID has no object_graph (P&IDAttributes not parsed)".to_string())?;
+    let graph =
+        arc.parsed.object_graph.as_ref().ok_or_else(|| {
+            "source PID has no object_graph (P&IDAttributes not parsed)".to_string()
+        })?;
     let raw_matches: Vec<&pid_parse::PidObject> = match criterion {
         PidFindCriterion::ItemType(t) => graph.find_objects_by_item_type(t),
-        PidFindCriterion::ExtraEquals { key, value } => {
-            graph.find_objects_by_extra(key, value)
-        }
+        PidFindCriterion::ExtraEquals { key, value } => graph.find_objects_by_extra(key, value),
     };
     Ok(raw_matches.into_iter().map(project_neighbor).collect())
 }
@@ -963,11 +949,10 @@ pub fn pid_graph_stats(source: &Path) -> Result<PidGraphStats, String> {
             source.display()
         )
     })?;
-    let graph = arc
-        .parsed
-        .object_graph
-        .as_ref()
-        .ok_or_else(|| "source PID has no object_graph (P&IDAttributes not parsed)".to_string())?;
+    let graph =
+        arc.parsed.object_graph.as_ref().ok_or_else(|| {
+            "source PID has no object_graph (P&IDAttributes not parsed)".to_string()
+        })?;
     let s = graph.endpoint_resolution_stats();
     Ok(PidGraphStats {
         object_count: graph.objects.len(),
@@ -1011,9 +996,7 @@ fn project_unidentified(
 /// List top-level CFB streams in the **cached** `PidPackage` for
 /// `source` that `pid-parse` does not yet recognize. Returns an empty
 /// vec when the sample is fully covered.
-pub fn list_pid_unidentified_cached(
-    source: &Path,
-) -> Result<Vec<UnidentifiedStreamInfo>, String> {
+pub fn list_pid_unidentified_cached(source: &Path) -> Result<Vec<UnidentifiedStreamInfo>, String> {
     let arc = pid_package_store::get_package(source).ok_or_else(|| {
         format!(
             "no cached PidPackage for {} (open the file in H7CAD first)",
@@ -1027,9 +1010,7 @@ pub fn list_pid_unidentified_cached(
 /// List top-level CFB streams in `path` that `pid-parse` does not yet
 /// recognize. Parses fresh; does not consult or mutate the package
 /// store.
-pub fn list_pid_unidentified_file(
-    path: &Path,
-) -> Result<Vec<UnidentifiedStreamInfo>, String> {
+pub fn list_pid_unidentified_file(path: &Path) -> Result<Vec<UnidentifiedStreamInfo>, String> {
     let doc = PidParser::new()
         .parse_file(path)
         .map_err(|e| e.to_string())?;
@@ -1397,12 +1378,16 @@ fn parse_publish_data_xml(path: &Path) -> Result<ParsedPublishData, String> {
                 if !uid1.is_empty() && !uid2.is_empty() {
                     raw_relationships.push((
                         node.children()
-                            .find(|child| child.is_element() && child.tag_name().name() == "IObject")
+                            .find(|child| {
+                                child.is_element() && child.tag_name().name() == "IObject"
+                            })
                             .and_then(|obj| obj.attribute("UID"))
                             .map(str::to_string),
                         uid1.to_string(),
                         uid2.to_string(),
-                        rel.attribute("DefUID").unwrap_or("Relationship").to_string(),
+                        rel.attribute("DefUID")
+                            .unwrap_or("Relationship")
+                            .to_string(),
                     ));
                 }
             }
@@ -1484,7 +1469,9 @@ fn parse_publish_data_xml(path: &Path) -> Result<ParsedPublishData, String> {
         .collect();
     let relationships = raw_relationships
         .into_iter()
-        .filter(|(_, uid1, uid2, _)| by_drawing_id.contains_key(uid1) && by_drawing_id.contains_key(uid2))
+        .filter(|(_, uid1, uid2, _)| {
+            by_drawing_id.contains_key(uid1) && by_drawing_id.contains_key(uid2)
+        })
         .map(|(uid, uid1, uid2, def_uid)| {
             let guid = uid.unwrap_or_else(|| stable_uid(&format!("{def_uid}:{uid1}:{uid2}")));
             PidRelationship {
@@ -1579,11 +1566,17 @@ fn parse_publish_meta_xml(path: &Path) -> Result<ParsedPublishMeta, String> {
     })
 }
 
-fn bran_publish_model_from_document(doc: &acadrust::CadDocument) -> Result<BranPublishModel, String> {
+fn bran_publish_model_from_document(
+    doc: &acadrust::CadDocument,
+) -> Result<BranPublishModel, String> {
     let inserts: Vec<Insert> = doc
         .entities()
         .filter_map(|entity| match entity {
-            EntityType::Insert(insert) if insert.block_name.eq_ignore_ascii_case(SPPID_BRAN_BLOCK_NAME) => {
+            EntityType::Insert(insert)
+                if insert
+                    .block_name
+                    .eq_ignore_ascii_case(SPPID_BRAN_BLOCK_NAME) =>
+            {
                 Some(insert.clone())
             }
             _ => None,
@@ -1592,13 +1585,15 @@ fn bran_publish_model_from_document(doc: &acadrust::CadDocument) -> Result<BranP
     let insert = match inserts.as_slice() {
         [] => {
             return Err(
-                "SPPID export requires exactly one SPPID_BRAN insert in the active drawing".to_string(),
+                "SPPID export requires exactly one SPPID_BRAN insert in the active drawing"
+                    .to_string(),
             )
         }
         [insert] => insert,
         _ => {
             return Err(
-                "SPPID export currently supports exactly one SPPID_BRAN insert per drawing".to_string(),
+                "SPPID export currently supports exactly one SPPID_BRAN insert per drawing"
+                    .to_string(),
             )
         }
     };
@@ -1733,8 +1728,14 @@ fn build_publish_object_graph(model: &BranPublishModel) -> ObjectGraph {
             model_id: Some(model.pipeline_name.clone()),
             extra: BTreeMap::from([
                 ("PipelineName".to_string(), model.pipeline_name.clone()),
-                ("NominalDiameter".to_string(), model.nominal_diameter.clone()),
-                ("PipingMaterialsClass".to_string(), model.piping_class.clone()),
+                (
+                    "NominalDiameter".to_string(),
+                    model.nominal_diameter.clone(),
+                ),
+                (
+                    "PipingMaterialsClass".to_string(),
+                    model.piping_class.clone(),
+                ),
             ]),
             record_id: None,
             field_x: None,
@@ -1796,11 +1797,7 @@ fn build_publish_object_graph(model: &BranPublishModel) -> ObjectGraph {
             &model.connector_uid,
             &model.process_point_uid,
         ),
-        publish_relationship(
-            SPPID_REL_TAP,
-            &model.piping_branch_uid,
-            &model.branch_uid,
-        ),
+        publish_relationship(SPPID_REL_TAP, &model.piping_branch_uid, &model.branch_uid),
         publish_relationship(
             SPPID_REL_PROCESS_POINT,
             &model.process_point_uid,
@@ -1824,7 +1821,9 @@ fn build_publish_object_graph(model: &BranPublishModel) -> ObjectGraph {
         .collect();
     let mut counts_by_type = BTreeMap::new();
     for object in &objects {
-        *counts_by_type.entry(object.item_type.clone()).or_insert(0usize) += 1;
+        *counts_by_type
+            .entry(object.item_type.clone())
+            .or_insert(0usize) += 1;
     }
     ObjectGraph {
         drawing_no: Some(model.drawing_no.clone()),
@@ -1957,17 +1956,72 @@ fn build_publish_data_xml(model: &BranPublishModel) -> String {
         branch_uid = model.branch_uid,
         process_point_uid = model.process_point_uid,
         representation_uid = model.representation_uid,
-        rel_draw_pipeline = publish_rel_xml("REL-DRAW-PIPELINE", &model.pipeline_uid, &model.drawing_uid, SPPID_REL_DRAWING_ITEMS),
-        rel_draw_connector = publish_rel_xml("REL-DRAW-CONNECTOR", &model.connector_uid, &model.drawing_uid, SPPID_REL_DRAWING_ITEMS),
-        rel_draw_branch = publish_rel_xml("REL-DRAW-PIPING-BRANCH", &model.piping_branch_uid, &model.drawing_uid, SPPID_REL_DRAWING_ITEMS),
-        rel_draw_branch_2 = publish_rel_xml("REL-DRAW-BRANCH", &model.branch_uid, &model.drawing_uid, SPPID_REL_DRAWING_ITEMS),
-        rel_draw_pp = publish_rel_xml("REL-DRAW-PROCESS", &model.process_point_uid, &model.drawing_uid, SPPID_REL_DRAWING_ITEMS),
-        rel_draw_rep = publish_rel_xml("REL-DRAW-REP", &model.representation_uid, &model.drawing_uid, SPPID_REL_DRAWING_ITEMS),
-        rel_rep = publish_rel_xml("REL-REP-COMP", &model.representation_uid, &model.piping_branch_uid, SPPID_REL_REP_COMPOSITION),
-        rel_end1 = publish_rel_xml("REL-END1", &model.connector_uid, &model.piping_branch_uid, SPPID_REL_END1),
-        rel_end2 = publish_rel_xml("REL-END2", &model.connector_uid, &model.process_point_uid, SPPID_REL_END2),
-        rel_tap = publish_rel_xml("REL-TAP", &model.piping_branch_uid, &model.branch_uid, SPPID_REL_TAP),
-        rel_process = publish_rel_xml("REL-PROCESS", &model.process_point_uid, &model.pipeline_uid, SPPID_REL_PROCESS_POINT),
+        rel_draw_pipeline = publish_rel_xml(
+            "REL-DRAW-PIPELINE",
+            &model.pipeline_uid,
+            &model.drawing_uid,
+            SPPID_REL_DRAWING_ITEMS
+        ),
+        rel_draw_connector = publish_rel_xml(
+            "REL-DRAW-CONNECTOR",
+            &model.connector_uid,
+            &model.drawing_uid,
+            SPPID_REL_DRAWING_ITEMS
+        ),
+        rel_draw_branch = publish_rel_xml(
+            "REL-DRAW-PIPING-BRANCH",
+            &model.piping_branch_uid,
+            &model.drawing_uid,
+            SPPID_REL_DRAWING_ITEMS
+        ),
+        rel_draw_branch_2 = publish_rel_xml(
+            "REL-DRAW-BRANCH",
+            &model.branch_uid,
+            &model.drawing_uid,
+            SPPID_REL_DRAWING_ITEMS
+        ),
+        rel_draw_pp = publish_rel_xml(
+            "REL-DRAW-PROCESS",
+            &model.process_point_uid,
+            &model.drawing_uid,
+            SPPID_REL_DRAWING_ITEMS
+        ),
+        rel_draw_rep = publish_rel_xml(
+            "REL-DRAW-REP",
+            &model.representation_uid,
+            &model.drawing_uid,
+            SPPID_REL_DRAWING_ITEMS
+        ),
+        rel_rep = publish_rel_xml(
+            "REL-REP-COMP",
+            &model.representation_uid,
+            &model.piping_branch_uid,
+            SPPID_REL_REP_COMPOSITION
+        ),
+        rel_end1 = publish_rel_xml(
+            "REL-END1",
+            &model.connector_uid,
+            &model.piping_branch_uid,
+            SPPID_REL_END1
+        ),
+        rel_end2 = publish_rel_xml(
+            "REL-END2",
+            &model.connector_uid,
+            &model.process_point_uid,
+            SPPID_REL_END2
+        ),
+        rel_tap = publish_rel_xml(
+            "REL-TAP",
+            &model.piping_branch_uid,
+            &model.branch_uid,
+            SPPID_REL_TAP
+        ),
+        rel_process = publish_rel_xml(
+            "REL-PROCESS",
+            &model.process_point_uid,
+            &model.pipeline_uid,
+            SPPID_REL_PROCESS_POINT
+        ),
     )
 }
 
@@ -2016,9 +2070,24 @@ fn build_publish_meta_xml(model: &BranPublishModel, pid_path: &Path) -> String {
         file_uid = model.file_uid,
         pid_name = pid_name,
         file_path = file_path,
-        rel_version = publish_rel_xml("REL-VERSIONED-DOC", &model.drawing_uid, &model.doc_version_uid, "VersionedDoc"),
-        rel_revision = publish_rel_xml("REL-REVISED-DOC", &model.doc_revision_uid, &model.drawing_uid, "RevisedDocument"),
-        rel_file = publish_rel_xml("REL-FILE-COMP", &model.file_uid, &model.doc_version_uid, "FileComposition"),
+        rel_version = publish_rel_xml(
+            "REL-VERSIONED-DOC",
+            &model.drawing_uid,
+            &model.doc_version_uid,
+            "VersionedDoc"
+        ),
+        rel_revision = publish_rel_xml(
+            "REL-REVISED-DOC",
+            &model.doc_revision_uid,
+            &model.drawing_uid,
+            "RevisedDocument"
+        ),
+        rel_file = publish_rel_xml(
+            "REL-FILE-COMP",
+            &model.file_uid,
+            &model.doc_version_uid,
+            "FileComposition"
+        ),
     )
 }
 
@@ -2092,11 +2161,16 @@ fn pid_document_to_preview(
     ensure_layer(&mut native, "PID_STREAMS", 3);
     ensure_layer(&mut native, "PID_CROSSREF", 7);
     ensure_layer(&mut native, "PID_UNRESOLVED", 6);
+    ensure_layer(&mut native, "PID_GEOM_POINTS", 3);
 
     let mut preview_index = PidPreviewIndex::default();
     let mut positions = BTreeMap::new();
     let object_count = view.objects.len();
-    let unresolved_edges = if let Some(layout) = doc.layout.as_ref().filter(|layout| !layout.items.is_empty()) {
+    let unresolved_edges = if let Some(layout) = doc
+        .layout
+        .as_ref()
+        .filter(|layout| !layout.items.is_empty())
+    {
         let rendered = add_layout_entities(&mut native, &mut preview_index, view, layout);
         positions = rendered.positions;
         add_layout_text_entities(&mut native, &mut preview_index, layout);
@@ -2118,6 +2192,7 @@ fn pid_document_to_preview(
     add_stream_entities(&mut native, &mut preview_index, doc);
     add_cross_reference_entities(&mut native, &mut preview_index, doc);
     add_unresolved_entities(&mut native, &mut preview_index, view, unresolved_edges);
+    add_geometry_entities(&mut native, &mut preview_index, doc);
 
     let attribute_class_count = doc
         .cross_reference
@@ -2150,6 +2225,42 @@ fn pid_document_to_preview(
         object_graph_available: doc.object_graph.is_some(),
     };
     (native, summary, preview_index)
+}
+
+fn add_geometry_entities(
+    native: &mut nm::CadDocument,
+    preview_index: &mut PidPreviewIndex,
+    doc: &PidDocument,
+) {
+    let geometry = build_normalized_geometry(doc);
+    if geometry.is_empty() {
+        return;
+    }
+
+    let point_radius = 6.0;
+    for geom_entity in &geometry.entities {
+        if geom_entity.confidence != PidGeometryConfidence::Inferred {
+            continue;
+        }
+        if let PidGraphicKind::Point { position } = &geom_entity.kind {
+            if geom_entity.source.field_x.is_none() {
+                continue;
+            }
+            let mut marker = nm::Entity::new(nm::EntityData::Circle {
+                center: [position.x, position.y, 0.0],
+                radius: point_radius,
+            });
+            marker.layer_name = "PID_GEOM_POINTS".into();
+            let _ = add_layout_indexed_entity(
+                native,
+                preview_index,
+                None,
+                geom_entity.drawing_id.as_deref(),
+                geom_entity.graphic_oid,
+                marker,
+            );
+        }
+    }
 }
 
 fn ensure_layer(doc: &mut nm::CadDocument, name: &str, color: i16) {
@@ -2192,7 +2303,10 @@ fn add_indexed_entity(
     key: Option<PidNodeKey>,
     entity: nm::Entity,
 ) -> Option<Handle> {
-    let handle = doc.add_entity(entity).ok().map(|handle| Handle::new(handle.value()))?;
+    let handle = doc
+        .add_entity(entity)
+        .ok()
+        .map(|handle| Handle::new(handle.value()))?;
     if let Some(key) = key {
         preview_index.record_existing_handle(key, handle);
     }
@@ -2261,7 +2375,10 @@ fn add_object_entities(
     marker.layer_name = layer.clone();
     let _ = add_indexed_entity(doc, preview_index, Some(key.clone()), marker);
 
-    let mut lines = vec![object.item_type.clone(), short_id(&object.drawing_id).to_string()];
+    let mut lines = vec![
+        object.item_type.clone(),
+        short_id(&object.drawing_id).to_string(),
+    ];
     if let Some(kind) = &object.drawing_item_type {
         lines.push(short_text(kind, 24));
     }
@@ -2269,7 +2386,11 @@ fn add_object_entities(
         lines.push(short_text(model_id, 28));
     }
     for (name, value) in object.extra.iter().take(2) {
-        lines.push(format!("{}={}", short_text(name, 10), short_text(value, 18)));
+        lines.push(format!(
+            "{}={}",
+            short_text(name, 10),
+            short_text(value, 18)
+        ));
     }
 
     let _ = add_panel_line(
@@ -2311,18 +2432,14 @@ fn classify_layout_glyph(item: &PidLayoutItem) -> LayoutGlyphKind {
         "Branch" | "PIDPipingBranchPoint" | "PIDBranchPoint" => LayoutGlyphKind::Branch,
         "Connector" | "PIDPipingConnector" => LayoutGlyphKind::Connector,
         "ProcessPoint" | "PIDProcessPoint" => LayoutGlyphKind::ProcessPoint,
-        "Instrument" | "PIDInstrument" | "PIDControlSystemFunction" => {
-            LayoutGlyphKind::Instrument
-        }
+        "Instrument" | "PIDInstrument" | "PIDControlSystemFunction" => LayoutGlyphKind::Instrument,
         "Equipment" | "PIDEquipment" => LayoutGlyphKind::Equipment,
         "Vessel" | "PIDProcessVessel" => LayoutGlyphKind::Vessel,
         "Note" | "PIDNote" | "ItemNote" => LayoutGlyphKind::Note,
         "Nozzle" | "PIDNozzle" | "PipingPort" | "SignalPort" | "PIDPipingPort"
         | "PIDSignalPort" => LayoutGlyphKind::Nozzle,
         "OffPageConnector" | "PIDSignalConnector" | "OPC" => LayoutGlyphKind::OffPageConnector,
-        "PipingComponent" | "PIDPipingComponent" | "PipingComp" => {
-            LayoutGlyphKind::PipingComponent
-        }
+        "PipingComponent" | "PIDPipingComponent" | "PipingComp" => LayoutGlyphKind::PipingComponent,
         _ => LayoutGlyphKind::Generic,
     }
 }
@@ -2353,7 +2470,11 @@ fn add_layout_entities(
         let label = item
             .label
             .as_deref()
-            .or_else(|| objects_by_id.get(drawing_id).and_then(|object| object.model_id.as_deref()))
+            .or_else(|| {
+                objects_by_id
+                    .get(drawing_id)
+                    .and_then(|object| object.model_id.as_deref())
+            })
             .unwrap_or(item.kind.as_str());
         add_layout_glyph(
             doc,
@@ -2452,7 +2573,10 @@ fn add_fallback_entities(
             44.0,
             26.0,
         );
-        let mut lines = vec![object.item_type.clone(), short_id(&object.drawing_id).to_string()];
+        let mut lines = vec![
+            object.item_type.clone(),
+            short_id(&object.drawing_id).to_string(),
+        ];
         if let Some(model_id) = &object.model_id {
             lines.push(short_text(model_id, 28));
         }
@@ -2749,8 +2873,14 @@ fn add_layout_cross(
     span: f64,
 ) {
     for (start, end) in [
-        ([point[0] - span, point[1], 0.0], [point[0] + span, point[1], 0.0]),
-        ([point[0], point[1] - span, 0.0], [point[0], point[1] + span, 0.0]),
+        (
+            [point[0] - span, point[1], 0.0],
+            [point[0] + span, point[1], 0.0],
+        ),
+        (
+            [point[0], point[1] - span, 0.0],
+            [point[0], point[1] + span, 0.0],
+        ),
     ] {
         let mut entity = nm::Entity::new(nm::EntityData::Line { start, end });
         entity.layer_name = layer.into();
@@ -2918,8 +3048,14 @@ fn add_relationship_entities(
 ) -> usize {
     let mut unresolved = 0;
     for relationship in &view.relationships {
-        let source = relationship.source_drawing_id.as_ref().and_then(|id| positions.get(id));
-        let target = relationship.target_drawing_id.as_ref().and_then(|id| positions.get(id));
+        let source = relationship
+            .source_drawing_id
+            .as_ref()
+            .and_then(|id| positions.get(id));
+        let target = relationship
+            .target_drawing_id
+            .as_ref()
+            .and_then(|id| positions.get(id));
 
         match (source, target) {
             (Some(source), Some(target)) => {
@@ -2943,7 +3079,11 @@ fn add_relationship_entities(
     unresolved
 }
 
-fn add_meta_entities(doc: &mut nm::CadDocument, preview_index: &mut PidPreviewIndex, view: &PidImportView) {
+fn add_meta_entities(
+    doc: &mut nm::CadDocument,
+    preview_index: &mut PidPreviewIndex,
+    view: &PidImportView,
+) {
     let mut lines = vec![view.title.clone()];
     if let Some(project) = &view.project_number {
         lines.push(format!("project={project}"));
@@ -2983,7 +3123,11 @@ fn add_meta_entities(doc: &mut nm::CadDocument, preview_index: &mut PidPreviewIn
     let _ = add_indexed_entity(doc, preview_index, Some(PidNodeKey::Overview), source_text);
 }
 
-fn add_symbol_entities(doc: &mut nm::CadDocument, preview_index: &mut PidPreviewIndex, view: &PidImportView) {
+fn add_symbol_entities(
+    doc: &mut nm::CadDocument,
+    preview_index: &mut PidPreviewIndex,
+    view: &PidImportView,
+) {
     if view.symbols.is_empty() {
         return;
     }
@@ -3070,7 +3214,11 @@ fn add_cluster_entities(
     }
 }
 
-fn add_stream_entities(doc: &mut nm::CadDocument, preview_index: &mut PidPreviewIndex, pid_doc: &PidDocument) {
+fn add_stream_entities(
+    doc: &mut nm::CadDocument,
+    preview_index: &mut PidPreviewIndex,
+    pid_doc: &PidDocument,
+) {
     let has_streams = !pid_doc.sheet_streams.is_empty()
         || pid_doc.dynamic_attributes.is_some()
         || pid_doc
@@ -3101,10 +3249,7 @@ fn add_stream_entities(doc: &mut nm::CadDocument, preview_index: &mut PidPreview
             "PID_STREAMS",
             [SIDE_PANEL_X, STREAM_PANEL_Y - 24.0 - row as f64 * 18.0, 0.0],
             300.0,
-            format!(
-                "DynamicAttrs [{} records]",
-                dynamic.attribute_records.len()
-            ),
+            format!("DynamicAttrs [{} records]", dynamic.attribute_records.len()),
             Some(PidNodeKey::DynamicAttributes),
         );
         row += 1;
@@ -3127,7 +3272,12 @@ fn add_stream_entities(doc: &mut nm::CadDocument, preview_index: &mut PidPreview
             }),
         );
         if let Some(handle) = handle {
-            preview_index.record_existing_handle(PidNodeKey::Sheet { name: sheet.name.clone() }, handle);
+            preview_index.record_existing_handle(
+                PidNodeKey::Sheet {
+                    name: sheet.name.clone(),
+                },
+                handle,
+            );
         }
         row += 1;
     }
@@ -3281,7 +3431,11 @@ fn add_unresolved_entities(
             doc,
             preview_index,
             "PID_UNRESOLVED",
-            [CROSSREF_PANEL_X, UNRESOLVED_PANEL_Y - 24.0 - row as f64 * 18.0, 0.0],
+            [
+                CROSSREF_PANEL_X,
+                UNRESOLVED_PANEL_Y - 24.0 - row as f64 * 18.0,
+                0.0,
+            ],
             320.0,
             label.clone(),
             Some(PidNodeKey::Unresolved { label }),
@@ -3293,7 +3447,11 @@ fn add_unresolved_entities(
             doc,
             preview_index,
             "PID_UNRESOLVED",
-            [CROSSREF_PANEL_X, UNRESOLVED_PANEL_Y - 24.0 - row as f64 * 18.0, 0.0],
+            [
+                CROSSREF_PANEL_X,
+                UNRESOLVED_PANEL_Y - 24.0 - row as f64 * 18.0,
+                0.0,
+            ],
             320.0,
             short_text(line, 72),
             Some(PidNodeKey::Unresolved {
@@ -3359,12 +3517,14 @@ mod tests {
         cfb.create_storage("/PlainSheet").unwrap();
         cfb.create_storage("/UnknownStorage").unwrap();
 
-        let drawing = b"<?xml version=\"1.0\"?><Drawing><Tag SP_DRAWINGNUMBER=\"FX-001\"/></Drawing>";
+        let drawing =
+            b"<?xml version=\"1.0\"?><Drawing><Tag SP_DRAWINGNUMBER=\"FX-001\"/></Drawing>";
         let mut s = cfb.create_stream(FIXTURE_DRAWING).unwrap();
         s.write_all(drawing).unwrap();
         drop(s);
 
-        let general = b"<?xml version=\"1.0\"?><General><FilePath>C:/fixture.pid</FilePath></General>";
+        let general =
+            b"<?xml version=\"1.0\"?><General><FilePath>C:/fixture.pid</FilePath></General>";
         let mut s = cfb.create_stream(FIXTURE_GENERAL).unwrap();
         s.write_all(general).unwrap();
         drop(s);
@@ -3374,7 +3534,9 @@ mod tests {
         s.write_all(&sheet).unwrap();
         drop(s);
 
-        let blob: Vec<u8> = (0u8..32).map(|i| i.wrapping_mul(7).wrapping_add(3)).collect();
+        let blob: Vec<u8> = (0u8..32)
+            .map(|i| i.wrapping_mul(7).wrapping_add(3))
+            .collect();
         let mut s = cfb.create_stream(FIXTURE_BLOB).unwrap();
         s.write_all(&blob).unwrap();
         drop(s);
@@ -3653,9 +3815,8 @@ mod tests {
     /// so this test is skipped when the repo isn't checked out alongside
     /// H7CAD.
     fn target_sample_pid_path() -> Option<PathBuf> {
-        let path = PathBuf::from(
-            r"D:\work\plant-code\cad\pid-parse\test-file\工艺管道及仪表流程-1.pid",
-        );
+        let path =
+            PathBuf::from(r"D:\work\plant-code\cad\pid-parse\test-file\工艺管道及仪表流程-1.pid");
         path.exists().then_some(path)
     }
 
@@ -3741,11 +3902,8 @@ mod tests {
         scene.set_native_doc(Some(bundle.native_preview));
         scene.native_render_enabled = true;
 
-        let fitted = scene.fit_layers_matching(&[
-            "PID_OBJECTS_",
-            "PID_LAYOUT_TEXT",
-            "PID_RELATIONSHIPS",
-        ]);
+        let fitted =
+            scene.fit_layers_matching(&["PID_OBJECTS_", "PID_LAYOUT_TEXT", "PID_RELATIONSHIPS"]);
         assert!(
             fitted,
             "target pid sample must carry primary-layer geometry so the PID FileOpened \
@@ -3859,11 +4017,17 @@ mod tests {
             "layout-backed preview should place PIPE-001 near its decoded anchor rather than the grid origin"
         );
         assert!(
-            !handles.iter().filter_map(|handle| entity_for_handle(&native, *handle)).any(|entity| {
-                entity_anchor(entity)
-                    .map(|point| (point[0] - grid_point(0)[0]).abs() < 0.1 && (point[1] - grid_point(0)[1]).abs() < 0.1)
-                    .unwrap_or(false)
-            }),
+            !handles
+                .iter()
+                .filter_map(|handle| entity_for_handle(&native, *handle))
+                .any(|entity| {
+                    entity_anchor(entity)
+                        .map(|point| {
+                            (point[0] - grid_point(0)[0]).abs() < 0.1
+                                && (point[1] - grid_point(0)[1]).abs() < 0.1
+                        })
+                        .unwrap_or(false)
+                }),
             "layout-backed preview should no longer use grid_point(0) for the first object"
         );
     }
@@ -3876,7 +4040,10 @@ mod tests {
         let handles = preview_index.handles_for(&PidNodeKey::Object {
             drawing_id: "UNPLACED-001".into(),
         });
-        assert!(!handles.is_empty(), "fallback object should still be selectable");
+        assert!(
+            !handles.is_empty(),
+            "fallback object should still be selectable"
+        );
         assert!(
             handles
                 .iter()
@@ -4125,8 +4292,8 @@ mod tests {
         build_fixture_pid_with_multi_attrs(&src);
         load_pid_native_with_package(&src).expect("load fixture");
 
-        let report = edit_pid_drawing_attribute(&src, "SP_PROJECTNUMBER", "PRJ-2026-A")
-            .expect("edit");
+        let report =
+            edit_pid_drawing_attribute(&src, "SP_PROJECTNUMBER", "PRJ-2026-A").expect("edit");
         assert_eq!(report.attr, "SP_PROJECTNUMBER");
         assert_eq!(report.previous.as_deref(), Some("PRJ-OLD"));
         assert_eq!(report.next, "PRJ-2026-A");
@@ -4166,18 +4333,14 @@ mod tests {
         load_pid_native_with_package(&src).expect("load fixture");
 
         // Snapshot the original Drawing bytes.
-        let original_bytes = pid_package_store::get_package(&src)
-            .unwrap()
-            .streams[FIXTURE_DRAWING]
+        let original_bytes = pid_package_store::get_package(&src).unwrap().streams[FIXTURE_DRAWING]
             .data
             .clone();
 
         edit_pid_drawing_attribute(&src, "SP_DRAWINGNUMBER", "NEW-9999")
             .expect("edit drawing number");
 
-        let new_bytes = pid_package_store::get_package(&src)
-            .unwrap()
-            .streams[FIXTURE_DRAWING]
+        let new_bytes = pid_package_store::get_package(&src).unwrap().streams[FIXTURE_DRAWING]
             .data
             .clone();
         let original_xml = std::str::from_utf8(&original_bytes).unwrap();
@@ -4212,7 +4375,8 @@ mod tests {
         let mut cfb = ::cfb::create(path).expect("create fixture cfb");
         cfb.create_storage("/TaggedTxtData").unwrap();
 
-        let drawing = b"<?xml version=\"1.0\"?><Drawing><Tag SP_DRAWINGNUMBER=\"FX-001\"/></Drawing>";
+        let drawing =
+            b"<?xml version=\"1.0\"?><Drawing><Tag SP_DRAWINGNUMBER=\"FX-001\"/></Drawing>";
         let mut s = cfb.create_stream(FIXTURE_DRAWING).unwrap();
         s.write_all(drawing).unwrap();
         drop(s);
@@ -4235,8 +4399,8 @@ mod tests {
         build_fixture_pid_with_general(&src);
         load_pid_native_with_package(&src).expect("load fixture");
 
-        let report = edit_pid_general_element(&src, "FilePath", "D:/issued/rev2.pid")
-            .expect("edit");
+        let report =
+            edit_pid_general_element(&src, "FilePath", "D:/issued/rev2.pid").expect("edit");
         assert_eq!(report.element, "FilePath");
         assert_eq!(report.previous.as_deref(), Some("C:/old/path.pid"));
         assert_eq!(report.next, "D:/issued/rev2.pid");
@@ -4258,8 +4422,7 @@ mod tests {
         build_fixture_pid_with_general(&src);
         load_pid_native_with_package(&src).expect("load fixture");
 
-        let err = edit_pid_general_element(&src, "NoSuchElement", "X")
-            .expect_err("must fail");
+        let err = edit_pid_general_element(&src, "NoSuchElement", "X").expect_err("must fail");
         assert!(
             err.contains("metadata edit failed") && err.contains("NoSuchElement"),
             "error must surface metadata_helpers diagnostic; got: {err}"
@@ -4275,22 +4438,18 @@ mod tests {
         build_fixture_pid_with_general(&src);
         load_pid_native_with_package(&src).expect("load fixture");
 
-        let original = pid_package_store::get_package(&src)
-            .unwrap()
-            .streams[FIXTURE_GENERAL]
+        let original = pid_package_store::get_package(&src).unwrap().streams[FIXTURE_GENERAL]
             .data
             .clone();
         edit_pid_general_element(&src, "Author", "NEW-AUTHOR").expect("edit");
-        let new_bytes = pid_package_store::get_package(&src)
-            .unwrap()
-            .streams[FIXTURE_GENERAL]
+        let new_bytes = pid_package_store::get_package(&src).unwrap().streams[FIXTURE_GENERAL]
             .data
             .clone();
         let original_xml = std::str::from_utf8(&original).unwrap();
         let new_xml = std::str::from_utf8(&new_bytes).unwrap();
 
-        let expected = original_xml
-            .replace("<Author>OLD-AUTHOR</Author>", "<Author>NEW-AUTHOR</Author>");
+        let expected =
+            original_xml.replace("<Author>OLD-AUTHOR</Author>", "<Author>NEW-AUTHOR</Author>");
         assert_eq!(
             new_xml, expected,
             "bytes outside the targeted element must be preserved verbatim"
@@ -4411,7 +4570,10 @@ mod tests {
 
         let report = verify_pid_cached(&src).expect("verify");
         assert!(report.ok(), "report not ok: {:?}", report);
-        assert_eq!(report.matched, 4, "fixture has 4 streams (Drawing/General/Sheet/Blob)");
+        assert_eq!(
+            report.matched, 4,
+            "fixture has 4 streams (Drawing/General/Sheet/Blob)"
+        );
         assert!(report.only_in_source.is_empty());
         assert!(report.only_in_roundtrip.is_empty());
 
@@ -4456,12 +4618,14 @@ mod tests {
         cfb.create_storage("/TaggedTxtData").unwrap();
 
         // Minimal Drawing/General so parse_package succeeds end-to-end.
-        let drawing = b"<?xml version=\"1.0\"?><Drawing><Tag SP_DRAWINGNUMBER=\"FX-001\"/></Drawing>";
+        let drawing =
+            b"<?xml version=\"1.0\"?><Drawing><Tag SP_DRAWINGNUMBER=\"FX-001\"/></Drawing>";
         let mut s = cfb.create_stream(FIXTURE_DRAWING).unwrap();
         s.write_all(drawing).unwrap();
         drop(s);
 
-        let general = b"<?xml version=\"1.0\"?><General><FilePath>C:/fixture.pid</FilePath></General>";
+        let general =
+            b"<?xml version=\"1.0\"?><General><FilePath>C:/fixture.pid</FilePath></General>";
         let mut s = cfb.create_stream(FIXTURE_GENERAL).unwrap();
         s.write_all(general).unwrap();
         drop(s);
@@ -4554,14 +4718,12 @@ mod tests {
             ],
         );
 
-        let (self_info, neighbors) =
-            list_pid_neighbors(&src, "AAAA", 1).expect("neighbors lookup");
+        let (self_info, neighbors) = list_pid_neighbors(&src, "AAAA", 1).expect("neighbors lookup");
         assert_eq!(self_info.drawing_id, "AAAA");
         assert_eq!(self_info.item_type, "Equipment");
         assert_eq!(self_info.tag_label.as_deref(), Some("E-101"));
 
-        let neighbor_ids: Vec<&str> =
-            neighbors.iter().map(|n| n.drawing_id.as_str()).collect();
+        let neighbor_ids: Vec<&str> = neighbors.iter().map(|n| n.drawing_id.as_str()).collect();
         assert_eq!(neighbor_ids, vec!["BBBB", "CCCC"]);
         assert_eq!(neighbors[1].tag_label.as_deref(), Some("FIT-001"));
 
@@ -4584,8 +4746,7 @@ mod tests {
             ],
         );
 
-        let (from_info, to_info, path) =
-            list_pid_path(&src, "AAAA", "CCCC").expect("path");
+        let (from_info, to_info, path) = list_pid_path(&src, "AAAA", "CCCC").expect("path");
         assert_eq!(from_info.drawing_id, "AAAA");
         assert_eq!(to_info.drawing_id, "CCCC");
         let ids: Vec<&str> = path.iter().map(|n| n.drawing_id.as_str()).collect();
@@ -4608,8 +4769,7 @@ mod tests {
             vec![],
         );
 
-        let err = list_pid_path(&src, "AAAA", "DDDD")
-            .expect_err("disconnected → error");
+        let err = list_pid_path(&src, "AAAA", "DDDD").expect_err("disconnected → error");
         assert!(
             err.contains("no path") && err.contains("AAAA") && err.contains("DDDD"),
             "should call out missing path + endpoints; got: {err}"
@@ -4704,12 +4864,14 @@ mod tests {
         );
 
         // 4-char prefix matches AAAAAA1 uniquely.
-        let (self_info, neighbors) =
-            list_pid_neighbors(&src, "AAAA", 1).expect("prefix lookup");
+        let (self_info, neighbors) = list_pid_neighbors(&src, "AAAA", 1).expect("prefix lookup");
         assert_eq!(self_info.drawing_id, "AAAAAA1");
         assert_eq!(self_info.tag_label.as_deref(), Some("E-101"));
         assert_eq!(
-            neighbors.iter().map(|n| n.drawing_id.as_str()).collect::<Vec<_>>(),
+            neighbors
+                .iter()
+                .map(|n| n.drawing_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["BBBBBB2"]
         );
 
@@ -4731,8 +4893,7 @@ mod tests {
             vec![],
         );
 
-        let err = list_pid_neighbors(&src, "DD", 1)
-            .expect_err("ambiguous prefix must error");
+        let err = list_pid_neighbors(&src, "DD", 1).expect_err("ambiguous prefix must error");
         assert!(
             err.contains("ambiguous") && err.contains("4"),
             "should report ambiguity + count; got: {err}"
@@ -4749,14 +4910,9 @@ mod tests {
     #[test]
     fn list_pid_neighbors_returns_no_match_error_for_unknown_prefix() {
         let src = unique_pid_path("neighbors-prefix-none");
-        cache_synthetic_graph_package(
-            &src,
-            vec![make_object("AAAA", "Equipment", None)],
-            vec![],
-        );
+        cache_synthetic_graph_package(&src, vec![make_object("AAAA", "Equipment", None)], vec![]);
 
-        let err = list_pid_neighbors(&src, "ZZZZ", 1)
-            .expect_err("unknown prefix must error");
+        let err = list_pid_neighbors(&src, "ZZZZ", 1).expect_err("unknown prefix must error");
         assert!(
             err.contains("no drawing_id matches") && err.contains("ZZZZ"),
             "should call out missing match + input; got: {err}"
@@ -4768,14 +4924,9 @@ mod tests {
     #[test]
     fn list_pid_neighbors_returns_error_for_unknown_drawing_id() {
         let src = unique_pid_path("neighbors-unknown");
-        cache_synthetic_graph_package(
-            &src,
-            vec![make_object("AAAA", "Equipment", None)],
-            vec![],
-        );
+        cache_synthetic_graph_package(&src, vec![make_object("AAAA", "Equipment", None)], vec![]);
 
-        let err = list_pid_neighbors(&src, "ZZZZ", 1)
-            .expect_err("unknown id must error");
+        let err = list_pid_neighbors(&src, "ZZZZ", 1).expect_err("unknown id must error");
         // After the prefix-match upgrade, the error message format is
         // "no drawing_id matches 'X' (exact or prefix)" rather than
         // "not found". Both pieces of info still surface.
@@ -4811,10 +4962,8 @@ mod tests {
         use pid_parse::package::PidPackage;
         use std::collections::BTreeMap;
 
-        let root =
-            pid_parse::Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap();
-        let sub =
-            pid_parse::Uuid::parse_str("abcdef01-2345-6789-abcd-ef0123456789").unwrap();
+        let root = pid_parse::Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap();
+        let sub = pid_parse::Uuid::parse_str("abcdef01-2345-6789-abcd-ef0123456789").unwrap();
         let mut storage = BTreeMap::new();
         storage.insert("/JSite0".to_string(), sub);
         storage.insert("/JSite1".to_string(), sub);
@@ -4832,10 +4981,7 @@ mod tests {
         assert_eq!(info.non_root.len(), 2);
         // BTreeMap sorted iteration → /JSite0 before /JSite1
         assert_eq!(info.non_root[0].0, "/JSite0");
-        assert_eq!(
-            info.non_root[0].1,
-            "{abcdef01-2345-6789-abcd-ef0123456789}"
-        );
+        assert_eq!(info.non_root[0].1, "{abcdef01-2345-6789-abcd-ef0123456789}");
         assert_eq!(info.non_root[1].0, "/JSite1");
 
         pid_package_store::clear_package(&src);
@@ -4888,7 +5034,10 @@ mod tests {
         if has_diff {
             // Synthetic CFBs often differ on CLSID alone; stream set
             // should still match.
-            assert!(text.contains("summary:"), "should have summary line: {text}");
+            assert!(
+                text.contains("summary:"),
+                "should have summary line: {text}"
+            );
         }
 
         let _ = std::fs::remove_file(&a);
@@ -5010,11 +5159,9 @@ mod tests {
             vec![],
         );
 
-        let pipe_runs = list_pid_objects_matching(
-            &src,
-            &PidFindCriterion::ItemType("PipeRun".into()),
-        )
-        .expect("find by type");
+        let pipe_runs =
+            list_pid_objects_matching(&src, &PidFindCriterion::ItemType("PipeRun".into()))
+                .expect("find by type");
         let ids: Vec<&str> = pipe_runs.iter().map(|m| m.drawing_id.as_str()).collect();
         assert_eq!(ids, vec!["AAAA", "CCCC"]);
         // Tag projection is preserved.
@@ -5053,16 +5200,9 @@ mod tests {
     #[test]
     fn list_pid_objects_matching_returns_empty_when_no_match() {
         let src = unique_pid_path("find-empty");
-        cache_synthetic_graph_package(
-            &src,
-            vec![make_object("AAAA", "PipeRun", None)],
-            vec![],
-        );
-        let hits = list_pid_objects_matching(
-            &src,
-            &PidFindCriterion::ItemType("NoSuch".into()),
-        )
-        .expect("find returns Ok with empty Vec");
+        cache_synthetic_graph_package(&src, vec![make_object("AAAA", "PipeRun", None)], vec![]);
+        let hits = list_pid_objects_matching(&src, &PidFindCriterion::ItemType("NoSuch".into()))
+            .expect("find returns Ok with empty Vec");
         assert!(hits.is_empty());
 
         let hits2 = list_pid_objects_matching(
@@ -5090,8 +5230,8 @@ mod tests {
             ],
             vec![
                 make_rel("R1", Some("AAAA"), Some("BBBB")), // fully
-                make_rel("R2", Some("AAAA"), None),          // partially
-                make_rel("R3", None, None),                  // unresolved
+                make_rel("R2", Some("AAAA"), None),         // partially
+                make_rel("R3", None, None),                 // unresolved
             ],
         );
 
@@ -5119,8 +5259,7 @@ mod tests {
         );
         pid_package_store::cache_package(&src, pkg);
 
-        let err = pid_graph_stats(&src)
-            .expect_err("no object_graph → error");
+        let err = pid_graph_stats(&src).expect_err("no object_graph → error");
         assert!(
             err.contains("no object_graph"),
             "should call out missing object_graph; got: {err}"
@@ -5172,8 +5311,7 @@ mod tests {
     #[test]
     fn list_pid_unidentified_cached_without_cache_errors() {
         let src = unique_pid_path("raw-no-cache");
-        let err = list_pid_unidentified_cached(&src)
-            .expect_err("must fail without cache");
+        let err = list_pid_unidentified_cached(&src).expect_err("must fail without cache");
         assert!(
             err.contains("no cached PidPackage"),
             "should call out missing cache; got: {err}"
@@ -5254,15 +5392,29 @@ mod tests {
             "{}_Meta.xml",
             dst.file_stem().and_then(|s| s.to_str()).unwrap()
         ));
-        assert!(dst_data.exists(), "dst sidecar Data.xml must exist at {}", dst_data.display());
-        assert!(dst_meta.exists(), "dst sidecar Meta.xml must exist at {}", dst_meta.display());
+        assert!(
+            dst_data.exists(),
+            "dst sidecar Data.xml must exist at {}",
+            dst_data.display()
+        );
+        assert!(
+            dst_meta.exists(),
+            "dst sidecar Meta.xml must exist at {}",
+            dst_meta.display()
+        );
 
         let src_data_bytes = std::fs::read(&src_data).unwrap();
         let dst_data_bytes = std::fs::read(&dst_data).unwrap();
-        assert_eq!(src_data_bytes, dst_data_bytes, "Data.xml bytes must be identical");
+        assert_eq!(
+            src_data_bytes, dst_data_bytes,
+            "Data.xml bytes must be identical"
+        );
         let src_meta_bytes = std::fs::read(&src_meta).unwrap();
         let dst_meta_bytes = std::fs::read(&dst_meta).unwrap();
-        assert_eq!(src_meta_bytes, dst_meta_bytes, "Meta.xml bytes must be identical");
+        assert_eq!(
+            src_meta_bytes, dst_meta_bytes,
+            "Meta.xml bytes must be identical"
+        );
 
         pid_package_store::clear_package(&src);
         let _ = std::fs::remove_file(&src);
@@ -5292,8 +5444,16 @@ mod tests {
             "{}_Meta.xml",
             dst.file_stem().and_then(|s| s.to_str()).unwrap()
         ));
-        assert!(!dst_data.exists(), "no sidecar should be fabricated at {}", dst_data.display());
-        assert!(!dst_meta.exists(), "no sidecar should be fabricated at {}", dst_meta.display());
+        assert!(
+            !dst_data.exists(),
+            "no sidecar should be fabricated at {}",
+            dst_data.display()
+        );
+        assert!(
+            !dst_meta.exists(),
+            "no sidecar should be fabricated at {}",
+            dst_meta.display()
+        );
 
         pid_package_store::clear_package(&src);
         let _ = std::fs::remove_file(&src);
@@ -5342,7 +5502,11 @@ mod tests {
         // bypasses the cache entirely.
 
         let report = verify_pid_file(&src).expect("verify file");
-        assert!(report.ok(), "verify_pid_file should pass on a fresh fixture; report: {:?}", report);
+        assert!(
+            report.ok(),
+            "verify_pid_file should pass on a fresh fixture; report: {:?}",
+            report
+        );
         assert_eq!(report.matched, 4);
 
         let _ = std::fs::remove_file(&src);
@@ -5393,7 +5557,9 @@ mod tests {
         );
         // The other three streams must remain byte-for-byte identical
         // with the original fixture.
-        let original = parser.parse_package(&src).expect("re-parse src for compare");
+        let original = parser
+            .parse_package(&src)
+            .expect("re-parse src for compare");
         for path in [FIXTURE_GENERAL, FIXTURE_SHEET, FIXTURE_BLOB] {
             assert_eq!(
                 original.streams[path].data, written.streams[path].data,
@@ -5493,7 +5659,9 @@ mod tests {
                 records_extracted: 2,
                 bytes_scanned: 128,
             }),
+            geometry: None,
             endpoint_records: vec![],
+            endpoint_decode_error: None,
         });
         doc.cross_reference = Some(CrossReferenceGraph {
             cluster_coverage: ClusterCoverage::default(),
@@ -5517,7 +5685,10 @@ mod tests {
         });
 
         let bundle = pid_document_to_bundle(&doc);
-        assert_eq!(bundle.pid_doc.object_graph.as_ref().unwrap().objects.len(), 2);
+        assert_eq!(
+            bundle.pid_doc.object_graph.as_ref().unwrap().objects.len(),
+            2
+        );
         assert_eq!(bundle.summary.sheet_count, 1);
         assert_eq!(bundle.summary.symbol_count, 1);
         assert_eq!(bundle.summary.attribute_class_count, 1);
