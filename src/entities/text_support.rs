@@ -206,38 +206,112 @@ pub fn strip_mtext_codes(s: &str) -> String {
     while let Some(ch) = chars.next() {
         match ch {
             '\\' => match chars.peek().copied() {
+                // Paragraph / line breaks
                 Some('P') | Some('n') | Some('N') => {
                     chars.next();
                     out.push('\n');
                 }
+                // Non-breaking space → regular space (preserves spacing, simpler for word-wrap)
                 Some('~') => {
                     chars.next();
                     out.push(' ');
                 }
-                // Decoration toggles — standalone (no args, no ';'). Keep as \X markers
-                // so tessellate_text_ex can emit underline/overline/strikethrough strokes.
+                // Tab
+                Some('t') => {
+                    chars.next();
+                    out.push_str("    ");
+                }
+                // \U+XXXX or \u+XXXX — Unicode character by hex code point.
+                // Up to 6 hex digits; optional trailing semicolon.
+                // NOTE: 'U'/'u' were previously in the "strip until ;" list — that was wrong.
+                Some('U') | Some('u') => {
+                    chars.next();
+                    if chars.peek() == Some(&'+') {
+                        chars.next(); // consume '+'
+                        let mut hex = String::with_capacity(6);
+                        for _ in 0..6 {
+                            match chars.peek() {
+                                Some(&c) if c.is_ascii_hexdigit() => {
+                                    hex.push(chars.next().unwrap());
+                                }
+                                _ => break,
+                            }
+                        }
+                        if chars.peek() == Some(&';') {
+                            chars.next(); // consume optional trailing semicolon
+                        }
+                        if let Ok(n) = u32::from_str_radix(&hex, 16) {
+                            if let Some(decoded) = char::from_u32(n) {
+                                out.push(decoded);
+                                continue;
+                            }
+                        }
+                        // Undecodable — silently drop
+                    } else {
+                        // \U or \u without '+' — strip until semicolon
+                        for c in chars.by_ref() {
+                            if c == ';' { break; }
+                        }
+                    }
+                }
+                // \S<upper><sep><lower>; — stacked text (fraction / tolerance).
+                // sep is '/' (diagonal fraction), '^' (stacked with bar), '#' (horizontal bar).
+                // Render as "upper/lower" or "upper^lower" since stroke fonts can't stack.
+                Some('S') | Some('s') => {
+                    chars.next();
+                    let mut upper = String::new();
+                    let mut lower = String::new();
+                    let mut sep = '/';
+                    let mut in_lower = false;
+                    for c in chars.by_ref() {
+                        if c == ';' { break; }
+                        if !in_lower && (c == '/' || c == '^' || c == '#') {
+                            sep = c;
+                            in_lower = true;
+                        } else if in_lower {
+                            lower.push(c);
+                        } else {
+                            upper.push(c);
+                        }
+                    }
+                    out.push_str(&upper);
+                    if !lower.is_empty() {
+                        out.push(if sep == '#' { '/' } else { sep });
+                        out.push_str(&lower);
+                    }
+                }
+                // Decoration toggles — keep as \X markers so the tessellator can
+                // emit underline / overline / strikethrough strokes.
                 Some('L') | Some('l') | Some('O') | Some('o') | Some('K') | Some('k') => {
                     out.push('\\');
                     out.push(chars.next().unwrap());
                 }
-                // Codes with semicolon-terminated arguments — strip entirely.
-                Some(c) if "pHWQTACcfFUu".contains(c) => {
-                    chars.next();
-                    for c in chars.by_ref() {
-                        if c == ';' {
-                            break;
-                        }
-                    }
-                }
+                // Literal backslash
                 Some('\\') => {
                     chars.next();
                     out.push('\\');
                 }
+                // Literal braces
                 Some('{') | Some('}') => {
                     out.push(chars.next().unwrap());
                 }
-                _ => {}
+                // In-line codes with semicolon-terminated arguments — strip entirely.
+                //   p = paragraph format   H = height       W = width factor
+                //   Q = oblique angle      T = tracking     A = alignment
+                //   C = ACI color          c = true color   f/F = font change
+                //   M = DBCS multibyte     X = paragraph-align end (arg-less but safe to strip)
+                Some(c) if "pHWQTACcfFMX".contains(c) => {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c == ';' { break; }
+                    }
+                }
+                // Unknown escape — consume and silently discard the code character so
+                // it does not appear as a literal in the output.
+                Some(_) => { chars.next(); }
+                None => {}
             },
+            // Strip brace grouping markers (scope delimiters for in-line formatting)
             '{' | '}' => {}
             '\r' => {}
             other => out.push(other),
@@ -248,10 +322,14 @@ pub fn strip_mtext_codes(s: &str) -> String {
 }
 
 pub fn split_mtext_lines(s: &str) -> Vec<String> {
-    s.split('\n')
+    let lines: Vec<String> = s.split('\n')
         .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect()
+        .collect();
+    // Drop leading and trailing blank lines, but preserve blank lines in the
+    // middle — they are intentional paragraph separators (\\P\\P in MTEXT).
+    let start = lines.iter().position(|l| !l.is_empty()).unwrap_or(0);
+    let end = lines.iter().rposition(|l| !l.is_empty()).map(|i| i + 1).unwrap_or(0);
+    lines[start..end].to_vec()
 }
 
 /// Measure the advance width of an MText line (after strip_mtext_codes), correctly

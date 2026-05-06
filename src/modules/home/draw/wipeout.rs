@@ -117,6 +117,8 @@ impl CadCommand for WipeoutCommand {
                     aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
                 })
             }
             WipeoutMode::Polygonal => {
@@ -138,6 +140,8 @@ impl CadCommand for WipeoutCommand {
                     aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
                 })
             }
         }

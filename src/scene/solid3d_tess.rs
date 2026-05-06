@@ -14,8 +14,8 @@ use std::collections::HashSet;
 use std::f64::consts::TAU;
 
 use acadrust::entities::acis::{
-    SatCoedge, SatConeSurface, SatDocument, SatEdge, SatFace, SatLoop, SatPlaneSurface, SatPoint,
-    SatPointer, SatSphereSurface, SatTorusSurface, SatVertex,
+    SabReader, SatCoedge, SatConeSurface, SatDocument, SatEdge, SatFace, SatLoop,
+    SatPlaneSurface, SatPoint, SatPointer, SatSphereSurface, SatTorusSurface, SatVertex,
 };
 use acadrust::entities::acis::types::Sense;
 use acadrust::entities::{Body, Region, Solid3D};
@@ -67,16 +67,26 @@ fn tessellate_sat(sat: &SatDocument, name: String, color: [f32; 4]) -> Option<Me
     Some(MeshModel { name, verts, normals, indices, color, selected: false })
 }
 
+fn parse_acis(sat_fn: impl FnOnce() -> Option<SatDocument>, is_binary: bool, sab_data: &[u8]) -> Option<SatDocument> {
+    if let Some(doc) = sat_fn() {
+        return Some(doc);
+    }
+    if is_binary && !sab_data.is_empty() {
+        return SabReader::read(sab_data).ok();
+    }
+    None
+}
+
 /// Tessellate a `Region` entity (2D planar ACIS body) into a `MeshModel`.
 pub fn tessellate_region(region: &Region, color: [f32; 4]) -> Option<MeshModel> {
-    let sat = region.parse_sat()?;
+    let sat = parse_acis(|| region.parse_sat(), region.acis_data.is_binary, &region.acis_data.sab_data)?;
     let name = region.common.handle.value().to_string();
     tessellate_sat(&sat, name, color)
 }
 
 /// Tessellate a `Body` entity (3D ACIS body) into a `MeshModel`.
 pub fn tessellate_body(body: &Body, color: [f32; 4]) -> Option<MeshModel> {
-    let sat = body.parse_sat()?;
+    let sat = parse_acis(|| body.parse_sat(), body.acis_data.is_binary, &body.acis_data.sab_data)?;
     let name = body.common.handle.value().to_string();
     tessellate_sat(&sat, name, color)
 }
@@ -86,7 +96,7 @@ pub fn tessellate_body(body: &Body, color: [f32; 4]) -> Option<MeshModel> {
 /// Returns `None` when the entity has no parseable SAT data or produces no
 /// triangles (e.g. the solid uses only unsupported surface types).
 pub fn tessellate_solid3d(solid: &Solid3D, color: [f32; 4]) -> Option<MeshModel> {
-    let sat = solid.parse_sat()?;
+    let sat = parse_acis(|| solid.parse_sat(), solid.acis_data.is_binary, &solid.acis_data.sab_data)?;
     let name = solid.common.handle.value().to_string();
     tessellate_sat(&sat, name, color)
 }

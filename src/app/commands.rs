@@ -130,7 +130,7 @@ impl H7CAD {
         let cmd: &str = rewritten.as_deref().unwrap_or(cmd);
 
         match cmd {
-            "NEW"                => return Task::done(Message::ClearScene),
+            "NEW"                => return Task::done(Message::TabNew),
             "OPEN"               => return Task::done(Message::OpenFile),
             "SAVE"|"QSAVE"       => return Task::done(Message::SaveFile),
             "SAVEAS"             => return Task::done(Message::SaveAs),
@@ -6942,7 +6942,12 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
         ),
         acadrust::EntityType::Arc(a) => format!(
             "center ({:.4},{:.4},{:.4})  r={:.4}  start={:.2}° end={:.2}°",
-            a.center.x, a.center.y, a.center.z, a.radius, a.start_angle, a.end_angle
+            a.center.x,
+            a.center.y,
+            a.center.z,
+            a.radius,
+            a.start_angle.to_degrees(),
+            a.end_angle.to_degrees()
         ),
         acadrust::EntityType::LwPolyline(p) => format!(
             "{} vertices  closed={}  elevation={:.4}",
@@ -7104,15 +7109,14 @@ fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
         acadrust::EntityType::Arc(a) => {
             let r = a.radius;
             let span = {
-                let s = ((a.end_angle - a.start_angle) + 360.0) % 360.0;
-                if s < 1e-6 { 360.0 } else { s }
+                let s = (a.end_angle - a.start_angle).rem_euclid(TAU);
+                if s < 1e-6 { TAU } else { s }
             };
-            let span_rad = span.to_radians();
             // Sector area (pie slice)
-            let area = 0.5 * r * r * span_rad;
-            let arc_len = r * span_rad;
+            let area = 0.5 * r * r * span;
+            let arc_len = r * span;
             // Centroid of arc (chord midpoint direction)
-            let mid_rad = (a.start_angle + span / 2.0).to_radians();
+            let mid_rad = a.start_angle + span / 2.0;
             Some(MassProps {
                 area,
                 perimeter: arc_len,
@@ -7287,7 +7291,11 @@ fn entity_extra_info(entity: &acadrust::EntityType) -> String {
         ),
         EntityType::Arc(e) => format!(
             "C({:.3},{:.3}) R={:.3} {:.1}°-{:.1}°",
-            e.center.x, e.center.y, e.radius, e.start_angle, e.end_angle
+            e.center.x,
+            e.center.y,
+            e.radius,
+            e.start_angle.to_degrees(),
+            e.end_angle.to_degrees()
         ),
         EntityType::Text(e) => e.value.clone(),
         EntityType::MText(e) => e.value.chars().take(60).collect(),

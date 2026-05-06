@@ -80,8 +80,52 @@ impl TruckConvertible for RasterImage {
             self.size.x,
             self.size.y,
         );
+
+        // Helper: pixel-space → world-space point.
+        let ox = self.insertion_point.x as f32;
+        let oy = self.insertion_point.y as f32;
+        let oz = self.insertion_point.z as f32;
+        let px_to_world = |px: f64, py: f64| -> [f32; 3] {
+            [
+                ox + (self.u_vector.x * px + self.v_vector.x * py) as f32,
+                oy + (self.u_vector.y * px + self.v_vector.y * py) as f32,
+                oz + (self.u_vector.z * px + self.v_vector.z * py) as f32,
+            ]
+        };
+
+        let pts = if self.clipping_enabled {
+            let cb = &self.clip_boundary;
+            match cb.clip_type {
+                acadrust::entities::ClipType::Polygonal if cb.vertices.len() >= 3 => {
+                    let mut poly: Vec<[f32; 3]> = cb
+                        .vertices
+                        .iter()
+                        .map(|v| px_to_world(v.x, v.y))
+                        .collect();
+                    if let Some(&first) = poly.first() {
+                        poly.push(first);
+                    }
+                    poly
+                }
+                acadrust::entities::ClipType::Rectangular if cb.vertices.len() >= 2 => {
+                    let v0 = &cb.vertices[0];
+                    let v1 = &cb.vertices[1];
+                    let (xa, xb) = (v0.x.min(v1.x), v0.x.max(v1.x));
+                    let (ya, yb) = (v0.y.min(v1.y), v0.y.max(v1.y));
+                    let c0 = px_to_world(xa, ya);
+                    let c1 = px_to_world(xb, ya);
+                    let c2 = px_to_world(xb, yb);
+                    let c3 = px_to_world(xa, yb);
+                    vec![c0, c1, c2, c3, c0]
+                }
+                _ => image_wire(corners, true),
+            }
+        } else {
+            image_wire(corners, true)
+        };
+
         Some(TruckEntity {
-            object: TruckObject::Lines(image_wire(corners, true)),
+            object: TruckObject::Lines(pts),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: corners.to_vec(),

@@ -6,7 +6,7 @@ use crate::entities::common::{diamond_grip, edit_prop as edit, ro_prop as ro, sq
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
-use crate::scene::wire_model::TangentGeom;
+use crate::scene::wire_model::{SnapHint, TangentGeom};
 
 // ── TruckConvertible ────────────────────────────────────────────────────────
 
@@ -49,11 +49,15 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
     let mut points: Vec<[f32; 3]> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
     let mut key_verts: Vec<[f32; 3]> = Vec::new();
+    let mut snap_pts: Vec<(Vec3, SnapHint)> = Vec::new();
     let mut first = true;
+
+    let node = |arr: [f32; 3]| (Vec3::from(arr), SnapHint::Node);
 
     for root in &ml.context.leader_roots {
         let cp = &root.connection_point;
         let cp_f = p3(cp);
+        snap_pts.push(node(cp_f));
 
         for line in &root.lines {
             if line.points.is_empty() { continue; }
@@ -71,6 +75,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
                 }
                 for &c in &ctrl {
                     key_verts.push(c);
+                    snap_pts.push(node(c));
                 }
 
                 if ml.path_type == MultiLeaderPathType::Spline && ctrl.len() >= 2 {
@@ -124,6 +129,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         let height = if ml.context.text_height > 0.0 { ml.context.text_height } else { ml.text_height };
         let ins = &ml.context.text_location;
         let z = ins.z as f32;
+        snap_pts.push(node([ins.x as f32, ins.y as f32, z]));
         let style = crate::entities::text_support::resolve_text_style("STANDARD", document);
         let strokes = crate::scene::cxf::tessellate_text_ex(
             [ins.x as f32, ins.y as f32],
@@ -147,7 +153,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
 
     Some(TruckEntity {
         object: TruckObject::Lines(points),
-        snap_pts: vec![],
+        snap_pts,
         tangent_geoms: tangents,
         key_vertices: key_verts,
     })

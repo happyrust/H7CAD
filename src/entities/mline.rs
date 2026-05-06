@@ -6,6 +6,7 @@ use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::wire_model::SnapHint;
 
 impl TruckConvertible for MLine {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
@@ -92,9 +93,20 @@ impl TruckConvertible for MLine {
             .map(|v| [v.position.x as f32, v.position.y as f32, v.position.z as f32])
             .collect();
 
+        let snap_pts = self
+            .vertices
+            .iter()
+            .map(|v| {
+                (
+                    Vec3::new(v.position.x as f32, v.position.y as f32, v.position.z as f32),
+                    SnapHint::Node,
+                )
+            })
+            .collect();
+
         Some(TruckEntity {
             object: TruckObject::Lines(pts),
-            snap_pts: vec![],
+            snap_pts,
             tangent_geoms: vec![],
             key_vertices: key_verts,
         })

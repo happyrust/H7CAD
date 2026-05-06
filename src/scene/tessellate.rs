@@ -65,27 +65,29 @@ pub fn tessellate(
     if let Some(te) = convert(entity, document) {
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────
-            TruckObject::Text(strokes_2d) => {
-                // Glyph strokes come from acad_to_truck in world-space f32.
-                // Subtract world_offset (f32 subtraction — acceptable precision
-                // for text rendering; the anchor was already cast to f32 there).
+            TruckObject::Text(stroke_groups) => {
+                // Each TextStroke keeps its strokes in glyph-local space and
+                // its world origin as f64.  Subtract world_offset in f64 before
+                // casting to f32 so large UTM coordinates don't crush precision.
                 let [ox, oy, oz] = world_offset;
                 let elev = entity_z(entity) - oz as f32;
 
-                // Pack all strokes into one flat point list, separated by
-                // NaN sentinels so wire_gpu.rs skips disconnected segments.
                 let mut points: Vec<[f32; 3]> = Vec::new();
-                for (i, stroke) in strokes_2d.iter().enumerate() {
-                    if stroke.len() < 2 {
-                        continue;
-                    }
-                    if i > 0 && !points.is_empty() {
-                        // NaN sentinel — wire_gpu skips any segment where
-                        // either endpoint contains NaN.
-                        points.push([f32::NAN, f32::NAN, f32::NAN]);
-                    }
-                    for &[x, y] in stroke {
-                        points.push([x - ox as f32, y - oy as f32, elev]);
+                let mut first = true;
+                for group in &stroke_groups {
+                    let lx = (group.origin[0] - ox) as f32;
+                    let ly = (group.origin[1] - oy) as f32;
+                    for stroke in &group.strokes {
+                        if stroke.len() < 2 {
+                            continue;
+                        }
+                        if !first && !points.is_empty() {
+                            points.push([f32::NAN, f32::NAN, f32::NAN]);
+                        }
+                        first = false;
+                        for &[x, y] in stroke {
+                            points.push([x + lx, y + ly, elev]);
+                        }
                     }
                 }
 
@@ -103,6 +105,8 @@ pub fn tessellate(
                     aci: 0,
             key_vertices: te.key_vertices,
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
                 };
             }
 
@@ -131,6 +135,8 @@ pub fn tessellate(
                             aci: 0,
                             key_vertices: te.key_vertices,
                             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
                         };
                     }
                     _ => {}
@@ -157,6 +163,8 @@ pub fn tessellate(
                         aci: 0,
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
                     };
                 }
             }
@@ -181,6 +189,8 @@ pub fn tessellate(
                         aci: 0,
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
                     };
                 }
             }
@@ -211,6 +221,36 @@ pub fn tessellate(
                     aci: 0,
                     key_vertices,
                     aabb: WireModel::UNBOUNDED_AABB,
+                    plinegen: true,
+            vp_scissor: None,
+                };
+            }
+
+            TruckObject::SegmentedLines(points) => {
+                let [ox, oy, oz] = world_offset;
+                let local_pts: Vec<[f32; 3]> = points.into_iter().map(|[x, y, z]| {
+                    if x.is_nan() { [x, y, z] }
+                    else { [x - ox as f32, y - oy as f32, z - oz as f32] }
+                }).collect();
+                let snap_pts = offset_snap_pts(te.snap_pts, world_offset);
+                let key_vertices: Vec<[f32; 3]> = te.key_vertices.into_iter()
+                    .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                    .collect();
+                return WireModel {
+                    name,
+                    points: local_pts,
+                    color,
+                    selected,
+                    pattern_length,
+                    pattern,
+                    line_weight_px,
+                    snap_pts,
+                    tangent_geoms: te.tangent_geoms,
+                    aci: 0,
+                    key_vertices,
+                    plinegen: false,
+            vp_scissor: None,
+                    aabb: WireModel::UNBOUNDED_AABB,
                 };
             }
 
@@ -220,7 +260,24 @@ pub fn tessellate(
                 // stored in the entity when present (e.g. from SOLVIEW output
                 // or when the SAT kernel cannot parse the ACIS data).
                 let wire_pts = solid_wire_fallback(entity, world_offset);
-                return WireModel::solid(name, wire_pts, color, selected);
+                let mut wm = WireModel::solid(name, wire_pts, color, selected);
+                // Add insertion snap at point_of_reference.
+                let [ox, oy, oz] = world_offset;
+                let por = match entity {
+                    EntityType::Solid3D(s) => Some(&s.point_of_reference),
+                    EntityType::Region(r) => Some(&r.point_of_reference),
+                    EntityType::Body(b) => Some(&b.point_of_reference),
+                    _ => None,
+                };
+                if let Some(p) = por {
+                    let sp = Vec3::new(
+                        (p.x - ox) as f32,
+                        (p.y - oy) as f32,
+                        (p.z - oz) as f32,
+                    );
+                    wm.snap_pts.push((sp, SnapHint::Insertion));
+                }
+                return wm;
             }
         }
     }
@@ -240,6 +297,8 @@ pub fn tessellate(
         tangent_geoms,
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
     }
 }
 
@@ -406,6 +465,8 @@ pub fn tessellate_dimension(
         .filter(|p| !(p[0].is_nan() || p[1].is_nan() || p[2].is_nan()))
         .collect();
 
+    let snap_pts = dimension_snap_pts(dim, world_offset);
+
     let mut wires = vec![WireModel {
         name: name.clone(),
         points,
@@ -415,10 +476,12 @@ pub fn tessellate_dimension(
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px,
-        snap_pts: vec![],
+        snap_pts,
         tangent_geoms: vec![],
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
     }];
 
     if let Some(text) = dimension_text_entity(dim) {
@@ -791,6 +854,8 @@ fn tessellate_leader(
             aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         }];
     }
 
@@ -859,6 +924,8 @@ fn tessellate_leader(
         tangent_geoms: vec![],
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
     }]
 }
 
@@ -968,6 +1035,8 @@ fn tessellate_multileader(
         aci: 0,
             key_vertices: key_verts,
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
     }];
 
     // Render text content as MText wire
@@ -1413,16 +1482,24 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
             (pts, vec![(ip, SnapHint::Insertion)], vec![], vec![])
         }
         EntityType::Hatch(h) => {
-            let elev = (h.elevation - oz) as f32;
+            let normal = (h.normal.x, h.normal.y, h.normal.z);
+            // Convert a 2D OCS hatch boundary point to WCS, then subtract world_offset.
+            let to_wcs = |x: f64, y: f64| -> [f32; 3] {
+                let (wx, wy, wz) = crate::scene::transform::ocs_point_to_wcs(
+                    (x, y, h.elevation), normal,
+                );
+                [(wx - ox) as f32, (wy - oy) as f32, (wz - oz) as f32]
+            };
             let mut pts: Vec<[f32; 3]> = Vec::new();
             let mut key_verts: Vec<[f32; 3]> = Vec::new();
+            let mut snap_pts: Vec<(Vec3, SnapHint)> = Vec::new();
             for path in &h.paths {
                 for edge in &path.edges {
                     match edge {
                         acadrust::entities::BoundaryEdge::Polyline(poly) => {
                             let start_idx = pts.len();
                             for v in &poly.vertices {
-                                let p = [(v.x - ox) as f32, (v.y - oy) as f32, elev];
+                                let p = to_wcs(v.x, v.y);
                                 pts.push(p);
                                 key_verts.push(p);
                             }
@@ -1431,12 +1508,72 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
                             }
                         }
                         acadrust::entities::BoundaryEdge::Line(ln) => {
-                            let p0 = [(ln.start.x - ox) as f32, (ln.start.y - oy) as f32, elev];
-                            let p1 = [(ln.end.x - ox) as f32, (ln.end.y - oy) as f32, elev];
+                            let p0 = to_wcs(ln.start.x, ln.start.y);
+                            let p1 = to_wcs(ln.end.x, ln.end.y);
+                            if !pts.is_empty() { pts.push([f32::NAN; 3]); }
                             pts.push(p0);
                             pts.push(p1);
                             key_verts.push(p0);
                             key_verts.push(p1);
+                        }
+                        acadrust::entities::BoundaryEdge::CircularArc(arc) => {
+                            let (sa, ea) = if arc.counter_clockwise {
+                                (arc.start_angle as f32, arc.end_angle as f32)
+                            } else {
+                                (arc.end_angle as f32, arc.start_angle as f32)
+                            };
+                            let span = if ea > sa {
+                                ea - sa
+                            } else {
+                                ea - sa + std::f32::consts::TAU
+                            };
+                            let segs = ((span / std::f32::consts::TAU) * 32.0)
+                                .ceil()
+                                .max(4.0) as u32;
+                            if !pts.is_empty() { pts.push([f32::NAN; 3]); }
+                            for i in 0..=segs {
+                                let t = sa + span * (i as f32 / segs as f32);
+                                let p = to_wcs(
+                                    arc.center.x + arc.radius * t.cos() as f64,
+                                    arc.center.y + arc.radius * t.sin() as f64,
+                                );
+                                pts.push(p);
+                                if i == 0 || i == segs { key_verts.push(p); }
+                            }
+                            snap_pts.push((Vec3::from(to_wcs(arc.center.x, arc.center.y)), SnapHint::Center));
+                        }
+                        acadrust::entities::BoundaryEdge::EllipticArc(ell) => {
+                            let r_maj = ((ell.major_axis_endpoint.x * ell.major_axis_endpoint.x
+                                + ell.major_axis_endpoint.y * ell.major_axis_endpoint.y)
+                                .sqrt()) as f32;
+                            let r_min = r_maj * ell.minor_axis_ratio as f32;
+                            let rot = (ell.major_axis_endpoint.y as f32)
+                                .atan2(ell.major_axis_endpoint.x as f32);
+                            let (sa, ea) = if ell.counter_clockwise {
+                                (ell.start_angle as f32, ell.end_angle as f32)
+                            } else {
+                                (ell.end_angle as f32, ell.start_angle as f32)
+                            };
+                            let span = if ea > sa {
+                                ea - sa
+                            } else {
+                                ea - sa + std::f32::consts::TAU
+                            };
+                            let segs = ((span / std::f32::consts::TAU) * 32.0)
+                                .ceil()
+                                .max(4.0) as u32;
+                            if !pts.is_empty() { pts.push([f32::NAN; 3]); }
+                            for i in 0..=segs {
+                                let t = sa + span * (i as f32 / segs as f32);
+                                let lx = r_maj * t.cos();
+                                let ly = r_min * t.sin();
+                                let ocs_x = ell.center.x + (lx * rot.cos() - ly * rot.sin()) as f64;
+                                let ocs_y = ell.center.y + (lx * rot.sin() + ly * rot.cos()) as f64;
+                                let p = to_wcs(ocs_x, ocs_y);
+                                pts.push(p);
+                                if i == 0 || i == segs { key_verts.push(p); }
+                            }
+                            snap_pts.push((Vec3::from(to_wcs(ell.center.x, ell.center.y)), SnapHint::Center));
                         }
                         _ => {}
                     }
@@ -1445,7 +1582,7 @@ fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
             if pts.is_empty() {
                 pts = vec![[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]];
             }
-            (pts, vec![], vec![], key_verts)
+            (pts, snap_pts, vec![], key_verts)
         }
         EntityType::Ole2Frame(ole) => {
             // OLE objects carry a bounding rectangle in model space.
@@ -1686,6 +1823,26 @@ fn add_polyline(points: &mut Vec<[f32; 3]>, polyline: &[Vec3]) {
         points.push([f32::NAN, f32::NAN, f32::NAN]);
     }
     points.extend(polyline.iter().map(|p| [p.x, p.y, p.z]));
+}
+
+fn dimension_snap_pts(dim: &Dimension, world_offset: [f64; 3]) -> Vec<(Vec3, SnapHint)> {
+    let lv = |v: acadrust::types::Vector3| {
+        Vec3::new(
+            (v.x - world_offset[0]) as f32,
+            (v.y - world_offset[1]) as f32,
+            (v.z - world_offset[2]) as f32,
+        )
+    };
+    let node = |v: acadrust::types::Vector3| (lv(v), SnapHint::Node);
+    match dim {
+        Dimension::Linear(d) => vec![node(d.first_point), node(d.second_point), node(d.definition_point)],
+        Dimension::Aligned(d) => vec![node(d.first_point), node(d.second_point), node(d.definition_point)],
+        Dimension::Radius(d) => vec![node(d.angle_vertex), node(d.definition_point)],
+        Dimension::Diameter(d) => vec![node(d.angle_vertex), node(d.definition_point)],
+        Dimension::Angular2Ln(d) => vec![node(d.angle_vertex), node(d.first_point), node(d.second_point), node(d.definition_point)],
+        Dimension::Angular3Pt(d) => vec![node(d.angle_vertex), node(d.first_point), node(d.second_point), node(d.definition_point)],
+        Dimension::Ordinate(d) => vec![node(d.definition_point), node(d.feature_location), node(d.leader_endpoint)],
+    }
 }
 
 fn dimension_text_entity(dim: &Dimension) -> Option<Text> {

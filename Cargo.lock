@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "H7CAD"
-version = "0.1.7"
+version = "0.2.3"
 dependencies = [
  "acadrust",
  "bytemuck",
@@ -48,8 +48,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2545729000aceb2c30e7002bdc26050532d5fa806bb6a6fef37175ebe6c8c5d2"
+source = "git+https://github.com/HakanSeven12/acadrust.git?branch=feat%2Flayout-paper-dimensions#2eaa7aacce3c5de4d6f15a0474fd365db0da9fba"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",

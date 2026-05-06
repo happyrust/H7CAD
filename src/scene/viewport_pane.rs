@@ -10,12 +10,6 @@ pub enum ViewportPaneMode {
     /// Full model space — fills whatever bounds Iced assigns.
     Model,
     /// Model-space content rendered through a specific viewport's 3-D camera.
-    ///
-    /// NOTE: Currently unused because Iced 0.14 batches all shader `prepare()`
-    /// calls before any `render()` calls. Multiple widgets sharing the same
-    /// `Pipeline` type overwrite each other's GPU buffers.  A per-viewport
-    /// wgpu sub-renderer that accumulates data across frames would be needed to
-    /// revive this path.
     #[allow(dead_code)]
     Paper { handle: Handle },
 }

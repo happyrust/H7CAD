@@ -96,7 +96,7 @@ impl Default for Snapper {
         enabled.insert(SnapType::Intersection);
         enabled.insert(SnapType::Nearest);
         Self {
-            snap_enabled: true,
+            snap_enabled: false,
             enabled,
             grid_spacing: 1.0,
             snap_radius_px: CROSSHAIR_ARM,

@@ -5,7 +5,7 @@ use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::text_support::resolve_text_style;
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 use crate::scene::{cxf, transform};
@@ -14,11 +14,12 @@ use crate::scene::{cxf, transform};
 
 impl TruckConvertible for AttributeDefinition {
     fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let snap_pt = Vec3::new(
-            self.insertion_point.x as f32,
-            self.insertion_point.y as f32,
-            self.insertion_point.z as f32,
+        let normal = (self.normal.x, self.normal.y, self.normal.z);
+        let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
+            (self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
+            normal,
         );
+        let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
         let resolved = resolve_text_style(&self.text_style, document);
         let display = if self.default_value.is_empty() {
             format!("[{}]", self.tag)
@@ -26,8 +27,9 @@ impl TruckConvertible for AttributeDefinition {
             self.default_value.clone()
         };
         let wf = (self.width_factor as f32).max(0.01);
+        let origin = [self.insertion_point.x, self.insertion_point.y];
         let strokes = cxf::tessellate_text_ex(
-            [self.insertion_point.x as f32, self.insertion_point.y as f32],
+            [0.0, 0.0],
             self.height as f32,
             self.rotation as f32,
             wf * resolved.width_factor.max(0.01),
@@ -36,7 +38,7 @@ impl TruckConvertible for AttributeDefinition {
             &display,
         );
         Some(TruckEntity {
-            object: TruckObject::Text(strokes),
+            object: TruckObject::Text(vec![TextStroke { strokes, origin }]),
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],
@@ -121,15 +123,17 @@ impl Transformable for AttributeDefinition {
 
 impl TruckConvertible for AttributeEntity {
     fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let snap_pt = Vec3::new(
-            self.insertion_point.x as f32,
-            self.insertion_point.y as f32,
-            self.insertion_point.z as f32,
+        let normal = (self.normal.x, self.normal.y, self.normal.z);
+        let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
+            (self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
+            normal,
         );
+        let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
         let resolved = resolve_text_style(&self.text_style, document);
         let wf = (self.width_factor as f32).max(0.01);
+        let origin = [self.insertion_point.x, self.insertion_point.y];
         let strokes = cxf::tessellate_text_ex(
-            [self.insertion_point.x as f32, self.insertion_point.y as f32],
+            [0.0, 0.0],
             self.height as f32,
             self.rotation as f32,
             wf * resolved.width_factor.max(0.01),
@@ -138,7 +142,7 @@ impl TruckConvertible for AttributeEntity {
             &self.value,
         );
         Some(TruckEntity {
-            object: TruckObject::Text(strokes),
+            object: TruckObject::Text(vec![TextStroke { strokes, origin }]),
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],

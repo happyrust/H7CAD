@@ -4,6 +4,7 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
+use crate::scene::wire_model::SnapHint;
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 
@@ -55,7 +56,12 @@ impl TruckConvertible for Face3D {
 
         Some(TruckEntity {
             object: TruckObject::Lines(pts),
-            snap_pts: vec![],
+            snap_pts: vec![
+                (Vec3::from(p0), SnapHint::Node),
+                (Vec3::from(p1), SnapHint::Node),
+                (Vec3::from(p2), SnapHint::Node),
+                (Vec3::from(p3), SnapHint::Node),
+            ],
             tangent_geoms: vec![],
             key_vertices: vec![p0, p1, p2, p3],
         })
