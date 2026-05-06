@@ -13,6 +13,12 @@ A CAD application for 2D/3D drawing and design, built with Rust.
 - Snap and annotation tools
 - Modular ribbon interface (Home, Annotate, Insert, View, Manage)
 
+## Architecture (developers)
+
+- [docs/README.md](docs/README.md) — documentation index.
+- [docs/ARCHITECTURE-TUTORIAL.md](docs/ARCHITECTURE-TUTORIAL.md) — layered overview, startup split, and links to SVG/HTML diagrams under `docs/diagrams/`.
+- [docs/DEVELOPMENT-PLAN.md](docs/DEVELOPMENT-PLAN.md) — phased roadmap (native path hardening, DWG runtime, QA).
+
 ## Native DWG Parser Status
 
 - Parser-side semantic extraction and resolver-hardening regression coverage now live in `crates/h7cad-native-dwg`.

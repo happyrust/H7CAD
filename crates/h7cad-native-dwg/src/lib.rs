@@ -1,12 +1,21 @@
 mod bit_reader;
 mod entity_arc;
+mod entity_attrib;
 mod entity_circle;
 mod entity_common;
+mod entity_dimension;
+mod entity_ellipse;
 mod entity_hatch;
+mod entity_insert;
 mod entity_line;
 mod entity_lwpolyline;
+mod entity_mtext;
 mod entity_point;
+mod entity_ray;
+mod entity_solid;
+mod entity_spline;
 mod entity_text;
+mod entity_viewport;
 mod error;
 mod file_header;
 mod file_header_ac1018;
@@ -33,17 +42,28 @@ use h7cad_native_model::Handle;
 
 pub use bit_reader::BitReader;
 pub use entity_arc::{read_arc_geometry, ArcGeometry};
+pub use entity_attrib::{
+    read_attdef_geometry, read_attrib_geometry, AttDefGeometry, AttribGeometry,
+};
 pub use entity_circle::{read_circle_geometry, CircleGeometry};
 pub use entity_common::{
     dwg_lineweight_from_index, parse_ac1015_entity_common, parse_ac1015_non_entity_common,
     probe_ac1015_entity_common, skip_ac1015_entity_common_main_stream, Ac1015EntityCommonData,
     Ac1015EntityCommonProbeFailure, Ac1015EntityCommonProbeStage, Ac1015NonEntityCommonData,
 };
+pub use entity_dimension::{read_dimension_geometry, DimensionGeometry};
+pub use entity_ellipse::{read_ellipse_geometry, EllipseGeometry};
 pub use entity_hatch::{read_hatch_geometry, HatchGeometry};
+pub use entity_insert::{read_insert_geometry, InsertGeometry};
 pub use entity_line::{read_line_geometry, LineGeometry};
 pub use entity_lwpolyline::{read_lwpolyline_geometry, LwPolylineGeometry};
+pub use entity_mtext::{read_mtext_geometry, MTextGeometry};
 pub use entity_point::{read_point_geometry, PointGeometry};
+pub use entity_ray::{read_ray_geometry, RayGeometry};
+pub use entity_solid::{read_face3d_geometry, read_solid_geometry, Face3DGeometry, SolidGeometry};
+pub use entity_spline::{read_spline_geometry, SplineGeometry};
 pub use entity_text::{read_text_geometry, TextGeometry};
+pub use entity_viewport::{read_viewport_geometry, ViewportGeometry};
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
 pub use file_header_ac1018::{
@@ -254,10 +274,28 @@ fn read_dwg_ac1018(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
 /// 2. an additional arm in [`try_decode_entity_body`],
 /// 3. a new case in the `EntityData` construction below.
 const TEXT_OBJECT_TYPE: i16 = 1;
+const ATTRIB_OBJECT_TYPE: i16 = 2;
+const ATTDEF_OBJECT_TYPE: i16 = 3;
+const INSERT_OBJECT_TYPE: i16 = 7;
 const ARC_OBJECT_TYPE: i16 = 17;
 const CIRCLE_OBJECT_TYPE: i16 = 18;
 const LINE_OBJECT_TYPE: i16 = 19;
+const DIM_ORDINATE_OBJECT_TYPE: i16 = 20;
+const DIM_LINEAR_OBJECT_TYPE: i16 = 21;
+const DIM_ALIGNED_OBJECT_TYPE: i16 = 22;
+const DIM_ANG3PT_OBJECT_TYPE: i16 = 23;
+const DIM_ANG2LN_OBJECT_TYPE: i16 = 24;
+const DIM_RADIUS_OBJECT_TYPE: i16 = 25;
+const DIM_DIAMETER_OBJECT_TYPE: i16 = 26;
 const POINT_OBJECT_TYPE: i16 = 27;
+const FACE3D_OBJECT_TYPE: i16 = 28;
+const SOLID_OBJECT_TYPE: i16 = 31;
+const VIEWPORT_OBJECT_TYPE: i16 = 34;
+const ELLIPSE_OBJECT_TYPE: i16 = 35;
+const SPLINE_OBJECT_TYPE: i16 = 36;
+const RAY_OBJECT_TYPE: i16 = 38;
+const XLINE_OBJECT_TYPE: i16 = 40;
+const MTEXT_OBJECT_TYPE: i16 = 44;
 const LWPOLYLINE_OBJECT_TYPE: i16 = 77;
 const HATCH_OBJECT_TYPE: i16 = 78;
 
@@ -266,6 +304,7 @@ struct SymbolNameMaps {
     layer_by_handle: std::collections::BTreeMap<Handle, String>,
     style_by_handle: std::collections::BTreeMap<Handle, String>,
     linetype_by_handle: std::collections::BTreeMap<Handle, String>,
+    block_by_handle: std::collections::BTreeMap<Handle, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -933,6 +972,216 @@ fn try_decode_entity_body_with_reason(
                 geom.extrusion,
             )
         }
+        ATTRIB_OBJECT_TYPE => {
+            let geom =
+                entity_attrib::read_attrib_geometry(main_reader, handle_reader, object_handle)
+                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Attrib {
+                    tag: geom.tag,
+                    value: geom.value,
+                    insertion: geom.insertion,
+                    height: geom.height,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        ATTDEF_OBJECT_TYPE => {
+            let geom =
+                entity_attrib::read_attdef_geometry(main_reader, handle_reader, object_handle)
+                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::AttDef {
+                    tag: geom.tag,
+                    prompt: geom.prompt,
+                    default_value: geom.default_value,
+                    insertion: geom.insertion,
+                    height: geom.height,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        DIM_ORDINATE_OBJECT_TYPE
+        | DIM_LINEAR_OBJECT_TYPE
+        | DIM_ALIGNED_OBJECT_TYPE
+        | DIM_ANG3PT_OBJECT_TYPE
+        | DIM_ANG2LN_OBJECT_TYPE
+        | DIM_RADIUS_OBJECT_TYPE
+        | DIM_DIAMETER_OBJECT_TYPE => {
+            let geom = entity_dimension::read_dimension_geometry(
+                object_type,
+                main_reader,
+                handle_reader,
+                object_handle,
+            )
+            .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            let block_name = resolve_block_name(geom.block_handle, symbol_names);
+            let style_name = resolve_style_name(geom.style_handle, symbol_names);
+            (
+                EntityData::Dimension {
+                    dim_type: geom.dim_type,
+                    block_name,
+                    style_name,
+                    definition_point: geom.definition_point,
+                    text_midpoint: geom.text_midpoint,
+                    text_override: geom.text_override,
+                    attachment_point: geom.attachment_point,
+                    measurement: geom.measurement,
+                    text_rotation: geom.text_rotation,
+                    horizontal_direction: geom.horizontal_direction,
+                    flip_arrow1: geom.flip_arrow1,
+                    flip_arrow2: geom.flip_arrow2,
+                    first_point: geom.first_point,
+                    second_point: geom.second_point,
+                    angle_vertex: geom.angle_vertex,
+                    dimension_arc: geom.dimension_arc,
+                    leader_length: geom.leader_length,
+                    rotation: geom.rotation,
+                    ext_line_rotation: geom.ext_line_rotation,
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
+        INSERT_OBJECT_TYPE => {
+            let geom =
+                entity_insert::read_insert_geometry(main_reader, handle_reader, object_handle)
+                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            let block_name = resolve_block_name(geom.block_header_handle, symbol_names);
+            (
+                EntityData::Insert {
+                    block_name,
+                    insertion: geom.insertion,
+                    scale: geom.scale,
+                    rotation: geom.rotation,
+                    has_attribs: geom.has_attribs,
+                    attribs: Vec::new(),
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
+        MTEXT_OBJECT_TYPE => {
+            let geom = entity_mtext::read_mtext_geometry(main_reader, handle_reader, object_handle)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::MText {
+                    insertion: geom.insertion,
+                    height: geom.height,
+                    width: geom.rect_width,
+                    rectangle_height: if geom.rect_height > 0.0 {
+                        Some(geom.rect_height)
+                    } else {
+                        None
+                    },
+                    value: geom.value,
+                    rotation: geom.rotation,
+                    style_name: resolve_style_name(geom.style_handle, symbol_names),
+                    attachment_point: geom.attachment_point,
+                    line_spacing_factor: geom.line_spacing_factor,
+                    drawing_direction: geom.drawing_direction,
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
+        ELLIPSE_OBJECT_TYPE => {
+            let geom = entity_ellipse::read_ellipse_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Ellipse {
+                    center: geom.center,
+                    major_axis: geom.major_axis,
+                    ratio: geom.ratio,
+                    start_param: geom.start_param,
+                    end_param: geom.end_param,
+                },
+                0.0,
+                geom.extrusion,
+            )
+        }
+        RAY_OBJECT_TYPE => {
+            let geom = entity_ray::read_ray_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Ray {
+                    origin: geom.origin,
+                    direction: geom.direction,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        XLINE_OBJECT_TYPE => {
+            let geom = entity_ray::read_ray_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::XLine {
+                    origin: geom.origin,
+                    direction: geom.direction,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        FACE3D_OBJECT_TYPE => {
+            let geom = entity_solid::read_face3d_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Face3D {
+                    corners: geom.corners,
+                    invisible_edges: geom.invisible_edges,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        SOLID_OBJECT_TYPE => {
+            let geom = entity_solid::read_solid_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Solid {
+                    corners: geom.corners,
+                    normal: geom.extrusion,
+                    thickness: geom.thickness,
+                },
+                geom.thickness,
+                geom.extrusion,
+            )
+        }
+        VIEWPORT_OBJECT_TYPE => {
+            let geom = entity_viewport::read_viewport_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Viewport {
+                    center: geom.center,
+                    width: geom.width,
+                    height: geom.height,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
+        SPLINE_OBJECT_TYPE => {
+            let geom = entity_spline::read_spline_geometry(main_reader)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            (
+                EntityData::Spline {
+                    degree: geom.degree,
+                    closed: geom.closed,
+                    knots: geom.knots,
+                    control_points: geom.control_points,
+                    weights: geom.weights,
+                    fit_points: geom.fit_points,
+                    start_tangent: geom.start_tangent,
+                    end_tangent: geom.end_tangent,
+                },
+                0.0,
+                [0.0, 0.0, 1.0],
+            )
+        }
         _ => return Err(Ac1015RecoveryFailureKind::UnsupportedType),
     };
 
@@ -952,11 +1201,29 @@ fn try_decode_entity_body_with_reason(
 
 fn object_type_family(object_type: i16) -> Option<&'static str> {
     match object_type {
+        TEXT_OBJECT_TYPE => Some("TEXT"),
+        ATTRIB_OBJECT_TYPE => Some("ATTRIB"),
+        ATTDEF_OBJECT_TYPE => Some("ATTDEF"),
+        INSERT_OBJECT_TYPE => Some("INSERT"),
         LINE_OBJECT_TYPE => Some("LINE"),
         CIRCLE_OBJECT_TYPE => Some("CIRCLE"),
         ARC_OBJECT_TYPE => Some("ARC"),
         POINT_OBJECT_TYPE => Some("POINT"),
-        TEXT_OBJECT_TYPE => Some("TEXT"),
+        DIM_ORDINATE_OBJECT_TYPE
+        | DIM_LINEAR_OBJECT_TYPE
+        | DIM_ALIGNED_OBJECT_TYPE
+        | DIM_ANG3PT_OBJECT_TYPE
+        | DIM_ANG2LN_OBJECT_TYPE
+        | DIM_RADIUS_OBJECT_TYPE
+        | DIM_DIAMETER_OBJECT_TYPE => Some("DIMENSION"),
+        FACE3D_OBJECT_TYPE => Some("3DFACE"),
+        SOLID_OBJECT_TYPE => Some("SOLID"),
+        VIEWPORT_OBJECT_TYPE => Some("VIEWPORT"),
+        ELLIPSE_OBJECT_TYPE => Some("ELLIPSE"),
+        SPLINE_OBJECT_TYPE => Some("SPLINE"),
+        RAY_OBJECT_TYPE => Some("RAY"),
+        XLINE_OBJECT_TYPE => Some("XLINE"),
+        MTEXT_OBJECT_TYPE => Some("MTEXT"),
         LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
         HATCH_OBJECT_TYPE => Some("HATCH"),
         _ => None,
@@ -1238,7 +1505,10 @@ fn semantic_supported_family_hint(
     symbol_names: &SymbolNameMaps,
 ) -> Option<&'static str> {
     let family = object_type_family(object_type)?;
-    if matches!(family, "TEXT" | "HATCH") {
+    if matches!(
+        family,
+        "TEXT" | "HATCH" | "MTEXT" | "INSERT" | "DIMENSION" | "ATTRIB" | "ATTDEF"
+    ) {
         return None;
     }
 
@@ -1248,6 +1518,13 @@ fn semantic_supported_family_hint(
         CIRCLE_OBJECT_TYPE => Some("CIRCLE"),
         ARC_OBJECT_TYPE => Some("ARC"),
         POINT_OBJECT_TYPE => Some("POINT"),
+        FACE3D_OBJECT_TYPE => Some("3DFACE"),
+        SOLID_OBJECT_TYPE => Some("SOLID"),
+        VIEWPORT_OBJECT_TYPE => Some("VIEWPORT"),
+        ELLIPSE_OBJECT_TYPE => Some("ELLIPSE"),
+        SPLINE_OBJECT_TYPE => Some("SPLINE"),
+        RAY_OBJECT_TYPE => Some("RAY"),
+        XLINE_OBJECT_TYPE => Some("XLINE"),
         LWPOLYLINE_OBJECT_TYPE => Some("LWPOLYLINE"),
         _ => None,
     }
@@ -1282,6 +1559,13 @@ fn collect_symbol_name_maps(bytes: &[u8], pending: &pending::PendingDocument) ->
                     read_text_style_name(&mut main_reader, &mut handle_reader, header.handle)
                 {
                     maps.style_by_handle.insert(header.handle, name);
+                }
+            }
+            49 => {
+                if let Ok(name) =
+                    read_block_header_name(&mut main_reader, &mut handle_reader, header.handle)
+                {
+                    maps.block_by_handle.insert(header.handle, name);
                 }
             }
             57 => {
@@ -1328,6 +1612,16 @@ fn read_text_style_name(
     Ok(main_reader.read_text_ascii()?)
 }
 
+fn read_block_header_name(
+    main_reader: &mut BitReader<'_>,
+    handle_reader: &mut BitReader<'_>,
+    object_handle: Handle,
+) -> Result<String, DwgReadError> {
+    let _common =
+        entity_common::parse_ac1015_non_entity_common(main_reader, handle_reader, object_handle)?;
+    Ok(main_reader.read_text_ascii()?)
+}
+
 fn read_linetype_name(
     main_reader: &mut BitReader<'_>,
     handle_reader: &mut BitReader<'_>,
@@ -1359,6 +1653,18 @@ fn resolve_style_name(handle: Handle, symbol_names: &SymbolNameMaps) -> String {
             .get(&handle)
             .cloned()
             .unwrap_or_else(|| format!("$STYLE_{:X}", handle.value()))
+    }
+}
+
+fn resolve_block_name(handle: Handle, symbol_names: &SymbolNameMaps) -> String {
+    if handle == Handle::NULL {
+        String::new()
+    } else {
+        symbol_names
+            .block_by_handle
+            .get(&handle)
+            .cloned()
+            .unwrap_or_else(|| format!("$BLOCK_{:X}", handle.value()))
     }
 }
 

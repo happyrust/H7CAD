@@ -160,9 +160,22 @@ fn real_dwg_samples_baseline_m3b() {
                     count_of(|d| matches!(d, h7cad_native_model::EntityData::LwPolyline { .. }));
                 let hatch_count =
                     count_of(|d| matches!(d, h7cad_native_model::EntityData::Hatch { .. }));
+                let ellipse_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Ellipse { .. }));
+                let spline_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Spline { .. }));
+                let mtext_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::MText { .. }));
+                let insert_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Insert { .. }));
+                let dimension_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Dimension { .. }));
+                let viewport_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Viewport { .. }));
                 eprintln!(
                     "{name} ({version:?}): read_dwg recovered {} entities \
-                     ({} LINE, {} CIRCLE, {} ARC, {} POINT, {} TEXT, {} LWPOLYLINE, {} HATCH), \
+                     ({} LINE, {} CIRCLE, {} ARC, {} POINT, {} TEXT, {} LWPOLYLINE, {} HATCH, \
+                     {} ELLIPSE, {} SPLINE, {} MTEXT, {} INSERT, {} DIMENSION, {} VIEWPORT), \
                      {} blocks, {} layouts, {} objects",
                     doc.entities.len(),
                     line_count,
@@ -172,6 +185,12 @@ fn real_dwg_samples_baseline_m3b() {
                     text_count,
                     lwpolyline_count,
                     hatch_count,
+                    ellipse_count,
+                    spline_count,
+                    mtext_count,
+                    insert_count,
+                    dimension_count,
+                    viewport_count,
                     doc.block_records.len(),
                     doc.layouts.len(),
                     doc.objects.len(),

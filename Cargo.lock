@@ -11,6 +11,7 @@ dependencies = [
  "cfb 0.10.0",
  "flate2",
  "glam 0.27.0",
+ "h7cad-native-dwg",
  "h7cad-native-dxf",
  "h7cad-native-model",
  "iced",

@@ -192,20 +192,7 @@ pub fn load_file_native_blocking(
         .unwrap_or_default();
 
     match ext.as_str() {
-        "dwg" => {
-            let mut reader = DwgReader::from_file(path).map_err(|e| {
-                let mut err = open_error::classify_acadrust(e, "DWG");
-                if let OpenError::Io { path: slot, .. } = &mut err {
-                    *slot = Some(path.to_path_buf());
-                }
-                err
-            })?;
-            let acad_doc = reader
-                .read()
-                .map_err(|e| open_error::classify_acadrust(e, "DWG"))?;
-            let notices = diagnostics::from_acadrust_notifications(&acad_doc.notifications);
-            Ok((native_bridge::acadrust_doc_to_native(&acad_doc), notices))
-        }
+        "dwg" => load_dwg_native_blocking(path),
         "dxf" => {
             let native = load_dxf_native_blocking(path)?;
             let notices = diagnostics::from_native_dxf_document(&native);
@@ -380,6 +367,44 @@ fn load_dxf_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError>
         message: e.to_string(),
     })?;
     h7cad_native_dxf::read_dxf_bytes(&bytes).map_err(open_error::classify_native_dxf)
+}
+
+/// Load a DWG file, trying the native parser first with acadrust fallback.
+fn load_dwg_native_blocking(
+    path: &Path,
+) -> Result<(NativeCadDocument, Vec<OpenNotice>), OpenError> {
+    let bytes = std::fs::read(path).map_err(|e| OpenError::Io {
+        path: Some(path.to_path_buf()),
+        message: e.to_string(),
+    })?;
+
+    match h7cad_native_dwg::read_dwg(&bytes) {
+        Ok(doc) => Ok((doc, Vec::new())),
+        Err(native_err) => {
+            let mut reader = DwgReader::from_file(path).map_err(|e| {
+                let mut err = open_error::classify_acadrust(e, "DWG");
+                if let OpenError::Io { path: slot, .. } = &mut err {
+                    *slot = Some(path.to_path_buf());
+                }
+                err
+            })?;
+            let acad_doc = reader.read().map_err(|e| {
+                let mut err = open_error::classify_acadrust(e, "DWG");
+                if let OpenError::Io { path: slot, .. } = &mut err {
+                    *slot = Some(path.to_path_buf());
+                }
+                err
+            })?;
+            let mut notices = vec![OpenNotice::new(
+                diagnostics::NoticeSeverity::Warning,
+                format!("native DWG parser fell back to acadrust: {native_err}"),
+            )];
+            notices.extend(diagnostics::from_acadrust_notifications(
+                &acad_doc.notifications,
+            ));
+            Ok((native_bridge::acadrust_doc_to_native(&acad_doc), notices))
+        }
+    }
 }
 
 /// Write the document to a DXF file at `path`.

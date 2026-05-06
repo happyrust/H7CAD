@@ -1,3 +1,8 @@
+//! Unified load/save entry for native CAD formats (DXF + DWG read; DWG write planned).
+//!
+//! DWG read delegates to [`h7cad_native_dwg::read_dwg`]. DWG write is tracked in
+//! repository file `docs/DEVELOPMENT-PLAN.md` (phase P2).
+
 use h7cad_native_model::CadDocument;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
