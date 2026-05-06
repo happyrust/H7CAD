@@ -22,10 +22,7 @@ pub fn tool() -> ToolDef {
 /// extracted into model space.
 ///
 /// Returns `Err` if the block is not found or has no entities.
-pub fn extract_block_to_doc(
-    src: &CadDocument,
-    block_name: &str,
-) -> Result<CadDocument, String> {
+pub fn extract_block_to_doc(src: &CadDocument, block_name: &str) -> Result<CadDocument, String> {
     let br = src
         .block_records
         .get(block_name)
@@ -62,7 +59,9 @@ pub fn extract_block_to_doc(
     }
 
     if out.entities().count() == 0 {
-        return Err(format!("Block \"{block_name}\" produced no exportable entities."));
+        return Err(format!(
+            "Block \"{block_name}\" produced no exportable entities."
+        ));
     }
 
     Ok(out)

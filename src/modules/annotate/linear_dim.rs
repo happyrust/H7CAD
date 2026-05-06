@@ -124,10 +124,10 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }
 

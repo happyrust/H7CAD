@@ -9,8 +9,8 @@
 // With 1 pair:  pure translation (src1 → dst1)
 // With 2 pairs: translate + rotate (+ optional uniform scale to fit)
 
-use glam::Vec3;
 use acadrust::Handle;
+use glam::Vec3;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};
 
@@ -38,23 +38,30 @@ impl AlignCommand {
         Self {
             state: AlignState::Gathering,
             handles: vec![],
-            src1: None, dst1: None,
-            src2: None, dst2: None,
+            src1: None,
+            dst1: None,
+            src2: None,
+            dst2: None,
         }
     }
 }
 
 impl CadCommand for AlignCommand {
-    fn name(&self) -> &'static str { "ALIGN" }
+    fn name(&self) -> &'static str {
+        "ALIGN"
+    }
 
     fn prompt(&self) -> String {
         match self.state {
-            AlignState::Gathering => format!("ALIGN  Select objects ({} selected, Enter when done):", self.handles.len()),
-            AlignState::Src1      => "ALIGN  Specify 1st source point:".into(),
-            AlignState::Dst1      => "ALIGN  Specify 1st destination point:".into(),
-            AlignState::Src2      => "ALIGN  Specify 2nd source point (Enter = translate only):".into(),
-            AlignState::Dst2      => "ALIGN  Specify 2nd destination point:".into(),
-            AlignState::AskScale  => "ALIGN  Scale objects based on alignment points? [Y/N]:".into(),
+            AlignState::Gathering => format!(
+                "ALIGN  Select objects ({} selected, Enter when done):",
+                self.handles.len()
+            ),
+            AlignState::Src1 => "ALIGN  Specify 1st source point:".into(),
+            AlignState::Dst1 => "ALIGN  Specify 1st destination point:".into(),
+            AlignState::Src2 => "ALIGN  Specify 2nd source point (Enter = translate only):".into(),
+            AlignState::Dst2 => "ALIGN  Specify 2nd destination point:".into(),
+            AlignState::AskScale => "ALIGN  Scale objects based on alignment points? [Y/N]:".into(),
         }
     }
 
@@ -97,7 +104,9 @@ impl CadCommand for AlignCommand {
     fn on_enter(&mut self) -> CmdResult {
         match self.state {
             AlignState::Gathering => {
-                if self.handles.is_empty() { return CmdResult::Cancel; }
+                if self.handles.is_empty() {
+                    return CmdResult::Cancel;
+                }
                 self.state = AlignState::Src1;
                 CmdResult::NeedPoint
             }
@@ -127,7 +136,9 @@ impl CadCommand for AlignCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        if self.state != AlignState::AskScale { return None; }
+        if self.state != AlignState::AskScale {
+            return None;
+        }
         let scale = text.trim().to_uppercase().starts_with('Y');
         Some(self.compute_align(scale))
     }

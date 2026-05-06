@@ -44,7 +44,11 @@ pub enum TruckTessResult {
 /// raw world coordinates are in the millions (e.g. Turkish UTM).
 #[inline]
 fn to_local(x: f64, y: f64, z: f64, off: [f64; 3]) -> [f32; 3] {
-    [(x - off[0]) as f32, (y - off[1]) as f32, (z - off[2]) as f32]
+    [
+        (x - off[0]) as f32,
+        (y - off[1]) as f32,
+        (z - off[2]) as f32,
+    ]
 }
 
 // ── Vertex ────────────────────────────────────────────────────────────────

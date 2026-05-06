@@ -292,8 +292,7 @@ pub(crate) fn parse_image(codes: &[(i16, String)]) -> EntityData {
             70 => display_flags = val.parse::<i32>().unwrap_or(0),
             // Hard-pointer to linked IMAGEDEF object.
             340 => {
-                image_def_handle =
-                    Handle::new(u64::from_str_radix(val.trim(), 16).unwrap_or(0));
+                image_def_handle = Handle::new(u64::from_str_radix(val.trim(), 16).unwrap_or(0));
             }
             _ => {
                 let v: f64 = val.parse().unwrap_or(0.0);
@@ -753,14 +752,17 @@ pub(crate) fn parse_insert(codes: &[(i16, String)]) -> (EntityData, bool) {
             _ => {}
         }
     }
-    (EntityData::Insert {
-        block_name,
-        insertion: [x, y, z],
-        scale: [sx, sy, sz],
-        rotation,
+    (
+        EntityData::Insert {
+            block_name,
+            insertion: [x, y, z],
+            scale: [sx, sy, sz],
+            rotation,
+            has_attribs,
+            attribs: Vec::new(),
+        },
         has_attribs,
-        attribs: Vec::new(),
-    }, has_attribs)
+    )
 }
 
 pub(crate) fn parse_dimension(codes: &[(i16, String)]) -> EntityData {
@@ -897,7 +899,9 @@ pub(crate) fn parse_hatch(codes: &[(i16, String)]) -> EntityData {
                         }
                         i += 1;
                     }
-                    if has_vertex && (vertices.is_empty() || *vertices.last().unwrap() != [x, y, bulge]) {
+                    if has_vertex
+                        && (vertices.is_empty() || *vertices.last().unwrap() != [x, y, bulge])
+                    {
                         vertices.push([x, y, bulge]);
                     }
                     edges.push(HatchEdge::Polyline { closed, vertices });

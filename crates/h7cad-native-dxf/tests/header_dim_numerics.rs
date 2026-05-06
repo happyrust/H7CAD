@@ -52,12 +52,7 @@ fn header_writes_all_6_dim_numerics() {
 
     let text = write_dxf(&doc).expect("write");
     for var in &[
-        "$DIMRND",
-        "$DIMLFAC",
-        "$DIMTDEC",
-        "$DIMFRAC",
-        "$DIMDSEP",
-        "$DIMZIN",
+        "$DIMRND", "$DIMLFAC", "$DIMTDEC", "$DIMFRAC", "$DIMDSEP", "$DIMZIN",
     ] {
         assert!(text.contains(var), "writer must emit {var}");
     }

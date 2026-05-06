@@ -1,6 +1,6 @@
 use acadrust::entities::{AttachmentPoint, DrawingDirection, MText};
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip, triangle_grip};
@@ -264,7 +264,9 @@ pub fn to_truck_native(
         1.0
     };
     let line_h = height as f32 * ls_factor * font.line_spacing;
-    let total_h = rectangle_height.map(|v| v as f32).unwrap_or(line_h * lines.len().max(1) as f32);
+    let total_h = rectangle_height
+        .map(|v| v as f32)
+        .unwrap_or(line_h * lines.len().max(1) as f32);
     let v_offset = match attachment_point {
         4..=6 => -total_h * 0.5,
         7..=9 => -total_h,
@@ -278,7 +280,11 @@ pub fn to_truck_native(
     let vertical_text = drawing_direction == 3;
     let rot = rotation_deg.to_radians() as f32;
     let (cos_r, sin_r) = (rot.cos(), rot.sin());
-    let insertion_vec = Vec3::new(insertion[0] as f32, insertion[1] as f32, insertion[2] as f32);
+    let insertion_vec = Vec3::new(
+        insertion[0] as f32,
+        insertion[1] as f32,
+        insertion[2] as f32,
+    );
     let mut all_strokes = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let (ox, oy) = if vertical_text {
@@ -321,7 +327,10 @@ pub fn to_truck_native(
             &font_name,
             line,
         );
-        all_strokes.extend(strokes);
+        all_strokes.push(TextStroke {
+            strokes,
+            origin: [0.0, 0.0],
+        });
     }
     TruckEntity {
         object: TruckObject::Text(all_strokes),
@@ -343,7 +352,11 @@ fn grips(t: &MText) -> Vec<GripDef> {
 }
 
 pub fn grips_native(insertion: &[f64; 3], width: f64, rotation_deg: f64) -> Vec<GripDef> {
-    let p = Vec3::new(insertion[0] as f32, insertion[1] as f32, insertion[2] as f32);
+    let p = Vec3::new(
+        insertion[0] as f32,
+        insertion[1] as f32,
+        insertion[2] as f32,
+    );
     let rot = rotation_deg.to_radians() as f32;
     let dir = Vec3::new(rot.cos(), rot.sin(), 0.0);
     let width_grip = p + dir * width.max(0.0) as f32;
@@ -461,7 +474,11 @@ pub fn properties_native(
                         .collect(),
                 },
             },
-            ro("Attachment", "attachment", native_attachment_str(attachment_point).to_string()),
+            ro(
+                "Attachment",
+                "attachment",
+                native_attachment_str(attachment_point).to_string(),
+            ),
             ro(
                 "Direction",
                 "direction",
@@ -559,11 +576,13 @@ pub fn apply_geom_prop_native(
             return;
         }
         "h_align" => {
-            *attachment_point = native_attachment_from_align(value, native_mtext_valign_str(*attachment_point));
+            *attachment_point =
+                native_attachment_from_align(value, native_mtext_valign_str(*attachment_point));
             return;
         }
         "v_align" => {
-            *attachment_point = native_attachment_from_align(native_mtext_halign_str(*attachment_point), value);
+            *attachment_point =
+                native_attachment_from_align(native_mtext_halign_str(*attachment_point), value);
             return;
         }
         _ => {}

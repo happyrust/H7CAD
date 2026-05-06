@@ -8,8 +8,8 @@ use std::sync::OnceLock;
 
 use crate::patterns::PatLineDef;
 use crate::scene::hatch_model::{HatchPattern, PatFamily};
-use acadrust::entities::{HatchPattern as DxfPattern, HatchPatternLine};
 use crate::types::Vector2;
+use acadrust::entities::{HatchPattern as DxfPattern, HatchPatternLine};
 
 // ── Public types ──────────────────────────────────────────────────────────
 

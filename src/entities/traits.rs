@@ -178,9 +178,7 @@ pub fn apply_transform_native(data: &mut nm::EntityData, t: &EntityTransform) {
         } => arc::apply_transform(center, radius, start_angle, end_angle, t),
         nm::EntityData::Point { position } => point::apply_transform(position, t),
         nm::EntityData::Ellipse {
-            center,
-            major_axis,
-            ..
+            center, major_axis, ..
         } => ellipse::apply_transform(center, major_axis, t),
         _ => {}
     }
@@ -257,17 +255,11 @@ impl EntityTypeOps for EntityType {
             }
             // ── B5e: Ray/XLine/Solid/Spline/Shape inline native dispatch ──
             EntityType::Spline(sp) => {
-                let cps: Vec<[f64; 3]> = sp
-                    .control_points
-                    .iter()
-                    .map(|p| [p.x, p.y, p.z])
-                    .collect();
+                let cps: Vec<[f64; 3]> =
+                    sp.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
                 let normal = [sp.normal.x, sp.normal.y, sp.normal.z];
                 Some(spline::to_truck_with_normal(
-                    sp.degree,
-                    &sp.knots,
-                    &cps,
-                    normal,
+                    sp.degree, &sp.knots, &cps, normal,
                 ))
             }
             EntityType::Ray(r) => {
@@ -459,7 +451,11 @@ impl EntityTypeOps for EntityType {
             // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::LwPolyline(pline) => {
                 let verts = lwv_ar_to_nm(&pline.vertices);
-                Some(lwpolyline::properties(&verts, pline.is_closed, pline.elevation))
+                Some(lwpolyline::properties(
+                    &verts,
+                    pline.is_closed,
+                    pline.elevation,
+                ))
             }
             // ── B5e: Ray/XLine/Solid/Spline/Shape inline ──────────────────
             EntityType::Ray(r) => {
@@ -484,8 +480,7 @@ impl EntityTypeOps for EntityType {
             EntityType::Spline(sp) => {
                 let cps: Vec<[f64; 3]> =
                     sp.control_points.iter().map(|p| [p.x, p.y, p.z]).collect();
-                let fps: Vec<[f64; 3]> =
-                    sp.fit_points.iter().map(|p| [p.x, p.y, p.z]).collect();
+                let fps: Vec<[f64; 3]> = sp.fit_points.iter().map(|p| [p.x, p.y, p.z]).collect();
                 Some(spline::properties(sp.degree, &cps, &fps))
             }
             EntityType::Shape(shp) => {
@@ -503,58 +498,45 @@ impl EntityTypeOps for EntityType {
                 ))
             }
             // ── 其余类型暂走 acadrust adapter ──────────────────────────────
-            EntityType::Polyline(pl) => Some(PropertyEditable::geometry_properties(
-                pl,
-                text_style_names,
-            )),
-            EntityType::Polyline2D(pl) => Some(PropertyEditable::geometry_properties(
-                pl,
-                text_style_names,
-            )),
-            EntityType::Polyline3D(pl) => Some(PropertyEditable::geometry_properties(
-                pl,
-                text_style_names,
-            )),
-            EntityType::RasterImage(img) => Some(PropertyEditable::geometry_properties(
-                img,
-                text_style_names,
-            )),
-            EntityType::Wipeout(wo) => Some(PropertyEditable::geometry_properties(
-                wo,
-                text_style_names,
-            )),
-            EntityType::AttributeDefinition(a) => Some(PropertyEditable::geometry_properties(
-                a,
-                text_style_names,
-            )),
-            EntityType::AttributeEntity(a) => Some(PropertyEditable::geometry_properties(
-                a,
-                text_style_names,
-            )),
-            EntityType::MLine(ml) => Some(PropertyEditable::geometry_properties(
-                ml,
-                text_style_names,
-            )),
-            EntityType::Tolerance(tol) => Some(PropertyEditable::geometry_properties(
-                tol,
-                text_style_names,
-            )),
-            EntityType::Face3D(f) => Some(PropertyEditable::geometry_properties(
-                f,
-                text_style_names,
-            )),
-            EntityType::PolygonMesh(pm) => Some(PropertyEditable::geometry_properties(
-                pm,
-                text_style_names,
-            )),
-            EntityType::PolyfaceMesh(pfm) => Some(PropertyEditable::geometry_properties(
-                pfm,
-                text_style_names,
-            )),
-            EntityType::Table(tbl) => Some(PropertyEditable::geometry_properties(
-                tbl,
-                text_style_names,
-            )),
+            EntityType::Polyline(pl) => {
+                Some(PropertyEditable::geometry_properties(pl, text_style_names))
+            }
+            EntityType::Polyline2D(pl) => {
+                Some(PropertyEditable::geometry_properties(pl, text_style_names))
+            }
+            EntityType::Polyline3D(pl) => {
+                Some(PropertyEditable::geometry_properties(pl, text_style_names))
+            }
+            EntityType::RasterImage(img) => {
+                Some(PropertyEditable::geometry_properties(img, text_style_names))
+            }
+            EntityType::Wipeout(wo) => {
+                Some(PropertyEditable::geometry_properties(wo, text_style_names))
+            }
+            EntityType::AttributeDefinition(a) => {
+                Some(PropertyEditable::geometry_properties(a, text_style_names))
+            }
+            EntityType::AttributeEntity(a) => {
+                Some(PropertyEditable::geometry_properties(a, text_style_names))
+            }
+            EntityType::MLine(ml) => {
+                Some(PropertyEditable::geometry_properties(ml, text_style_names))
+            }
+            EntityType::Tolerance(tol) => {
+                Some(PropertyEditable::geometry_properties(tol, text_style_names))
+            }
+            EntityType::Face3D(f) => {
+                Some(PropertyEditable::geometry_properties(f, text_style_names))
+            }
+            EntityType::PolygonMesh(pm) => {
+                Some(PropertyEditable::geometry_properties(pm, text_style_names))
+            }
+            EntityType::PolyfaceMesh(pfm) => {
+                Some(PropertyEditable::geometry_properties(pfm, text_style_names))
+            }
+            EntityType::Table(tbl) => {
+                Some(PropertyEditable::geometry_properties(tbl, text_style_names))
+            }
             EntityType::Hatch(hatch) => Some(PropertyEditable::geometry_properties(
                 hatch,
                 text_style_names,
@@ -573,22 +555,19 @@ impl EntityTypeOps for EntityType {
             EntityType::Insert(ins) => {
                 Some(PropertyEditable::geometry_properties(ins, text_style_names))
             }
-            EntityType::Dimension(dim) => Some(PropertyEditable::geometry_properties(
-                dim,
-                text_style_names,
-            )),
+            EntityType::Dimension(dim) => {
+                Some(PropertyEditable::geometry_properties(dim, text_style_names))
+            }
             EntityType::Leader(leader) => Some(PropertyEditable::geometry_properties(
                 leader,
                 text_style_names,
             )),
-            EntityType::MultiLeader(ml) => Some(PropertyEditable::geometry_properties(
-                ml,
-                text_style_names,
-            )),
-            EntityType::Underlay(ul) => Some(PropertyEditable::geometry_properties(
-                ul,
-                text_style_names,
-            )),
+            EntityType::MultiLeader(ml) => {
+                Some(PropertyEditable::geometry_properties(ml, text_style_names))
+            }
+            EntityType::Underlay(ul) => {
+                Some(PropertyEditable::geometry_properties(ul, text_style_names))
+            }
             _ => None,
         }
     }
@@ -600,14 +579,20 @@ impl EntityTypeOps for EntityType {
                 let mut s = [l.start.x, l.start.y, l.start.z];
                 let mut e = [l.end.x, l.end.y, l.end.z];
                 line::apply_geom_prop(&mut s, &mut e, field, value);
-                l.start.x = s[0]; l.start.y = s[1]; l.start.z = s[2];
-                l.end.x = e[0]; l.end.y = e[1]; l.end.z = e[2];
+                l.start.x = s[0];
+                l.start.y = s[1];
+                l.start.z = s[2];
+                l.end.x = e[0];
+                l.end.y = e[1];
+                l.end.z = e[2];
             }
             EntityType::Circle(c) => {
                 let mut center = [c.center.x, c.center.y, c.center.z];
                 let mut radius = c.radius;
                 circle::apply_geom_prop(&mut center, &mut radius, field, value);
-                c.center.x = center[0]; c.center.y = center[1]; c.center.z = center[2];
+                c.center.x = center[0];
+                c.center.y = center[1];
+                c.center.z = center[2];
                 c.radius = radius;
             }
             EntityType::Arc(a) => {
@@ -616,7 +601,9 @@ impl EntityTypeOps for EntityType {
                 let mut sa = a.start_angle.to_radians();
                 let mut ea = a.end_angle.to_radians();
                 arc::apply_geom_prop(&mut center, &mut radius, &mut sa, &mut ea, field, value);
-                a.center.x = center[0]; a.center.y = center[1]; a.center.z = center[2];
+                a.center.x = center[0];
+                a.center.y = center[1];
+                a.center.z = center[2];
                 a.radius = radius;
                 a.start_angle = sa.to_degrees();
                 a.end_angle = ea.to_degrees();
@@ -626,14 +613,20 @@ impl EntityTypeOps for EntityType {
                 let mut major = [e.major_axis.x, e.major_axis.y, e.major_axis.z];
                 let mut ratio = e.minor_axis_ratio;
                 ellipse::apply_geom_prop(&mut center, &mut major, &mut ratio, field, value);
-                e.center.x = center[0]; e.center.y = center[1]; e.center.z = center[2];
-                e.major_axis.x = major[0]; e.major_axis.y = major[1]; e.major_axis.z = major[2];
+                e.center.x = center[0];
+                e.center.y = center[1];
+                e.center.z = center[2];
+                e.major_axis.x = major[0];
+                e.major_axis.y = major[1];
+                e.major_axis.z = major[2];
                 e.minor_axis_ratio = ratio;
             }
             EntityType::Point(pt) => {
                 let mut p = [pt.location.x, pt.location.y, pt.location.z];
                 point::apply_geom_prop(&mut p, field, value);
-                pt.location.x = p[0]; pt.location.y = p[1]; pt.location.z = p[2];
+                pt.location.x = p[0];
+                pt.location.y = p[1];
+                pt.location.z = p[2];
             }
             // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::LwPolyline(pline) => {
@@ -709,7 +702,9 @@ impl EntityTypeOps for EntityType {
             EntityType::Polyline3D(pl) => PropertyEditable::apply_geom_prop(pl, field, value),
             EntityType::RasterImage(img) => PropertyEditable::apply_geom_prop(img, field, value),
             EntityType::Wipeout(wo) => PropertyEditable::apply_geom_prop(wo, field, value),
-            EntityType::AttributeDefinition(a) => PropertyEditable::apply_geom_prop(a, field, value),
+            EntityType::AttributeDefinition(a) => {
+                PropertyEditable::apply_geom_prop(a, field, value)
+            }
             EntityType::AttributeEntity(a) => PropertyEditable::apply_geom_prop(a, field, value),
             EntityType::MLine(ml) => PropertyEditable::apply_geom_prop(ml, field, value),
             EntityType::Tolerance(tol) => PropertyEditable::apply_geom_prop(tol, field, value),
@@ -737,14 +732,20 @@ impl EntityTypeOps for EntityType {
                 let mut s = [l.start.x, l.start.y, l.start.z];
                 let mut e = [l.end.x, l.end.y, l.end.z];
                 line::apply_grip(&mut s, &mut e, grip_id, apply);
-                l.start.x = s[0]; l.start.y = s[1]; l.start.z = s[2];
-                l.end.x = e[0]; l.end.y = e[1]; l.end.z = e[2];
+                l.start.x = s[0];
+                l.start.y = s[1];
+                l.start.z = s[2];
+                l.end.x = e[0];
+                l.end.y = e[1];
+                l.end.z = e[2];
             }
             EntityType::Circle(c) => {
                 let mut center = [c.center.x, c.center.y, c.center.z];
                 let mut radius = c.radius;
                 circle::apply_grip(&mut center, &mut radius, grip_id, apply);
-                c.center.x = center[0]; c.center.y = center[1]; c.center.z = center[2];
+                c.center.x = center[0];
+                c.center.y = center[1];
+                c.center.z = center[2];
                 c.radius = radius;
             }
             EntityType::Arc(a) => {
@@ -753,7 +754,9 @@ impl EntityTypeOps for EntityType {
                 let mut sa = a.start_angle.to_radians();
                 let mut ea = a.end_angle.to_radians();
                 arc::apply_grip(&mut center, &mut radius, &mut sa, &mut ea, grip_id, apply);
-                a.center.x = center[0]; a.center.y = center[1]; a.center.z = center[2];
+                a.center.x = center[0];
+                a.center.y = center[1];
+                a.center.z = center[2];
                 a.radius = radius;
                 a.start_angle = sa.to_degrees();
                 a.end_angle = ea.to_degrees();
@@ -763,14 +766,20 @@ impl EntityTypeOps for EntityType {
                 let mut major = [e.major_axis.x, e.major_axis.y, e.major_axis.z];
                 let mut ratio = e.minor_axis_ratio;
                 ellipse::apply_grip(&mut center, &mut major, &mut ratio, grip_id, apply);
-                e.center.x = center[0]; e.center.y = center[1]; e.center.z = center[2];
-                e.major_axis.x = major[0]; e.major_axis.y = major[1]; e.major_axis.z = major[2];
+                e.center.x = center[0];
+                e.center.y = center[1];
+                e.center.z = center[2];
+                e.major_axis.x = major[0];
+                e.major_axis.y = major[1];
+                e.major_axis.z = major[2];
                 e.minor_axis_ratio = ratio;
             }
             EntityType::Point(pt) => {
                 let mut p = [pt.location.x, pt.location.y, pt.location.z];
                 point::apply_grip(&mut p, grip_id, apply);
-                pt.location.x = p[0]; pt.location.y = p[1]; pt.location.z = p[2];
+                pt.location.x = p[0];
+                pt.location.y = p[1];
+                pt.location.z = p[2];
             }
             // ── 其余类型暂走 acadrust adapter ──────────────────────────────
             EntityType::LwPolyline(pline) => {
@@ -877,14 +886,20 @@ impl EntityTypeOps for EntityType {
                 let mut s = [l.start.x, l.start.y, l.start.z];
                 let mut e = [l.end.x, l.end.y, l.end.z];
                 line::apply_transform(&mut s, &mut e, t);
-                l.start.x = s[0]; l.start.y = s[1]; l.start.z = s[2];
-                l.end.x = e[0]; l.end.y = e[1]; l.end.z = e[2];
+                l.start.x = s[0];
+                l.start.y = s[1];
+                l.start.z = s[2];
+                l.end.x = e[0];
+                l.end.y = e[1];
+                l.end.z = e[2];
             }
             EntityType::Circle(c) => {
                 let mut center = [c.center.x, c.center.y, c.center.z];
                 let mut radius = c.radius;
                 circle::apply_transform(&mut center, &mut radius, t);
-                c.center.x = center[0]; c.center.y = center[1]; c.center.z = center[2];
+                c.center.x = center[0];
+                c.center.y = center[1];
+                c.center.z = center[2];
                 c.radius = radius;
             }
             EntityType::Arc(a) => {
@@ -893,7 +908,9 @@ impl EntityTypeOps for EntityType {
                 let mut sa = a.start_angle.to_radians();
                 let mut ea = a.end_angle.to_radians();
                 arc::apply_transform(&mut center, &mut radius, &mut sa, &mut ea, t);
-                a.center.x = center[0]; a.center.y = center[1]; a.center.z = center[2];
+                a.center.x = center[0];
+                a.center.y = center[1];
+                a.center.z = center[2];
                 a.radius = radius;
                 a.start_angle = sa.to_degrees();
                 a.end_angle = ea.to_degrees();
@@ -902,13 +919,19 @@ impl EntityTypeOps for EntityType {
                 let mut center = [e.center.x, e.center.y, e.center.z];
                 let mut major = [e.major_axis.x, e.major_axis.y, e.major_axis.z];
                 ellipse::apply_transform(&mut center, &mut major, t);
-                e.center.x = center[0]; e.center.y = center[1]; e.center.z = center[2];
-                e.major_axis.x = major[0]; e.major_axis.y = major[1]; e.major_axis.z = major[2];
+                e.center.x = center[0];
+                e.center.y = center[1];
+                e.center.z = center[2];
+                e.major_axis.x = major[0];
+                e.major_axis.y = major[1];
+                e.major_axis.z = major[2];
             }
             EntityType::Point(pt) => {
                 let mut p = [pt.location.x, pt.location.y, pt.location.z];
                 point::apply_transform(&mut p, t);
-                pt.location.x = p[0]; pt.location.y = p[1]; pt.location.z = p[2];
+                pt.location.x = p[0];
+                pt.location.y = p[1];
+                pt.location.z = p[2];
             }
             EntityType::LwPolyline(pline) => {
                 let mut verts = lwv_ar_to_nm(&pline.vertices);

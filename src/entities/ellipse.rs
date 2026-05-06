@@ -1,4 +1,5 @@
 use glam::Vec3;
+use h7cad_native_model::geom_ocs::is_world_normal;
 use truck_modeling::{builder, BSplineCurve, Curve, Edge, KnotVec, Point3, Wire};
 
 use crate::command::EntityTransform;
@@ -25,8 +26,30 @@ pub fn to_truck(
     start_param: f64,
     end_param: f64,
 ) -> TruckEntity {
+    to_truck_with_normal(
+        center,
+        major_axis,
+        ratio,
+        start_param,
+        end_param,
+        [0.0, 0.0, 1.0],
+    )
+}
+
+pub fn to_truck_with_normal(
+    center: &[f64; 3],
+    major_axis: &[f64; 3],
+    ratio: f64,
+    start_param: f64,
+    end_param: f64,
+    normal: [f64; 3],
+) -> TruckEntity {
     let (cx, cy, cz) = (center[0], center[1], center[2]);
-    let maj = Vec3::new(major_axis[0] as f32, major_axis[1] as f32, major_axis[2] as f32);
+    let maj = Vec3::new(
+        major_axis[0] as f32,
+        major_axis[1] as f32,
+        major_axis[2] as f32,
+    );
     let r_major = maj.length() as f64;
     let r_minor = r_major * ratio;
     let t0 = start_param;
@@ -34,8 +57,17 @@ pub fn to_truck(
     if t1 <= t0 {
         t1 += TAU;
     }
-    let u = if r_major > 1e-9 { maj / maj.length() } else { Vec3::X };
-    let v_axis = Vec3::Z.cross(u);
+    let u = if r_major > 1e-9 {
+        maj / maj.length()
+    } else {
+        Vec3::X
+    };
+    let n = Vec3::new(normal[0] as f32, normal[1] as f32, normal[2] as f32).normalize_or_zero();
+    let v_axis = if is_world_normal(normal) {
+        Vec3::Z.cross(u)
+    } else {
+        n.cross(u).normalize_or_zero()
+    };
     let center_v3 = pt_to_vec3(center);
     let is_closed = (t1 - t0 - TAU).abs() < 1e-6;
 
@@ -69,14 +101,14 @@ pub fn to_truck(
             Vec3::new(
                 (cx + lx * u.x as f64 + lz * v_axis.x as f64) as f32,
                 (cy + lx * u.y as f64 + lz * v_axis.y as f64) as f32,
-                cz as f32,
+                (cz + lx * u.z as f64 + lz * v_axis.z as f64) as f32,
             )
         };
         let snap_pts = vec![
             (center_v3, SnapHint::Center),
-            (q(r_major, 0.0),  SnapHint::Quadrant),
+            (q(r_major, 0.0), SnapHint::Quadrant),
             (q(-r_major, 0.0), SnapHint::Quadrant),
-            (q(0.0, r_minor),  SnapHint::Quadrant),
+            (q(0.0, r_minor), SnapHint::Quadrant),
             (q(0.0, -r_minor), SnapHint::Quadrant),
         ];
         TruckEntity {
@@ -139,7 +171,11 @@ pub fn grips(center: &[f64; 3], major_axis: &[f64; 3], ratio: f64) -> Vec<GripDe
         (center[1] + py) as f32,
         center[2] as f32,
     );
-    vec![diamond_grip(0, ctr), square_grip(1, maj), square_grip(2, min)]
+    vec![
+        diamond_grip(0, ctr),
+        square_grip(1, maj),
+        square_grip(2, min),
+    ]
 }
 
 pub fn properties(center: &[f64; 3], major_axis: &[f64; 3], ratio: f64) -> PropSection {
@@ -202,11 +238,7 @@ pub fn apply_grip(
     }
 }
 
-pub fn apply_transform(
-    center: &mut [f64; 3],
-    major_axis: &mut [f64; 3],
-    t: &EntityTransform,
-) {
+pub fn apply_transform(center: &mut [f64; 3], major_axis: &mut [f64; 3], t: &EntityTransform) {
     transform_pt(center, t);
     crate::entities::common::transform_dir(major_axis, t);
     if let EntityTransform::Scale { center: c, factor } = t {
@@ -217,4 +249,3 @@ pub fn apply_transform(
         }
     }
 }
-

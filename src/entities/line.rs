@@ -49,7 +49,11 @@ pub fn properties(start: &[f64; 3], end: &[f64; 3]) -> PropSection {
             edit("End X", "end_x", end[0]),
             edit("End Y", "end_y", end[1]),
             edit("End Z", "end_z", end[2]),
-            ro("Length", "length", format!("{:.4}", distance_3d(start, end))),
+            ro(
+                "Length",
+                "length",
+                format!("{:.4}", distance_3d(start, end)),
+            ),
         ],
     }
 }
@@ -95,4 +99,3 @@ pub fn apply_transform(start: &mut [f64; 3], end: &mut [f64; 3], t: &EntityTrans
     transform_pt(start, t);
     transform_pt(end, t);
 }
-

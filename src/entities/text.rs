@@ -1,6 +1,6 @@
 use acadrust::entities::{Text, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
@@ -52,17 +52,28 @@ fn sync_text_alignment_point(t: &mut Text) {
 fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
     let normal = (t.normal.x, t.normal.y, t.normal.z);
     let (wsx, wsy, wsz) = crate::scene::transform::ocs_point_to_wcs(
-        (t.insertion_point.x, t.insertion_point.y, t.insertion_point.z),
+        (
+            t.insertion_point.x,
+            t.insertion_point.y,
+            t.insertion_point.z,
+        ),
         normal,
     );
     let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
     let resolved_style = resolve_text_style(&t.style, document);
     let font_name = resolved_style.font_name;
-    let base_wf = (if t.width_factor > 0.0 { t.width_factor as f32 } else { 1.0 }
-        * resolved_style.width_factor.max(0.01))
+    let base_wf = (if t.width_factor > 0.0 {
+        t.width_factor as f32
+    } else {
+        1.0
+    } * resolved_style.width_factor.max(0.01))
     .clamp(0.01, 100.0);
     // is_backward mirrors text left-right via negative width factor.
-    let width_factor = if resolved_style.is_backward { -base_wf } else { base_wf };
+    let width_factor = if resolved_style.is_backward {
+        -base_wf
+    } else {
+        base_wf
+    };
     // is_upside_down rotates 180° around the insertion point.
     let rotation = if resolved_style.is_upside_down {
         t.rotation as f32 + std::f32::consts::PI
@@ -184,7 +195,11 @@ pub fn to_truck_native(
     alignment_point: Option<[f64; 3]>,
     document: &nm::CadDocument,
 ) -> TruckEntity {
-    let snap_pt = Vec3::new(insertion[0] as f32, insertion[1] as f32, insertion[2] as f32);
+    let snap_pt = Vec3::new(
+        insertion[0] as f32,
+        insertion[1] as f32,
+        insertion[2] as f32,
+    );
     let resolved_style = resolve_text_style_native(style_name, document);
     let font_name = resolved_style.font_name;
     let width_factor = ((if width_factor_value > 0.0 {
@@ -236,7 +251,10 @@ pub fn to_truck_native(
         value,
     );
     TruckEntity {
-        object: TruckObject::Text(strokes_2d),
+        object: TruckObject::Text(vec![TextStroke {
+            strokes: strokes_2d,
+            origin: [0.0, 0.0],
+        }]),
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],
@@ -253,11 +271,14 @@ fn grips(t: &Text) -> Vec<GripDef> {
 }
 
 pub fn grips_native(insertion: &[f64; 3]) -> Vec<GripDef> {
-    vec![square_grip(0, Vec3::new(
-        insertion[0] as f32,
-        insertion[1] as f32,
-        insertion[2] as f32,
-    ))]
+    vec![square_grip(
+        0,
+        Vec3::new(
+            insertion[0] as f32,
+            insertion[1] as f32,
+            insertion[2] as f32,
+        ),
+    )]
 }
 
 fn properties(t: &Text, text_style_names: &[String]) -> PropSection {

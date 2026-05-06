@@ -35,10 +35,18 @@ impl JoinRect {
     pub fn new(cx: f64, cy: f64, w: f64, h: f64) -> Self {
         Self { cx, cy, w, h }
     }
-    pub fn x_min(&self) -> f64 { self.cx - self.w * 0.5 }
-    pub fn x_max(&self) -> f64 { self.cx + self.w * 0.5 }
-    pub fn y_min(&self) -> f64 { self.cy - self.h * 0.5 }
-    pub fn y_max(&self) -> f64 { self.cy + self.h * 0.5 }
+    pub fn x_min(&self) -> f64 {
+        self.cx - self.w * 0.5
+    }
+    pub fn x_max(&self) -> f64 {
+        self.cx + self.w * 0.5
+    }
+    pub fn y_min(&self) -> f64 {
+        self.cy - self.h * 0.5
+    }
+    pub fn y_max(&self) -> f64 {
+        self.cy + self.h * 0.5
+    }
 }
 
 /// Tolerance for edge-coincidence checks.  Paper-space viewport rectangles

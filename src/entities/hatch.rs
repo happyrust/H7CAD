@@ -193,17 +193,29 @@ impl Grippable for Hatch {
                         }
                     }
                     BoundaryEdge::Line(l) => {
-                        out.push(diamond_grip(id, Vec3::new(l.start.x as f32, l.start.y as f32, elev)));
+                        out.push(diamond_grip(
+                            id,
+                            Vec3::new(l.start.x as f32, l.start.y as f32, elev),
+                        ));
                         id += 1;
-                        out.push(diamond_grip(id, Vec3::new(l.end.x as f32, l.end.y as f32, elev)));
+                        out.push(diamond_grip(
+                            id,
+                            Vec3::new(l.end.x as f32, l.end.y as f32, elev),
+                        ));
                         id += 1;
                     }
                     BoundaryEdge::CircularArc(a) => {
-                        out.push(diamond_grip(id, Vec3::new(a.center.x as f32, a.center.y as f32, elev)));
+                        out.push(diamond_grip(
+                            id,
+                            Vec3::new(a.center.x as f32, a.center.y as f32, elev),
+                        ));
                         id += 1;
                     }
                     BoundaryEdge::EllipticArc(e) => {
-                        out.push(diamond_grip(id, Vec3::new(e.center.x as f32, e.center.y as f32, elev)));
+                        out.push(diamond_grip(
+                            id,
+                            Vec3::new(e.center.x as f32, e.center.y as f32, elev),
+                        ));
                         id += 1;
                     }
                     BoundaryEdge::Spline(s) => {
@@ -241,7 +253,8 @@ impl Grippable for Hatch {
                     BoundaryEdge::Polyline(p) => {
                         for v in &mut p.vertices {
                             if id == grip_id {
-                                let (nx, ny) = resolve(&apply, Vec3::new(v.x as f32, v.y as f32, elev));
+                                let (nx, ny) =
+                                    resolve(&apply, Vec3::new(v.x as f32, v.y as f32, elev));
                                 v.x = nx;
                                 v.y = ny;
                                 break 'outer;
@@ -251,14 +264,18 @@ impl Grippable for Hatch {
                     }
                     BoundaryEdge::Line(l) => {
                         if id == grip_id {
-                            let (nx, ny) = resolve(&apply, Vec3::new(l.start.x as f32, l.start.y as f32, elev));
+                            let (nx, ny) = resolve(
+                                &apply,
+                                Vec3::new(l.start.x as f32, l.start.y as f32, elev),
+                            );
                             l.start.x = nx;
                             l.start.y = ny;
                             break 'outer;
                         }
                         id += 1;
                         if id == grip_id {
-                            let (nx, ny) = resolve(&apply, Vec3::new(l.end.x as f32, l.end.y as f32, elev));
+                            let (nx, ny) =
+                                resolve(&apply, Vec3::new(l.end.x as f32, l.end.y as f32, elev));
                             l.end.x = nx;
                             l.end.y = ny;
                             break 'outer;
@@ -267,7 +284,10 @@ impl Grippable for Hatch {
                     }
                     BoundaryEdge::CircularArc(a) => {
                         if id == grip_id {
-                            let (nx, ny) = resolve(&apply, Vec3::new(a.center.x as f32, a.center.y as f32, elev));
+                            let (nx, ny) = resolve(
+                                &apply,
+                                Vec3::new(a.center.x as f32, a.center.y as f32, elev),
+                            );
                             a.center.x = nx;
                             a.center.y = ny;
                             break 'outer;
@@ -276,7 +296,10 @@ impl Grippable for Hatch {
                     }
                     BoundaryEdge::EllipticArc(e) => {
                         if id == grip_id {
-                            let (nx, ny) = resolve(&apply, Vec3::new(e.center.x as f32, e.center.y as f32, elev));
+                            let (nx, ny) = resolve(
+                                &apply,
+                                Vec3::new(e.center.x as f32, e.center.y as f32, elev),
+                            );
                             e.center.x = nx;
                             e.center.y = ny;
                             break 'outer;
@@ -287,7 +310,8 @@ impl Grippable for Hatch {
                         if !s.fit_points.is_empty() {
                             for fp in &mut s.fit_points {
                                 if id == grip_id {
-                                    let (nx, ny) = resolve(&apply, Vec3::new(fp.x as f32, fp.y as f32, elev));
+                                    let (nx, ny) =
+                                        resolve(&apply, Vec3::new(fp.x as f32, fp.y as f32, elev));
                                     fp.x = nx;
                                     fp.y = ny;
                                     break 'outer;
@@ -297,7 +321,8 @@ impl Grippable for Hatch {
                         } else {
                             for cp in &mut s.control_points {
                                 if id == grip_id {
-                                    let (nx, ny) = resolve(&apply, Vec3::new(cp.x as f32, cp.y as f32, elev));
+                                    let (nx, ny) =
+                                        resolve(&apply, Vec3::new(cp.x as f32, cp.y as f32, elev));
                                     cp.x = nx;
                                     cp.y = ny;
                                     break 'outer;

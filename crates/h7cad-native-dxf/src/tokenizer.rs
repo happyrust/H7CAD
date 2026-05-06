@@ -69,22 +69,11 @@ impl GroupCode {
             | 470..=481
             | 999
             | 1000..=1009 => GroupValueKind::Str,
-            10..=59
-            | 110..=149
-            | 210..=239
-            | 460..=469
-            | 1010..=1059 => GroupValueKind::Double,
-            60..=79
-            | 170..=179
-            | 270..=289
-            | 370..=389
-            | 400..=409
-            | 1060..=1070 => GroupValueKind::Short,
-            90..=99
-            | 160..=169
-            | 420..=429
-            | 440..=459
-            | 1071 => GroupValueKind::Long,
+            10..=59 | 110..=149 | 210..=239 | 460..=469 | 1010..=1059 => GroupValueKind::Double,
+            60..=79 | 170..=179 | 270..=289 | 370..=389 | 400..=409 | 1060..=1070 => {
+                GroupValueKind::Short
+            }
+            90..=99 | 160..=169 | 420..=429 | 440..=459 | 1071 => GroupValueKind::Long,
             290..=299 => GroupValueKind::Bool,
             _ => GroupValueKind::Int,
         }
@@ -133,10 +122,7 @@ pub enum DxfValue {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DxfParseError {
-    UnexpectedEndOfInput {
-        expected: &'static str,
-        line: usize,
-    },
+    UnexpectedEndOfInput { expected: &'static str, line: usize },
     InvalidGroupCode(String),
 }
 
@@ -144,7 +130,10 @@ impl fmt::Display for DxfParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnexpectedEndOfInput { expected, line } => {
-                write!(f, "unexpected end of input at line {line}, expected {expected}")
+                write!(
+                    f,
+                    "unexpected end of input at line {line}, expected {expected}"
+                )
             }
             Self::InvalidGroupCode(value) => write!(f, "invalid DXF group code `{value}`"),
         }
@@ -335,12 +324,13 @@ impl<'a> BinaryDxfTokenizer<'a> {
     fn read_group_code(&mut self) -> Option<Result<i16, DxfParseError>> {
         let first = self.read_u8()?;
         if first == 255 {
-            Some(self.read_i16_le().ok_or_else(|| {
-                DxfParseError::UnexpectedEndOfInput {
-                    expected: "extended group code",
-                    line: self.pos,
-                }
-            }))
+            Some(
+                self.read_i16_le()
+                    .ok_or_else(|| DxfParseError::UnexpectedEndOfInput {
+                        expected: "extended group code",
+                        line: self.pos,
+                    }),
+            )
         } else {
             Some(Ok(first as i16))
         }
@@ -352,13 +342,13 @@ impl<'a> BinaryDxfTokenizer<'a> {
             GroupValueKind::Str => self.read_null_terminated_string(),
             GroupValueKind::Double => self.read_f64_le().map(|v| format!("{v}")),
             GroupValueKind::Short => self.read_i16_le().map(|v| format!("{v}")),
-            GroupValueKind::Long | GroupValueKind::Int => self.read_i32_le().map(|v| format!("{v}")),
-            GroupValueKind::Bool => self.read_u8().map(|v| format!("{v}")),
-            GroupValueKind::Binary => {
-                self.read_binary_chunk().map(|bytes| {
-                    bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()
-                })
+            GroupValueKind::Long | GroupValueKind::Int => {
+                self.read_i32_le().map(|v| format!("{v}"))
             }
+            GroupValueKind::Bool => self.read_u8().map(|v| format!("{v}")),
+            GroupValueKind::Binary => self
+                .read_binary_chunk()
+                .map(|bytes| bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()),
         }
     }
 }

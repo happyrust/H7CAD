@@ -1,18 +1,18 @@
 //! Layer Manager — floating window.
 
-use crate::ui::properties::{color_picker_dropdown, LinetypeItem, LwItem, lw_options};
 use crate::app::Message;
-use acadrust::tables::layer::Layer as DocLayer;
-use acadrust::tables::Table;
 use crate::types::aci_table::aci_to_rgb;
 use crate::types::{Color as AcadColor, LineWeight};
+use crate::ui::properties::{color_picker_dropdown, lw_options, LinetypeItem, LwItem};
+use crate::ui::ROW_H;
+use acadrust::tables::layer::Layer as DocLayer;
+use acadrust::tables::Table;
 use acadrust::Handle;
 use iced::widget::{
     button, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
 };
-use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 use iced::Padding;
-use crate::ui::ROW_H;
+use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
 // ── Per-viewport column descriptor ───────────────────────────────────────────
 
@@ -24,9 +24,9 @@ pub struct VpCol {
 
 // ── Row-height-derived constants ─────────────────────────────────────────
 /// SVG icon size inside a layer-table cell.
-const ICON_SZ: f32   = ROW_H * 0.62;    // ≈16 px at ROW_H=26
+const ICON_SZ: f32 = ROW_H * 0.62; // ≈16 px at ROW_H=26
 /// Font size for cell text.
-const FONT_SZ: f32   = ROW_H * 0.42;    // ≈11 px at ROW_H=26
+const FONT_SZ: f32 = ROW_H * 0.42; // ≈11 px at ROW_H=26
 /// Vertical padding for combo_box / text_input so their total height = ROW_H.
 const COMBO_PAD_V: f32 = (ROW_H - FONT_SZ * 1.3 - 2.0) / 2.0;
 
@@ -91,12 +91,16 @@ impl Default for LayerPanel {
             editing: None,
             edit_buf: String::new(),
             current_layer: "0".to_string(),
-            linetype_items: vec![LinetypeItem { name: "Continuous".into(), art: String::new() }],
+            linetype_items: vec![LinetypeItem {
+                name: "Continuous".into(),
+                art: String::new(),
+            }],
             color_picker_row: None,
             color_full_palette: false,
-            linetype_combo: combo_box::State::new(vec![
-                LinetypeItem { name: "Continuous".into(), art: String::new() }
-            ]),
+            linetype_combo: combo_box::State::new(vec![LinetypeItem {
+                name: "Continuous".into(),
+                art: String::new(),
+            }]),
             lw_combo: combo_box::State::new(lw_options()),
             vp_cols: vec![],
         }
@@ -113,7 +117,10 @@ impl LayerPanel {
     ) {
         self.vp_cols = vp_info
             .iter()
-            .map(|(h, label, _)| VpCol { handle: *h, label: label.clone() })
+            .map(|(h, label, _)| VpCol {
+                handle: *h,
+                label: label.clone(),
+            })
             .collect();
 
         self.layers = doc_layers
@@ -179,14 +186,38 @@ impl LayerPanel {
         // ── Column header ─────────────────────────────────────────────────
         let mut header_row = row![
             text("Status").size(10).color(DIM).width(50),
-            text("Name").size(10).color(DIM).width(Length::Fixed(COL_NAME)),
-            text("On").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
-            text("Freeze").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
-            text("Lock").size(10).color(DIM).width(Length::Fixed(COL_ICON)),
-            text("Color").size(10).color(DIM).width(Length::Fixed(COL_COLOR)),
-            text("Linetype").size(10).color(DIM).width(Length::Fixed(COL_LT)),
-            text("Lineweight").size(10).color(DIM).width(Length::Fixed(COL_LW)),
-            text("Transparency").size(10).color(DIM).width(Length::Fixed(COL_TRANS)),
+            text("Name")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_NAME)),
+            text("On")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_ICON)),
+            text("Freeze")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_ICON)),
+            text("Lock")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_ICON)),
+            text("Color")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_COLOR)),
+            text("Linetype")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_LT)),
+            text("Lineweight")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_LW)),
+            text("Transparency")
+                .size(10)
+                .color(DIM)
+                .width(Length::Fixed(COL_TRANS)),
         ]
         .spacing(4)
         .align_y(iced::Center);
@@ -203,7 +234,11 @@ impl LayerPanel {
         let col_header = container(header_row)
             .style(|_: &Theme| container::Style {
                 background: Some(Background::Color(COL_HEADER_BG)),
-                border: Border { color: BORDER_COLOR, width: 1.0, radius: 0.0.into() },
+                border: Border {
+                    color: BORDER_COLOR,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
                 ..Default::default()
             })
             .padding([4, 8])
@@ -224,7 +259,15 @@ impl LayerPanel {
             };
 
             rows_col = rows_col.push(layer_row(
-                i, layer, is_sel, is_current, is_editing, &self.edit_buf, color_open, ltc, lwc,
+                i,
+                layer,
+                is_sel,
+                is_current,
+                is_editing,
+                &self.edit_buf,
+                color_open,
+                ltc,
+                lwc,
                 &self.vp_cols,
             ));
 
@@ -255,11 +298,30 @@ fn toolbar_btn(label: &str, msg: Message) -> Element<'_, Message> {
         .on_press(msg)
         .style(|_: &Theme, status| button::Style {
             background: Some(Background::Color(match status {
-                button::Status::Hovered => Color { r: 0.32, g: 0.32, b: 0.32, a: 1.0 },
-                button::Status::Pressed => Color { r: 0.25, g: 0.25, b: 0.25, a: 1.0 },
-                _ => Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
+                button::Status::Hovered => Color {
+                    r: 0.32,
+                    g: 0.32,
+                    b: 0.32,
+                    a: 1.0,
+                },
+                button::Status::Pressed => Color {
+                    r: 0.25,
+                    g: 0.25,
+                    b: 0.25,
+                    a: 1.0,
+                },
+                _ => Color {
+                    r: 0.26,
+                    g: 0.26,
+                    b: 0.26,
+                    a: 1.0,
+                },
             })),
-            border: Border { radius: 3.0.into(), color: BORDER_COLOR, width: 1.0 },
+            border: Border {
+                radius: 3.0.into(),
+                color: BORDER_COLOR,
+                width: 1.0,
+            },
             text_color: Color::WHITE,
             ..Default::default()
         })
@@ -271,14 +333,33 @@ fn toolbar_btn_cond(label: &str, msg: Message, enabled: bool) -> Element<'_, Mes
     let mut b = button(text(label).size(11).color(if enabled {
         Color::WHITE
     } else {
-        Color { r: 0.45, g: 0.45, b: 0.45, a: 1.0 }
+        Color {
+            r: 0.45,
+            g: 0.45,
+            b: 0.45,
+            a: 1.0,
+        }
     }))
     .style(|_: &Theme, status| button::Style {
         background: Some(Background::Color(match status {
-            button::Status::Hovered => Color { r: 0.32, g: 0.32, b: 0.32, a: 1.0 },
-            _ => Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
+            button::Status::Hovered => Color {
+                r: 0.32,
+                g: 0.32,
+                b: 0.32,
+                a: 1.0,
+            },
+            _ => Color {
+                r: 0.26,
+                g: 0.26,
+                b: 0.26,
+                a: 1.0,
+            },
         })),
-        border: Border { radius: 3.0.into(), color: BORDER_COLOR, width: 1.0 },
+        border: Border {
+            radius: 3.0.into(),
+            color: BORDER_COLOR,
+            width: 1.0,
+        },
         text_color: Color::WHITE,
         ..Default::default()
     })
@@ -313,12 +394,22 @@ fn layer_row<'a>(
         .on_press(on_press)
         .style(|_: &Theme, status| button::Style {
             background: Some(Background::Color(match status {
-                button::Status::Hovered => Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+                button::Status::Hovered => Color {
+                    r: 0.35,
+                    g: 0.35,
+                    b: 0.35,
+                    a: 1.0,
+                },
                 _ => Color::TRANSPARENT,
             })),
             ..Default::default()
         })
-        .padding(Padding { top: COMBO_PAD_V, bottom: COMBO_PAD_V, left: 4.0, right: 4.0 })
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 4.0,
+            right: 4.0,
+        })
         .height(Length::Fixed(ROW_H))
         .into()
     };
@@ -340,9 +431,25 @@ fn layer_row<'a>(
     };
 
     let status_dot: Element<'_, Message> = if is_current {
-        text("✓").size(13).color(Color { r: 0.25, g: 0.85, b: 0.45, a: 1.0 }).into()
+        text("✓")
+            .size(13)
+            .color(Color {
+                r: 0.25,
+                g: 0.85,
+                b: 0.45,
+                a: 1.0,
+            })
+            .into()
     } else {
-        text("▣").size(11).color(Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }).into()
+        text("▣")
+            .size(11)
+            .color(Color {
+                r: 0.55,
+                g: 0.55,
+                b: 0.55,
+                a: 1.0,
+            })
+            .into()
     };
 
     // Name cell
@@ -351,18 +458,43 @@ fn layer_row<'a>(
             .on_input(Message::LayerRenameEdit)
             .on_submit(Message::LayerRenameCommit)
             .size(FONT_SZ)
-            .padding(Padding { top: COMBO_PAD_V, bottom: COMBO_PAD_V, left: 4.0, right: 4.0 })
+            .padding(Padding {
+                top: COMBO_PAD_V,
+                bottom: COMBO_PAD_V,
+                left: 4.0,
+                right: 4.0,
+            })
             .style(|_: &Theme, _| iced::widget::text_input::Style {
-                background: iced::Background::Color(Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 }),
+                background: iced::Background::Color(Color {
+                    r: 0.12,
+                    g: 0.12,
+                    b: 0.12,
+                    a: 1.0,
+                }),
                 border: Border {
                     radius: 2.0.into(),
                     width: 1.0,
-                    color: Color { r: 0.45, g: 0.65, b: 0.90, a: 1.0 },
+                    color: Color {
+                        r: 0.45,
+                        g: 0.65,
+                        b: 0.90,
+                        a: 1.0,
+                    },
                 },
                 icon: Color::WHITE,
-                placeholder: Color { r: 0.4, g: 0.4, b: 0.4, a: 1.0 },
+                placeholder: Color {
+                    r: 0.4,
+                    g: 0.4,
+                    b: 0.4,
+                    a: 1.0,
+                },
                 value: Color::WHITE,
-                selection: Color { r: 0.25, g: 0.45, b: 0.75, a: 0.5 },
+                selection: Color {
+                    r: 0.25,
+                    g: 0.45,
+                    b: 0.75,
+                    a: 0.5,
+                },
             })
             .width(Length::Fixed(COL_NAME))
             .into()
@@ -371,12 +503,22 @@ fn layer_row<'a>(
             .on_press(Message::LayerRenameStart(index))
             .style(|_: &Theme, status| button::Style {
                 background: Some(Background::Color(match status {
-                    button::Status::Hovered => Color { r: 0.30, g: 0.30, b: 0.30, a: 1.0 },
+                    button::Status::Hovered => Color {
+                        r: 0.30,
+                        g: 0.30,
+                        b: 0.30,
+                        a: 1.0,
+                    },
                     _ => Color::TRANSPARENT,
                 })),
                 ..Default::default()
             })
-            .padding(Padding { top: COMBO_PAD_V, bottom: COMBO_PAD_V, left: 4.0, right: 4.0 })
+            .padding(Padding {
+                top: COMBO_PAD_V,
+                bottom: COMBO_PAD_V,
+                left: 4.0,
+                right: 4.0,
+            })
             .height(Length::Fixed(ROW_H))
             .width(Length::Fixed(COL_NAME))
             .into()
@@ -391,7 +533,12 @@ fn layer_row<'a>(
         .style(move |_: &Theme| container::Style {
             background: Some(Background::Color(layer_color)),
             border: Border {
-                color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.5 },
+                color: Color {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.5,
+                },
                 width: 1.0,
                 radius: 1.0.into(),
             },
@@ -415,21 +562,41 @@ fn layer_row<'a>(
     .on_press(Message::LayerColorPickerToggle(index))
     .style(move |_: &Theme, status| button::Style {
         background: Some(Background::Color(match status {
-            button::Status::Hovered => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
-            _ => Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 },
+            button::Status::Hovered => Color {
+                r: 0.20,
+                g: 0.20,
+                b: 0.20,
+                a: 1.0,
+            },
+            _ => Color {
+                r: 0.13,
+                g: 0.13,
+                b: 0.13,
+                a: 1.0,
+            },
         })),
         border: Border {
             radius: 2.0.into(),
             width: 1.0,
             color: if color_picker_open {
-                Color { r: 0.45, g: 0.65, b: 0.90, a: 1.0 }
+                Color {
+                    r: 0.45,
+                    g: 0.65,
+                    b: 0.90,
+                    a: 1.0,
+                }
             } else {
                 BORDER_COLOR
             },
         },
         ..Default::default()
     })
-    .padding(Padding { top: COMBO_PAD_V, bottom: COMBO_PAD_V, left: 4.0, right: 4.0 })
+    .padding(Padding {
+        top: COMBO_PAD_V,
+        bottom: COMBO_PAD_V,
+        left: 4.0,
+        right: 4.0,
+    })
     .height(Length::Fixed(ROW_H))
     .width(Length::Fixed(COL_COLOR))
     .into();
@@ -447,12 +614,21 @@ fn layer_row<'a>(
             |item: LinetypeItem| Message::LayerLinetypeSet(item.name),
         )
         .size(FONT_SZ)
-        .padding(Padding { top: COMBO_PAD_V, bottom: COMBO_PAD_V, left: 4.0, right: 4.0 })
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 4.0,
+            right: 4.0,
+        })
         .width(Length::Fixed(COL_LT))
         .input_style(combo_input_style)
         .into()
     } else {
-        text(layer.linetype.as_str()).size(FONT_SZ).color(DIM).width(Length::Fixed(COL_LT)).into()
+        text(layer.linetype.as_str())
+            .size(FONT_SZ)
+            .color(DIM)
+            .width(Length::Fixed(COL_LT))
+            .into()
     };
 
     // Lineweight cell
@@ -462,12 +638,21 @@ fn layer_row<'a>(
             Message::LayerLineweightSet(item.0)
         })
         .size(FONT_SZ)
-        .padding(Padding { top: COMBO_PAD_V, bottom: COMBO_PAD_V, left: 4.0, right: 4.0 })
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 4.0,
+            right: 4.0,
+        })
         .width(Length::Fixed(COL_LW))
         .input_style(combo_input_style)
         .into()
     } else {
-        text(cur_lw_item.to_string()).size(FONT_SZ).color(DIM).width(Length::Fixed(COL_LW)).into()
+        text(cur_lw_item.to_string())
+            .size(FONT_SZ)
+            .color(DIM)
+            .width(Length::Fixed(COL_LW))
+            .into()
     };
 
     // Transparency cell
@@ -475,21 +660,44 @@ fn layer_row<'a>(
     let trans_cell = text_input("0", &trans_str)
         .on_input(move |s| Message::LayerTransparencyEdit(index, s))
         .size(FONT_SZ)
-        .padding(Padding { top: COMBO_PAD_V, bottom: COMBO_PAD_V, left: 4.0, right: 4.0 })
+        .padding(Padding {
+            top: COMBO_PAD_V,
+            bottom: COMBO_PAD_V,
+            left: 4.0,
+            right: 4.0,
+        })
         .style(|_: &Theme, _| iced::widget::text_input::Style {
             background: iced::Background::Color(Color::TRANSPARENT),
-            border: Border { radius: 2.0.into(), width: 1.0, color: BORDER_COLOR },
+            border: Border {
+                radius: 2.0.into(),
+                width: 1.0,
+                color: BORDER_COLOR,
+            },
             icon: Color::WHITE,
             placeholder: DIM,
             value: ROW_TEXT,
-            selection: Color { r: 0.25, g: 0.45, b: 0.75, a: 0.5 },
+            selection: Color {
+                r: 0.25,
+                g: 0.45,
+                b: 0.75,
+                a: 0.5,
+            },
         })
         .width(Length::Fixed(COL_TRANS));
 
-    let bg = if is_selected { ROW_SEL } else if index % 2 == 0 { ROW_EVEN } else { ROW_ODD };
+    let bg = if is_selected {
+        ROW_SEL
+    } else if index % 2 == 0 {
+        ROW_EVEN
+    } else {
+        ROW_ODD
+    };
 
     let mut row_content = row![
-        container(status_dot).width(50).align_x(iced::Center).align_y(iced::Center),
+        container(status_dot)
+            .width(50)
+            .align_x(iced::Center)
+            .align_y(iced::Center),
         name_cell,
         container(svg_btn(vis_svg, Message::LayerToggleVisible(index)))
             .width(Length::Fixed(COL_ICON))
@@ -517,9 +725,12 @@ fn layer_row<'a>(
             include_bytes!("../../assets/icons/layers/laythw.svg")
         };
         row_content = row_content.push(
-            container(svg_btn(vp_frz_svg, Message::LayerToggleVpFreeze(index, vp_idx)))
-                .width(Length::Fixed(COL_ICON))
-                .align_x(iced::Center),
+            container(svg_btn(
+                vp_frz_svg,
+                Message::LayerToggleVpFreeze(index, vp_idx),
+            ))
+            .width(Length::Fixed(COL_ICON))
+            .align_x(iced::Center),
         );
     }
 
@@ -529,7 +740,12 @@ fn layer_row<'a>(
                 background: Some(Background::Color(bg)),
                 ..Default::default()
             })
-            .padding(Padding { top: 0.0, bottom: 0.0, left: 8.0, right: 8.0 })
+            .padding(Padding {
+                top: 0.0,
+                bottom: 0.0,
+                left: 8.0,
+                right: 8.0,
+            })
             .height(Length::Fixed(ROW_H))
             .width(Fill),
     )
@@ -539,16 +755,31 @@ fn layer_row<'a>(
 
 // ── Combo style ────────────────────────────────────────────────────────────
 
-fn combo_input_style(_theme: &Theme, _status: iced::widget::text_input::Status)
-    -> iced::widget::text_input::Style
-{
+fn combo_input_style(
+    _theme: &Theme,
+    _status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
     iced::widget::text_input::Style {
-        background: iced::Background::Color(Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 }),
-        border: Border { radius: 2.0.into(), width: 1.0, color: BORDER_COLOR },
+        background: iced::Background::Color(Color {
+            r: 0.13,
+            g: 0.13,
+            b: 0.13,
+            a: 1.0,
+        }),
+        border: Border {
+            radius: 2.0.into(),
+            width: 1.0,
+            color: BORDER_COLOR,
+        },
         icon: Color::WHITE,
         placeholder: DIM,
         value: Color::WHITE,
-        selection: Color { r: 0.25, g: 0.45, b: 0.75, a: 0.5 },
+        selection: Color {
+            r: 0.25,
+            g: 0.45,
+            b: 0.75,
+            a: 0.5,
+        },
     }
 }
 
@@ -556,32 +787,26 @@ fn combo_input_style(_theme: &Theme, _status: iced::widget::text_input::Status)
 
 fn color_picker_palette<'a>(full: bool) -> Element<'a, Message> {
     // Horizontal offset to align dropdown under the Color column.
-    const LEFT_OFFSET: f32 = 20.0 + 4.0 + COL_NAME + 4.0 + COL_ICON + 4.0
-        + COL_ICON + 4.0 + COL_ICON + 4.0 + 8.0;
+    const LEFT_OFFSET: f32 =
+        20.0 + 4.0 + COL_NAME + 4.0 + COL_ICON + 4.0 + COL_ICON + 4.0 + COL_ICON + 4.0 + 8.0;
 
     // Use the shared color_picker_dropdown from properties — no ByLayer/ByBlock for layers.
-    let dropdown = color_picker_dropdown(
-        full,
-        Message::LayerColorMorePalette,
-        None,
-        None,
-        |aci| Message::LayerColorSet(aci),
-    );
+    let dropdown = color_picker_dropdown(full, Message::LayerColorMorePalette, None, None, |aci| {
+        Message::LayerColorSet(aci)
+    });
 
-    row![
-        iced::widget::Space::new().width(LEFT_OFFSET),
-        dropdown,
-    ]
-    .into()
+    row![iced::widget::Space::new().width(LEFT_OFFSET), dropdown,].into()
 }
-
 
 // ── Display helpers ───────────────────────────────────────────────────────
 
 #[allow(dead_code)]
 fn aci_color_display(i: u8) -> (Color, &'static str) {
     let (r, g, b) = aci_to_rgb(i).unwrap_or((200, 200, 200));
-    (Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0), "")
+    (
+        Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0),
+        "",
+    )
 }
 
 fn iced_to_aci(c: Color) -> u8 {
@@ -629,7 +854,6 @@ fn color_name_to_aci(name: &str) -> u8 {
     }
 }
 
-
 pub fn iced_color_from_acad(c: &AcadColor) -> Color {
     match c {
         AcadColor::Index(i) => {
@@ -645,23 +869,73 @@ pub fn iced_color_from_acad(c: &AcadColor) -> Color {
 
 // ── Column widths ─────────────────────────────────────────────────────────
 
-const COL_NAME: f32  = 130.0;
-const COL_ICON: f32  = 44.0;
+const COL_NAME: f32 = 130.0;
+const COL_ICON: f32 = 44.0;
 const COL_COLOR: f32 = 90.0;
-const COL_LT: f32    = 110.0;
-const COL_LW: f32    = 90.0;
+const COL_LT: f32 = 110.0;
+const COL_LW: f32 = 90.0;
 const COL_TRANS: f32 = 80.0;
 
 // ── Colors ────────────────────────────────────────────────────────────────
 
-const PANEL_BG: Color      = Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 };
-const TOOLBAR_BG: Color    = Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 };
-const COL_HEADER_BG: Color = Color { r: 0.21, g: 0.21, b: 0.21, a: 1.0 };
-const ROW_EVEN: Color      = Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 };
-const ROW_ODD: Color       = Color { r: 0.21, g: 0.21, b: 0.21, a: 1.0 };
-const ROW_SEL: Color       = Color { r: 0.18, g: 0.32, b: 0.52, a: 1.0 };
-const ROW_TEXT: Color      = Color { r: 0.85, g: 0.85, b: 0.85, a: 1.0 };
-const DIM: Color           = Color { r: 0.50, g: 0.50, b: 0.50, a: 1.0 };
-const BORDER_COLOR: Color  = Color { r: 0.30, g: 0.30, b: 0.30, a: 1.0 };
+const PANEL_BG: Color = Color {
+    r: 0.18,
+    g: 0.18,
+    b: 0.18,
+    a: 1.0,
+};
+const TOOLBAR_BG: Color = Color {
+    r: 0.20,
+    g: 0.20,
+    b: 0.20,
+    a: 1.0,
+};
+const COL_HEADER_BG: Color = Color {
+    r: 0.21,
+    g: 0.21,
+    b: 0.21,
+    a: 1.0,
+};
+const ROW_EVEN: Color = Color {
+    r: 0.18,
+    g: 0.18,
+    b: 0.18,
+    a: 1.0,
+};
+const ROW_ODD: Color = Color {
+    r: 0.21,
+    g: 0.21,
+    b: 0.21,
+    a: 1.0,
+};
+const ROW_SEL: Color = Color {
+    r: 0.18,
+    g: 0.32,
+    b: 0.52,
+    a: 1.0,
+};
+const ROW_TEXT: Color = Color {
+    r: 0.85,
+    g: 0.85,
+    b: 0.85,
+    a: 1.0,
+};
+const DIM: Color = Color {
+    r: 0.50,
+    g: 0.50,
+    b: 0.50,
+    a: 1.0,
+};
+const BORDER_COLOR: Color = Color {
+    r: 0.30,
+    g: 0.30,
+    b: 0.30,
+    a: 1.0,
+};
 #[allow(dead_code)]
-const ICON_COLOR: Color    = Color { r: 0.80, g: 0.80, b: 0.80, a: 1.0 };
+const ICON_COLOR: Color = Color {
+    r: 0.80,
+    g: 0.80,
+    b: 0.80,
+    a: 1.0,
+};

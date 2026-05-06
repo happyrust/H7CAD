@@ -377,8 +377,15 @@ fn parse_text_element(inner: &str) -> Option<LtSegment> {
     let after = rest[end + 1..].trim().trim_start_matches(',');
 
     let mut parts = after.split(',');
-    let style = parts.next().map(|s| s.trim().to_string()).unwrap_or_default();
-    let style = if style.is_empty() { "Standard".to_string() } else { style };
+    let style = parts
+        .next()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let style = if style.is_empty() {
+        "Standard".to_string()
+    } else {
+        style
+    };
 
     let mut x = 0.0f32;
     let mut y = 0.0f32;
@@ -403,7 +410,14 @@ fn parse_text_element(inner: &str) -> Option<LtSegment> {
         }
     }
 
-    Some(LtSegment::Text { text, style, x, y, scale, rot_deg })
+    Some(LtSegment::Text {
+        text,
+        style,
+        x,
+        y,
+        scale,
+        rot_deg,
+    })
 }
 
 fn push_lt_segment(token: &str, out: &mut Vec<LtSegment>) {

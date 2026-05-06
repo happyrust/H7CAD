@@ -19,8 +19,15 @@ pub fn tool() -> ToolDef {
 enum Step {
     Vertex,
     FirstRay(Vec3),
-    SecondRay { vertex: Vec3, first: Vec3 },
-    ArcPoint { vertex: Vec3, first: Vec3, second: Vec3 },
+    SecondRay {
+        vertex: Vec3,
+        first: Vec3,
+    },
+    ArcPoint {
+        vertex: Vec3,
+        first: Vec3,
+        second: Vec3,
+    },
 }
 
 pub struct AngularDimensionCommand {
@@ -119,9 +126,13 @@ impl CadCommand for AngularDimensionCommand {
         match self.step {
             Step::Vertex => None,
             Step::FirstRay(vertex) => Some(preview_wire(vec![vertex, pt])),
-            Step::SecondRay { vertex, first } => {
-                Some(preview_wire(vec![vertex, first, Vec3::new(f32::NAN, f32::NAN, f32::NAN), vertex, pt]))
-            }
+            Step::SecondRay { vertex, first } => Some(preview_wire(vec![
+                vertex,
+                first,
+                Vec3::new(f32::NAN, f32::NAN, f32::NAN),
+                vertex,
+                pt,
+            ])),
             Step::ArcPoint {
                 vertex,
                 first,
@@ -143,10 +154,10 @@ fn preview_wire(points: Vec<Vec3>) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }
 

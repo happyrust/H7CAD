@@ -54,8 +54,10 @@ pub fn grips_to_screen(
 /// Parameters match the `to_px` closure in `paper_canvas.rs`.
 pub fn grips_to_screen_paper(
     grips: &[GripDef],
-    tx: f32, ty: f32,
-    half_w: f32, half_h: f32,
+    tx: f32,
+    ty: f32,
+    half_w: f32,
+    half_h: f32,
     bounds: Rectangle,
 ) -> Vec<(usize, Point, bool, GripShape)> {
     grips
@@ -74,8 +76,10 @@ pub fn grips_to_screen_paper(
 pub fn find_hit_grip_paper(
     cursor: Point,
     grips: &[GripDef],
-    tx: f32, ty: f32,
-    half_w: f32, half_h: f32,
+    tx: f32,
+    ty: f32,
+    half_w: f32,
+    half_h: f32,
     bounds: Rectangle,
 ) -> Option<(usize, bool, Vec3)> {
     let mut best_dist = GRIP_THRESHOLD_PX;

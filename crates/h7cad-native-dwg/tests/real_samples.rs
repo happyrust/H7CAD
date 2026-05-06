@@ -10,8 +10,8 @@
 use std::path::{Path, PathBuf};
 
 use h7cad_native_dwg::{
-    build_pending_document, collect_ac1015_recovery_diagnostics,
-    collect_ac1015_recovery_diagnostics_with_known_successes, collect_ac1015_preheader_object_type_hints,
+    build_pending_document, collect_ac1015_preheader_object_type_hints,
+    collect_ac1015_recovery_diagnostics, collect_ac1015_recovery_diagnostics_with_known_successes,
     parse_ac1018_encrypted_metadata, parse_ac1018_page_map, parse_ac1018_section_map,
     read_ac1015_object_header, read_ac1018_section_payload, read_dwg, sniff_version,
     trace_ac1015_targeted_failure_before_fallback, Ac1015RecoveryFailureKind,
@@ -101,8 +101,8 @@ fn real_dwg_samples_sniff_correct_versions() {
             continue;
         };
         seen += 1;
-        let version = sniff_version(&bytes)
-            .unwrap_or_else(|err| panic!("{name}: sniff failed: {err:?}"));
+        let version =
+            sniff_version(&bytes).unwrap_or_else(|err| panic!("{name}: sniff failed: {err:?}"));
         assert_eq!(
             version, expected,
             "{name}: expected {expected:?}, got {version:?}"
@@ -146,14 +146,20 @@ fn real_dwg_samples_baseline_m3b() {
                 let count_of = |pred: fn(&h7cad_native_model::EntityData) -> bool| {
                     doc.entities.iter().filter(|e| pred(&e.data)).count()
                 };
-                let line_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Line { .. }));
-                let circle_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Circle { .. }));
-                let arc_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Arc { .. }));
-                let point_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Point { .. }));
-                let text_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Text { .. }));
+                let line_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Line { .. }));
+                let circle_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Circle { .. }));
+                let arc_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Arc { .. }));
+                let point_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Point { .. }));
+                let text_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Text { .. }));
                 let lwpolyline_count =
                     count_of(|d| matches!(d, h7cad_native_model::EntityData::LwPolyline { .. }));
-                let hatch_count = count_of(|d| matches!(d, h7cad_native_model::EntityData::Hatch { .. }));
+                let hatch_count =
+                    count_of(|d| matches!(d, h7cad_native_model::EntityData::Hatch { .. }));
                 eprintln!(
                     "{name} ({version:?}): read_dwg recovered {} entities \
                      ({} LINE, {} CIRCLE, {} ARC, {} POINT, {} TEXT, {} LWPOLYLINE, {} HATCH), \
@@ -172,7 +178,8 @@ fn real_dwg_samples_baseline_m3b() {
                 );
                 if version == DwgVersion::Ac1015 {
                     let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
-                    let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
+                    let sections =
+                        SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
                     let payloads = sections
                         .read_section_payloads(&bytes)
                         .expect("AC1015 section payloads readable");
@@ -212,7 +219,15 @@ fn real_dwg_samples_baseline_m3b() {
                         failure_kind_count(Ac1015RecoveryFailureKind::BodyDecodeFail),
                         failure_kind_count(Ac1015RecoveryFailureKind::UnsupportedType),
                     );
-                    for family in ["LINE", "CIRCLE", "ARC", "POINT", "TEXT", "LWPOLYLINE", "HATCH"] {
+                    for family in [
+                        "LINE",
+                        "CIRCLE",
+                        "ARC",
+                        "POINT",
+                        "TEXT",
+                        "LWPOLYLINE",
+                        "HATCH",
+                    ] {
                         let by_family = diagnostics.failure_counts_by_family.get(family);
                         eprintln!(
                             "  family={family} slice_miss={} header_fail={} handle_mismatch={} common_decode_fail={} body_decode_fail={} unsupported_type={}",
@@ -277,7 +292,12 @@ fn real_dwg_samples_baseline_m3b() {
                         "{name}: AC1015 baseline must recover exactly 26 TEXT entities"
                     );
                     assert!(
-                        diagnostics.recovered_by_family.get("TEXT").copied().unwrap_or(0) == 26,
+                        diagnostics
+                            .recovered_by_family
+                            .get("TEXT")
+                            .copied()
+                            .unwrap_or(0)
+                            == 26,
                         "{name}: diagnostics surface must report exactly 26 TEXT entities"
                     );
                     // LWPOLYLINE: ratcheted with R50-LINE-HANDLE-RECOVERY to
@@ -287,7 +307,12 @@ fn real_dwg_samples_baseline_m3b() {
                         "{name}: AC1015 baseline must recover at least 16 LWPOLYLINE entities; got {lwpolyline_count}"
                     );
                     assert!(
-                        diagnostics.recovered_by_family.get("LWPOLYLINE").copied().unwrap_or(0) >= 16,
+                        diagnostics
+                            .recovered_by_family
+                            .get("LWPOLYLINE")
+                            .copied()
+                            .unwrap_or(0)
+                            >= 16,
                         "{name}: diagnostics surface must report at least 16 LWPOLYLINE entities"
                     );
                     assert_eq!(
@@ -295,26 +320,47 @@ fn real_dwg_samples_baseline_m3b() {
                         "{name}: AC1015 baseline must recover exactly 6 HATCH entities"
                     );
                     assert!(
-                        diagnostics.recovered_by_family.get("HATCH").copied().unwrap_or(0) == 6,
+                        diagnostics
+                            .recovered_by_family
+                            .get("HATCH")
+                            .copied()
+                            .unwrap_or(0)
+                            == 6,
                         "{name}: diagnostics surface must report exactly 6 HATCH entities"
                     );
                     assert_eq!(
-                        diagnostics.recovered_by_family.get("LINE").copied().unwrap_or(0),
+                        diagnostics
+                            .recovered_by_family
+                            .get("LINE")
+                            .copied()
+                            .unwrap_or(0),
                         line_count,
                         "{name}: diagnostics LINE count must match recovered entity count"
                     );
                     assert_eq!(
-                        diagnostics.recovered_by_family.get("CIRCLE").copied().unwrap_or(0),
+                        diagnostics
+                            .recovered_by_family
+                            .get("CIRCLE")
+                            .copied()
+                            .unwrap_or(0),
                         circle_count,
                         "{name}: diagnostics CIRCLE count must match recovered entity count"
                     );
                     assert_eq!(
-                        diagnostics.recovered_by_family.get("ARC").copied().unwrap_or(0),
+                        diagnostics
+                            .recovered_by_family
+                            .get("ARC")
+                            .copied()
+                            .unwrap_or(0),
                         arc_count,
                         "{name}: diagnostics ARC count must match recovered entity count"
                     );
                     assert_eq!(
-                        diagnostics.recovered_by_family.get("POINT").copied().unwrap_or(0),
+                        diagnostics
+                            .recovered_by_family
+                            .get("POINT")
+                            .copied()
+                            .unwrap_or(0),
                         point_count,
                         "{name}: diagnostics POINT count must match recovered entity count"
                     );
@@ -546,9 +592,7 @@ fn real_ac1015_header_section_decodes_first_cadheader_block() {
 
     // Seven CadHeader boolean bits: DIMASO, DIMSHO, PLINEGEN,
     // ORTHOMODE, REGENMODE, FILLMODE, QTEXTMODE.
-    let bits: Vec<u8> = (0..7)
-        .map(|_| reader.read_bit().unwrap())
-        .collect();
+    let bits: Vec<u8> = (0..7).map(|_| reader.read_bit().unwrap()).collect();
     eprintln!("AC1015 header boolean bits (DIMASO,DIMSHO,PLINEGEN,ORTHOMODE,REGENMODE,FILLMODE,QTEXTMODE) = {bits:?}");
     for (i, b) in bits.iter().enumerate() {
         assert!(*b == 0 || *b == 1, "bit {i} should be 0 or 1, got {b}");
@@ -812,9 +856,9 @@ fn real_ac1015_classes_section_parses_full_table() {
     // Spot-check: AutoCAD's R2000 drawings almost always register
     // AcDbDictionaryWithDefault and AcDbLayout, so a class list
     // without either is a strong signal of a bit-alignment bug.
-    let has_common_class = parsed.iter().any(|(_, _, _, cpp, _)| {
-        cpp == "AcDbDictionaryWithDefault" || cpp == "AcDbLayout"
-    });
+    let has_common_class = parsed
+        .iter()
+        .any(|(_, _, _, cpp, _)| cpp == "AcDbDictionaryWithDefault" || cpp == "AcDbLayout");
     assert!(
         has_common_class,
         "expected at least one of AcDbDictionaryWithDefault / AcDbLayout \
@@ -977,7 +1021,7 @@ fn real_dwg_samples_section_locator_dump() {
                         "sentinel=mismatch".to_string()
                     }
                 }
-                None => "sentinel=n/a".to_string()
+                None => "sentinel=n/a".to_string(),
             };
             eprintln!(
                 "  [{:>2}] rec#{} {:<20} offset=0x{:08X} size={:>8}  {}",
@@ -1280,8 +1324,7 @@ fn real_ac1015_full_handle_map_object_type_histogram() {
     let cursor = ObjectStreamCursor::new(&bytes, &pending.handle_offsets);
     let total = pending.handle_offsets.len();
 
-    let mut histogram: std::collections::BTreeMap<i16, usize> =
-        std::collections::BTreeMap::new();
+    let mut histogram: std::collections::BTreeMap<i16, usize> = std::collections::BTreeMap::new();
     let mut decoded = 0usize;
     let mut slice_miss = 0usize;
     let mut header_fail = 0usize;
@@ -1364,7 +1407,15 @@ fn real_ac1015_preheader_object_type_hints_follow_offsets_not_handles() {
     eprintln!(
         "AC1015 pre-header type hints: total={total} offset_backed={offset_backed} header_backed={header_backed} unresolved={unresolved}"
     );
-    for family in ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE", "TEXT", "HATCH"] {
+    for family in [
+        "LINE",
+        "POINT",
+        "CIRCLE",
+        "ARC",
+        "LWPOLYLINE",
+        "TEXT",
+        "HATCH",
+    ] {
         eprintln!(
             "  family={family} hinted={}",
             family_counts.get(family).copied().unwrap_or(0)
@@ -1387,7 +1438,11 @@ fn real_ac1015_preheader_object_type_hints_follow_offsets_not_handles() {
         .collect();
     eprintln!("  sample LINE hints: {}", sample_lines.join(", "));
 
-    assert_eq!(total, pending.handle_offsets.len(), "every handle-map entry should produce a hint record");
+    assert_eq!(
+        total,
+        pending.handle_offsets.len(),
+        "every handle-map entry should produce a hint record"
+    );
     assert!(
         header_backed >= 600,
         "expected header decoding to expose at least 600 object types, got {header_backed}"
@@ -1585,7 +1640,10 @@ fn representative_supported_geometric_stage_failures(
     diagnostics: &h7cad_native_dwg::Ac1015RecoveryDiagnostics,
 ) -> std::collections::BTreeMap<
     &'static str,
-    std::collections::BTreeMap<Ac1015RecoveryFailureKind, Vec<h7cad_native_dwg::Ac1015RecoveryFailure>>,
+    std::collections::BTreeMap<
+        Ac1015RecoveryFailureKind,
+        Vec<h7cad_native_dwg::Ac1015RecoveryFailure>,
+    >,
 > {
     const FAMILIES: [&str; 5] = ["LINE", "POINT", "CIRCLE", "ARC", "LWPOLYLINE"];
     const KINDS: [Ac1015RecoveryFailureKind; 4] = [
@@ -1604,7 +1662,10 @@ fn representative_supported_geometric_stage_failures(
                     | Ac1015RecoveryFailureKind::UnsupportedType
             )
     }) {
-        let Some(family) = failure.object_type.and_then(ac1015_geometric_family_from_type) else {
+        let Some(family) = failure
+            .object_type
+            .and_then(ac1015_geometric_family_from_type)
+        else {
             continue;
         };
         let bucket = grouped
@@ -1624,7 +1685,10 @@ fn representative_supported_geometric_stage_failures(
             Some("common_entity_decode") | Some("entity_body_decode") | Some("body_dispatch")
         )
     }) {
-        let Some(family) = failure.object_type.and_then(ac1015_geometric_family_from_type) else {
+        let Some(family) = failure
+            .object_type
+            .and_then(ac1015_geometric_family_from_type)
+        else {
             continue;
         };
         let kind = match failure.stage {
@@ -1768,11 +1832,7 @@ fn extract_logged_i32(entries: &[String], needle: &str) -> Option<i32> {
         if !entry.contains(needle) {
             return None;
         }
-        let value = entry
-            .split("value=")
-            .nth(1)?
-            .split_whitespace()
-            .next()?;
+        let value = entry.split("value=").nth(1)?.split_whitespace().next()?;
         value.parse::<i32>().ok()
     })
 }
@@ -1814,13 +1874,19 @@ fn ac1015_common_layout_comparison(
         family,
         representative_handle,
         blocked_handle,
-        representative_xdata_size: extract_logged_i32(&representative.handle_reads, "label=xdata_size"),
+        representative_xdata_size: extract_logged_i32(
+            &representative.handle_reads,
+            "label=xdata_size",
+        ),
         blocked_xdata_size: extract_logged_i32(&blocked.handle_reads, "label=xdata_size"),
         representative_first_xdata_block_size: extract_logged_i32(
             &representative.handle_reads,
             "label=xdata[0].size",
         ),
-        blocked_first_xdata_block_size: extract_logged_i32(&blocked.handle_reads, "label=xdata[0].size"),
+        blocked_first_xdata_block_size: extract_logged_i32(
+            &blocked.handle_reads,
+            "label=xdata[0].size",
+        ),
         representative_reaches_xdictionary: representative
             .handle_reads
             .iter()
@@ -1895,17 +1961,15 @@ fn ac1015_common_stream_probe_report(
         Ok(()) => "ok".to_string(),
         Err(err) => format!("err({err:?})"),
     };
-    let common_failure_stage = handle_reads
-        .iter()
-        .find_map(|entry| {
-            entry.strip_prefix("stage=").and_then(|stage| {
-                if stage == "done" {
-                    None
-                } else {
-                    Some(stage.to_string())
-                }
-            })
-        });
+    let common_failure_stage = handle_reads.iter().find_map(|entry| {
+        entry.strip_prefix("stage=").and_then(|stage| {
+            if stage == "done" {
+                None
+            } else {
+                Some(stage.to_string())
+            }
+        })
+    });
     let common_failure_context = handle_reads
         .iter()
         .find_map(|entry| entry.strip_prefix("failure_context=").map(str::to_string));
@@ -2037,8 +2101,8 @@ fn ac1015_line_body_probe(
                 |value: &f64| format!("{value:?}"),
                 |reader| {
                     reader
-                    .read_bit_double_with_default(start_z)
-                    .expect("LINE end.z bit-double")
+                        .read_bit_double_with_default(start_z)
+                        .expect("LINE end.z bit-double")
                 },
             )
         };
@@ -2084,7 +2148,9 @@ fn ac1015_line_body_probe(
     let body_end_byte = (obj_header.main_size_bits as usize).div_ceil(8);
     let body_bytes = slice[body_start_byte..body_end_byte].to_vec();
     let boundary_audit = Ac1015BodyBoundaryAudit {
-        payload_consumed_bits: body_reader.position_in_bits().saturating_sub(body_start_bits),
+        payload_consumed_bits: body_reader
+            .position_in_bits()
+            .saturating_sub(body_start_bits),
         payload_remaining_bits: body_reader.bits_remaining(),
         consumed_to_declared_boundary: body_reader.bits_remaining() == 0,
     };
@@ -2155,8 +2221,10 @@ fn first_line_body_divergence(
                 previous_field: index.checked_sub(1).map(|prev| baseline.fields[prev].label),
             };
         }
-        if expected.position_before_bits as isize + bit_offset != observed.position_before_bits as isize
-            || expected.position_after_bits as isize + bit_offset != observed.position_after_bits as isize
+        if expected.position_before_bits as isize + bit_offset
+            != observed.position_before_bits as isize
+            || expected.position_after_bits as isize + bit_offset
+                != observed.position_after_bits as isize
             || expected.remaining_before_bits != observed.remaining_before_bits
             || expected.remaining_after_bits != observed.remaining_after_bits
         {
@@ -2237,14 +2305,16 @@ fn ac1015_line_body_entry_decision_trace(
 ) -> Ac1015LineBodyEntryDecisionTrace {
     let common = ac1015_common_stream_probe_report(bytes, handle_value, family);
     let body = ac1015_line_body_probe(bytes, handle_value, family);
-    let trace = trace_ac1015_targeted_failure_before_fallback(bytes, pending, &[Handle::new(handle_value)])
-        .into_iter()
-        .next()
-        .expect("targeted trace for representative handle");
+    let trace =
+        trace_ac1015_targeted_failure_before_fallback(bytes, pending, &[Handle::new(handle_value)])
+            .into_iter()
+            .next()
+            .expect("targeted trace for representative handle");
 
     let common_bits_consumed = body.body_start_bits - common.main_position_bits_before_common;
     let absolute_body_start_bits = common.header_end_bits + common_bits_consumed;
-    let absolute_declared_main_boundary_bits = common.header_end_bits + common.header_main_size_bits as usize;
+    let absolute_declared_main_boundary_bits =
+        common.header_end_bits + common.header_main_size_bits as usize;
 
     let (body_boundary_rule, rule_reason) = match handle_value {
         0x2C7 => (
@@ -2567,7 +2637,10 @@ fn ac1015_line_point_common_stream_instrumentation_reports_alignment_for_represe
     }
 
     for probe in &probes {
-        assert_eq!(probe.object_type, if probe.family == "LINE" { 19 } else { 27 });
+        assert_eq!(
+            probe.object_type,
+            if probe.family == "LINE" { 19 } else { 27 }
+        );
         assert!(
             probe.main_position_bits_before_common < probe.header_main_size_bits as usize,
             "expected representative handle 0x{:X} to enter common decode before the declared AC1015 main-stream boundary",
@@ -2592,7 +2665,10 @@ fn ac1015_line_point_common_stream_instrumentation_reports_alignment_for_represe
                 probe.common_failure_stage.as_deref(),
                 Some("skip_extended_entity_data")
             );
-            assert_eq!(probe.handle_position_bits_after_common, probe.handle_position_bits_before_common);
+            assert_eq!(
+                probe.handle_position_bits_after_common,
+                probe.handle_position_bits_before_common
+            );
             assert!(
                 probe.handle_reads
                     .iter()
@@ -2600,7 +2676,8 @@ fn ac1015_line_point_common_stream_instrumentation_reports_alignment_for_represe
                 "expected representative handle 0x298 to expose the oversized xdata preamble before alignment diverges"
             );
             assert!(
-                probe.handle_reads
+                probe
+                    .handle_reads
                     .iter()
                     .all(|entry| !entry.contains("label=xdictionary")),
                 "expected representative handle 0x298 to diverge before the handle stream begins"
@@ -2732,8 +2809,7 @@ fn ac1015_common_xdata_semantics_audit_identifies_overlong_main_stream_xdata_rul
         "handle 0x298 should fail before any downstream handle decoding begins"
     );
     assert_eq!(
-        overlong.handle_position_bits_after_common,
-        overlong.handle_position_bits_before_common,
+        overlong.handle_position_bits_after_common, overlong.handle_position_bits_before_common,
         "handle 0x298 should leave the separate handle stream untouched"
     );
     assert!(
@@ -2758,8 +2834,7 @@ fn ac1015_common_xdata_semantics_audit_identifies_overlong_main_stream_xdata_rul
         "handle 0x298 should never reach xdictionary if the main stream is exhausted by xdata bytes"
     );
     assert_eq!(
-        overlong.main_bits_remaining_after_common,
-        0,
+        overlong.main_bits_remaining_after_common, 0,
         "handle 0x298 should exhaust the declared main stream during the xdata walk"
     );
 }
@@ -2880,9 +2955,8 @@ fn ac1015_line_point_previously_stuck_handles_recover_after_r47_r50_r51_fix() {
         return;
     };
 
-    let doc = read_dwg(&bytes).expect(
-        "R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg",
-    );
+    let doc =
+        read_dwg(&bytes).expect("R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg");
     let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
     let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
     let payloads = sections
@@ -2974,9 +3048,8 @@ fn ac1015_line_point_representative_handles_recovered_after_r47_r50_r51_fix() {
         eprintln!("skip: sample_AC1015.dwg not present");
         return;
     };
-    let doc = read_dwg(&bytes).expect(
-        "R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg",
-    );
+    let doc =
+        read_dwg(&bytes).expect("R47/R50 fixes should let read_dwg succeed on sample_AC1015.dwg");
     let header = DwgFileHeader::parse(&bytes).expect("AC1015 file header parse");
     let sections = SectionMap::parse(&bytes, &header).expect("AC1015 section map parse");
     let payloads = sections
@@ -3200,9 +3273,7 @@ fn ac1015_line_body_byte_position_red_test_proves_representative_field_mismatch(
             .find(|field| field.label == "thickness")
             .and_then(|field| field.semantic_value.parse::<f64>().ok())
             .expect("recovered thickness"),
-        extrusion: [
-            0.0, 0.0, 0.0,
-        ],
+        extrusion: [0.0, 0.0, 0.0],
     };
     let failing_semantics = Ac1015LineBodySemanticAudit {
         z_are_zero: failing
@@ -3257,9 +3328,7 @@ fn ac1015_line_body_byte_position_red_test_proves_representative_field_mismatch(
             .find(|field| field.label == "thickness")
             .and_then(|field| field.semantic_value.parse::<f64>().ok())
             .expect("failing thickness"),
-        extrusion: [
-            0.0, 0.0, 0.0,
-        ],
+        extrusion: [0.0, 0.0, 0.0],
     };
     let parse_vec3 = |value: &str| -> [f64; 3] {
         let trimmed = value.trim_matches(|c| c == '[' || c == ']');
@@ -3441,7 +3510,8 @@ fn ac1015_line_body_post_starty_hypothesis_audit_isolates_line_only_offset_vs_pr
         start: [
             parse_f64(probe, "start.x"),
             parse_f64(probe, "start.y"),
-            probe.fields
+            probe
+                .fields
                 .iter()
                 .find(|field| field.label == "start.z")
                 .and_then(|field| field.semantic_value.parse::<f64>().ok())
@@ -3450,7 +3520,8 @@ fn ac1015_line_body_post_starty_hypothesis_audit_isolates_line_only_offset_vs_pr
         end: [
             parse_f64(probe, "end.x"),
             parse_f64(probe, "end.y"),
-            probe.fields
+            probe
+                .fields
                 .iter()
                 .find(|field| field.label == "end.z")
                 .and_then(|field| field.semantic_value.parse::<f64>().ok())
@@ -3465,12 +3536,9 @@ fn ac1015_line_body_post_starty_hypothesis_audit_isolates_line_only_offset_vs_pr
     let second_failing_semantics = semantic_of(&second_failing);
 
     let start_y_dd_prefix = {
-        let mut reader = BitReader::from_bit_range(
-            &recovered.body_bytes,
-            195,
-            recovered.body_bytes.len() * 8,
-        )
-        .expect("LINE start.y DD prefix bit range");
+        let mut reader =
+            BitReader::from_bit_range(&recovered.body_bytes, 195, recovered.body_bytes.len() * 8)
+                .expect("LINE start.y DD prefix bit range");
         reader
             .read_bits(2)
             .expect("LINE start.y DD prefix should decode") as u8
@@ -3493,7 +3561,9 @@ fn ac1015_line_body_post_starty_hypothesis_audit_isolates_line_only_offset_vs_pr
             recovered.body_bytes.len() * 8,
         )
         .expect("LINE thickness flag bit range");
-        reader.read_bit().expect("LINE thickness flag should decode")
+        reader
+            .read_bit()
+            .expect("LINE thickness flag should decode")
     };
     let extrusion_flag = {
         let mut reader = BitReader::from_bit_range(
@@ -3502,7 +3572,9 @@ fn ac1015_line_body_post_starty_hypothesis_audit_isolates_line_only_offset_vs_pr
             recovered.body_bytes.len() * 8,
         )
         .expect("LINE extrusion flag bit range");
-        reader.read_bit().expect("LINE extrusion flag should decode")
+        reader
+            .read_bit()
+            .expect("LINE extrusion flag should decode")
     };
 
     let audit = Ac1015LineBodyHypothesisAudit {
@@ -3511,7 +3583,8 @@ fn ac1015_line_body_post_starty_hypothesis_audit_isolates_line_only_offset_vs_pr
         recovered_body_start_bits: recovered.body_start_bits,
         failing_body_start_bits: failing.body_start_bits,
         body_start_bit_delta: failing.body_start_bits as isize - recovered.body_start_bits as isize,
-        body_start_byte_delta: failing.body_start_bits as isize / 8 - recovered.body_start_bits as isize / 8,
+        body_start_byte_delta: failing.body_start_bits as isize / 8
+            - recovered.body_start_bits as isize / 8,
         recovered_body_prefix_bytes: recovered.body_bytes.iter().take(8).copied().collect(),
         failing_body_prefix_bytes: failing.body_bytes.iter().take(8).copied().collect(),
         recovered_start_y: recovered_semantics.start[1],
@@ -3713,8 +3786,7 @@ fn ac1015_line_2cf_common_body_handoff_rule_trace() {
         "representative handle 0x2CF must still enter LINE body decode one byte later than recovered 0x2C7"
     );
     assert_eq!(
-        failing.main_bits_remaining_after_common,
-        recovered.main_bits_remaining_after_common,
+        failing.main_bits_remaining_after_common, recovered.main_bits_remaining_after_common,
         "0x2CF should preserve the same post-common main payload width as recovered 0x2C7"
     );
     assert_eq!(
@@ -3823,10 +3895,7 @@ fn ac1015_line_common_body_entry_decision_trace() {
         selective.body_start_bits as isize - recovered.body_start_bits as isize,
         8
     );
-    assert_eq!(
-        selective.main_bits_consumed_by_common,
-        100
-    );
+    assert_eq!(selective.main_bits_consumed_by_common, 100);
     assert_eq!(
         selective.body_boundary_rule,
         Ac1015LineBodyEntryRule::SelectivePlus8Boundary
@@ -3910,7 +3979,11 @@ fn ac1015_line_point_targeted_debug_trace_reports_first_missing_record_point() {
     }
 
     for trace in traces {
-        let expected = if trace.family_hint == Some("LINE") { 19 } else { 27 };
+        let expected = if trace.family_hint == Some("LINE") {
+            19
+        } else {
+            27
+        };
         assert_eq!(trace.object_type_hint, Some(expected));
         assert!(
             matches!(
@@ -4002,17 +4075,18 @@ fn print_supported_geometric_failure_examples(
                             failures
                                 .iter()
                                 .map(|failure| match failure.object_type {
-                                    Some(object_type) => {
-                                        match failure.stage {
-                                            Some(stage) => format!(
-                                                "0x{:X}(type={object_type},stage={stage})",
+                                    Some(object_type) => match failure.stage {
+                                        Some(stage) => format!(
+                                            "0x{:X}(type={object_type},stage={stage})",
+                                            failure.handle.value()
+                                        ),
+                                        None => {
+                                            format!(
+                                                "0x{:X}(type={object_type})",
                                                 failure.handle.value()
-                                            ),
-                                            None => {
-                                                format!("0x{:X}(type={object_type})", failure.handle.value())
-                                            }
+                                            )
                                         }
-                                    }
+                                    },
                                     None => match failure.stage {
                                         Some(stage) => {
                                             format!("0x{:X}(stage={stage})", failure.handle.value())
@@ -4025,7 +4099,10 @@ fn print_supported_geometric_failure_examples(
                         })
                         .filter(|value| !value.is_empty())
                         .unwrap_or_else(|| "none".to_string());
-                    eprintln!("  family={family} kind={} handles=[{handles}]", kind.as_str());
+                    eprintln!(
+                        "  family={family} kind={} handles=[{handles}]",
+                        kind.as_str()
+                    );
                 }
             }
             None => {
@@ -4317,9 +4394,9 @@ fn ac1018_section_data_decompresses_real_acdb_header() {
     let payload = read_ac1018_section_payload(&bytes, header_descriptor)
         .expect("AcDb:Header payload must reassemble end-to-end (R46-A → R46-E1)");
 
-    let sentinel = KnownSection::Header.start_sentinel().expect(
-        "KnownSection::Header has a documented start sentinel",
-    );
+    let sentinel = KnownSection::Header
+        .start_sentinel()
+        .expect("KnownSection::Header has a documented start sentinel");
     assert!(
         payload.len() >= sentinel.len(),
         "AcDb:Header payload must be at least {} bytes (got {})",

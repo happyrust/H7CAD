@@ -167,16 +167,32 @@ pub fn resolve_dxf_special_chars(s: &str) -> String {
         }
         chars.next(); // consume second '%'
         match chars.peek().map(|c| c.to_ascii_lowercase()) {
-            Some('d') => { chars.next(); out.push('°'); }
-            Some('p') => { chars.next(); out.push('±'); }
-            Some('c') => { chars.next(); out.push('⌀'); }
-            Some('u') | Some('o') => { chars.next(); } // toggle codes — strip silently
-            Some('%') => { chars.next(); out.push('%'); }
+            Some('d') => {
+                chars.next();
+                out.push('°');
+            }
+            Some('p') => {
+                chars.next();
+                out.push('±');
+            }
+            Some('c') => {
+                chars.next();
+                out.push('⌀');
+            }
+            Some('u') | Some('o') => {
+                chars.next();
+            } // toggle codes — strip silently
+            Some('%') => {
+                chars.next();
+                out.push('%');
+            }
             Some(d) if d.is_ascii_digit() => {
                 let mut digits = String::with_capacity(3);
                 for _ in 0..3 {
                     match chars.peek() {
-                        Some(&ch) if ch.is_ascii_digit() => { digits.push(chars.next().unwrap()); }
+                        Some(&ch) if ch.is_ascii_digit() => {
+                            digits.push(chars.next().unwrap());
+                        }
                         _ => break,
                     }
                 }
@@ -192,7 +208,10 @@ pub fn resolve_dxf_special_chars(s: &str) -> String {
                 out.push('%');
                 out.push_str(&digits);
             }
-            _ => { out.push('%'); out.push('%'); }
+            _ => {
+                out.push('%');
+                out.push('%');
+            }
         }
     }
 
@@ -250,7 +269,9 @@ pub fn strip_mtext_codes(s: &str) -> String {
                     } else {
                         // \U or \u without '+' — strip until semicolon
                         for c in chars.by_ref() {
-                            if c == ';' { break; }
+                            if c == ';' {
+                                break;
+                            }
                         }
                     }
                 }
@@ -264,7 +285,9 @@ pub fn strip_mtext_codes(s: &str) -> String {
                     let mut sep = '/';
                     let mut in_lower = false;
                     for c in chars.by_ref() {
-                        if c == ';' { break; }
+                        if c == ';' {
+                            break;
+                        }
                         if !in_lower && (c == '/' || c == '^' || c == '#') {
                             sep = c;
                             in_lower = true;
@@ -303,12 +326,16 @@ pub fn strip_mtext_codes(s: &str) -> String {
                 Some(c) if "pHWQTACcfFMX".contains(c) => {
                     chars.next();
                     for c in chars.by_ref() {
-                        if c == ';' { break; }
+                        if c == ';' {
+                            break;
+                        }
                     }
                 }
                 // Unknown escape — consume and silently discard the code character so
                 // it does not appear as a literal in the output.
-                Some(_) => { chars.next(); }
+                Some(_) => {
+                    chars.next();
+                }
                 None => {}
             },
             // Strip brace grouping markers (scope delimiters for in-line formatting)
@@ -322,13 +349,15 @@ pub fn strip_mtext_codes(s: &str) -> String {
 }
 
 pub fn split_mtext_lines(s: &str) -> Vec<String> {
-    let lines: Vec<String> = s.split('\n')
-        .map(|l| l.trim().to_string())
-        .collect();
+    let lines: Vec<String> = s.split('\n').map(|l| l.trim().to_string()).collect();
     // Drop leading and trailing blank lines, but preserve blank lines in the
     // middle — they are intentional paragraph separators (\\P\\P in MTEXT).
     let start = lines.iter().position(|l| !l.is_empty()).unwrap_or(0);
-    let end = lines.iter().rposition(|l| !l.is_empty()).map(|i| i + 1).unwrap_or(0);
+    let end = lines
+        .iter()
+        .rposition(|l| !l.is_empty())
+        .map(|i| i + 1)
+        .unwrap_or(0);
     lines[start..end].to_vec()
 }
 

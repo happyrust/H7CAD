@@ -187,12 +187,12 @@ pub fn decrypt_page_header(
     bytes: &[u8],
     page_offset: usize,
 ) -> Result<EncryptedPageHeader, SectionDataDecodeError> {
-    let end = page_offset
-        .checked_add(PAGE_HEADER_LEN)
-        .ok_or(SectionDataDecodeError::TruncatedPageHeader {
+    let end = page_offset.checked_add(PAGE_HEADER_LEN).ok_or(
+        SectionDataDecodeError::TruncatedPageHeader {
             offset: page_offset,
             expected_at_least: PAGE_HEADER_LEN,
-        })?;
+        },
+    )?;
     let slice = bytes
         .get(page_offset..end)
         .ok_or(SectionDataDecodeError::TruncatedPageHeader {
@@ -240,8 +240,7 @@ pub fn read_section_payload(
     }
 
     let mut out = Vec::with_capacity(
-        (descriptor.decompressed_size as usize)
-            .saturating_mul(descriptor.local_sections.len()),
+        (descriptor.decompressed_size as usize).saturating_mul(descriptor.local_sections.len()),
     );
 
     for local in &descriptor.local_sections {
@@ -297,10 +296,7 @@ pub fn read_section_payload(
             // R46-E2 will tighten this when the section reassembly
             // talks to a callable allocator that knows the real
             // decompressed length up front.
-            let decompressed = decompress_ac18_lz77(
-                compressed,
-                MAX_LZ77_OUTPUT_PER_PAGE,
-            )?;
+            let decompressed = decompress_ac18_lz77(compressed, MAX_LZ77_OUTPUT_PER_PAGE)?;
             out.extend_from_slice(&decompressed);
         } else {
             // compressed_code == 1: verbatim copy.
@@ -413,7 +409,10 @@ mod tests {
         let off_b = 0x10BC20;
         let enc_a = build_encrypted_page_header(off_a, plain);
         let enc_b = build_encrypted_page_header(off_b, plain);
-        assert_ne!(enc_a, enc_b, "different page_offset must produce different ciphertext");
+        assert_ne!(
+            enc_a, enc_b,
+            "different page_offset must produce different ciphertext"
+        );
 
         // Place each encrypted block inside a buffer big enough to host
         // its declared offset.
@@ -669,7 +668,10 @@ mod tests {
         };
         let err = read_section_payload(&[0u8; 0x100], &descriptor).unwrap_err();
         assert!(
-            matches!(err, SectionDataDecodeError::PageOutOfBounds { seeker: -1, .. }),
+            matches!(
+                err,
+                SectionDataDecodeError::PageOutOfBounds { seeker: -1, .. }
+            ),
             "expected PageOutOfBounds with seeker == -1, got {err:?}"
         );
     }

@@ -6,10 +6,10 @@
 //! Coordinate convention: 2D entities live in the **XZ** plane (Y = elevation).
 //! Shape X → along the linetype direction; Shape Y → perpendicular in XZ.
 
+use crate::entities::text_support::resolve_dxf_special_chars;
 use crate::linetypes::{ComplexLt, LtSegment};
 use crate::scene::cxf;
 use crate::scene::wire_model::WireModel;
-use crate::entities::text_support::resolve_dxf_special_chars;
 
 // ── Public entry point ────────────────────────────────────────────────────
 
@@ -166,10 +166,8 @@ pub fn apply_along(
                     );
                     for stroke in &text_strokes {
                         if stroke.len() >= 2 {
-                            let pts: Vec<[f32; 3]> = stroke
-                                .iter()
-                                .map(|&[sx, sy]| [sx, sy, insert[2]])
-                                .collect();
+                            let pts: Vec<[f32; 3]> =
+                                stroke.iter().map(|&[sx, sy]| [sx, sy, insert[2]]).collect();
                             strokes.push(pts);
                         }
                     }
@@ -238,14 +236,27 @@ fn scale_segments(segs: &[LtSegment], scale: f32) -> Vec<LtSeg> {
             LtSegment::Dash(l) => LtSeg::Dash(l * scale),
             LtSegment::Space(l) => LtSeg::Space(l * scale),
             LtSegment::Dot => LtSeg::Dot,
-            LtSegment::Shape { name, x, y, scale: sh_scale, rot_deg } => LtSeg::Shape {
+            LtSegment::Shape {
+                name,
+                x,
+                y,
+                scale: sh_scale,
+                rot_deg,
+            } => LtSeg::Shape {
                 name: name.clone(),
                 x: x * scale,
                 y: y * scale,
                 scale: *sh_scale * scale,
                 rot_deg: *rot_deg,
             },
-            LtSegment::Text { text, style, x, y, scale: tx_scale, rot_deg } => LtSeg::Text {
+            LtSegment::Text {
+                text,
+                style,
+                x,
+                y,
+                scale: tx_scale,
+                rot_deg,
+            } => LtSeg::Text {
                 text: text.clone(),
                 style: style.clone(),
                 x: x * scale,

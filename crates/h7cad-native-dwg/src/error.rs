@@ -3,10 +3,16 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DwgReadError {
-    TruncatedHeader { expected_at_least: usize },
-    InvalidMagic { found: String },
+    TruncatedHeader {
+        expected_at_least: usize,
+    },
+    InvalidMagic {
+        found: String,
+    },
     UnsupportedVersion(DwgVersion),
-    UnsupportedHeaderLayout { version: DwgVersion },
+    UnsupportedHeaderLayout {
+        version: DwgVersion,
+    },
     TruncatedSectionDirectory {
         version: DwgVersion,
         expected_at_least: usize,

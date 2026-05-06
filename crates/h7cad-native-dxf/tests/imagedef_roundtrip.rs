@@ -145,7 +145,10 @@ fn legacy_dxf_reads_code_1_as_fallback() {
                 Handle::NULL,
                 "legacy IMAGE has no code 340, handle must stay NULL"
             );
-            assert_eq!(file_path, "legacy.jpg", "code 1 fallback must populate file_path");
+            assert_eq!(
+                file_path, "legacy.jpg",
+                "code 1 fallback must populate file_path"
+            );
         }
         other => panic!("expected EntityData::Image, got {other:?}"),
     }
@@ -213,9 +216,9 @@ fn writer_emits_code_340_when_handle_set_and_omits_code_1() {
         "writer must emit code 340 pointing to IMAGEDEF handle; got:\n{text}"
     );
     let lines: Vec<&str> = text.lines().collect();
-    let has_inline_code_1 = lines.windows(2).any(|w| {
-        w[0].trim() == "1" && w[1].trim() == "should_not_appear_as_code_1.png"
-    });
+    let has_inline_code_1 = lines
+        .windows(2)
+        .any(|w| w[0].trim() == "1" && w[1].trim() == "should_not_appear_as_code_1.png");
     assert!(
         !has_inline_code_1,
         "writer must NOT emit code 1 on IMAGE when image_def_handle is set; got:\n{text}"
@@ -255,9 +258,9 @@ fn writer_ensure_prepass_promotes_null_handle_image_to_standard_340_link() {
     let image_body = extract_first_entity_body(&text, "IMAGE")
         .expect("IMAGE entity body must be present in output");
 
-    let has_inline_code_1_for_orphan = image_body.windows(2).any(|w| {
-        w[0].trim() == "1" && w[1].trim() == "orphan.bmp"
-    });
+    let has_inline_code_1_for_orphan = image_body
+        .windows(2)
+        .any(|w| w[0].trim() == "1" && w[1].trim() == "orphan.bmp");
     assert!(
         !has_inline_code_1_for_orphan,
         "writer must NOT emit non-standard code 1 file_path on IMAGE after ensure_image_defs; \
@@ -379,8 +382,14 @@ fn imagedef_reads_extended_fields() {
     assert_eq!(imagedef.1, [800.0, 600.0]);
     assert_eq!(imagedef.2, [0.25, 0.5]);
     assert_eq!(imagedef.3, 1);
-    assert!(!imagedef.4, "code 71 = 0 must become image_is_loaded = false");
-    assert_eq!(imagedef.5, 5, "code 281 = 5 must become resolution_unit = 5 (inches)");
+    assert!(
+        !imagedef.4,
+        "code 71 = 0 must become image_is_loaded = false"
+    );
+    assert_eq!(
+        imagedef.5, 5,
+        "code 281 = 5 must become resolution_unit = 5 (inches)"
+    );
 }
 
 #[test]
@@ -410,7 +419,12 @@ fn imagedef_legacy_file_uses_defaults_for_missing_extension_fields() {
                 image_is_loaded,
                 resolution_unit,
                 ..
-            } => Some((*pixel_size, *class_version, *image_is_loaded, *resolution_unit)),
+            } => Some((
+                *pixel_size,
+                *class_version,
+                *image_is_loaded,
+                *resolution_unit,
+            )),
             _ => None,
         })
         .expect("IMAGEDEF present");
@@ -427,9 +441,7 @@ fn imagedef_extended_fields_survive_full_roundtrip() {
     let text = write_dxf(&doc1).expect("write_dxf");
     let doc2 = read_dxf(&text).expect("second read");
 
-    fn probe(
-        doc: &h7cad_native_model::CadDocument,
-    ) -> ([f64; 2], i32, bool, u8) {
+    fn probe(doc: &h7cad_native_model::CadDocument) -> ([f64; 2], i32, bool, u8) {
         for o in &doc.objects {
             if let ObjectData::ImageDef {
                 pixel_size,
@@ -439,7 +451,12 @@ fn imagedef_extended_fields_survive_full_roundtrip() {
                 ..
             } = &o.data
             {
-                return (*pixel_size, *class_version, *image_is_loaded, *resolution_unit);
+                return (
+                    *pixel_size,
+                    *class_version,
+                    *image_is_loaded,
+                    *resolution_unit,
+                );
             }
         }
         panic!("no IMAGEDEF");

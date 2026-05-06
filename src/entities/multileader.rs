@@ -25,12 +25,11 @@ fn catmull_rom_pts(ctrl: &[[f32; 3]], segs_per_span: u32) -> Vec<[f32; 3]> {
             let t3 = t2 * t;
             let mut pt = [0.0_f32; 3];
             for k in 0..3 {
-                pt[k] = 0.5 * (
-                    (2.0 * p1[k])
-                    + (-p0[k] + p2[k]) * t
-                    + (2.0 * p0[k] - 5.0 * p1[k] + 4.0 * p2[k] - p3[k]) * t2
-                    + (-p0[k] + 3.0 * p1[k] - 3.0 * p2[k] + p3[k]) * t3
-                );
+                pt[k] = 0.5
+                    * ((2.0 * p1[k])
+                        + (-p0[k] + p2[k]) * t
+                        + (2.0 * p0[k] - 5.0 * p1[k] + 4.0 * p2[k] - p3[k]) * t2
+                        + (-p0[k] + 3.0 * p1[k] - 3.0 * p2[k] + p3[k]) * t3);
             }
             out.push(pt);
         }
@@ -60,16 +59,20 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         snap_pts.push(node(cp_f));
 
         for line in &root.lines {
-            if line.points.is_empty() { continue; }
+            if line.points.is_empty() {
+                continue;
+            }
 
             if !invisible {
-                if !first { points.push(nan); }
+                if !first {
+                    points.push(nan);
+                }
                 first = false;
 
                 // Build the full control-point list: line.points + connection_point
                 let mut ctrl: Vec<[f32; 3]> = line.points.iter().map(|p| p3(p)).collect();
                 let last_f = *ctrl.last().unwrap_or(&cp_f);
-                let dist = ((last_f[0]-cp_f[0]).powi(2) + (last_f[1]-cp_f[1]).powi(2)).sqrt();
+                let dist = ((last_f[0] - cp_f[0]).powi(2) + (last_f[1] - cp_f[1]).powi(2)).sqrt();
                 if dist > 1e-9 {
                     ctrl.push(cp_f);
                 }
@@ -91,7 +94,10 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
                 }
 
                 for i in 0..ctrl.len().saturating_sub(1) {
-                    tangents.push(TangentGeom::Line { p1: ctrl[i], p2: ctrl[i + 1] });
+                    tangents.push(TangentGeom::Line {
+                        p1: ctrl[i],
+                        p2: ctrl[i + 1],
+                    });
                 }
             }
 
@@ -99,34 +105,54 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
             if draw_arrow {
                 let tip = &line.points[0];
                 let tip_f = p3(tip);
-                let next = if line.points.len() >= 2 { line.points[1] } else { *cp };
+                let next = if line.points.len() >= 2 {
+                    line.points[1]
+                } else {
+                    *cp
+                };
                 let dx = (next.x - tip.x) as f32;
                 let dy = (next.y - tip.y) as f32;
-                let dl = (dx*dx + dy*dy).sqrt().max(1e-9);
+                let dl = (dx * dx + dy * dy).sqrt().max(1e-9);
                 let (dx, dy) = (dx / dl, dy / dl);
                 let a = std::f32::consts::PI / 6.0;
                 let (s, c) = a.sin_cos();
                 points.push(nan);
-                points.push([tip_f[0]+(dx*c-dy*s)*arrow_size, tip_f[1]+(dx*s+dy*c)*arrow_size, tip_f[2]]);
+                points.push([
+                    tip_f[0] + (dx * c - dy * s) * arrow_size,
+                    tip_f[1] + (dx * s + dy * c) * arrow_size,
+                    tip_f[2],
+                ]);
                 points.push(tip_f);
-                points.push([tip_f[0]+(dx*c+dy*s)*arrow_size, tip_f[1]+(-dx*s+dy*c)*arrow_size, tip_f[2]]);
+                points.push([
+                    tip_f[0] + (dx * c + dy * s) * arrow_size,
+                    tip_f[1] + (-dx * s + dy * c) * arrow_size,
+                    tip_f[2],
+                ]);
             }
         }
 
         // Landing shelf at connection_point
         if ml.enable_landing && ml.enable_dogleg && ml.dogleg_length > 0.0 {
             let dir = &root.direction;
-            let dl = (dir.x*dir.x + dir.y*dir.y).sqrt().max(1e-9);
+            let dl = (dir.x * dir.x + dir.y * dir.y).sqrt().max(1e-9);
             let d = ml.dogleg_length;
             points.push(nan);
             points.push(cp_f);
-            points.push([(cp.x + dir.x/dl*d) as f32, (cp.y + dir.y/dl*d) as f32, cp.z as f32]);
+            points.push([
+                (cp.x + dir.x / dl * d) as f32,
+                (cp.y + dir.y / dl * d) as f32,
+                cp.z as f32,
+            ]);
         }
     }
 
     // Text strokes (MText content rendered inline)
     if ml.content_type == LeaderContentType::MText && !ml.context.text_string.is_empty() {
-        let height = if ml.context.text_height > 0.0 { ml.context.text_height } else { ml.text_height };
+        let height = if ml.context.text_height > 0.0 {
+            ml.context.text_height
+        } else {
+            ml.text_height
+        };
         let ins = &ml.context.text_location;
         let z = ins.z as f32;
         snap_pts.push(node([ins.x as f32, ins.y as f32, z]));
@@ -141,7 +167,9 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
             &ml.context.text_string,
         );
         for stroke in &strokes {
-            if stroke.len() < 2 { continue; }
+            if stroke.len() < 2 {
+                continue;
+            }
             points.push(nan);
             for &[x, y] in stroke {
                 points.push([x, y, z]);
@@ -149,7 +177,9 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         }
     }
 
-    if points.is_empty() { return None; }
+    if points.is_empty() {
+        return None;
+    }
 
     Some(TruckEntity {
         object: TruckObject::Lines(points),
@@ -172,7 +202,10 @@ fn grips(ml: &MultiLeader) -> Vec<GripDef> {
     for root in &ml.context.leader_roots {
         for line in &root.lines {
             for p in &line.points {
-                result.push(square_grip(id, Vec3::new(p.x as f32, p.y as f32, p.z as f32)));
+                result.push(square_grip(
+                    id,
+                    Vec3::new(p.x as f32, p.y as f32, p.z as f32),
+                ));
                 id += 1;
             }
         }
@@ -180,7 +213,10 @@ fn grips(ml: &MultiLeader) -> Vec<GripDef> {
 
     if ml.content_type == LeaderContentType::MText {
         let tl = &ml.context.text_location;
-        result.push(diamond_grip(id, Vec3::new(tl.x as f32, tl.y as f32, tl.z as f32)));
+        result.push(diamond_grip(
+            id,
+            Vec3::new(tl.x as f32, tl.y as f32, tl.z as f32),
+        ));
     }
 
     result
@@ -291,8 +327,12 @@ fn properties(ml: &MultiLeader) -> PropSection {
 
     let mut props = vec![
         // Content
-        choice("Content Type", "content_type", content_type_str(&ml.content_type),
-               &["None", "MText", "Block", "Tolerance"]),
+        choice(
+            "Content Type",
+            "content_type",
+            content_type_str(&ml.content_type),
+            &["None", "MText", "Block", "Tolerance"],
+        ),
         Property {
             label: "Text".into(),
             field: "text_string",
@@ -304,21 +344,49 @@ fn properties(ml: &MultiLeader) -> PropSection {
         edit("Text Z", "text_z", ctx.text_location.z),
         bool_toggle("Text Frame", "text_frame", ml.text_frame),
         // Leader line
-        choice("Path Type", "path_type", path_type_str(&ml.path_type),
-               &["Straight", "Spline", "Invisible"]),
+        choice(
+            "Path Type",
+            "path_type",
+            path_type_str(&ml.path_type),
+            &["Straight", "Spline", "Invisible"],
+        ),
         bool_toggle("Landing", "enable_landing", ml.enable_landing),
         bool_toggle("Dogleg", "enable_dogleg", ml.enable_dogleg),
         edit("Dogleg Length", "dogleg_length", ml.dogleg_length),
         edit("Arrow Size", "arrowhead_size", ml.arrowhead_size),
         edit("Scale", "scale_factor", ml.scale_factor),
-        bool_toggle("Annotation Scale", "enable_annotation_scale", ml.enable_annotation_scale),
+        bool_toggle(
+            "Annotation Scale",
+            "enable_annotation_scale",
+            ml.enable_annotation_scale,
+        ),
         // Text attachment
-        choice("Left Attach", "text_left_attachment",
-               attachment_str(&ml.text_left_attachment),
-               &["Top of Top","Mid of Top","Mid of Text","Mid of Bot","Bot of Bot","Bottom Line"]),
-        choice("Right Attach", "text_right_attachment",
-               attachment_str(&ml.text_right_attachment),
-               &["Top of Top","Mid of Top","Mid of Text","Mid of Bot","Bot of Bot","Bottom Line"]),
+        choice(
+            "Left Attach",
+            "text_left_attachment",
+            attachment_str(&ml.text_left_attachment),
+            &[
+                "Top of Top",
+                "Mid of Top",
+                "Mid of Text",
+                "Mid of Bot",
+                "Bot of Bot",
+                "Bottom Line",
+            ],
+        ),
+        choice(
+            "Right Attach",
+            "text_right_attachment",
+            attachment_str(&ml.text_right_attachment),
+            &[
+                "Top of Top",
+                "Mid of Top",
+                "Mid of Text",
+                "Mid of Bot",
+                "Bot of Bot",
+                "Bottom Line",
+            ],
+        ),
         // Stats
         ro("Leader Pts", "total_pts", total_pts.to_string()),
         ro("Roots", "root_count", ctx.leader_roots.len().to_string()),
@@ -331,7 +399,10 @@ fn properties(ml: &MultiLeader) -> PropSection {
         props.push(edit("Root Conn Z", "conn_z", root.connection_point.z));
     }
 
-    PropSection { title: "Geometry".into(), props }
+    PropSection {
+        title: "Geometry".into(),
+        props,
+    }
 }
 
 fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
@@ -348,12 +419,33 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
         }
         "text_string" => ml.context.text_string = value.to_string(),
         "text_height" => {
-            if let Some(v) = f64(value) { ml.text_height = v; ml.context.text_height = v; }
+            if let Some(v) = f64(value) {
+                ml.text_height = v;
+                ml.context.text_height = v;
+            }
         }
-        "text_x" => { if let Some(v) = f64(value) { ml.context.text_location.x = v; } }
-        "text_y" => { if let Some(v) = f64(value) { ml.context.text_location.y = v; } }
-        "text_z" => { if let Some(v) = f64(value) { ml.context.text_location.z = v; } }
-        "text_frame" => ml.text_frame = if value == "toggle" { !ml.text_frame } else { value == "true" },
+        "text_x" => {
+            if let Some(v) = f64(value) {
+                ml.context.text_location.x = v;
+            }
+        }
+        "text_y" => {
+            if let Some(v) = f64(value) {
+                ml.context.text_location.y = v;
+            }
+        }
+        "text_z" => {
+            if let Some(v) = f64(value) {
+                ml.context.text_location.z = v;
+            }
+        }
+        "text_frame" => {
+            ml.text_frame = if value == "toggle" {
+                !ml.text_frame
+            } else {
+                value == "true"
+            }
+        }
         "path_type" => {
             ml.path_type = match value {
                 "Spline" => MultiLeaderPathType::Spline,
@@ -361,12 +453,42 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 _ => MultiLeaderPathType::StraightLineSegments,
             };
         }
-        "enable_landing" => ml.enable_landing = if value == "toggle" { !ml.enable_landing } else { value == "true" },
-        "enable_dogleg" => ml.enable_dogleg = if value == "toggle" { !ml.enable_dogleg } else { value == "true" },
-        "enable_annotation_scale" => ml.enable_annotation_scale = if value == "toggle" { !ml.enable_annotation_scale } else { value == "true" },
-        "dogleg_length" => { if let Some(v) = f64(value) { ml.dogleg_length = v; } }
-        "arrowhead_size" => { if let Some(v) = f64(value) { ml.arrowhead_size = v; } }
-        "scale_factor" => { if let Some(v) = f64(value) { ml.scale_factor = v; } }
+        "enable_landing" => {
+            ml.enable_landing = if value == "toggle" {
+                !ml.enable_landing
+            } else {
+                value == "true"
+            }
+        }
+        "enable_dogleg" => {
+            ml.enable_dogleg = if value == "toggle" {
+                !ml.enable_dogleg
+            } else {
+                value == "true"
+            }
+        }
+        "enable_annotation_scale" => {
+            ml.enable_annotation_scale = if value == "toggle" {
+                !ml.enable_annotation_scale
+            } else {
+                value == "true"
+            }
+        }
+        "dogleg_length" => {
+            if let Some(v) = f64(value) {
+                ml.dogleg_length = v;
+            }
+        }
+        "arrowhead_size" => {
+            if let Some(v) = f64(value) {
+                ml.arrowhead_size = v;
+            }
+        }
+        "scale_factor" => {
+            if let Some(v) = f64(value) {
+                ml.scale_factor = v;
+            }
+        }
         "conn_x" => {
             if let (Some(v), Some(root)) = (f64(value), ml.context.leader_roots.first_mut()) {
                 root.connection_point.x = v;
@@ -416,10 +538,18 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
                 }
             }
             crate::scene::transform::reflect_xy_point(
-                &mut root.connection_point.x, &mut root.connection_point.y, p1, p2);
+                &mut root.connection_point.x,
+                &mut root.connection_point.y,
+                p1,
+                p2,
+            );
         }
         crate::scene::transform::reflect_xy_point(
-            &mut entity.context.text_location.x, &mut entity.context.text_location.y, p1, p2);
+            &mut entity.context.text_location.x,
+            &mut entity.context.text_location.y,
+            p1,
+            p2,
+        );
     });
 }
 

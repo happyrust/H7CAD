@@ -12,25 +12,84 @@ use iced::{Background, Border, Color, Element, Fill, Theme};
 // ── Palette (deliberately identical to svg_export_dialog so the two
 //     option windows share a visual language). ────────────────────────────
 
-const TB:     Color = Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 };
-const BG:     Color = Color { r: 0.15, g: 0.15, b: 0.15, a: 1.0 };
-const BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-const TEXT:   Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-const DIM:    Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-const ACCENT: Color = Color { r: 0.25, g: 0.50, b: 0.85, a: 1.0 };
-const ACTIVE: Color = Color { r: 0.20, g: 0.40, b: 0.70, a: 1.0 };
-const FIELD:  Color = Color { r: 0.10, g: 0.10, b: 0.10, a: 1.0 };
+const TB: Color = Color {
+    r: 0.13,
+    g: 0.13,
+    b: 0.13,
+    a: 1.0,
+};
+const BG: Color = Color {
+    r: 0.15,
+    g: 0.15,
+    b: 0.15,
+    a: 1.0,
+};
+const BORDER: Color = Color {
+    r: 0.35,
+    g: 0.35,
+    b: 0.35,
+    a: 1.0,
+};
+const TEXT: Color = Color {
+    r: 0.88,
+    g: 0.88,
+    b: 0.88,
+    a: 1.0,
+};
+const DIM: Color = Color {
+    r: 0.55,
+    g: 0.55,
+    b: 0.55,
+    a: 1.0,
+};
+const ACCENT: Color = Color {
+    r: 0.25,
+    g: 0.50,
+    b: 0.85,
+    a: 1.0,
+};
+const ACTIVE: Color = Color {
+    r: 0.20,
+    g: 0.40,
+    b: 0.70,
+    a: 1.0,
+};
+const FIELD: Color = Color {
+    r: 0.10,
+    g: 0.10,
+    b: 0.10,
+    a: 1.0,
+};
 
 fn btn(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_: &Theme, st| button::Style {
         background: Some(Background::Color(match (accent, st) {
-            (true,  button::Status::Hovered | button::Status::Pressed) => Color { r: 0.20, g: 0.42, b: 0.72, a: 1.0 },
-            (false, button::Status::Hovered | button::Status::Pressed) => Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-            (true,  _) => ACCENT,
-            _ => Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 },
+            (true, button::Status::Hovered | button::Status::Pressed) => Color {
+                r: 0.20,
+                g: 0.42,
+                b: 0.72,
+                a: 1.0,
+            },
+            (false, button::Status::Hovered | button::Status::Pressed) => Color {
+                r: 0.28,
+                g: 0.28,
+                b: 0.28,
+                a: 1.0,
+            },
+            (true, _) => ACCENT,
+            _ => Color {
+                r: 0.22,
+                g: 0.22,
+                b: 0.22,
+                a: 1.0,
+            },
         })),
         text_color: TEXT,
-        border: Border { color: BORDER, width: 1.0, radius: 4.0.into() },
+        border: Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
         shadow: iced::Shadow::default(),
         snap: false,
     }
@@ -39,12 +98,26 @@ fn btn(accent: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
 fn pill(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_: &Theme, st| button::Style {
         background: Some(Background::Color(match (active, st) {
-            (true,  _) => ACTIVE,
-            (false, button::Status::Hovered | button::Status::Pressed) => Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 },
-            _ => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
+            (true, _) => ACTIVE,
+            (false, button::Status::Hovered | button::Status::Pressed) => Color {
+                r: 0.28,
+                g: 0.28,
+                b: 0.28,
+                a: 1.0,
+            },
+            _ => Color {
+                r: 0.20,
+                g: 0.20,
+                b: 0.20,
+                a: 1.0,
+            },
         })),
         text_color: TEXT,
-        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
+        border: Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
         shadow: iced::Shadow::default(),
         snap: false,
     }
@@ -53,14 +126,22 @@ fn pill(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
 fn field_style(_: &Theme, _: text_input::Status) -> text_input::Style {
     text_input::Style {
         background: Background::Color(FIELD),
-        border: Border { color: BORDER, width: 1.0, radius: 3.0.into() },
-        icon: TEXT, placeholder: DIM, value: TEXT, selection: ACCENT,
+        border: Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        icon: TEXT,
+        placeholder: DIM,
+        value: TEXT,
+        selection: ACCENT,
     }
 }
 
 fn hdivider<'a>() -> Element<'a, Message> {
     container(Space::new().width(Fill).height(1))
-        .width(Fill).height(1)
+        .width(Fill)
+        .height(1)
         .style(|_: &Theme| container::Style {
             background: Some(Background::Color(BORDER)),
             ..Default::default()
@@ -86,11 +167,7 @@ fn toggle<'a>(
         .into()
 }
 
-fn font_pill<'a>(
-    label: &'static str,
-    choice: PdfFontChoice,
-    active: bool,
-) -> Element<'a, Message> {
+fn font_pill<'a>(label: &'static str, choice: PdfFontChoice, active: bool) -> Element<'a, Message> {
     button(text(label).size(11))
         .on_press(Message::PdfExportDialogSelectFont(choice))
         .style(pill(active))
@@ -99,10 +176,7 @@ fn font_pill<'a>(
         .into()
 }
 
-pub fn view_window<'a>(
-    opts: &'a PdfExportOptions,
-    font_size_buf: &'a str,
-) -> Element<'a, Message> {
+pub fn view_window<'a>(opts: &'a PdfExportOptions, font_size_buf: &'a str) -> Element<'a, Message> {
     // ── Toolbar ───────────────────────────────────────────────────────────
     let toolbar = container(
         row![
@@ -116,7 +190,7 @@ pub fn view_window<'a>(
                 .style(btn(true))
                 .padding([4, 20]),
         ]
-        .align_y(iced::Center)
+        .align_y(iced::Center),
     )
     .style(|_: &Theme| container::Style {
         background: Some(Background::Color(TB)),
@@ -132,7 +206,8 @@ pub fn view_window<'a>(
     let stroke_section = column![
         section_label("Color & Strokes"),
         toggle("Monochrome (force black)", opts.monochrome, F::Monochrome),
-    ].spacing(8);
+    ]
+    .spacing(8);
 
     let text_section = column![
         section_label("Text"),
@@ -148,9 +223,21 @@ pub fn view_window<'a>(
         ),
         row![
             lbl("Built-in font"),
-            font_pill("Helvetica", PdfFontChoice::Helvetica, opts.font_family == PdfFontChoice::Helvetica),
-            font_pill("Times",     PdfFontChoice::TimesRoman, opts.font_family == PdfFontChoice::TimesRoman),
-            font_pill("Courier",   PdfFontChoice::Courier,    opts.font_family == PdfFontChoice::Courier),
+            font_pill(
+                "Helvetica",
+                PdfFontChoice::Helvetica,
+                opts.font_family == PdfFontChoice::Helvetica
+            ),
+            font_pill(
+                "Times",
+                PdfFontChoice::TimesRoman,
+                opts.font_family == PdfFontChoice::TimesRoman
+            ),
+            font_pill(
+                "Courier",
+                PdfFontChoice::Courier,
+                opts.font_family == PdfFontChoice::Courier
+            ),
         ]
         .spacing(6)
         .align_y(iced::Center),
@@ -162,21 +249,42 @@ pub fn view_window<'a>(
                 .style(field_style)
                 .size(12)
                 .width(100),
-        ].spacing(8).align_y(iced::Center),
-    ].spacing(8);
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    ]
+    .spacing(8);
 
     let geometry_section = column![
         section_label("Geometry"),
-        toggle("Include hatch fills",                opts.include_hatches, F::IncludeHatches),
-        toggle("Emit hatch patterns (line family)",  opts.hatch_patterns,  F::HatchPatterns),
-        toggle("Emit native curves (circle/arc)",    opts.native_curves,   F::NativeCurves),
-    ].spacing(6);
+        toggle(
+            "Include hatch fills",
+            opts.include_hatches,
+            F::IncludeHatches
+        ),
+        toggle(
+            "Emit hatch patterns (line family)",
+            opts.hatch_patterns,
+            F::HatchPatterns
+        ),
+        toggle(
+            "Emit native curves (circle/arc)",
+            opts.native_curves,
+            F::NativeCurves
+        ),
+    ]
+    .spacing(6);
 
     let images_section = column![
         section_label("Images"),
-        toggle("Include raster images",  opts.include_images, F::IncludeImages),
-        toggle("Embed image bytes",      opts.embed_images,   F::EmbedImages),
-    ].spacing(6);
+        toggle(
+            "Include raster images",
+            opts.include_images,
+            F::IncludeImages
+        ),
+        toggle("Embed image bytes", opts.embed_images, F::EmbedImages),
+    ]
+    .spacing(6);
 
     // ── Main scrollable form ──────────────────────────────────────────────
     let form = column![
@@ -194,16 +302,14 @@ pub fn view_window<'a>(
 
     let content = scrollable(form).width(Fill).height(Fill);
 
-    container(
-        column![toolbar, hdivider(), content].spacing(0)
-    )
-    .style(|_: &Theme| container::Style {
-        background: Some(Background::Color(BG)),
-        ..Default::default()
-    })
-    .width(Fill)
-    .height(Fill)
-    .into()
+    container(column![toolbar, hdivider(), content].spacing(0))
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(BG)),
+            ..Default::default()
+        })
+        .width(Fill)
+        .height(Fill)
+        .into()
 }
 
 /// Apply one `PdfExportDialogField` toggle to a mutable `PdfExportOptions`.
@@ -212,14 +318,14 @@ pub fn view_window<'a>(
 pub fn apply_toggle(opts: &mut PdfExportOptions, field: PdfExportDialogField) {
     use PdfExportDialogField as F;
     match field {
-        F::Monochrome           => opts.monochrome            = !opts.monochrome,
-        F::TextAsGeometry       => opts.text_as_geometry      = !opts.text_as_geometry,
-        F::IncludeHatches       => opts.include_hatches       = !opts.include_hatches,
-        F::HatchPatterns        => opts.hatch_patterns        = !opts.hatch_patterns,
-        F::NativeCurves         => opts.native_curves         = !opts.native_curves,
-        F::IncludeImages        => opts.include_images        = !opts.include_images,
-        F::EmbedImages          => opts.embed_images          = !opts.embed_images,
-        F::NativeDimensionText  => opts.native_dimension_text = !opts.native_dimension_text,
+        F::Monochrome => opts.monochrome = !opts.monochrome,
+        F::TextAsGeometry => opts.text_as_geometry = !opts.text_as_geometry,
+        F::IncludeHatches => opts.include_hatches = !opts.include_hatches,
+        F::HatchPatterns => opts.hatch_patterns = !opts.hatch_patterns,
+        F::NativeCurves => opts.native_curves = !opts.native_curves,
+        F::IncludeImages => opts.include_images = !opts.include_images,
+        F::EmbedImages => opts.embed_images = !opts.embed_images,
+        F::NativeDimensionText => opts.native_dimension_text = !opts.native_dimension_text,
         F::FontSizeScale => {}
     }
 }
@@ -237,8 +343,14 @@ mod tests {
     fn toggle_flips_each_boolean_field() {
         let mut o = PdfExportOptions::default();
         let (mono0, tag0, hat0, pat0, cur0, img0, emb0, dim0) = (
-            o.monochrome, o.text_as_geometry, o.include_hatches, o.hatch_patterns,
-            o.native_curves, o.include_images, o.embed_images, o.native_dimension_text,
+            o.monochrome,
+            o.text_as_geometry,
+            o.include_hatches,
+            o.hatch_patterns,
+            o.native_curves,
+            o.include_images,
+            o.embed_images,
+            o.native_dimension_text,
         );
         apply_toggle(&mut o, PdfExportDialogField::Monochrome);
         apply_toggle(&mut o, PdfExportDialogField::TextAsGeometry);
@@ -249,13 +361,13 @@ mod tests {
         apply_toggle(&mut o, PdfExportDialogField::EmbedImages);
         apply_toggle(&mut o, PdfExportDialogField::NativeDimensionText);
 
-        assert_ne!(o.monochrome,            mono0);
-        assert_ne!(o.text_as_geometry,      tag0);
-        assert_ne!(o.include_hatches,       hat0);
-        assert_ne!(o.hatch_patterns,        pat0);
-        assert_ne!(o.native_curves,         cur0);
-        assert_ne!(o.include_images,        img0);
-        assert_ne!(o.embed_images,          emb0);
+        assert_ne!(o.monochrome, mono0);
+        assert_ne!(o.text_as_geometry, tag0);
+        assert_ne!(o.include_hatches, hat0);
+        assert_ne!(o.hatch_patterns, pat0);
+        assert_ne!(o.native_curves, cur0);
+        assert_ne!(o.include_images, img0);
+        assert_ne!(o.embed_images, emb0);
         assert_ne!(o.native_dimension_text, dim0);
     }
 

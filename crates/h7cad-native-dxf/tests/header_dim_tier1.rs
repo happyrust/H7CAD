@@ -49,8 +49,7 @@ fn header_writes_all_8_dim_tier1_vars() {
 
     let text = write_dxf(&doc).expect("write");
     for var in &[
-        "$DIMTXT", "$DIMASZ", "$DIMEXO", "$DIMEXE", "$DIMGAP",
-        "$DIMDEC", "$DIMADEC", "$DIMTOFL",
+        "$DIMTXT", "$DIMASZ", "$DIMEXO", "$DIMEXE", "$DIMGAP", "$DIMDEC", "$DIMADEC", "$DIMTOFL",
     ] {
         assert!(
             text.contains(var),

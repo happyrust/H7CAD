@@ -21,7 +21,11 @@ impl TruckConvertible for Table {
 
         let origin = v3(&self.insertion_point);
         let h_raw = v3(&self.horizontal_direction);
-        let h = if h_raw.length_squared() > 1e-10 { h_raw.normalize() } else { Vec3::X };
+        let h = if h_raw.length_squared() > 1e-10 {
+            h_raw.normalize()
+        } else {
+            Vec3::X
+        };
         // Perpendicular "down" direction in the drawing plane (tables grow downward)
         let v_down = Vec3::new(h.y, -h.x, 0.0);
 
@@ -58,13 +62,13 @@ impl TruckConvertible for Table {
         };
 
         for &ry in &row_offsets {
-            let left  = origin + h * 0.0    + v_down * ry;
+            let left = origin + h * 0.0 + v_down * ry;
             let right = origin + h * total_w + v_down * ry;
             add_seg(left, right);
         }
 
         for &cx in &col_offsets {
-            let top    = origin + h * cx + v_down * 0.0;
+            let top = origin + h * cx + v_down * 0.0;
             let bottom = origin + h * cx + v_down * total_h;
             add_seg(top, bottom);
         }
@@ -75,7 +79,10 @@ impl TruckConvertible for Table {
 
         for (ri, row) in self.rows.iter().enumerate() {
             let row_top = row_offsets[ri];
-            let row_bot = row_offsets.get(ri + 1).copied().unwrap_or(row_top + row.height as f32);
+            let row_bot = row_offsets
+                .get(ri + 1)
+                .copied()
+                .unwrap_or(row_top + row.height as f32);
             let row_mid = (row_top + row_bot) * 0.5;
 
             for (ci, cell) in row.cells.iter().enumerate() {
@@ -84,7 +91,7 @@ impl TruckConvertible for Table {
                     continue;
                 }
 
-                let col_left  = col_offsets[ci];
+                let col_left = col_offsets[ci];
                 let col_width = self.columns.get(ci).map(|c| c.width as f32).unwrap_or(1.0);
                 let col_right = col_left + col_width;
 
@@ -95,19 +102,19 @@ impl TruckConvertible for Table {
                 // 0/default = MiddleCenter (5)
                 let align = cell.style.as_ref().map_or(5, |s| s.alignment);
                 let horiz = ((align - 1).rem_euclid(3)) + 1; // 1=left, 2=center, 3=right
-                let vert  = ((align - 1) / 3) + 1;           // 1=top, 2=middle, 3=bottom
+                let vert = ((align - 1) / 3) + 1; // 1=top, 2=middle, 3=bottom
 
                 let text_w = cxf::measure_text(text, text_height, 1.0, "txt");
 
                 let x_offset = match horiz {
-                    1 => col_left + margin,                         // left
-                    3 => col_right - margin - text_w,               // right
-                    _ => col_left + (col_width - text_w) * 0.5,    // center (default)
+                    1 => col_left + margin,                     // left
+                    3 => col_right - margin - text_w,           // right
+                    _ => col_left + (col_width - text_w) * 0.5, // center (default)
                 };
                 let y_offset = match vert {
-                    1 => row_top + margin,                          // top
-                    3 => row_bot - margin - text_height,            // bottom
-                    _ => row_mid - text_height * 0.5,               // middle (default)
+                    1 => row_top + margin,               // top
+                    3 => row_bot - margin - text_height, // bottom
+                    _ => row_mid - text_height * 0.5,    // middle (default)
                 };
 
                 let text_origin = origin + h * x_offset + v_down * y_offset;
@@ -169,11 +176,23 @@ impl PropertyEditable for Table {
         PropSection {
             title: "Table".into(),
             props: vec![
-                ro("Rows",    "tbl_rows",    self.rows.len().to_string()),
-                ro("Columns", "tbl_cols",    self.columns.len().to_string()),
-                ro("Insert X","tbl_ix",      format!("{:.4}", self.insertion_point.x)),
-                ro("Insert Y","tbl_iy",      format!("{:.4}", self.insertion_point.y)),
-                ro("Insert Z","tbl_iz",      format!("{:.4}", self.insertion_point.z)),
+                ro("Rows", "tbl_rows", self.rows.len().to_string()),
+                ro("Columns", "tbl_cols", self.columns.len().to_string()),
+                ro(
+                    "Insert X",
+                    "tbl_ix",
+                    format!("{:.4}", self.insertion_point.x),
+                ),
+                ro(
+                    "Insert Y",
+                    "tbl_iy",
+                    format!("{:.4}", self.insertion_point.y),
+                ),
+                ro(
+                    "Insert Z",
+                    "tbl_iz",
+                    format!("{:.4}", self.insertion_point.z),
+                ),
             ],
         }
     }

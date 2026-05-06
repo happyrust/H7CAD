@@ -217,12 +217,13 @@ pub fn parse_system_page_header(
     bytes: &[u8],
     offset: usize,
 ) -> Result<SystemPageHeader, PageMapDecodeError> {
-    let end = offset
-        .checked_add(SYSTEM_PAGE_HEADER_LEN)
-        .ok_or(PageMapDecodeError::TruncatedInput {
-            offset,
-            expected_at_least: SYSTEM_PAGE_HEADER_LEN,
-        })?;
+    let end =
+        offset
+            .checked_add(SYSTEM_PAGE_HEADER_LEN)
+            .ok_or(PageMapDecodeError::TruncatedInput {
+                offset,
+                expected_at_least: SYSTEM_PAGE_HEADER_LEN,
+            })?;
     let slice = bytes
         .get(offset..end)
         .ok_or(PageMapDecodeError::TruncatedInput {
@@ -276,12 +277,12 @@ pub fn parse_ac1018_page_map(
         });
     }
 
-    let payload_start = page_map_offset
-        .checked_add(SYSTEM_PAGE_HEADER_LEN)
-        .ok_or(PageMapDecodeError::TruncatedInput {
+    let payload_start = page_map_offset.checked_add(SYSTEM_PAGE_HEADER_LEN).ok_or(
+        PageMapDecodeError::TruncatedInput {
             offset: page_map_offset,
             expected_at_least: SYSTEM_PAGE_HEADER_LEN,
-        })?;
+        },
+    )?;
     let compressed_len = header.compressed_size as usize;
     let payload_end =
         payload_start
@@ -290,12 +291,13 @@ pub fn parse_ac1018_page_map(
                 offset: payload_start,
                 expected_at_least: compressed_len,
             })?;
-    let compressed = bytes
-        .get(payload_start..payload_end)
-        .ok_or(PageMapDecodeError::TruncatedInput {
-            offset: payload_start,
-            expected_at_least: compressed_len,
-        })?;
+    let compressed =
+        bytes
+            .get(payload_start..payload_end)
+            .ok_or(PageMapDecodeError::TruncatedInput {
+                offset: payload_start,
+                expected_at_least: compressed_len,
+            })?;
 
     let decompressed = decompress_ac18_lz77(compressed, header.decompressed_size as usize)?;
     parse_records(&decompressed)
@@ -652,7 +654,10 @@ mod tests {
 
         let unsupported = format!(
             "{}",
-            PageMapDecodeError::UnsupportedCompressionType { actual: 1, offset: 0 }
+            PageMapDecodeError::UnsupportedCompressionType {
+                actual: 1,
+                offset: 0
+            }
         );
         assert!(unsupported.contains("compression_type 1"));
 

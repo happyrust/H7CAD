@@ -12,12 +12,12 @@
 use h7cad_native_dxf::{read_dxf, write_dxf};
 use h7cad_native_model::CadDocument;
 
-const LOFT_ANG1: f64 = std::f64::consts::FRAC_PI_6;  // 30°
-const LOFT_ANG2: f64 = std::f64::consts::FRAC_PI_3;  // 60°
+const LOFT_ANG1: f64 = std::f64::consts::FRAC_PI_6; // 30°
+const LOFT_ANG2: f64 = std::f64::consts::FRAC_PI_3; // 60°
 const LOFT_MAG1: f64 = 1.5;
 const LOFT_MAG2: f64 = 2.5;
-const LOFT_NORMALS: i16 = 6;  // path-normals (default is 1 = smooth-fit)
-const LOFT_PARAM: i16 = 9;    // bit 1 (no twist) + bit 8 (closed)
+const LOFT_NORMALS: i16 = 6; // path-normals (default is 1 = smooth-fit)
+const LOFT_PARAM: i16 = 9; // bit 1 (no twist) + bit 8 (closed)
 
 fn dxf_with_loft_family() -> String {
     format!(

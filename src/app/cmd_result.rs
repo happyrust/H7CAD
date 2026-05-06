@@ -1,7 +1,7 @@
-use super::{H7CAD, Message};
+use super::{Message, H7CAD};
 use crate::command::CmdResult;
-use acadrust::Handle;
 use crate::types::{Color as AcadColor, LineWeight};
+use acadrust::Handle;
 use h7cad_native_model as nm;
 use iced::Task;
 
@@ -55,7 +55,9 @@ impl H7CAD {
         let _ = native_doc.remove_entity(nm::Handle::new(handle.value()));
         let mut new_handles = Vec::new();
         for entity in new_entities {
-            if let Some(mut native_entity) = crate::io::native_bridge::acadrust_entity_to_native(&entity) {
+            if let Some(mut native_entity) =
+                crate::io::native_bridge::acadrust_entity_to_native(&entity)
+            {
                 if native_entity.owner_handle == nm::Handle::NULL {
                     native_entity.owner_handle = owner_handle;
                 }
@@ -90,7 +92,9 @@ impl H7CAD {
         if prefer_native {
             if let Some(native_doc) = self.tabs[i].scene.native_doc_mut() {
                 for entity in additions {
-                    if let Some(native_entity) = crate::io::native_bridge::acadrust_entity_to_native(&entity) {
+                    if let Some(native_entity) =
+                        crate::io::native_bridge::acadrust_entity_to_native(&entity)
+                    {
                         let _ = native_doc.add_entity(native_entity);
                     }
                 }
@@ -169,7 +173,12 @@ impl H7CAD {
             })
     }
 
-    fn apply_layer_match_to_destinations(&mut self, i: usize, dest: &[Handle], layer: &str) -> bool {
+    fn apply_layer_match_to_destinations(
+        &mut self,
+        i: usize,
+        dest: &[Handle],
+        layer: &str,
+    ) -> bool {
         use h7cad_native_model as nm;
         let mut changed = false;
         for &h in dest {
@@ -489,9 +498,16 @@ impl H7CAD {
                 self.tabs[i].snap_result = None;
                 self.restore_pre_cmd_tangent();
             }
-            CmdResult::CreateBlock { handles, name, base } => {
+            CmdResult::CreateBlock {
+                handles,
+                name,
+                base,
+            } => {
                 self.push_undo_snapshot(i, "BLOCK");
-                match self.tabs[i].scene.create_block_from_entities(&handles, &name, base) {
+                match self.tabs[i]
+                    .scene
+                    .create_block_from_entities(&handles, &name, base)
+                {
                     Ok(insert_handle) => {
                         self.tabs[i].dirty = true;
                         self.tabs[i].scene.deselect_all();
@@ -565,16 +581,15 @@ impl H7CAD {
                             self.push_undo_snapshot(i, label);
                             if let Some(native_doc) = self.tabs[i].scene.native_doc_mut() {
                                 crate::modules::home::modify::attedit::apply_attedit_native(
-                                    native_doc,
-                                    handle,
-                                    encoded,
+                                    native_doc, handle, encoded,
                                 );
                             }
                             self.sync_compat_from_native(i, handle);
                             self.tabs[i].dirty = true;
                             self.tabs[i].active_cmd = None;
                             self.tabs[i].snap_result = None;
-                            self.command_line.push_output("ATTEDIT  Attribute values updated.");
+                            self.command_line
+                                .push_output("ATTEDIT  Attribute values updated.");
                             return Task::none();
                         }
                     }
@@ -587,19 +602,19 @@ impl H7CAD {
                         if op.starts_with("__SPLINEDIT_") {
                             let label = self.history_label_from_active_cmd(i, "SPLINEDIT");
                             self.push_undo_snapshot(i, label);
-                            if let Some(updated) = self
-                                .source_entity_for_geom(i, handle)
-                                .and_then(|entity| {
+                            if let Some(updated) =
+                                self.source_entity_for_geom(i, handle).and_then(|entity| {
                                     crate::modules::home::modify::splinedit::apply_spline_op_entity(
-                                        &entity,
-                                        &op,
+                                        &entity, &op,
                                     )
                                 })
                             {
                                 let _ = self.replace_entities_in_scene(i, handle, vec![updated]);
                                 self.tabs[i].dirty = true;
                                 let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
-                                if let Some(p) = prompt { self.command_line.push_info(&p); }
+                                if let Some(p) = prompt {
+                                    self.command_line.push_info(&p);
+                                }
                                 return Task::none();
                             }
                         }
@@ -609,7 +624,9 @@ impl H7CAD {
                 if new_entities.len() == 1 {
                     if let acadrust::EntityType::XLine(ref xl) = new_entities[0] {
                         let layer = xl.common.layer.clone();
-                        if layer.starts_with("__DIMBREAK__") || layer.starts_with("__DIMBREAK_AUTO__") {
+                        if layer.starts_with("__DIMBREAK__")
+                            || layer.starts_with("__DIMBREAK_AUTO__")
+                        {
                             // DIMBREAK is a geometry operation we approximate by
                             // recording a note on the dimension; full intersection logic
                             // requires render geometry. For now, just undo-snapshot and log.
@@ -645,7 +662,8 @@ impl H7CAD {
                                 apply_mleader_align(&mut self.tabs[i].scene, encoded);
                             }
                             self.push_undo_snapshot(i, "MLEADERALIGN");
-                            self.command_line.push_output("MLEADERALIGN  Leaders aligned.");
+                            self.command_line
+                                .push_output("MLEADERALIGN  Leaders aligned.");
                             self.tabs[i].dirty = true;
                             self.tabs[i].active_cmd = None;
                             self.tabs[i].snap_result = None;
@@ -656,7 +674,8 @@ impl H7CAD {
                                 apply_mleader_collect(&mut self.tabs[i].scene, encoded);
                             }
                             self.push_undo_snapshot(i, "MLEADERCOLLECT");
-                            self.command_line.push_output("MLEADERCOLLECT  Leaders collected.");
+                            self.command_line
+                                .push_output("MLEADERCOLLECT  Leaders collected.");
                             self.tabs[i].dirty = true;
                             self.tabs[i].active_cmd = None;
                             self.tabs[i].snap_result = None;
@@ -682,15 +701,22 @@ impl H7CAD {
                 let attdefs: Vec<(String, String, String)> = {
                     let doc = &self.tabs[i].scene.document;
                     if let Some(br) = doc.block_records.get(&block_name) {
-                        br.entity_handles.iter().filter_map(|&h| {
-                            if let Some(acadrust::EntityType::AttributeDefinition(ad)) =
-                                doc.get_entity(h)
-                            {
-                                Some((ad.tag.clone(), ad.prompt.clone(), ad.default_value.clone()))
-                            } else {
-                                None
-                            }
-                        }).collect()
+                        br.entity_handles
+                            .iter()
+                            .filter_map(|&h| {
+                                if let Some(acadrust::EntityType::AttributeDefinition(ad)) =
+                                    doc.get_entity(h)
+                                {
+                                    Some((
+                                        ad.tag.clone(),
+                                        ad.prompt.clone(),
+                                        ad.default_value.clone(),
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
                     } else {
                         vec![]
                     }
@@ -698,7 +724,9 @@ impl H7CAD {
 
                 if attdefs.is_empty() {
                     // No attribute definitions — commit the INSERT directly.
-                    let entity = self.tabs[i].active_cmd.as_mut()
+                    let entity = self.tabs[i]
+                        .active_cmd
+                        .as_mut()
                         .and_then(|c| c.attreq_take_insert());
                     if let Some(entity) = entity {
                         let label = self.history_label_from_active_cmd(i, "INSERT");
@@ -748,7 +776,8 @@ impl H7CAD {
                     self.push_undo_snapshot(i, "LAYMATCH");
                     if self.apply_layer_match_to_destinations(i, &dest, &layer) {
                         self.tabs[i].dirty = true;
-                        self.command_line.push_info(&format!("Layer matched to \"{layer}\"."));
+                        self.command_line
+                            .push_info(&format!("Layer matched to \"{layer}\"."));
                         self.sync_ribbon_layers();
                     }
                 } else {
@@ -767,9 +796,8 @@ impl H7CAD {
                     if self.apply_match_props_to_destinations(i, &dest, &props) {
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
-                        self.command_line.push_info(
-                            &format!("Properties matched to {} object(s).", dest.len())
-                        );
+                        self.command_line
+                            .push_info(&format!("Properties matched to {} object(s).", dest.len()));
                     }
                 } else {
                     self.command_line.push_error("Source object not found.");
@@ -786,7 +814,9 @@ impl H7CAD {
                     let translate = crate::command::EntityTransform::Translate(delta);
                     self.push_undo_snapshot(i, "PASTECLIP");
                     let count = self.clipboard.len();
-                    let new_handles: Vec<Handle> = self.clipboard.clone()
+                    let new_handles: Vec<Handle> = self
+                        .clipboard
+                        .clone()
                         .into_iter()
                         .map(|mut entity| {
                             crate::scene::dispatch::apply_transform(&mut entity, &translate);
@@ -801,7 +831,8 @@ impl H7CAD {
                     }
                     self.tabs[i].dirty = true;
                     self.refresh_properties();
-                    self.command_line.push_info(&format!("{count} object(s) pasted."));
+                    self.command_line
+                        .push_info(&format!("{count} object(s) pasted."));
                 }
             }
             CmdResult::CreateGroup { handles, name } => {
@@ -811,7 +842,8 @@ impl H7CAD {
                 self.push_undo_snapshot(i, "GROUP");
                 self.tabs[i].scene.create_group(name.clone(), handles);
                 self.tabs[i].dirty = true;
-                self.command_line.push_info(&format!("Group \"{}\" created.", name));
+                self.command_line
+                    .push_info(&format!("Group \"{}\" created.", name));
             }
             CmdResult::DeleteGroups { handles } => {
                 self.tabs[i].active_cmd = None;
@@ -821,24 +853,40 @@ impl H7CAD {
                 let count = self.tabs[i].scene.delete_groups_containing(&handles);
                 self.tabs[i].dirty = true;
                 if count > 0 {
-                    self.command_line.push_info(&format!("{} group(s) dissolved.", count));
+                    self.command_line
+                        .push_info(&format!("{} group(s) dissolved.", count));
                 } else {
-                    self.command_line.push_info("No groups found for selected objects.");
+                    self.command_line
+                        .push_info("No groups found for selected objects.");
                 }
             }
-            CmdResult::VpLayerUpdate { vp_handle, freeze, thaw } => {
+            CmdResult::VpLayerUpdate {
+                vp_handle,
+                freeze,
+                thaw,
+            } => {
                 // Resolve layer names → handles, then update frozen_layers on the viewport(s).
                 // vp_handle == Handle::NULL means "apply to all viewports in current layout".
-                let freeze_handles: Vec<Handle> = freeze.iter()
+                let freeze_handles: Vec<Handle> = freeze
+                    .iter()
                     .filter_map(|name| {
-                        self.tabs[i].scene.document.layers.iter()
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .layers
+                            .iter()
                             .find(|l| l.name.eq_ignore_ascii_case(name))
                             .map(|l| l.handle)
                     })
                     .collect();
-                let thaw_handles: Vec<Handle> = thaw.iter()
+                let thaw_handles: Vec<Handle> = thaw
+                    .iter()
                     .filter_map(|name| {
-                        self.tabs[i].scene.document.layers.iter()
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .layers
+                            .iter()
                             .find(|l| l.name.eq_ignore_ascii_case(name))
                             .map(|l| l.handle)
                     })
@@ -851,7 +899,10 @@ impl H7CAD {
                 let target_handles: Vec<Handle> = if vp_handle == acadrust::Handle::NULL {
                     // All viewports in current layout block
                     let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
-                    self.tabs[i].scene.document.entities()
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .entities()
                         .filter(|e| {
                             e.common().owner_handle == block_handle
                                 && matches!(e, acadrust::EntityType::Viewport(_))
@@ -875,7 +926,9 @@ impl H7CAD {
                         for h in &thaw_handles {
                             let before = vp.frozen_layers.len();
                             vp.frozen_layers.retain(|fh| fh != h);
-                            if vp.frozen_layers.len() < before { thawed_count += 1; }
+                            if vp.frozen_layers.len() < before {
+                                thawed_count += 1;
+                            }
                         }
                     }
                 }
@@ -884,15 +937,21 @@ impl H7CAD {
                     self.push_undo_snapshot(i, "VPLAYER");
                     self.tabs[i].dirty = true;
                     if frozen_count > 0 {
-                        self.command_line.push_info(&format!("VPLAYER: {frozen_count} layer(s) frozen in viewport."));
+                        self.command_line.push_info(&format!(
+                            "VPLAYER: {frozen_count} layer(s) frozen in viewport."
+                        ));
                     }
                     if thawed_count > 0 {
-                        self.command_line.push_info(&format!("VPLAYER: {thawed_count} layer(s) thawed in viewport."));
+                        self.command_line.push_info(&format!(
+                            "VPLAYER: {thawed_count} layer(s) thawed in viewport."
+                        ));
                     }
                     // Sync layer panel so VP freeze columns update immediately.
                     let doc_layers = self.tabs[i].scene.document.layers.clone();
                     let vp_info = self.tabs[i].scene.viewport_list();
-                    self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
+                    self.tabs[i]
+                        .layers
+                        .sync_with_viewports(&doc_layers, vp_info);
                 }
 
                 // Show updated prompt (command stays active for more operations).
@@ -918,8 +977,11 @@ impl H7CAD {
             }
             CmdResult::SetInsertionBase([x, y, z]) => {
                 self.push_undo_snapshot(i, "BASE");
-                self.tabs[i].scene.document.header.model_space_insertion_base =
-                    crate::types::Vector3::new(x, y, z);
+                self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .model_space_insertion_base = crate::types::Vector3::new(x, y, z);
                 if let Some(native_doc) = self.tabs[i].scene.native_doc_mut() {
                     native_doc.header.insbase = [x, y, z];
                 }
@@ -931,7 +993,13 @@ impl H7CAD {
                 self.command_line
                     .push_output(&format!("Base point set to {:.4},{:.4},{:.4}", x, y, z));
             }
-            CmdResult::AlignSelected { handles, src1, dst1, angle_rad, scale } => {
+            CmdResult::AlignSelected {
+                handles,
+                src1,
+                dst1,
+                angle_rad,
+                scale,
+            } => {
                 if handles.is_empty() {
                     self.tabs[i].active_cmd = None;
                     self.tabs[i].snap_result = None;
@@ -983,7 +1051,11 @@ impl H7CAD {
                     self.refresh_properties();
                 }
             }
-            CmdResult::LengthenEntity { handle, pick_pt, mode } => {
+            CmdResult::LengthenEntity {
+                handle,
+                pick_pt,
+                mode,
+            } => {
                 use crate::modules::home::modify::lengthen::lengthen_entity;
                 let result = self
                     .source_entity_for_geom(i, handle)
@@ -998,7 +1070,8 @@ impl H7CAD {
                         self.refresh_properties();
                     }
                     None => {
-                        self.command_line.push_error("LENGTHEN: entity type not supported.");
+                        self.command_line
+                            .push_error("LENGTHEN: entity type not supported.");
                     }
                 }
                 self.tabs[i].active_cmd = None;
@@ -1015,18 +1088,25 @@ impl H7CAD {
                 let count = pts.len();
                 if count > 0 {
                     self.push_undo_snapshot(i, "DIVIDE");
-                    for p in pts { self.tabs[i].scene.add_entity(p); }
+                    for p in pts {
+                        self.tabs[i].scene.add_entity(p);
+                    }
                     self.tabs[i].dirty = true;
-                    self.command_line.push_output(&format!("DIVIDE: {count} point(s) placed."));
+                    self.command_line
+                        .push_output(&format!("DIVIDE: {count} point(s) placed."));
                 } else {
-                    self.command_line.push_error("DIVIDE: entity type not supported or N < 2.");
+                    self.command_line
+                        .push_error("DIVIDE: entity type not supported or N < 2.");
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
-            CmdResult::MeasureEntity { handle, segment_length } => {
+            CmdResult::MeasureEntity {
+                handle,
+                segment_length,
+            } => {
                 use crate::modules::home::inquiry::divide::measure_entity;
                 let pts = self
                     .source_entity_for_geom(i, handle)
@@ -1035,11 +1115,15 @@ impl H7CAD {
                 let count = pts.len();
                 if count > 0 {
                     self.push_undo_snapshot(i, "MEASURE");
-                    for p in pts { self.tabs[i].scene.add_entity(p); }
+                    for p in pts {
+                        self.tabs[i].scene.add_entity(p);
+                    }
                     self.tabs[i].dirty = true;
-                    self.command_line.push_output(&format!("MEASURE: {count} point(s) placed."));
+                    self.command_line
+                        .push_output(&format!("MEASURE: {count} point(s) placed."));
                 } else {
-                    self.command_line.push_error("MEASURE: entity type not supported or distance too large.");
+                    self.command_line
+                        .push_error("MEASURE: entity type not supported or distance too large.");
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -1048,13 +1132,15 @@ impl H7CAD {
             }
             CmdResult::PeditOp { handle, op } => {
                 use crate::modules::home::modify::pedit::apply_pedit;
-                let replacement = self.source_entity_for_geom(i, handle).and_then(|mut entity| {
-                    if apply_pedit(&mut entity, &op) {
-                        Some(entity)
-                    } else {
-                        None
-                    }
-                });
+                let replacement = self
+                    .source_entity_for_geom(i, handle)
+                    .and_then(|mut entity| {
+                        if apply_pedit(&mut entity, &op) {
+                            Some(entity)
+                        } else {
+                            None
+                        }
+                    });
                 if let Some(entity) = replacement {
                     self.push_undo_snapshot(i, "PEDIT");
                     let _ = self.replace_entities_in_scene(i, handle, vec![entity]);
@@ -1062,12 +1148,12 @@ impl H7CAD {
                     self.command_line.push_output("PEDIT: applied.");
                     self.refresh_properties();
                 } else {
-                    self.command_line.push_error("PEDIT: operation not applicable to this entity.");
+                    self.command_line
+                        .push_error("PEDIT: operation not applicable to this entity.");
                 }
                 // Keep command active — user may apply more ops
-                self.command_line.push_info(
-                    "PEDIT  Enter option [C=Close O=Open W=Width X=Exit]:"
-                );
+                self.command_line
+                    .push_info("PEDIT  Enter option [C=Close O=Open W=Width X=Exit]:");
             }
             CmdResult::JoinEntities(handles) => {
                 use crate::modules::home::modify::join::join_entities;
@@ -1088,17 +1174,19 @@ impl H7CAD {
                         self.push_undo_snapshot(i, label);
                         let count_in = to_remove.len();
                         let count_out = merged.len();
-                        let replacements =
-                            to_remove.into_iter().map(|handle| (handle, vec![])).collect();
+                        let replacements = to_remove
+                            .into_iter()
+                            .map(|handle| (handle, vec![]))
+                            .collect();
                         self.replace_many_in_scene(i, replacements, merged);
                         self.tabs[i].dirty = true;
                         self.tabs[i].scene.clear_preview_wire();
                         self.tabs[i].active_cmd = None;
                         self.tabs[i].snap_result = None;
                         self.restore_pre_cmd_tangent();
-                        self.command_line.push_output(
-                            &format!("JOIN: {count_in} object(s) joined into {count_out}.")
-                        );
+                        self.command_line.push_output(&format!(
+                            "JOIN: {count_in} object(s) joined into {count_out}."
+                        ));
                         self.refresh_properties();
                     }
                     None => {
@@ -1107,7 +1195,7 @@ impl H7CAD {
                         self.tabs[i].scene.clear_preview_wire();
                         self.restore_pre_cmd_tangent();
                         self.command_line.push_error(
-                            "JOIN: objects are not collinear/co-circular or have gaps."
+                            "JOIN: objects are not collinear/co-circular or have gaps.",
                         );
                     }
                 }
@@ -1128,7 +1216,8 @@ impl H7CAD {
                         self.tabs[i].active_cmd = None;
                         self.tabs[i].snap_result = None;
                         self.restore_pre_cmd_tangent();
-                        self.command_line.push_output(&format!("BREAK: {} fragment(s).", count));
+                        self.command_line
+                            .push_output(&format!("BREAK: {} fragment(s).", count));
                         self.refresh_properties();
                     }
                     None => {
@@ -1136,7 +1225,8 @@ impl H7CAD {
                         self.tabs[i].snap_result = None;
                         self.tabs[i].scene.clear_preview_wire();
                         self.restore_pre_cmd_tangent();
-                        self.command_line.push_error("BREAK: entity type not supported.");
+                        self.command_line
+                            .push_error("BREAK: entity type not supported.");
                     }
                 }
             }
@@ -1144,14 +1234,21 @@ impl H7CAD {
                 use acadrust::objects::{ObjectType, PlotSettings};
                 let layout_name = self.tabs[i].scene.current_layout.clone();
                 if layout_name == "Model" {
-                    self.command_line.push_error("PLOTWINDOW: switch to a paper space layout first.");
+                    self.command_line
+                        .push_error("PLOTWINDOW: switch to a paper space layout first.");
                 } else {
                     let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
                     let doc = &mut self.tabs[i].scene.document;
                     let ps_handle = doc.objects.iter().find_map(|(h, obj)| {
                         if let ObjectType::PlotSettings(ps) = obj {
-                            if ps.page_name == layout_name { Some(*h) } else { None }
-                        } else { None }
+                            if ps.page_name == layout_name {
+                                Some(*h)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     });
                     let ps_entry = match ps_handle {
                         Some(h) => doc.objects.get_mut(&h),
@@ -1182,7 +1279,12 @@ impl H7CAD {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
             }
-            CmdResult::StretchEntities { handles, win_min, win_max, delta } => {
+            CmdResult::StretchEntities {
+                handles,
+                win_min,
+                win_max,
+                delta,
+            } => {
                 self.push_undo_snapshot(i, "STRETCH");
                 let mut count = 0usize;
 
@@ -1208,7 +1310,8 @@ impl H7CAD {
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
-                self.command_line.push_output(&format!("STRETCH: {count} entity(ies) stretched."));
+                self.command_line
+                    .push_output(&format!("STRETCH: {count} entity(ies) stretched."));
                 self.refresh_properties();
             }
             // ── Solid3D creation (BOX / SPHERE / CYLINDER) ────────────────
@@ -1234,11 +1337,15 @@ impl H7CAD {
             }
 
             // ── EXTRUDE ────────────────────────────────────────────────────
-            CmdResult::ExtrudeEntity { handle, height, color } => {
+            CmdResult::ExtrudeEntity {
+                handle,
+                height,
+                color,
+            } => {
                 use crate::entities::traits::EntityTypeOps;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use crate::scene::acad_to_truck::TruckObject;
                 use crate::scene::truck_tess;
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use truck_modeling::builder;
                 use truck_modeling::Vector3 as TruckVec3;
 
@@ -1252,16 +1359,21 @@ impl H7CAD {
                                 // Attach a planar face to the wire profile, then sweep.
                                 let face = builder::try_attach_plane(&[wire]).ok()?;
                                 // tsweep(Face) → Solid
-                                let solid = builder::tsweep(&face, TruckVec3::new(0.0, 0.0, height as f64));
+                                let solid =
+                                    builder::tsweep(&face, TruckVec3::new(0.0, 0.0, height as f64));
                                 match truck_tess::tessellate_solid(&solid, woff) {
-                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } => {
-                                        Some(crate::scene::mesh_model::MeshModel {
-                                            name: String::new(),
-                                            verts, normals, indices,
-                                            color,
-                                            selected: false,
-                                        })
-                                    }
+                                    truck_tess::TruckTessResult::Mesh {
+                                        verts,
+                                        normals,
+                                        indices,
+                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                        name: String::new(),
+                                        verts,
+                                        normals,
+                                        indices,
+                                        color,
+                                        selected: false,
+                                    }),
                                     _ => None,
                                 }
                             }
@@ -1289,11 +1401,17 @@ impl H7CAD {
             }
 
             // ── REVOLVE ────────────────────────────────────────────────────
-            CmdResult::RevolveEntity { handle, axis_start, axis_end, angle_deg, color } => {
+            CmdResult::RevolveEntity {
+                handle,
+                axis_start,
+                axis_end,
+                angle_deg,
+                color,
+            } => {
                 use crate::entities::traits::EntityTypeOps;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use crate::scene::acad_to_truck::TruckObject;
                 use crate::scene::truck_tess;
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use truck_modeling::builder;
                 use truck_modeling::{Point3, Rad, Vector3 as TruckVec3};
 
@@ -1315,16 +1433,25 @@ impl H7CAD {
                         );
                         let dir = (axis_end - axis_start).normalize();
                         let axis = TruckVec3::new(dir.x as f64, dir.z as f64, dir.y as f64);
-                        let shell = builder::rsweep(&wire, origin, axis, Rad(angle_deg.to_radians() as f64));
+                        let shell = builder::rsweep(
+                            &wire,
+                            origin,
+                            axis,
+                            Rad(angle_deg.to_radians() as f64),
+                        );
                         match truck_tess::tessellate_shell(&shell, woff) {
-                            truck_tess::TruckTessResult::Mesh { verts, normals, indices } => {
-                                Some(crate::scene::mesh_model::MeshModel {
-                                    name: String::new(),
-                                    verts, normals, indices,
-                                    color,
-                                    selected: false,
-                                })
-                            }
+                            truck_tess::TruckTessResult::Mesh {
+                                verts,
+                                normals,
+                                indices,
+                            } => Some(crate::scene::mesh_model::MeshModel {
+                                name: String::new(),
+                                verts,
+                                normals,
+                                indices,
+                                color,
+                                selected: false,
+                            }),
                             _ => None,
                         }
                     });
@@ -1335,9 +1462,11 @@ impl H7CAD {
                         mesh.name = format!("{}", new_handle.value());
                         self.tabs[i].scene.meshes.insert(new_handle, mesh);
                         self.tabs[i].dirty = true;
-                        self.command_line.push_output(&format!("REVOLVE: solid created ({:.0}°).", angle_deg));
+                        self.command_line
+                            .push_output(&format!("REVOLVE: solid created ({:.0}°).", angle_deg));
                     } else {
-                        self.command_line.push_error("REVOLVE: could not revolve profile.");
+                        self.command_line
+                            .push_error("REVOLVE: could not revolve profile.");
                     }
                 } else {
                     self.command_line.push_error("REVOLVE: entity not found.");
@@ -1349,11 +1478,15 @@ impl H7CAD {
             }
 
             // ── SWEEP ──────────────────────────────────────────────────────
-            CmdResult::SweepEntity { profile_handle, path_handle, color } => {
+            CmdResult::SweepEntity {
+                profile_handle,
+                path_handle,
+                color,
+            } => {
                 use crate::entities::traits::EntityTypeOps;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use crate::scene::acad_to_truck::TruckObject;
                 use crate::scene::truck_tess;
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use truck_modeling::builder;
                 use truck_modeling::Vector3 as TruckVec3;
 
@@ -1368,7 +1501,7 @@ impl H7CAD {
                     // Profile must be a wire (closed or open).
                     let profile_wire: truck_modeling::Wire = match prof_truck.object {
                         TruckObject::Contour(w) => w,
-                        TruckObject::Curve(e)   => std::iter::once(e).collect(),
+                        TruckObject::Curve(e) => std::iter::once(e).collect(),
                         _ => return None,
                     };
 
@@ -1377,7 +1510,7 @@ impl H7CAD {
                         // Linear path: translate profile along the line direction.
                         TruckObject::Curve(edge) => {
                             let p_start = edge.front().point();
-                            let p_end   = edge.back().point();
+                            let p_end = edge.back().point();
                             let dir = TruckVec3::new(
                                 p_end.x - p_start.x,
                                 p_end.y - p_start.y,
@@ -1388,19 +1521,35 @@ impl H7CAD {
                             if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
                                 let solid = builder::tsweep(&face, dir);
                                 match truck_tess::tessellate_solid(&solid, woff) {
-                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
-                                        Some(crate::scene::mesh_model::MeshModel {
-                                            name: String::new(), verts, normals, indices, color, selected: false,
-                                        }),
+                                    truck_tess::TruckTessResult::Mesh {
+                                        verts,
+                                        normals,
+                                        indices,
+                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                        name: String::new(),
+                                        verts,
+                                        normals,
+                                        indices,
+                                        color,
+                                        selected: false,
+                                    }),
                                     _ => None,
                                 }
                             } else {
                                 let shell = builder::tsweep(&profile_wire, dir);
                                 match truck_tess::tessellate_shell(&shell, woff) {
-                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
-                                        Some(crate::scene::mesh_model::MeshModel {
-                                            name: String::new(), verts, normals, indices, color, selected: false,
-                                        }),
+                                    truck_tess::TruckTessResult::Mesh {
+                                        verts,
+                                        normals,
+                                        indices,
+                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                        name: String::new(),
+                                        verts,
+                                        normals,
+                                        indices,
+                                        color,
+                                        selected: false,
+                                    }),
                                     _ => None,
                                 }
                             }
@@ -1412,7 +1561,7 @@ impl H7CAD {
                         TruckObject::Contour(path_wire) => {
                             // Use start→end of the whole wire as translation vector.
                             let p_start = path_wire.front_vertex()?.point();
-                            let p_end   = path_wire.back_vertex()?.point();
+                            let p_end = path_wire.back_vertex()?.point();
                             let dir = TruckVec3::new(
                                 p_end.x - p_start.x,
                                 p_end.y - p_start.y,
@@ -1421,19 +1570,35 @@ impl H7CAD {
                             if let Ok(face) = builder::try_attach_plane(&[profile_wire.clone()]) {
                                 let solid = builder::tsweep(&face, dir);
                                 match truck_tess::tessellate_solid(&solid, woff) {
-                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
-                                        Some(crate::scene::mesh_model::MeshModel {
-                                            name: String::new(), verts, normals, indices, color, selected: false,
-                                        }),
+                                    truck_tess::TruckTessResult::Mesh {
+                                        verts,
+                                        normals,
+                                        indices,
+                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                        name: String::new(),
+                                        verts,
+                                        normals,
+                                        indices,
+                                        color,
+                                        selected: false,
+                                    }),
                                     _ => None,
                                 }
                             } else {
                                 let shell = builder::tsweep(&profile_wire, dir);
                                 match truck_tess::tessellate_shell(&shell, woff) {
-                                    truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
-                                        Some(crate::scene::mesh_model::MeshModel {
-                                            name: String::new(), verts, normals, indices, color, selected: false,
-                                        }),
+                                    truck_tess::TruckTessResult::Mesh {
+                                        verts,
+                                        normals,
+                                        indices,
+                                    } => Some(crate::scene::mesh_model::MeshModel {
+                                        name: String::new(),
+                                        verts,
+                                        normals,
+                                        indices,
+                                        color,
+                                        selected: false,
+                                    }),
                                     _ => None,
                                 }
                             }
@@ -1464,9 +1629,9 @@ impl H7CAD {
             // ── LOFT ───────────────────────────────────────────────────────
             CmdResult::LoftEntities { handles, color } => {
                 use crate::entities::traits::EntityTypeOps;
+                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use crate::scene::acad_to_truck::TruckObject;
                 use crate::scene::truck_tess;
-                use crate::modules::insert::solid3d_cmds::empty_solid3d;
                 use truck_modeling::builder;
 
                 // Collect wires from each profile.
@@ -1476,24 +1641,30 @@ impl H7CAD {
                         if let Some(te) = ent.to_truck_entity(&self.tabs[i].scene.document) {
                             let wire = match te.object {
                                 TruckObject::Contour(w) => Some(w),
-                                TruckObject::Curve(e)   => Some(std::iter::once(e).collect()),
+                                TruckObject::Curve(e) => Some(std::iter::once(e).collect()),
                                 _ => None,
                             };
-                            if let Some(w) = wire { wires.push(w); }
+                            if let Some(w) = wire {
+                                wires.push(w);
+                            }
                         }
                     }
                 }
 
                 let woff = self.tabs[i].scene.world_offset;
                 let result: Option<crate::scene::mesh_model::MeshModel> = (|| {
-                    if wires.len() < 2 { return None; }
+                    if wires.len() < 2 {
+                        return None;
+                    }
 
                     // Build ruled shells between consecutive profile pairs.
                     let mut all_faces: Vec<truck_modeling::Face> = Vec::new();
 
                     for pair in wires.windows(2) {
                         let shell = builder::try_wire_homotopy(&pair[0], &pair[1]).ok()?;
-                        for face in shell.into_iter() { all_faces.push(face); }
+                        for face in shell.into_iter() {
+                            all_faces.push(face);
+                        }
                     }
 
                     // Cap the first and last profiles if they are closed.
@@ -1506,10 +1677,18 @@ impl H7CAD {
 
                     let shell = truck_modeling::Shell::from(all_faces);
                     match truck_tess::tessellate_shell(&shell, woff) {
-                        truck_tess::TruckTessResult::Mesh { verts, normals, indices } =>
-                            Some(crate::scene::mesh_model::MeshModel {
-                                name: String::new(), verts, normals, indices, color, selected: false,
-                            }),
+                        truck_tess::TruckTessResult::Mesh {
+                            verts,
+                            normals,
+                            indices,
+                        } => Some(crate::scene::mesh_model::MeshModel {
+                            name: String::new(),
+                            verts,
+                            normals,
+                            indices,
+                            color,
+                            selected: false,
+                        }),
                         _ => None,
                     }
                 })();
@@ -1521,7 +1700,10 @@ impl H7CAD {
                     mesh.name = format!("{}", new_handle.value());
                     self.tabs[i].scene.meshes.insert(new_handle, mesh);
                     self.tabs[i].dirty = true;
-                    self.command_line.push_output(&format!("LOFT: solid created from {} profiles.", handles.len()));
+                    self.command_line.push_output(&format!(
+                        "LOFT: solid created from {} profiles.",
+                        handles.len()
+                    ));
                 } else {
                     self.command_line.push_error("LOFT: could not loft profiles. Ensure sections have the same edge count and are compatible.");
                 }
@@ -1531,7 +1713,12 @@ impl H7CAD {
                 self.restore_pre_cmd_tangent();
             }
 
-            CmdResult::HatcheditApply { handle, name, scale, angle } => {
+            CmdResult::HatcheditApply {
+                handle,
+                name,
+                scale,
+                angle,
+            } => {
                 if let Some(mut model) = self.tabs[i].scene.hatches.get(&handle).cloned() {
                     // Update model fields
                     if !name.is_empty() {
@@ -1556,7 +1743,8 @@ impl H7CAD {
                     self.tabs[i].dirty = true;
                     self.command_line.push_output("HATCHEDIT: hatch updated.");
                 } else {
-                    self.command_line.push_error("HATCHEDIT: hatch entity not found.");
+                    self.command_line
+                        .push_error("HATCHEDIT: hatch entity not found.");
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -1601,7 +1789,8 @@ impl H7CAD {
                     self.tabs[i].dirty = true;
                     self.command_line.push_output("DDEDIT: text updated.");
                 } else {
-                    self.command_line.push_error("DDEDIT: entity type not supported.");
+                    self.command_line
+                        .push_error("DDEDIT: entity type not supported.");
                 }
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
@@ -1827,7 +2016,11 @@ mod tests {
         app.tabs[0].scene.set_native_doc(Some(native));
 
         let mut cmd = AtteditCommand::new();
-        let _ = crate::command::CadCommand::on_entity_pick(&mut cmd, Handle::new(handle.value()), Vec3::ZERO);
+        let _ = crate::command::CadCommand::on_entity_pick(
+            &mut cmd,
+            Handle::new(handle.value()),
+            Vec3::ZERO,
+        );
         app.tabs[0].active_cmd = Some(Box::new(cmd));
 
         let _ = app.apply_cmd_result(CmdResult::NeedPoint);
@@ -1917,10 +2110,7 @@ mod tests {
             vec![acadrust::EntityType::Line(replacement)],
         ));
 
-        let native_doc = app.tabs[0]
-            .scene
-            .native_doc()
-            .expect("native document");
+        let native_doc = app.tabs[0].scene.native_doc().expect("native document");
         assert!(
             native_doc.get_entity(old_handle).is_none(),
             "old native entity should be removed"
@@ -1956,14 +2146,14 @@ mod tests {
         let addition = acadrust::EntityType::Point(acadrust::entities::Point::new());
 
         let _ = app.apply_cmd_result(CmdResult::ReplaceMany(
-            vec![(Handle::new(old_handle.value()), vec![acadrust::EntityType::Line(replacement)])],
+            vec![(
+                Handle::new(old_handle.value()),
+                vec![acadrust::EntityType::Line(replacement)],
+            )],
             vec![addition],
         ));
 
-        let native_doc = app.tabs[0]
-            .scene
-            .native_doc()
-            .expect("native document");
+        let native_doc = app.tabs[0].scene.native_doc().expect("native document");
         assert!(native_doc.get_entity(old_handle).is_none());
         assert_eq!(
             native_doc
@@ -2001,10 +2191,7 @@ mod tests {
             p2: Vec3::new(8.0, 0.0, 0.0),
         });
 
-        let native_doc = app.tabs[0]
-            .scene
-            .native_doc()
-            .expect("native document");
+        let native_doc = app.tabs[0].scene.native_doc().expect("native document");
         let lines: Vec<_> = native_doc
             .entities
             .iter()
@@ -2043,7 +2230,11 @@ mod tests {
         let entity = app.tabs[0]
             .scene
             .native_doc()
-            .and_then(|doc| doc.entities.iter().find(|entity| matches!(entity.data, nm::EntityData::Line { .. })))
+            .and_then(|doc| {
+                doc.entities
+                    .iter()
+                    .find(|entity| matches!(entity.data, nm::EntityData::Line { .. }))
+            })
             .expect("replacement native line");
         match &entity.data {
             nm::EntityData::Line { start, end } => {
@@ -2071,10 +2262,7 @@ mod tests {
             n: 5,
         });
 
-        let native_doc = app.tabs[0]
-            .scene
-            .native_doc()
-            .expect("native document");
+        let native_doc = app.tabs[0].scene.native_doc().expect("native document");
         let points: Vec<_> = native_doc
             .entities
             .iter()
@@ -2112,10 +2300,7 @@ mod tests {
             segment_length: 3.0,
         });
 
-        let native_doc = app.tabs[0]
-            .scene
-            .native_doc()
-            .expect("native document");
+        let native_doc = app.tabs[0].scene.native_doc().expect("native document");
         let points: Vec<_> = native_doc
             .entities
             .iter()
@@ -2199,10 +2384,7 @@ mod tests {
             Handle::new(h2.value()),
         ]));
 
-        let native_doc = app.tabs[0]
-            .scene
-            .native_doc()
-            .expect("native document");
+        let native_doc = app.tabs[0].scene.native_doc().expect("native document");
         let lines: Vec<_> = native_doc
             .entities
             .iter()
@@ -2325,7 +2507,11 @@ mod tests {
             color: [0.7, 0.7, 0.9, 1.0],
         });
 
-        assert_eq!(app.tabs[0].scene.meshes.len(), 1, "extrude should create one mesh");
+        assert_eq!(
+            app.tabs[0].scene.meshes.len(),
+            1,
+            "extrude should create one mesh"
+        );
         assert!(app.tabs[0].dirty, "extrude should mark the tab dirty");
     }
 
@@ -2349,7 +2535,11 @@ mod tests {
             color: [0.8, 0.6, 0.6, 1.0],
         });
 
-        assert_eq!(app.tabs[0].scene.meshes.len(), 1, "revolve should create one mesh");
+        assert_eq!(
+            app.tabs[0].scene.meshes.len(),
+            1,
+            "revolve should create one mesh"
+        );
         assert!(app.tabs[0].dirty, "revolve should mark the tab dirty");
     }
 
@@ -2360,10 +2550,34 @@ mod tests {
         let profile = native
             .add_entity(nm::Entity::new(nm::EntityData::LwPolyline {
                 vertices: vec![
-                    nm::LwVertex { x: -1.0, y: -1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
-                    nm::LwVertex { x: 1.0, y: -1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
-                    nm::LwVertex { x: 1.0, y: 1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
-                    nm::LwVertex { x: -1.0, y: 1.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                    nm::LwVertex {
+                        x: -1.0,
+                        y: -1.0,
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    },
+                    nm::LwVertex {
+                        x: 1.0,
+                        y: -1.0,
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    },
+                    nm::LwVertex {
+                        x: 1.0,
+                        y: 1.0,
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    },
+                    nm::LwVertex {
+                        x: -1.0,
+                        y: 1.0,
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    },
                 ],
                 closed: true,
                 constant_width: 0.0,
@@ -2383,7 +2597,11 @@ mod tests {
             color: [0.6, 0.8, 0.6, 1.0],
         });
 
-        assert_eq!(app.tabs[0].scene.meshes.len(), 1, "sweep should create one mesh");
+        assert_eq!(
+            app.tabs[0].scene.meshes.len(),
+            1,
+            "sweep should create one mesh"
+        );
         assert!(app.tabs[0].dirty, "sweep should mark the tab dirty");
     }
 
@@ -2410,7 +2628,11 @@ mod tests {
             color: [0.8, 0.8, 0.6, 1.0],
         });
 
-        assert_eq!(app.tabs[0].scene.meshes.len(), 1, "loft should create one mesh");
+        assert_eq!(
+            app.tabs[0].scene.meshes.len(),
+            1,
+            "loft should create one mesh"
+        );
         assert!(app.tabs[0].dirty, "loft should mark the tab dirty");
     }
 
@@ -2483,7 +2705,9 @@ mod tests {
             .and_then(|doc| doc.get_entity(other))
             .expect("other native dimension should still exist");
         match &entity.data {
-            nm::EntityData::Dimension { definition_point, .. } => {
+            nm::EntityData::Dimension {
+                definition_point, ..
+            } => {
                 assert_eq!(*definition_point, [0.0, 0.0, 15.0]);
             }
             other => panic!("expected native dimension, got {other:?}"),
@@ -2618,10 +2842,7 @@ mod tests {
             vec![acadrust::EntityType::XLine(marker)],
         ));
 
-        let native_doc = app.tabs[0]
-            .scene
-            .native_doc()
-            .expect("native document");
+        let native_doc = app.tabs[0].scene.native_doc().expect("native document");
         let entity = native_doc
             .get_entity(base)
             .expect("base native multileader should still exist");
@@ -2642,7 +2863,10 @@ mod tests {
             native_doc.get_entity(other).is_none(),
             "secondary native multileader should be erased"
         );
-        assert!(app.tabs[0].dirty, "mleadercollect should mark the tab dirty");
+        assert!(
+            app.tabs[0].dirty,
+            "mleadercollect should mark the tab dirty"
+        );
     }
 
     #[test]
@@ -2701,9 +2925,12 @@ mod tests {
 fn apply_dimspace(scene: &mut crate::scene::Scene, encoded: &str) {
     // Format: "<base_handle>,<h1>;<h2>;...;<hN>,<spacing>"
     let parts: Vec<&str> = encoded.splitn(3, ',').collect();
-    if parts.len() < 3 { return; }
+    if parts.len() < 3 {
+        return;
+    }
     let base_val: u64 = parts[0].parse().unwrap_or(0);
-    let other_vals: Vec<u64> = parts[1].split(';')
+    let other_vals: Vec<u64> = parts[1]
+        .split(';')
         .filter_map(|s| s.parse::<u64>().ok())
         .collect();
     let spacing: f64 = parts[2].parse().unwrap_or(0.0);
@@ -2718,10 +2945,14 @@ fn apply_dimspace(scene: &mut crate::scene::Scene, encoded: &str) {
             _ => None,
         })
         .or_else(|| {
-            scene.native_entity(base_h).and_then(|entity| match &entity.data {
-                nm::EntityData::Dimension { definition_point, .. } => Some(definition_point[2]),
-                _ => None,
-            })
+            scene
+                .native_entity(base_h)
+                .and_then(|entity| match &entity.data {
+                    nm::EntityData::Dimension {
+                        definition_point, ..
+                    } => Some(definition_point[2]),
+                    _ => None,
+                })
         });
     let Some(base_z) = base_z else {
         return;
@@ -2735,7 +2966,10 @@ fn apply_dimspace(scene: &mut crate::scene::Scene, encoded: &str) {
             let dp = &mut d.base_mut().definition_point;
             dp.z = new_z;
         } else if let Some(entity) = scene.native_entity_mut(h) {
-            if let nm::EntityData::Dimension { definition_point, .. } = &mut entity.data {
+            if let nm::EntityData::Dimension {
+                definition_point, ..
+            } = &mut entity.data
+            {
                 definition_point[2] = new_z;
             }
         }
@@ -2748,17 +2982,18 @@ fn apply_dimspace(scene: &mut crate::scene::Scene, encoded: &str) {
 fn apply_mleader_align(scene: &mut crate::scene::Scene, encoded: &str) {
     // Format: "<h1>,<h2>,...;<fx>,<fz>;<tx>,<tz>"
     let parts: Vec<&str> = encoded.splitn(3, ';').collect();
-    if parts.len() < 3 { return; }
-    let handles: Vec<acadrust::Handle> = parts[0].split(',')
+    if parts.len() < 3 {
+        return;
+    }
+    let handles: Vec<acadrust::Handle> = parts[0]
+        .split(',')
         .filter_map(|s| s.parse::<u64>().ok().map(acadrust::Handle::from))
         .collect();
-    let from_parts: Vec<f64> = parts[1].split(',')
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    let to_parts: Vec<f64> = parts[2].split(',')
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    if from_parts.len() < 2 || to_parts.len() < 2 || handles.is_empty() { return; }
+    let from_parts: Vec<f64> = parts[1].split(',').filter_map(|s| s.parse().ok()).collect();
+    let to_parts: Vec<f64> = parts[2].split(',').filter_map(|s| s.parse().ok()).collect();
+    if from_parts.len() < 2 || to_parts.len() < 2 || handles.is_empty() {
+        return;
+    }
 
     let fx = from_parts[0];
     let fz = from_parts[1];
@@ -2767,7 +3002,9 @@ fn apply_mleader_align(scene: &mut crate::scene::Scene, encoded: &str) {
     let dx = tx - fx;
     let dz = tz - fz;
     let len = (dx * dx + dz * dz).sqrt();
-    if len < 1e-9 { return; }
+    if len < 1e-9 {
+        return;
+    }
 
     // Project each multileader's content point onto the alignment line, then
     // snap it to the line (preserve perpendicular offset from line is discarded;
@@ -2804,14 +3041,17 @@ fn apply_mleader_align(scene: &mut crate::scene::Scene, encoded: &str) {
 /// Parse `h1,h2,...;px,pz` — merge all selected multileaders into the first one at position.
 fn apply_mleader_collect(scene: &mut crate::scene::Scene, encoded: &str) {
     let parts: Vec<&str> = encoded.splitn(2, ';').collect();
-    if parts.len() < 2 { return; }
-    let handles: Vec<acadrust::Handle> = parts[0].split(',')
+    if parts.len() < 2 {
+        return;
+    }
+    let handles: Vec<acadrust::Handle> = parts[0]
+        .split(',')
         .filter_map(|s| s.parse::<u64>().ok().map(acadrust::Handle::from))
         .collect();
-    let pos_parts: Vec<f64> = parts[1].split(',')
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    if handles.len() < 2 || pos_parts.len() < 2 { return; }
+    let pos_parts: Vec<f64> = parts[1].split(',').filter_map(|s| s.parse().ok()).collect();
+    if handles.len() < 2 || pos_parts.len() < 2 {
+        return;
+    }
 
     let px = pos_parts[0];
     let pz = pos_parts[1];
@@ -2922,7 +3162,8 @@ fn apply_mleader_collect(scene: &mut crate::scene::Scene, encoded: &str) {
             }
             leader_vertices.extend(extra_native_vertices);
             if leader_root_lengths.is_empty() && !leader_vertices.is_empty() {
-                leader_root_lengths.push(leader_vertices.len() - extra_native_root_lengths.iter().sum::<usize>());
+                leader_root_lengths
+                    .push(leader_vertices.len() - extra_native_root_lengths.iter().sum::<usize>());
             }
             leader_root_lengths.extend(extra_native_root_lengths);
             merged = true;

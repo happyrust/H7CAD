@@ -9,6 +9,7 @@ mod orbit;
 mod ortho;
 mod pan;
 mod persp;
+pub mod plot_window;
 mod properties_palette;
 mod sheetset;
 mod solid;
@@ -16,11 +17,11 @@ mod tile_horiz;
 mod tile_vert;
 mod tool_palettes;
 mod ucs_icon;
-mod viewcube;
 mod view_front;
 mod view_iso;
 mod view_right;
 mod view_top;
+mod viewcube;
 mod vports_config;
 pub(crate) mod vports_join;
 mod vports_named;
@@ -30,7 +31,6 @@ mod xray;
 mod zoom_ext;
 mod zoom_in;
 mod zoom_out;
-pub mod plot_window;
 pub mod zoom_window;
 
 use crate::modules::{CadModule, RibbonGroup, RibbonItem};
@@ -82,20 +82,18 @@ impl CadModule for ViewModule {
                 // WIREFRAME and SOLID ids are special-cased in ribbon.rs
                 // for toggle-state highlighting based on Ribbon::wireframe.
                 title: "Visual Style",
-                tools: vec![
-                    RibbonItem::LargeDropdown {
-                        id: "VISUAL_STYLE",
-                        label: "Visual\nStyle",
-                        icon: wireframe::tool().icon,
-                        items: vec![
-                            ("WIREFRAME", "Wireframe", wireframe::tool().icon),
-                            ("SOLID",     "Shaded",   solid::tool().icon),
-                            ("HIDDEN",    "Hidden",   hidden::tool().icon),
-                            ("XRAY",      "X-Ray",    xray::tool().icon),
-                        ],
-                        default: "WIREFRAME",
-                    },
-                ],
+                tools: vec![RibbonItem::LargeDropdown {
+                    id: "VISUAL_STYLE",
+                    label: "Visual\nStyle",
+                    icon: wireframe::tool().icon,
+                    items: vec![
+                        ("WIREFRAME", "Wireframe", wireframe::tool().icon),
+                        ("SOLID", "Shaded", solid::tool().icon),
+                        ("HIDDEN", "Hidden", hidden::tool().icon),
+                        ("XRAY", "X-Ray", xray::tool().icon),
+                    ],
+                    default: "WIREFRAME",
+                }],
             },
             // ── Projection ────────────────────────────────────────────────────
             RibbonGroup {

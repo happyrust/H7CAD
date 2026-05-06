@@ -74,8 +74,13 @@ fn ensure_creates_imagedef_for_top_level_image_with_file_path_only() {
     let (imagedef_handle, file_name) =
         first_imagedef(&restored).expect("IMAGEDEF must be present after roundtrip");
     assert_eq!(file_name, "solo.png");
-    let image_handle = first_image_handle(&restored).expect("IMAGE must be present after roundtrip");
-    assert_ne!(image_handle, Handle::NULL, "IMAGE must now carry a 340 link");
+    let image_handle =
+        first_image_handle(&restored).expect("IMAGE must be present after roundtrip");
+    assert_ne!(
+        image_handle,
+        Handle::NULL,
+        "IMAGE must now carry a 340 link"
+    );
     assert_eq!(
         image_handle, imagedef_handle,
         "IMAGE.image_def_handle must match IMAGEDEF.handle"
@@ -85,11 +90,8 @@ fn ensure_creates_imagedef_for_top_level_image_with_file_path_only() {
 #[test]
 fn ensure_skips_image_with_empty_file_path() {
     let mut doc = CadDocument::new();
-    doc.entities.push(make_image_entity(
-        Handle::new(0x301),
-        Handle::NULL,
-        "",
-    ));
+    doc.entities
+        .push(make_image_entity(Handle::new(0x301), Handle::NULL, ""));
 
     let text = write_dxf(&doc).expect("write_dxf");
     let restored = read_dxf(&text).expect("read_dxf");

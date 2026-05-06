@@ -680,25 +680,42 @@ fn write_header(w: &mut DxfWriter, doc: &CadDocument) {
     w.pair_i16(70, doc.header.blipmode);
 
     // ── User variables ────────────────────────────────────────────────────
-    w.pair_str(9, "$USERI1"); w.pair_i16(70, doc.header.useri1);
-    w.pair_str(9, "$USERI2"); w.pair_i16(70, doc.header.useri2);
-    w.pair_str(9, "$USERI3"); w.pair_i16(70, doc.header.useri3);
-    w.pair_str(9, "$USERI4"); w.pair_i16(70, doc.header.useri4);
-    w.pair_str(9, "$USERI5"); w.pair_i16(70, doc.header.useri5);
-    w.pair_str(9, "$USERR1"); w.pair_f64(40, doc.header.userr1);
-    w.pair_str(9, "$USERR2"); w.pair_f64(40, doc.header.userr2);
-    w.pair_str(9, "$USERR3"); w.pair_f64(40, doc.header.userr3);
-    w.pair_str(9, "$USERR4"); w.pair_f64(40, doc.header.userr4);
-    w.pair_str(9, "$USERR5"); w.pair_f64(40, doc.header.userr5);
+    w.pair_str(9, "$USERI1");
+    w.pair_i16(70, doc.header.useri1);
+    w.pair_str(9, "$USERI2");
+    w.pair_i16(70, doc.header.useri2);
+    w.pair_str(9, "$USERI3");
+    w.pair_i16(70, doc.header.useri3);
+    w.pair_str(9, "$USERI4");
+    w.pair_i16(70, doc.header.useri4);
+    w.pair_str(9, "$USERI5");
+    w.pair_i16(70, doc.header.useri5);
+    w.pair_str(9, "$USERR1");
+    w.pair_f64(40, doc.header.userr1);
+    w.pair_str(9, "$USERR2");
+    w.pair_f64(40, doc.header.userr2);
+    w.pair_str(9, "$USERR3");
+    w.pair_f64(40, doc.header.userr3);
+    w.pair_str(9, "$USERR4");
+    w.pair_f64(40, doc.header.userr4);
+    w.pair_str(9, "$USERR5");
+    w.pair_f64(40, doc.header.userr5);
 
     // ── Geolocation / 3D walk / misc ──────────────────────────────────────
-    w.pair_str(9, "$LATITUDE"); w.pair_f64(40, doc.header.latitude);
-    w.pair_str(9, "$LONGITUDE"); w.pair_f64(40, doc.header.longitude);
-    w.pair_str(9, "$TIMEZONE"); w.pair_i16(70, doc.header.timezone);
-    w.pair_str(9, "$STEPSPERSEC"); w.pair_f64(40, doc.header.stepspersec);
-    w.pair_str(9, "$STEPSIZE"); w.pair_f64(40, doc.header.stepsize);
-    w.pair_str(9, "$LENSLENGTH"); w.pair_f64(40, doc.header.lenslength);
-    w.pair_str(9, "$SKETCHINC"); w.pair_f64(40, doc.header.sketchinc);
+    w.pair_str(9, "$LATITUDE");
+    w.pair_f64(40, doc.header.latitude);
+    w.pair_str(9, "$LONGITUDE");
+    w.pair_f64(40, doc.header.longitude);
+    w.pair_str(9, "$TIMEZONE");
+    w.pair_i16(70, doc.header.timezone);
+    w.pair_str(9, "$STEPSPERSEC");
+    w.pair_f64(40, doc.header.stepspersec);
+    w.pair_str(9, "$STEPSIZE");
+    w.pair_f64(40, doc.header.stepsize);
+    w.pair_str(9, "$LENSLENGTH");
+    w.pair_f64(40, doc.header.lenslength);
+    w.pair_str(9, "$SKETCHINC");
+    w.pair_f64(40, doc.header.sketchinc);
 
     // ── Spline defaults ───────────────────────────────────────────────────
     w.pair_str(9, "$SPLFRAME");
@@ -975,14 +992,8 @@ fn write_classes(w: &mut DxfWriter, doc: &CadDocument) {
         w.pair_str(3, &cls.application_name);
         w.pair_i32(90, cls.proxy_flags);
         w.pair_i32(91, cls.instance_count);
-        w.pair_i16(
-            280,
-            if cls.was_a_proxy { 1 } else { 0 },
-        );
-        w.pair_i16(
-            281,
-            if cls.is_an_entity { 1 } else { 0 },
-        );
+        w.pair_i16(280, if cls.was_a_proxy { 1 } else { 0 });
+        w.pair_i16(281, if cls.is_an_entity { 1 } else { 0 });
     }
 
     w.pair_str(0, "ENDSEC");
@@ -1132,8 +1143,9 @@ fn write_dimstyle_table(w: &mut DxfWriter, doc: &CadDocument) {
         w.pair_f64(40, ds.dimscale);
         w.pair_f64(41, ds.dimasz);
         w.pair_f64(42, ds.dimexo);
-        w.pair_f64(44, ds.dimgap);
+        w.pair_f64(44, ds.dimexe);
         w.pair_f64(140, ds.dimtxt);
+        w.pair_f64(147, ds.dimgap);
         w.pair_i16(271, ds.dimdec);
         w.pair_i16(277, ds.dimlunit);
         w.pair_i16(275, ds.dimaunit);

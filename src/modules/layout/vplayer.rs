@@ -53,7 +53,11 @@ impl CadCommand for VplayerCommand {
         let op = tokens[0].to_uppercase();
 
         // Check for ALL keyword: "F ALL layer1 layer2" or "T ALL layer1"
-        let (all_viewports, layer_start) = if tokens.get(1).map(|s| s.to_uppercase().as_str() == "ALL").unwrap_or(false) {
+        let (all_viewports, layer_start) = if tokens
+            .get(1)
+            .map(|s| s.to_uppercase().as_str() == "ALL")
+            .unwrap_or(false)
+        {
             (true, 2)
         } else {
             (false, 1)
@@ -69,7 +73,11 @@ impl CadCommand for VplayerCommand {
         }
 
         // Handle::NULL signals "apply to all viewports" in cmd_result.rs
-        let vp_handle = if all_viewports { acadrust::Handle::NULL } else { self.vp_handle };
+        let vp_handle = if all_viewports {
+            acadrust::Handle::NULL
+        } else {
+            self.vp_handle
+        };
 
         match op.as_str() {
             "F" | "FREEZE" => Some(CmdResult::VpLayerUpdate {

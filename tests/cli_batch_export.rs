@@ -298,7 +298,10 @@ fn cli_infers_output_path_from_input_stem() {
         .output()
         .expect("spawn h7cad with inferred output");
 
-    assert!(output.status.success(), "expected exit 0 for inferred output");
+    assert!(
+        output.status.success(),
+        "expected exit 0 for inferred output"
+    );
     let bytes = fs::read(&expected_output).expect("inferred output pdf should exist");
     assert!(bytes.starts_with(b"%PDF-"));
 

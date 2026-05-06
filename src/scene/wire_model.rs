@@ -73,8 +73,12 @@ impl WireModel {
     pub const CYAN: [f32; 4] = [0.25, 0.85, 1.00, 1.0];
     pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
     /// Sentinel AABB that never rejects any snap query.
-    pub const UNBOUNDED_AABB: [f32; 4] =
-        [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY];
+    pub const UNBOUNDED_AABB: [f32; 4] = [
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        f32::INFINITY,
+    ];
 
     /// Create a solid wire (no dash pattern, 1px weight).
     pub fn solid(name: String, points: Vec<[f32; 3]>, color: [f32; 4], selected: bool) -> Self {

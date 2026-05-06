@@ -37,24 +37,34 @@ pub struct DimBreakCommand {
 
 impl DimBreakCommand {
     pub fn new() -> Self {
-        Self { step: Step::PickDim }
+        Self {
+            step: Step::PickDim,
+        }
     }
 }
 
 impl CadCommand for DimBreakCommand {
-    fn name(&self) -> &'static str { "DIMBREAK" }
+    fn name(&self) -> &'static str {
+        "DIMBREAK"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             Step::PickDim => "DIMBREAK  Select dimension to break:".into(),
-            Step::PickCrossing { .. } => "DIMBREAK  Select object to break at, or Enter for Auto:".into(),
+            Step::PickCrossing { .. } => {
+                "DIMBREAK  Select object to break at, or Enter for Auto:".into()
+            }
         }
     }
 
-    fn needs_entity_pick(&self) -> bool { true }
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
         match &self.step {
             Step::PickDim => {
                 self.step = Step::PickCrossing { dim_handle: handle };
@@ -71,7 +81,9 @@ impl CadCommand for DimBreakCommand {
         }
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
 
     fn on_enter(&mut self) -> CmdResult {
         // Auto mode: apply to all crossings

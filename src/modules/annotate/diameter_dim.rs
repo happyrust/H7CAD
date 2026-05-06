@@ -1,7 +1,7 @@
 // DIMDIAMETER command — diameter dimension for circles and arcs.
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -30,18 +30,22 @@ pub struct DiameterDimensionCommand {
 
 impl DiameterDimensionCommand {
     pub fn new() -> Self {
-        Self { step: Step::CenterPoint }
+        Self {
+            step: Step::CenterPoint,
+        }
     }
 }
 
 impl CadCommand for DiameterDimensionCommand {
-    fn name(&self) -> &'static str { "DIMDIAMETER" }
+    fn name(&self) -> &'static str {
+        "DIMDIAMETER"
+    }
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::CenterPoint    => "DIMDIAMETER  Specify center point:".into(),
-            Step::ArcPoint(_)    => "DIMDIAMETER  Specify point on circle:".into(),
-            Step::TextPoint {..} => "DIMDIAMETER  Specify dimension line location:".into(),
+            Step::CenterPoint => "DIMDIAMETER  Specify center point:".into(),
+            Step::ArcPoint(_) => "DIMDIAMETER  Specify point on circle:".into(),
+            Step::TextPoint { .. } => "DIMDIAMETER  Specify dimension line location:".into(),
         }
     }
 
@@ -83,7 +87,9 @@ impl CadCommand for DiameterDimensionCommand {
         }
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         match self.step {
@@ -109,9 +115,9 @@ fn preview_line(a: Vec3, b: Vec3) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }

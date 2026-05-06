@@ -7,12 +7,16 @@
 //
 //   BREAK @ (at-sign as second point) → Break at a single point (splits without gap).
 
-use acadrust::entities::{Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
-use truck_modeling::base::{BoundedCurve, Cut};
-use crate::modules::home::modify::spline_ops::{bspline_to_spline, spline_nearest_t, spline_to_bspline};
+use crate::modules::home::modify::spline_ops::{
+    bspline_to_spline, spline_nearest_t, spline_to_bspline,
+};
 use crate::types::Vector3;
+use acadrust::entities::{
+    Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt,
+};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
+use truck_modeling::base::{BoundedCurve, Cut};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -37,17 +41,21 @@ pub fn tool() -> ToolDef {
 pub fn break_entity(entity: &EntityType, p1: Vec3, p2: Vec3) -> Option<Vec<EntityType>> {
     match entity {
         EntityType::Line(line) => Some(break_line(line, p1, p2)),
-        EntityType::Arc(arc)   => Some(break_arc(arc, p1, p2)),
-        EntityType::Circle(c)  => Some(break_circle(c, p1, p2)),
+        EntityType::Arc(arc) => Some(break_arc(arc, p1, p2)),
+        EntityType::Circle(c) => Some(break_circle(c, p1, p2)),
         EntityType::LwPolyline(p) => Some(break_lwpolyline(p, p1, p2)),
-        EntityType::Ellipse(e)    => Some(break_ellipse(e, p1, p2)),
-        EntityType::Spline(s)     => Some(break_spline(s, p1, p2)),
+        EntityType::Ellipse(e) => Some(break_ellipse(e, p1, p2)),
+        EntityType::Spline(s) => Some(break_spline(s, p1, p2)),
         _ => None,
     }
 }
 
 fn break_line(line: &LineEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
-    let s = Vec3::new(line.start.x as f32, line.start.z as f32, line.start.y as f32);
+    let s = Vec3::new(
+        line.start.x as f32,
+        line.start.z as f32,
+        line.start.y as f32,
+    );
     let e = Vec3::new(line.end.x as f32, line.end.z as f32, line.end.y as f32);
     let dir = e - s;
     let len2 = dir.length_squared();
@@ -189,7 +197,9 @@ fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     let cx = ell.center.x;
     let cy = ell.center.y;
     let a = (ell.major_axis.x.powi(2) + ell.major_axis.y.powi(2)).sqrt();
-    if a < 1e-9 { return vec![EntityType::Ellipse(ell.clone())]; }
+    if a < 1e-9 {
+        return vec![EntityType::Ellipse(ell.clone())];
+    }
     let _b = a * ell.minor_axis_ratio;
     let nx = ell.major_axis.x / a;
     let ny = ell.major_axis.y / a;
@@ -198,7 +208,7 @@ fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     let param_of = |pt: Vec3| -> f64 {
         let rx = pt.x as f64 - cx;
         let ry = pt.z as f64 - cy; // Y-up: DXF Y → world Z
-        let xl =  rx * nx + ry * ny;
+        let xl = rx * nx + ry * ny;
         let yl = -rx * ny + ry * nx;
         yl.atan2(xl) // atan2(yl/b*b, xl/a*a) simplifies to atan2(yl,xl) for ordering
     };
@@ -212,11 +222,22 @@ fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     // Clamp both params to arc range (same logic as clamp_to_arc for arcs)
     let span_deg = {
         let s = t1 - t0;
-        if s <= 0.0 { s + std::f64::consts::TAU } else { s }
+        if s <= 0.0 {
+            s + std::f64::consts::TAU
+        } else {
+            s
+        }
     };
     let clamp = |a: f64| -> f64 {
-        let rel = ((a - t0) % std::f64::consts::TAU + std::f64::consts::TAU) % std::f64::consts::TAU;
-        if rel <= span_deg { a } else if rel < span_deg + (std::f64::consts::TAU - span_deg) / 2.0 { t1 } else { t0 }
+        let rel =
+            ((a - t0) % std::f64::consts::TAU + std::f64::consts::TAU) % std::f64::consts::TAU;
+        if rel <= span_deg {
+            a
+        } else if rel < span_deg + (std::f64::consts::TAU - span_deg) / 2.0 {
+            t1
+        } else {
+            t0
+        }
     };
     let a1_on = clamp(pa1);
     let a2_on = clamp(pa2);
@@ -229,7 +250,7 @@ fn break_ellipse(ell: &EllipseEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     let mut result = ell.clone();
     result.common.handle = Handle::NULL;
     result.start_parameter = a2_on;
-    result.end_parameter   = a1_on;
+    result.end_parameter = a1_on;
     vec![EntityType::Ellipse(result)]
 }
 
@@ -257,11 +278,16 @@ fn clamp_to_arc(a: f32, start: f32, end: f32) -> f32 {
 
 /// Find the index of the polyline vertex closest to `pt`.
 fn nearest_pline_param(p: &LwPolyline, pt: Vec3) -> usize {
-    p.vertices.iter().enumerate().min_by_key(|(_, v)| {
-        let dx = v.location.x as f32 - pt.x;
-        let dy = v.location.y as f32 - pt.z;
-        ((dx * dx + dy * dy) * 1e6) as i64
-    }).map(|(i, _)| i).unwrap_or(0)
+    p.vertices
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, v)| {
+            let dx = v.location.x as f32 - pt.x;
+            let dy = v.location.y as f32 - pt.z;
+            ((dx * dx + dy * dy) * 1e6) as i64
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(0)
 }
 
 fn world_to_dxf(v: Vec3) -> Vec3 {
@@ -307,13 +333,13 @@ fn break_spline(spl: &SplineEnt, p1: Vec3, p2: Vec3) -> Vec<EntityType> {
     // Left piece [t0, ta]
     if ta - t0 > 1e-9 {
         let mut left = bs.clone();
-        let _right = left.cut(ta);   // left = [t0, ta]
+        let _right = left.cut(ta); // left = [t0, ta]
         result.push(EntityType::Spline(bspline_to_spline(&left, spl)));
     }
     // Right piece [tb, t_end]
     if t_end - tb > 1e-9 {
         let mut full = bs.clone();
-        let right = full.cut(tb);    // right = [tb, t_end]
+        let right = full.cut(tb); // right = [tb, t_end]
         result.push(EntityType::Spline(bspline_to_spline(&right, spl)));
     }
     result
@@ -330,12 +356,17 @@ pub struct BreakInteractiveCommand {
 
 impl BreakInteractiveCommand {
     pub fn new() -> Self {
-        Self { target: None, p1: None }
+        Self {
+            target: None,
+            p1: None,
+        }
     }
 }
 
 impl CadCommand for BreakInteractiveCommand {
-    fn name(&self) -> &'static str { "BREAK" }
+    fn name(&self) -> &'static str {
+        "BREAK"
+    }
 
     fn prompt(&self) -> String {
         if self.target.is_none() {
@@ -397,7 +428,9 @@ impl BreakAtPointCommand {
 }
 
 impl CadCommand for BreakAtPointCommand {
-    fn name(&self) -> &'static str { "BREAKATPOINT" }
+    fn name(&self) -> &'static str {
+        "BREAKATPOINT"
+    }
 
     fn prompt(&self) -> String {
         if self.target.is_none() {
@@ -421,7 +454,11 @@ impl CadCommand for BreakAtPointCommand {
 
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         match self.target {
-            Some(handle) => CmdResult::BreakEntity { handle, p1: pt, p2: pt },
+            Some(handle) => CmdResult::BreakEntity {
+                handle,
+                p1: pt,
+                p2: pt,
+            },
             None => CmdResult::Cancel,
         }
     }

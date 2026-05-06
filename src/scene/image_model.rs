@@ -49,7 +49,14 @@ impl ImageModel {
         let opacity = 1.0 - img.fade as f32 / 100.0;
 
         let (pixels, width, height) = load_pixels(&img.file_path)?;
-        Some(Self { file_path: img.file_path.clone(), pixels: Arc::new(pixels), width, height, opacity, corners })
+        Some(Self {
+            file_path: img.file_path.clone(),
+            pixels: Arc::new(pixels),
+            width,
+            height,
+            opacity,
+            corners,
+        })
     }
 }
 

@@ -12,10 +12,10 @@ use crate::types::{Color as AcadColor, LineWeight};
 use iced::widget::{button, column, container, mouse_area, row, scrollable, svg, text};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
+use crate::app::Message;
 use crate::modules::registry;
 use crate::modules::{CadModule, IconKind, RibbonItem};
-use crate::ui::properties::{LinetypeItem, color_picker_dropdown, lw_options};
-use crate::app::Message;
+use crate::ui::properties::{color_picker_dropdown, lw_options, LinetypeItem};
 
 mod widgets;
 use widgets::{StyleContext, *};
@@ -104,10 +104,14 @@ impl Ribbon {
 
     pub fn set_styles(
         &mut self,
-        text: Vec<String>, active_text: &str,
-        dim: Vec<String>, active_dim: &str,
-        mleader: Vec<String>, active_mleader: &str,
-        table: Vec<String>, active_table: &str,
+        text: Vec<String>,
+        active_text: &str,
+        dim: Vec<String>,
+        active_dim: &str,
+        mleader: Vec<String>,
+        active_mleader: &str,
+        table: Vec<String>,
+        active_table: &str,
     ) {
         self.text_style_names = text;
         self.active_text_style = active_text.to_string();
@@ -187,7 +191,12 @@ impl Ribbon {
 
     // ── View ──────────────────────────────────────────────────────────────
 
-    pub fn view(&self, is_paper: bool, undo_count: usize, redo_count: usize) -> Element<'_, Message> {
+    pub fn view(
+        &self,
+        is_paper: bool,
+        undo_count: usize,
+        redo_count: usize,
+    ) -> Element<'_, Message> {
         // ── Logo ──────────────────────────────────────────────────────────
         let logo_svg = {
             let handle = svg::Handle::from_memory(include_bytes!("../../../assets/logo.svg"));
@@ -217,14 +226,28 @@ impl Ribbon {
 
         // ── Tab buttons ───────────────────────────────────────────────────
         let history_controls = row![
-            render_history_control("↶", "Undo", UNDO_HISTORY_ID, undo_count, &self.open_dropdown),
-            render_history_control("↷", "Redo", REDO_HISTORY_ID, redo_count, &self.open_dropdown),
+            render_history_control(
+                "↶",
+                "Undo",
+                UNDO_HISTORY_ID,
+                undo_count,
+                &self.open_dropdown
+            ),
+            render_history_control(
+                "↷",
+                "Redo",
+                REDO_HISTORY_ID,
+                redo_count,
+                &self.open_dropdown
+            ),
         ]
         .spacing(TOP_HIST_GAP)
         .align_y(iced::Center);
 
         let tab_buttons = self.modules.iter().enumerate().fold(
-            row![logo, history_controls].align_y(iced::Center).spacing(6),
+            row![logo, history_controls]
+                .align_y(iced::Center)
+                .spacing(6),
             |row_acc, (i, module)| {
                 if module.id() == "layout" && !is_paper {
                     return row_acc;
@@ -232,16 +255,40 @@ impl Ribbon {
 
                 let is_active = i == self.active;
                 let is_contextual = module.id() == "layout";
-                let accent = if is_contextual { ACCENT_GOLD } else { ACCENT_BLUE };
-                let text_inactive = if is_contextual {
-                    Color { r: 0.90, g: 0.72, b: 0.30, a: 1.0 }
+                let accent = if is_contextual {
+                    ACCENT_GOLD
                 } else {
-                    Color { r: 0.75, g: 0.75, b: 0.75, a: 1.0 }
+                    ACCENT_BLUE
+                };
+                let text_inactive = if is_contextual {
+                    Color {
+                        r: 0.90,
+                        g: 0.72,
+                        b: 0.30,
+                        a: 1.0,
+                    }
+                } else {
+                    Color {
+                        r: 0.75,
+                        g: 0.75,
+                        b: 0.75,
+                        a: 1.0,
+                    }
                 };
                 let hover_bg = if is_contextual {
-                    Color { r: 0.28, g: 0.24, b: 0.12, a: 1.0 }
+                    Color {
+                        r: 0.28,
+                        g: 0.24,
+                        b: 0.12,
+                        a: 1.0,
+                    }
                 } else {
-                    Color { r: 0.25, g: 0.25, b: 0.25, a: 1.0 }
+                    Color {
+                        r: 0.25,
+                        g: 0.25,
+                        b: 0.25,
+                        a: 1.0,
+                    }
                 };
                 let btn = container(
                     button(text(module.title()).size(12))
@@ -252,9 +299,17 @@ impl Ribbon {
                                 (false, button::Status::Hovered) => hover_bg,
                                 _ => Color::TRANSPARENT,
                             })),
-                            text_color: if is_active { Color::WHITE } else { text_inactive },
+                            text_color: if is_active {
+                                Color::WHITE
+                            } else {
+                                text_inactive
+                            },
                             border: Border {
-                                color: if is_active { accent } else { Color::TRANSPARENT },
+                                color: if is_active {
+                                    accent
+                                } else {
+                                    Color::TRANSPARENT
+                                },
                                 width: if is_active { 2.0 } else { 0.0 },
                                 radius: 0.0.into(),
                             },
@@ -265,7 +320,11 @@ impl Ribbon {
                 )
                 .style(move |_: &Theme| container::Style {
                     border: Border {
-                        color: if is_active { accent } else { Color::TRANSPARENT },
+                        color: if is_active {
+                            accent
+                        } else {
+                            Color::TRANSPARENT
+                        },
                         width: if is_active { 2.0 } else { 0.0 },
                         radius: 0.0.into(),
                     },
@@ -344,10 +403,10 @@ impl Ribbon {
                         let is_large = matches!(
                             &item,
                             RibbonItem::LargeTool(_)
-                            | RibbonItem::LargeDropdown { .. }
-                            | RibbonItem::LayerComboGroup { .. }
-                            | RibbonItem::PropertiesGroup { .. }
-                            | RibbonItem::StyleComboGroup { .. }
+                                | RibbonItem::LargeDropdown { .. }
+                                | RibbonItem::LayerComboGroup { .. }
+                                | RibbonItem::PropertiesGroup { .. }
+                                | RibbonItem::StyleComboGroup { .. }
                         );
 
                         if is_large {
@@ -391,8 +450,7 @@ impl Ribbon {
                     widgets.push(
                         column![
                             tools_el,
-                            container(text(group.title).size(9).color(GROUP_LABEL))
-                                .padding([1, 4]),
+                            container(text(group.title).size(9).color(GROUP_LABEL)).padding([1, 4]),
                         ]
                         .spacing(0)
                         .padding([3u16, 4])
@@ -518,8 +576,12 @@ impl Ribbon {
         'outer: for group in &groups {
             for item in &group.tools {
                 let (id, items, default) = match item {
-                    RibbonItem::Dropdown { id, items, default, .. } => (id, items, default),
-                    RibbonItem::LargeDropdown { id, items, default, .. } => (id, items, default),
+                    RibbonItem::Dropdown {
+                        id, items, default, ..
+                    } => (id, items, default),
+                    RibbonItem::LargeDropdown {
+                        id, items, default, ..
+                    } => (id, items, default),
                     _ => continue,
                 };
                 if *id == open_id {
@@ -539,7 +601,11 @@ impl Ribbon {
                 let is_current = *cmd == last_cmd;
                 let checkmark = text(if is_current { "✓" } else { "  " })
                     .size(11)
-                    .color(if is_current { CHECK_COLOR } else { Color::TRANSPARENT })
+                    .color(if is_current {
+                        CHECK_COLOR
+                    } else {
+                        Color::TRANSPARENT
+                    })
                     .width(Length::Fixed(14.0));
                 let icon_el: Element<Message> = match *item_icon {
                     IconKind::Glyph(s) => text(s)
@@ -552,9 +618,10 @@ impl Ribbon {
                         svg(handle).width(20).height(20).into()
                     }
                 };
-                let label_el = text(*label)
-                    .size(11)
-                    .color(if is_current { LABEL_ON } else { LABEL_OFF });
+                let label_el =
+                    text(*label)
+                        .size(11)
+                        .color(if is_current { LABEL_ON } else { LABEL_OFF });
 
                 button(
                     row![checkmark, icon_el, label_el]
@@ -626,7 +693,12 @@ impl Ribbon {
                     .style(move |_: &Theme| container::Style {
                         background: Some(Background::Color(lc)),
                         border: Border {
-                            color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.5 },
+                            color: Color {
+                                r: 0.0,
+                                g: 0.0,
+                                b: 0.0,
+                                a: 0.5,
+                            },
                             width: 1.0,
                             radius: 1.0.into(),
                         },
@@ -635,30 +707,63 @@ impl Ribbon {
                     .width(12)
                     .height(12);
 
-                let vis = text(if lv { "●" } else { "○" })
-                    .size(10)
-                    .color(if lv {
-                        Color { r: 0.95, g: 0.85, b: 0.20, a: 1.0 }
-                    } else {
-                        Color { r: 0.45, g: 0.45, b: 0.45, a: 1.0 }
-                    });
-                let freeze = text("✱").size(10).color(if lf {
-                    Color { r: 0.40, g: 0.80, b: 1.00, a: 1.0 }
+                let vis = text(if lv { "●" } else { "○" }).size(10).color(if lv {
+                    Color {
+                        r: 0.95,
+                        g: 0.85,
+                        b: 0.20,
+                        a: 1.0,
+                    }
                 } else {
-                    Color { r: 0.95, g: 0.85, b: 0.20, a: 1.0 }
+                    Color {
+                        r: 0.45,
+                        g: 0.45,
+                        b: 0.45,
+                        a: 1.0,
+                    }
+                });
+                let freeze = text("✱").size(10).color(if lf {
+                    Color {
+                        r: 0.40,
+                        g: 0.80,
+                        b: 1.00,
+                        a: 1.0,
+                    }
+                } else {
+                    Color {
+                        r: 0.95,
+                        g: 0.85,
+                        b: 0.20,
+                        a: 1.0,
+                    }
                 });
                 let lock = text(if ll { "🔒" } else { "🔓" }).size(10).color(if ll {
-                    Color { r: 0.95, g: 0.70, b: 0.20, a: 1.0 }
+                    Color {
+                        r: 0.95,
+                        g: 0.70,
+                        b: 0.20,
+                        a: 1.0,
+                    }
                 } else {
-                    Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }
+                    Color {
+                        r: 0.55,
+                        g: 0.55,
+                        b: 0.55,
+                        a: 1.0,
+                    }
                 });
                 let checkmark = text(if is_active { "✓" } else { "  " })
                     .size(11)
-                    .color(if is_active { CHECK_COLOR } else { Color::TRANSPARENT })
+                    .color(if is_active {
+                        CHECK_COLOR
+                    } else {
+                        Color::TRANSPARENT
+                    })
                     .width(Length::Fixed(14.0));
-                let label = text(&info.name)
-                    .size(11)
-                    .color(if is_active { LABEL_ON } else { LABEL_OFF });
+                let label =
+                    text(&info.name)
+                        .size(11)
+                        .color(if is_active { LABEL_ON } else { LABEL_OFF });
 
                 button(
                     row![checkmark, vis, freeze, lock, swatch, label]
@@ -682,7 +787,11 @@ impl Ribbon {
         let panel = container(column(rows))
             .style(|_: &Theme| container::Style {
                 background: Some(Background::Color(PANEL_BG)),
-                border: Border { color: PANEL_BORDER, width: 1.0, radius: 3.0.into() },
+                border: Border {
+                    color: PANEL_BORDER,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
                 ..Default::default()
             })
             .width(Length::Fixed(220.0));
@@ -693,11 +802,19 @@ impl Ribbon {
         let positioned = container(panel)
             .align_left(Fill)
             .align_top(Fill)
-            .padding(Padding { top: top_offset, left: left_offset, ..Default::default() })
+            .padding(Padding {
+                top: top_offset,
+                left: left_offset,
+                ..Default::default()
+            })
             .width(Fill)
             .height(Fill);
 
-        Some(mouse_area(positioned).on_press(Message::CloseRibbonDropdown).into())
+        Some(
+            mouse_area(positioned)
+                .on_press(Message::CloseRibbonDropdown)
+                .into(),
+        )
     }
 
     fn prop_color_overlay(&self) -> Option<Element<'_, Message>> {
@@ -712,7 +829,11 @@ impl Ribbon {
         let panel = container(picker)
             .style(|_: &Theme| container::Style {
                 background: Some(Background::Color(PANEL_BG)),
-                border: Border { color: PANEL_BORDER, width: 1.0, radius: 3.0.into() },
+                border: Border {
+                    color: PANEL_BORDER,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
                 ..Default::default()
             })
             .width(Length::Fixed(200.0));
@@ -723,19 +844,33 @@ impl Ribbon {
         let positioned = container(panel)
             .align_left(Fill)
             .align_top(Fill)
-            .padding(Padding { top: top_offset, left: left_offset, ..Default::default() })
+            .padding(Padding {
+                top: top_offset,
+                left: left_offset,
+                ..Default::default()
+            })
             .width(Fill)
             .height(Fill);
 
-        Some(mouse_area(positioned).on_press(Message::CloseRibbonDropdown).into())
+        Some(
+            mouse_area(positioned)
+                .on_press(Message::CloseRibbonDropdown)
+                .into(),
+        )
     }
 
     fn prop_linetype_overlay(&self) -> Option<Element<'_, Message>> {
         let active_lt = &self.active_linetype;
 
         let mut items: Vec<LinetypeItem> = vec![
-            LinetypeItem { name: "ByLayer".to_string(), art: String::new() },
-            LinetypeItem { name: "ByBlock".to_string(), art: String::new() },
+            LinetypeItem {
+                name: "ByLayer".to_string(),
+                art: String::new(),
+            },
+            LinetypeItem {
+                name: "ByBlock".to_string(),
+                art: String::new(),
+            },
         ];
         for lt in &self.available_linetypes {
             if lt.name != "ByLayer" && lt.name != "ByBlock" {
@@ -749,34 +884,50 @@ impl Ribbon {
                 let is_cur = lt.name == *active_lt;
                 let check = text(if is_cur { "✓" } else { "  " })
                     .size(11)
-                    .color(if is_cur { CHECK_COLOR } else { Color::TRANSPARENT })
+                    .color(if is_cur {
+                        CHECK_COLOR
+                    } else {
+                        Color::TRANSPARENT
+                    })
                     .width(Length::Fixed(14.0));
                 let name_col = text(lt.name.clone())
                     .size(11)
                     .color(if is_cur { LABEL_ON } else { LABEL_OFF })
                     .width(Length::Fixed(90.0));
-                let art_col =
-                    text(lt.art.clone()).size(9).color(Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 });
+                let art_col = text(lt.art.clone()).size(9).color(Color {
+                    r: 0.55,
+                    g: 0.55,
+                    b: 0.55,
+                    a: 1.0,
+                });
                 let name = lt.name.clone();
-                button(row![check, name_col, art_col].spacing(4).align_y(iced::Center))
-                    .on_press(Message::RibbonLinetypeChanged(name))
-                    .style(|_: &Theme, status| button::Style {
-                        background: Some(Background::Color(match status {
-                            button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
-                            _ => Color::TRANSPARENT,
-                        })),
-                        ..Default::default()
-                    })
-                    .width(Fill)
-                    .padding([4, 6])
-                    .into()
+                button(
+                    row![check, name_col, art_col]
+                        .spacing(4)
+                        .align_y(iced::Center),
+                )
+                .on_press(Message::RibbonLinetypeChanged(name))
+                .style(|_: &Theme, status| button::Style {
+                    background: Some(Background::Color(match status {
+                        button::Status::Hovered | button::Status::Pressed => ROW_HOVER,
+                        _ => Color::TRANSPARENT,
+                    })),
+                    ..Default::default()
+                })
+                .width(Fill)
+                .padding([4, 6])
+                .into()
             })
             .collect();
 
         let list = container(scrollable(column(rows)).height(Length::Fixed(200.0)))
             .style(|_: &Theme| container::Style {
                 background: Some(Background::Color(PANEL_BG)),
-                border: Border { color: PANEL_BORDER, width: 1.0, radius: 3.0.into() },
+                border: Border {
+                    color: PANEL_BORDER,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
                 ..Default::default()
             })
             .width(Length::Fixed(220.0));
@@ -787,11 +938,19 @@ impl Ribbon {
         let positioned = container(list)
             .align_left(Fill)
             .align_top(Fill)
-            .padding(Padding { top: top_offset, left: left_offset, ..Default::default() })
+            .padding(Padding {
+                top: top_offset,
+                left: left_offset,
+                ..Default::default()
+            })
             .width(Fill)
             .height(Fill);
 
-        Some(mouse_area(positioned).on_press(Message::CloseRibbonDropdown).into())
+        Some(
+            mouse_area(positioned)
+                .on_press(Message::CloseRibbonDropdown)
+                .into(),
+        )
     }
 
     fn prop_lw_overlay(&self) -> Option<Element<'_, Message>> {
@@ -803,7 +962,11 @@ impl Ribbon {
                 let label = item.to_string();
                 let check = text(if is_cur { "✓" } else { "  " })
                     .size(11)
-                    .color(if is_cur { CHECK_COLOR } else { Color::TRANSPARENT })
+                    .color(if is_cur {
+                        CHECK_COLOR
+                    } else {
+                        Color::TRANSPARENT
+                    })
                     .width(Length::Fixed(14.0));
                 button(
                     row![
@@ -841,7 +1004,11 @@ impl Ribbon {
         let panel = container(column(rows))
             .style(|_: &Theme| container::Style {
                 background: Some(Background::Color(PANEL_BG)),
-                border: Border { color: PANEL_BORDER, width: 1.0, radius: 3.0.into() },
+                border: Border {
+                    color: PANEL_BORDER,
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
                 ..Default::default()
             })
             .width(Length::Fixed(width));
@@ -852,11 +1019,19 @@ impl Ribbon {
         let positioned = container(panel)
             .align_left(Fill)
             .align_top(Fill)
-            .padding(Padding { top: top_offset, left: left_offset, ..Default::default() })
+            .padding(Padding {
+                top: top_offset,
+                left: left_offset,
+                ..Default::default()
+            })
             .width(Fill)
             .height(Fill);
 
-        Some(mouse_area(positioned).on_press(Message::CloseRibbonDropdown).into())
+        Some(
+            mouse_area(positioned)
+                .on_press(Message::CloseRibbonDropdown)
+                .into(),
+        )
     }
 }
 

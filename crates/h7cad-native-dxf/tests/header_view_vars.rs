@@ -37,10 +37,7 @@ fn header_writes_all_3_view_vars() {
 
     let text = write_dxf(&doc).expect("write");
     for var in &["$VIEWCTR", "$VIEWSIZE", "$VIEWDIR"] {
-        assert!(
-            text.contains(var),
-            "writer must emit {var}; got:\n{text}"
-        );
+        assert!(text.contains(var), "writer must emit {var}; got:\n{text}");
     }
 }
 

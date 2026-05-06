@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sample</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1a1a}
+#viewport{width:100%;height:100%;cursor:grab;overflow:hidden;position:relative}
+#viewport.panning{cursor:grabbing}
+#canvas{transform-origin:0 0;position:absolute;top:50%;left:50%}
+#canvas svg{display:block}
+#toolbar{position:fixed;top:12px;right:12px;display:flex;gap:6px;z-index:100}
+#toolbar button{background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:4px;padding:6px 14px;font:13px/1 system-ui;cursor:pointer}
+#toolbar button:hover{background:#3a3a3a}
+#info{position:fixed;bottom:12px;left:12px;color:#888;font:11px/1.4 monospace;z-index:100;pointer-events:none}
+#layers{position:fixed;top:12px;left:12px;z-index:100;background:#222;border:1px solid #444;border-radius:6px;max-height:80vh;display:flex;flex-direction:column}
+#layers-header{display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid #333;cursor:pointer;user-select:none}
+#layers-header span{color:#ccc;font:bold 12px/1 system-ui;flex:1}
+#layers-header .arrow{color:#888;font:11px monospace;margin-left:8px}
+#layers-list{overflow-y:auto;padding:6px 10px;display:block}
+#layers-list.collapsed{display:none}
+#layers-list label{display:flex;align-items:center;gap:6px;padding:3px 0;color:#bbb;font:12px/1.4 system-ui;cursor:pointer;white-space:nowrap}
+#layers-list label:hover{color:#fff}
+#layers-list input{accent-color:#0078d7}
+#layers-btns{display:flex;gap:4px;padding:4px 10px 8px;border-top:1px solid #333}
+#layers-btns button{flex:1;font-size:11px;padding:3px 6px}
+#entity-info{position:fixed;bottom:12px;right:12px;z-index:100;background:#222;border:1px solid #444;border-radius:6px;padding:10px 14px;min-width:200px;display:none;font:12px/1.5 monospace;color:#ccc}
+#entity-info .close{position:absolute;top:4px;right:8px;cursor:pointer;color:#888;font:bold 14px system-ui}
+#entity-info .close:hover{color:#fff}
+#entity-info dt{color:#888;font-size:10px;text-transform:uppercase;margin-top:4px}
+#entity-info dd{color:#ddd;margin:0 0 2px}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button onclick="fit()">Fit</button>
+  <button onclick="zoomBy(1.3)">Zoom +</button>
+  <button onclick="zoomBy(0.77)">Zoom −</button>
+</div>
+<div id="layers">
+  <div id="layers-header" onclick="togglePanel()">
+    <span>Layers</span><span class="arrow" id="arrow">▼</span>
+  </div>
+  <div id="layers-list">
+    <label><input type="checkbox" checked onchange="toggleLayer('layer_0',this.checked)">0</label>
+  </div>
+  <div id="layers-btns">
+    <button onclick="allLayers(true)">All On</button>
+    <button onclick="allLayers(false)">All Off</button>
+  </div>
+</div>
+<div id="entity-info">
+  <span class="close" onclick="closeInfo()">×</span>
+  <dl id="entity-dl"></dl>
+</div>
+<div id="viewport">
+  <div id="canvas">
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 105 105" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" stroke-linecap="round" stroke-linejoin="round" fill-rule="evenodd" xml:space="preserve">
+<style type="text/css">
+[data-handle]{cursor:pointer;transition:opacity .15s}
+[data-handle]:hover{opacity:0.6}
+[data-handle].h7-sel{stroke:#0078d7!important;fill:none!important;filter:drop-shadow(0 0 3px #0078d7)}
+</style>
+<script type="text/ecmascript"><![CDATA[
+(function(){
+var sel=null;
+document.addEventListener('click',function(e){
+  var t=e.target;
+  while(t&&!t.dataset.handle)t=t.parentElement;
+  if(sel)sel.classList.remove('h7-sel');
+  if(t&&t.dataset.handle){
+    if(sel===t){sel=null;return}
+    t.classList.add('h7-sel');sel=t;
+  }else{sel=null}
+});
+})();
+]]></script>
+<rect width="105" height="105" fill="white" />
+<g transform="translate(0,105) scale(1,-1)">
+<polyline fill="none" stroke="rgb(0,0,0)" stroke-width="0.265" class="layer-layer_0" data-handle="160" data-layer="0" data-type="wire" points="2.5,2.5 102.5,2.5" />
+<polyline fill="none" stroke="rgb(0,0,0)" stroke-width="0.265" class="layer-layer_0" data-handle="161" data-layer="0" data-type="wire" points="102.5,2.5 102.5,102.5" />
+<polyline fill="none" stroke="rgb(0,0,0)" stroke-width="0.265" class="layer-layer_0" data-handle="162" data-layer="0" data-type="wire" points="102.5,102.5 2.5,102.5" />
+<polyline fill="none" stroke="rgb(0,0,0)" stroke-width="0.265" class="layer-layer_0" data-handle="163" data-layer="0" data-type="wire" points="2.5,102.5 2.5,2.5" />
+<circle cx="52.5" cy="52.5" r="25" fill="none" stroke="rgb(0,0,0)" stroke-width="0.1" class="layer-layer_0" data-handle="164" data-layer="0" data-type="circle" />
+<path d="M 172.5 52.5 A 20 20 0 0 1 132.5 52.5" fill="none" stroke="rgb(0,0,0)" stroke-width="0.1" class="layer-layer_0" data-handle="165" data-layer="0" data-type="arc" />
+<text x="12.5" y="112.5" font-size="8" font-family="SimSun, 宋体" fill="rgb(0,0,0)" class="layer-layer_0" data-handle="166" data-layer="0" data-type="text" transform="translate(12.5,112.5) scale(1,-1) translate(-12.5,-112.5)">Hello H7CAD</text>
+</g>
+</svg>
+  </div>
+</div>
+<div id="info">scroll/+- = zoom &nbsp; drag/arrows = pan &nbsp; Home = fit &nbsp; click = inspect</div>
+<script>
+(function(){
+var vp=document.getElementById('viewport'),
+    cv=document.getElementById('canvas'),
+    s=1,tx=0,ty=0,dragging=false,sx=0,sy=0,stx=0,sty=0;
+function apply(){cv.style.transform='translate('+tx+'px,'+ty+'px) scale('+s+')'}
+window.fit=function(){
+  var svg=cv.querySelector('svg');
+  if(!svg)return;
+  var vw=vp.clientWidth,vh=vp.clientHeight,
+      sw=svg.viewBox.baseVal.width||svg.clientWidth,
+      sh=svg.viewBox.baseVal.height||svg.clientHeight;
+  s=Math.min(vw/sw,vh/sh)*0.95;
+  tx=vw/2-sw*s/2;ty=vh/2-sh*s/2;
+  apply();
+};
+window.zoomBy=function(f){
+  var cx=vp.clientWidth/2,cy=vp.clientHeight/2;
+  tx=cx-(cx-tx)*f;ty=cy-(cy-ty)*f;s*=f;apply();
+};
+vp.addEventListener('wheel',function(e){
+  e.preventDefault();
+  var f=e.deltaY<0?1.1:0.909;
+  var r=vp.getBoundingClientRect();
+  var mx=e.clientX-r.left,my=e.clientY-r.top;
+  tx=mx-(mx-tx)*f;ty=my-(my-ty)*f;s*=f;apply();
+},{passive:false});
+vp.addEventListener('mousedown',function(e){
+  if(e.button!==0)return;
+  dragging=true;sx=e.clientX;sy=e.clientY;stx=tx;sty=ty;
+  vp.classList.add('panning');
+});
+window.addEventListener('mousemove',function(e){
+  if(!dragging)return;
+  tx=stx+(e.clientX-sx);ty=sty+(e.clientY-sy);apply();
+});
+window.addEventListener('mouseup',function(){
+  dragging=false;vp.classList.remove('panning');
+});
+setTimeout(fit,50);
+var infoPanel=document.getElementById('entity-info'),
+    infoDl=document.getElementById('entity-dl'),
+    selElem=null;
+function showInfo(el){
+  if(selElem)selElem.classList.remove('h7-sel');
+  if(el===selElem){selElem=null;infoPanel.style.display='none';return}
+  selElem=el;el.classList.add('h7-sel');
+  var d=el.dataset,html='';
+  if(d.handle)html+='<dt>Handle</dt><dd>'+d.handle+'</dd>';
+  if(d.type)html+='<dt>Type</dt><dd>'+d.type+'</dd>';
+  if(d.layer)html+='<dt>Layer</dt><dd>'+d.layer+'</dd>';
+  var tag=el.tagName.toLowerCase();
+  html+='<dt>SVG Element</dt><dd>'+tag+'</dd>';
+  if(tag==='circle'){
+    html+='<dt>Center</dt><dd>'+el.getAttribute('cx')+', '+el.getAttribute('cy')+'</dd>';
+    html+='<dt>Radius</dt><dd>'+el.getAttribute('r')+'</dd>';
+  }else if(tag==='text'){
+    html+='<dt>Content</dt><dd>'+el.textContent.substring(0,60)+'</dd>';
+  }
+  infoDl.innerHTML=html;
+  infoPanel.style.display='block';
+}
+window.closeInfo=function(){infoPanel.style.display='none';if(selElem)selElem.classList.remove('h7-sel');selElem=null};
+document.addEventListener('click',function(e){
+  var t=e.target;
+  while(t&&!t.dataset.handle&&t!==document.body)t=t.parentElement;
+  if(t&&t.dataset.handle){e.stopPropagation();showInfo(t)}
+},true);
+var styleSheet=null;
+function getSheet(){
+  if(!styleSheet){
+    var s=document.createElement('style');
+    document.head.appendChild(s);
+    styleSheet=s.sheet;
+  }
+  return styleSheet;
+}
+var layerRules={};
+window.toggleLayer=function(cls,on){
+  var sh=getSheet();
+  if(layerRules[cls]!==undefined){
+    sh.deleteRule(layerRules[cls]);
+    var keys=Object.keys(layerRules);
+    for(var i=0;i<keys.length;i++){
+      if(layerRules[keys[i]]>layerRules[cls])layerRules[keys[i]]--;
+    }
+    delete layerRules[cls];
+  }
+  if(!on){
+    var idx=sh.insertRule('.layer-'+cls+'{display:none!important}',sh.cssRules.length);
+    layerRules[cls]=idx;
+  }
+};
+window.allLayers=function(on){
+  var boxes=document.querySelectorAll('#layers-list input');
+  for(var i=0;i<boxes.length;i++){boxes[i].checked=on;boxes[i].onchange()}
+};
+window.togglePanel=function(){
+  var list=document.getElementById('layers-list'),
+      btns=document.getElementById('layers-btns'),
+      arrow=document.getElementById('arrow');
+  var collapsed=list.classList.toggle('collapsed');
+  if(btns)btns.style.display=collapsed?'none':'flex';
+  arrow.textContent=collapsed?'\u25B6':'\u25BC';
+};
+document.addEventListener('keydown',function(e){
+  var k=e.key,step=50;
+  if(k==='+'||k==='=')zoomBy(1.2);
+  else if(k==='-'||k==='_')zoomBy(0.833);
+  else if(k==='ArrowUp'){ty+=step;apply()}
+  else if(k==='ArrowDown'){ty-=step;apply()}
+  else if(k==='ArrowLeft'){tx+=step;apply()}
+  else if(k==='ArrowRight'){tx-=step;apply()}
+  else if(k==='Home'||k==='0')fit();
+  else if(k==='Escape')closeInfo();
+  else return;
+  e.preventDefault();
+});
+})();
+</script>
+</body>
+</html>

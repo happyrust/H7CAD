@@ -13,11 +13,11 @@
 use std::collections::HashSet;
 use std::f64::consts::TAU;
 
-use acadrust::entities::acis::{
-    SabReader, SatCoedge, SatConeSurface, SatDocument, SatEdge, SatFace, SatLoop,
-    SatPlaneSurface, SatPoint, SatPointer, SatSphereSurface, SatTorusSurface, SatVertex,
-};
 use acadrust::entities::acis::types::Sense;
+use acadrust::entities::acis::{
+    SabReader, SatCoedge, SatConeSurface, SatDocument, SatEdge, SatFace, SatLoop, SatPlaneSurface,
+    SatPoint, SatPointer, SatSphereSurface, SatTorusSurface, SatVertex,
+};
 use acadrust::entities::{Body, Region, Solid3D};
 
 use crate::scene::mesh_model::MeshModel;
@@ -38,7 +38,9 @@ fn tessellate_sat(sat: &SatDocument, name: String, color: [f32; 4]) -> Option<Me
 
     for face in sat.faces() {
         let surf_ptr = face.surface();
-        let Some(surf_rec) = sat.resolve(surf_ptr) else { continue };
+        let Some(surf_rec) = sat.resolve(surf_ptr) else {
+            continue;
+        };
         match surf_rec.entity_type.as_str() {
             "plane-surface" => {
                 if let Some(plane) = SatPlaneSurface::from_record(surf_rec) {
@@ -63,11 +65,24 @@ fn tessellate_sat(sat: &SatDocument, name: String, color: [f32; 4]) -> Option<Me
             _ => {}
         }
     }
-    if indices.is_empty() { return None; }
-    Some(MeshModel { name, verts, normals, indices, color, selected: false })
+    if indices.is_empty() {
+        return None;
+    }
+    Some(MeshModel {
+        name,
+        verts,
+        normals,
+        indices,
+        color,
+        selected: false,
+    })
 }
 
-fn parse_acis(sat_fn: impl FnOnce() -> Option<SatDocument>, is_binary: bool, sab_data: &[u8]) -> Option<SatDocument> {
+fn parse_acis(
+    sat_fn: impl FnOnce() -> Option<SatDocument>,
+    is_binary: bool,
+    sab_data: &[u8],
+) -> Option<SatDocument> {
     if let Some(doc) = sat_fn() {
         return Some(doc);
     }
@@ -79,14 +94,22 @@ fn parse_acis(sat_fn: impl FnOnce() -> Option<SatDocument>, is_binary: bool, sab
 
 /// Tessellate a `Region` entity (2D planar ACIS body) into a `MeshModel`.
 pub fn tessellate_region(region: &Region, color: [f32; 4]) -> Option<MeshModel> {
-    let sat = parse_acis(|| region.parse_sat(), region.acis_data.is_binary, &region.acis_data.sab_data)?;
+    let sat = parse_acis(
+        || region.parse_sat(),
+        region.acis_data.is_binary,
+        &region.acis_data.sab_data,
+    )?;
     let name = region.common.handle.value().to_string();
     tessellate_sat(&sat, name, color)
 }
 
 /// Tessellate a `Body` entity (3D ACIS body) into a `MeshModel`.
 pub fn tessellate_body(body: &Body, color: [f32; 4]) -> Option<MeshModel> {
-    let sat = parse_acis(|| body.parse_sat(), body.acis_data.is_binary, &body.acis_data.sab_data)?;
+    let sat = parse_acis(
+        || body.parse_sat(),
+        body.acis_data.is_binary,
+        &body.acis_data.sab_data,
+    )?;
     let name = body.common.handle.value().to_string();
     tessellate_sat(&sat, name, color)
 }
@@ -96,7 +119,11 @@ pub fn tessellate_body(body: &Body, color: [f32; 4]) -> Option<MeshModel> {
 /// Returns `None` when the entity has no parseable SAT data or produces no
 /// triangles (e.g. the solid uses only unsupported surface types).
 pub fn tessellate_solid3d(solid: &Solid3D, color: [f32; 4]) -> Option<MeshModel> {
-    let sat = parse_acis(|| solid.parse_sat(), solid.acis_data.is_binary, &solid.acis_data.sab_data)?;
+    let sat = parse_acis(
+        || solid.parse_sat(),
+        solid.acis_data.is_binary,
+        &solid.acis_data.sab_data,
+    )?;
     let name = solid.common.handle.value().to_string();
     tessellate_sat(&sat, name, color)
 }
@@ -261,7 +288,11 @@ fn tess_cone_face(
     let segs_u = CIRC_SEGS;
     let segs_v = segs_u / 4; // height subdivisions
 
-    let theta_span = if full_circle { TAU } else { theta_max - theta_min };
+    let theta_span = if full_circle {
+        TAU
+    } else {
+        theta_max - theta_min
+    };
     let h_span = h_max - h_min;
 
     if h_span.abs() < 1e-10 || theta_span.abs() < 1e-10 {
@@ -317,7 +348,9 @@ fn tess_cone_face(
 /// Compute a point on a cone/cylinder surface.
 #[inline]
 fn cone_pt(
-    cx: f64, cy: f64, cz: f64,
+    cx: f64,
+    cy: f64,
+    cz: f64,
     axis: [f64; 3],
     u_dir: [f64; 3],
     v_dir: [f64; 3],
@@ -338,7 +371,9 @@ fn cone_pt(
 /// `full_circle` is true when there are no boundary vertices (e.g. a sphere or
 /// a cylinder with no seam edge).
 fn angular_range(
-    cx: f64, cy: f64, cz: f64,
+    cx: f64,
+    cy: f64,
+    cz: f64,
     axis: [f64; 3],
     u_dir: [f64; 3],
     v_dir: [f64; 3],
@@ -397,7 +432,7 @@ fn tess_sphere_face(
     let nv = GRID_V;
 
     for j in 0..nv {
-        let phi0 = std::f64::consts::PI * (j as f64 / nv as f64);       // 0..π
+        let phi0 = std::f64::consts::PI * (j as f64 / nv as f64); // 0..π
         let phi1 = std::f64::consts::PI * ((j + 1) as f64 / nv as f64);
 
         for i in 0..nu {
@@ -429,13 +464,7 @@ fn tess_sphere_face(
 }
 
 #[inline]
-fn sphere_dir(
-    pole: [f64; 3],
-    u_dir: [f64; 3],
-    v_dir: [f64; 3],
-    theta: f64,
-    phi: f64,
-) -> [f64; 3] {
+fn sphere_dir(pole: [f64; 3], u_dir: [f64; 3], v_dir: [f64; 3], theta: f64, phi: f64) -> [f64; 3] {
     let sin_phi = phi.sin();
     let cos_phi = phi.cos();
     let cos_theta = theta.cos();
@@ -477,10 +506,18 @@ fn tess_torus_face(
             let theta1 = TAU * ((i + 1) as f64 / nu as f64);
 
             let p = [
-                torus_pt(cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta0, phi0),
-                torus_pt(cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta0, phi1),
-                torus_pt(cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta1, phi1),
-                torus_pt(cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta1, phi0),
+                torus_pt(
+                    cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta0, phi0,
+                ),
+                torus_pt(
+                    cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta0, phi1,
+                ),
+                torus_pt(
+                    cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta1, phi1,
+                ),
+                torus_pt(
+                    cx, cy, cz, axis, u_dir, v_dir, major_r, minor_r, theta1, phi0,
+                ),
             ];
 
             // Outward tube normal.
@@ -505,14 +542,16 @@ fn tess_torus_face(
 
 #[inline]
 fn torus_pt(
-    cx: f64, cy: f64, cz: f64,
+    cx: f64,
+    cy: f64,
+    cz: f64,
     axis: [f64; 3],
     u_dir: [f64; 3],
     v_dir: [f64; 3],
     major_r: f64,
     minor_r: f64,
-    theta: f64,   // tube angle
-    phi: f64,     // revolution angle
+    theta: f64, // tube angle
+    phi: f64,   // revolution angle
 ) -> [f64; 3] {
     // Ring center at angle phi.
     let ring = [

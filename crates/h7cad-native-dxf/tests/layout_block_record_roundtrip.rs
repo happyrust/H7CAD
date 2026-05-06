@@ -26,9 +26,10 @@ fn layout_block_record_handle_survives_roundtrip() {
     );
 
     let doc2 = read_dxf(&dxf_text).unwrap();
-    let layout = doc2.objects.iter().find(|o| {
-        matches!(&o.data, ObjectData::Layout { name, .. } if name == "TestLayout")
-    });
+    let layout = doc2
+        .objects
+        .iter()
+        .find(|o| matches!(&o.data, ObjectData::Layout { name, .. } if name == "TestLayout"));
     assert!(layout.is_some(), "LAYOUT object must survive roundtrip");
 
     if let ObjectData::Layout {

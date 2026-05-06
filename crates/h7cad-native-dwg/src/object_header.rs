@@ -135,7 +135,9 @@ fn parse_ac1015_object_header_internal(
 /// * [`DwgReadError::UnexpectedEof`] with a specific context when
 ///   the `MS` field decodes to a body larger than the slice or
 ///   when `main_size_bits` is obviously out of range.
-pub fn read_ac1015_object_header(slice: &[u8]) -> Result<(ObjectHeader, BitReader<'_>), DwgReadError> {
+pub fn read_ac1015_object_header(
+    slice: &[u8],
+) -> Result<(ObjectHeader, BitReader<'_>), DwgReadError> {
     let (header, body, header_end_bits) = parse_ac1015_object_header_internal(slice)?;
     let mut reader = BitReader::new(body);
     reader.set_position_in_bits(header_end_bits)?;
@@ -180,7 +182,10 @@ mod tests {
     /// `body_size` is encoded as a single-chunk ModularShort and must
     /// be < 0x8000.
     fn synth_slice(body: &[u8]) -> Vec<u8> {
-        assert!(body.len() < 0x8000, "test helper only supports single-chunk MS");
+        assert!(
+            body.len() < 0x8000,
+            "test helper only supports single-chunk MS"
+        );
         let size = body.len() as u16;
         let mut buf = Vec::with_capacity(2 + body.len());
         buf.push((size & 0xFF) as u8);
@@ -218,7 +223,12 @@ mod tests {
     ///
     /// Returns the packed body bytes, ready to go inside the MS
     /// prefix of a synthetic slice.
-    fn synth_body(bs_value: u8, main_size_bits: u32, handle_code: u8, handle_bytes: &[u8]) -> Vec<u8> {
+    fn synth_body(
+        bs_value: u8,
+        main_size_bits: u32,
+        handle_code: u8,
+        handle_bytes: &[u8],
+    ) -> Vec<u8> {
         let mut fields: Vec<(u64, u8)> = Vec::new();
         // BS prefix `01` (next byte is unsigned short) + bs_value.
         fields.push((0b01, 2));
@@ -316,10 +326,7 @@ mod tests {
         let err = read_ac1015_object_header(&slice).unwrap_err();
         match err {
             DwgReadError::UnexpectedEof { context } => {
-                assert!(
-                    context.contains("main_size_bits"),
-                    "context was {context}"
-                );
+                assert!(context.contains("main_size_bits"), "context was {context}");
             }
             other => panic!("expected UnexpectedEof, got {other:?}"),
         }

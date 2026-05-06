@@ -59,7 +59,12 @@ impl DocumentBuilder {
 
         let mut registered_blocks = BTreeMap::new();
         for template in self.block_templates.values() {
-            if document.tables.block_record.entries.contains_key(&template.name) {
+            if document
+                .tables
+                .block_record
+                .entries
+                .contains_key(&template.name)
+            {
                 continue;
             }
 

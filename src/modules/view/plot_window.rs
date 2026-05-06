@@ -18,7 +18,9 @@ impl PlotWindowCommand {
 }
 
 impl CadCommand for PlotWindowCommand {
-    fn name(&self) -> &'static str { "PLOTWINDOW" }
+    fn name(&self) -> &'static str {
+        "PLOTWINDOW"
+    }
 
     fn prompt(&self) -> String {
         if self.p1.is_none() {
@@ -48,10 +50,14 @@ impl CadCommand for PlotWindowCommand {
         Some(WireModel {
             name: "plotwindow_preview".into(),
             points: vec![
-                [p1.x, p1.y, p1.z], [pt.x, p1.y, p1.z],
-                [pt.x, p1.y, p1.z], [pt.x, pt.y, pt.z],
-                [pt.x, pt.y, pt.z], [p1.x, pt.y, pt.z],
-                [p1.x, pt.y, pt.z], [p1.x, p1.y, p1.z],
+                [p1.x, p1.y, p1.z],
+                [pt.x, p1.y, p1.z],
+                [pt.x, p1.y, p1.z],
+                [pt.x, pt.y, pt.z],
+                [pt.x, pt.y, pt.z],
+                [p1.x, pt.y, pt.z],
+                [p1.x, pt.y, pt.z],
+                [p1.x, p1.y, p1.z],
             ],
             color: WireModel::CYAN,
             selected: false,

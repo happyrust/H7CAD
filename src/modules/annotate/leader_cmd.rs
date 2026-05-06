@@ -6,8 +6,8 @@
 //   3. AskAnnotation  — text string (Text) or block name (Block); blank = skip
 //   → commit Leader  [+ MText | + Insert]
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -50,25 +50,36 @@ pub struct LeaderCommand {
 
 impl LeaderCommand {
     pub fn new() -> Self {
-        Self { step: Step::CollectPoints { verts: Vec::new() } }
+        Self {
+            step: Step::CollectPoints { verts: Vec::new() },
+        }
     }
 }
 
 impl CadCommand for LeaderCommand {
-    fn name(&self) -> &'static str { "LEADER" }
+    fn name(&self) -> &'static str {
+        "LEADER"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
-            Step::CollectPoints { verts } if verts.is_empty() =>
-                "LEADER  Specify arrowhead point:".into(),
-            Step::CollectPoints { verts } =>
-                format!("LEADER  Specify next point [{} pts — Enter to finish]:", verts.len()),
-            Step::AskCreationType { .. } =>
-                "LEADER  Annotation type [None/Text/Block/Tolerance] <Text>:".into(),
-            Step::AskText { verts } =>
-                format!("LEADER  Annotation text [{} pts — blank = skip]:", verts.len()),
-            Step::AskBlock { verts } =>
-                format!("LEADER  Block name [{} pts — blank = skip]:", verts.len()),
+            Step::CollectPoints { verts } if verts.is_empty() => {
+                "LEADER  Specify arrowhead point:".into()
+            }
+            Step::CollectPoints { verts } => format!(
+                "LEADER  Specify next point [{} pts — Enter to finish]:",
+                verts.len()
+            ),
+            Step::AskCreationType { .. } => {
+                "LEADER  Annotation type [None/Text/Block/Tolerance] <Text>:".into()
+            }
+            Step::AskText { verts } => format!(
+                "LEADER  Annotation text [{} pts — blank = skip]:",
+                verts.len()
+            ),
+            Step::AskBlock { verts } => {
+                format!("LEADER  Block name [{} pts — blank = skip]:", verts.len())
+            }
         }
     }
 
@@ -85,7 +96,9 @@ impl CadCommand for LeaderCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         if let Step::CollectPoints { verts } = &self.step {
-            if verts.len() < 2 { return CmdResult::Cancel; }
+            if verts.len() < 2 {
+                return CmdResult::Cancel;
+            }
             let verts = verts.clone();
             self.step = Step::AskCreationType { verts };
             CmdResult::NeedPoint
@@ -139,11 +152,15 @@ impl CadCommand for LeaderCommand {
         }
     }
 
-    fn on_escape(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         if let Step::CollectPoints { verts } = &self.step {
-            if verts.is_empty() { return None; }
+            if verts.is_empty() {
+                return None;
+            }
             let mut pts = verts.clone();
             pts.push(pt);
             Some(preview_wire(&pts))
@@ -157,16 +174,19 @@ impl CadCommand for LeaderCommand {
 
 fn parse_ct(s: &str) -> CreationChoice {
     match s.to_ascii_uppercase().as_str() {
-        "N" | "NONE"      => CreationChoice::None,
-        "B" | "BLOCK"     => CreationChoice::Block,
-        "TL"| "TOLERANCE" => CreationChoice::Tolerance,
-        _                 => CreationChoice::Text,
+        "N" | "NONE" => CreationChoice::None,
+        "B" | "BLOCK" => CreationChoice::Block,
+        "TL" | "TOLERANCE" => CreationChoice::Tolerance,
+        _ => CreationChoice::Text,
     }
 }
 
 fn build_leader_native(verts: &[Vec3]) -> nm::Entity {
     nm::Entity::new(nm::EntityData::Leader {
-        vertices: verts.iter().map(|p| [p.x as f64, p.y as f64, p.z as f64]).collect(),
+        vertices: verts
+            .iter()
+            .map(|p| [p.x as f64, p.y as f64, p.z as f64])
+            .collect(),
         has_arrowhead: true,
     })
 }
@@ -224,10 +244,10 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }
 
@@ -238,7 +258,15 @@ pub fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {
     let angle = std::f32::consts::PI / 6.0;
     let (s, c) = angle.sin_cos();
     [
-        Vec3::new(tip.x + (dx*c - dy*s)*size, tip.y + (dx*s + dy*c)*size, tip.z),
-        Vec3::new(tip.x + (dx*c + dy*s)*size, tip.y + (-dx*s + dy*c)*size, tip.z),
+        Vec3::new(
+            tip.x + (dx * c - dy * s) * size,
+            tip.y + (dx * s + dy * c) * size,
+            tip.z,
+        ),
+        Vec3::new(
+            tip.x + (dx * c + dy * s) * size,
+            tip.y + (-dx * s + dy * c) * size,
+            tip.z,
+        ),
     ]
 }

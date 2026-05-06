@@ -1,5 +1,7 @@
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_prop as edit, parse_f64, pt_to_vec3, square_grip, transform_pt};
+use crate::entities::common::{
+    edit_prop as edit, parse_f64, pt_to_vec3, square_grip, transform_pt,
+};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
@@ -12,10 +14,17 @@ pub fn to_truck(corners: &[[f64; 3]; 4]) -> TruckEntity {
         .map(|c| [c[0] as f32, c[1] as f32, c[2] as f32])
         .collect();
     let pts = vec![
-        p[0], p[1], [f32::NAN; 3],
-        p[1], p[3], [f32::NAN; 3],
-        p[3], p[2], [f32::NAN; 3],
-        p[2], p[0],
+        p[0],
+        p[1],
+        [f32::NAN; 3],
+        p[1],
+        p[3],
+        [f32::NAN; 3],
+        p[3],
+        p[2],
+        [f32::NAN; 3],
+        p[2],
+        p[0],
     ];
     let snap = corners
         .iter()
@@ -80,7 +89,9 @@ pub fn apply_geom_prop(corners: &mut [[f64; 3]; 4], thickness: &mut f64, field: 
 }
 
 pub fn apply_grip(corners: &mut [[f64; 3]; 4], grip_id: usize, apply: GripApply) {
-    let Some(corner) = corners.get_mut(grip_id) else { return };
+    let Some(corner) = corners.get_mut(grip_id) else {
+        return;
+    };
     match apply {
         GripApply::Translate(d) => {
             corner[0] += d.x as f64;
@@ -100,4 +111,3 @@ pub fn apply_transform(corners: &mut [[f64; 3]; 4], t: &EntityTransform) {
         transform_pt(c, t);
     }
 }
-

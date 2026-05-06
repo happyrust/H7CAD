@@ -72,7 +72,11 @@ pub fn to_truck_with_normal(
         object: TruckObject::Curve(edge),
         snap_pts: vec![(pt_to_vec3(&wcs_center), SnapHint::Center)],
         tangent_geoms: vec![TangentGeom::Circle {
-            center: [wcs_center[0] as f32, wcs_center[1] as f32, wcs_center[2] as f32],
+            center: [
+                wcs_center[0] as f32,
+                wcs_center[1] as f32,
+                wcs_center[2] as f32,
+            ],
             radius: r as f32,
         }],
         key_vertices: vec![],
@@ -87,12 +91,7 @@ fn angle_span(start: f32, end: f32) -> f32 {
     span
 }
 
-pub fn grips(
-    center: &[f64; 3],
-    radius: f64,
-    start_angle: f64,
-    end_angle: f64,
-) -> Vec<GripDef> {
+pub fn grips(center: &[f64; 3], radius: f64, start_angle: f64, end_angle: f64) -> Vec<GripDef> {
     let ctr = pt_to_vec3(center);
     let r = radius as f32;
     let sa = (start_angle as f32).to_radians();
@@ -106,12 +105,7 @@ pub fn grips(
     ]
 }
 
-pub fn properties(
-    center: &[f64; 3],
-    radius: f64,
-    start_angle: f64,
-    end_angle: f64,
-) -> PropSection {
+pub fn properties(center: &[f64; 3], radius: f64, start_angle: f64, end_angle: f64) -> PropSection {
     PropSection {
         title: "Geometry".into(),
         props: vec![
@@ -234,8 +228,7 @@ mod tests {
     #[test]
     fn to_truck_default_normal_matches_legacy_2d() {
         let legacy = to_truck(&[1.0, 2.0, 0.0], 5.0, 0.0, 90.0);
-        let with_n =
-            to_truck_with_normal(&[1.0, 2.0, 0.0], 5.0, 0.0, 90.0, [0.0, 0.0, 1.0]);
+        let with_n = to_truck_with_normal(&[1.0, 2.0, 0.0], 5.0, 0.0, 90.0, [0.0, 0.0, 1.0]);
 
         assert_eq!(legacy.snap_pts.len(), with_n.snap_pts.len());
         for (a, b) in legacy.snap_pts.iter().zip(with_n.snap_pts.iter()) {
@@ -276,7 +269,11 @@ mod tests {
             approx_eq_v3(center_snap, Vec3::new(0.0, 0.0, 0.0), 1.0e-4),
             "center at origin should remain origin: {center_snap:?}"
         );
-        if let TangentGeom::Circle { center: c, radius: r } = entity.tangent_geoms[0] {
+        if let TangentGeom::Circle {
+            center: c,
+            radius: r,
+        } = entity.tangent_geoms[0]
+        {
             assert!(c[0].abs() < 1e-5);
             assert!((r - 1.0).abs() < 1e-5);
         } else {
@@ -288,14 +285,20 @@ mod tests {
     fn to_truck_with_negative_z_normal_reverses_sweep_via_ocs_basis() {
         // For N=(0,0,-1): Ax=(1,0,0), Ay=(0,-1,0). The 0..90° arc on
         // OCS becomes WCS x→1, y→0; mid point at 45° has y < 0.
-        let entity =
-            to_truck_with_normal(&[0.0, 0.0, 0.0], 1.0, 0.0, 90.0, [0.0, 0.0, -1.0]);
-        if let TangentGeom::Circle { center: c, radius: r } = entity.tangent_geoms[0] {
-            assert!(approx_eq_v3(Vec3::new(c[0], c[1], c[2]), Vec3::new(0.0, 0.0, 0.0), 1e-5));
+        let entity = to_truck_with_normal(&[0.0, 0.0, 0.0], 1.0, 0.0, 90.0, [0.0, 0.0, -1.0]);
+        if let TangentGeom::Circle {
+            center: c,
+            radius: r,
+        } = entity.tangent_geoms[0]
+        {
+            assert!(approx_eq_v3(
+                Vec3::new(c[0], c[1], c[2]),
+                Vec3::new(0.0, 0.0, 0.0),
+                1e-5
+            ));
             assert!((r - 1.0).abs() < 1e-5);
         } else {
             panic!("expected Circle tangent geometry");
         }
     }
 }
-

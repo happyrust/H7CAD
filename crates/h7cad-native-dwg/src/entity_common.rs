@@ -20,8 +20,8 @@ use crate::DwgReadError;
 use h7cad_native_model::Handle;
 
 const DWG_LINEWEIGHT_VALUES: [i16; 24] = [
-    0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140,
-    158, 200, 211,
+    0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200,
+    211,
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -404,12 +404,9 @@ mod tests {
 
         let mut main_reader = BitReader::new(&main);
         let mut handle_reader = BitReader::new(&handle_bytes);
-        let common = parse_ac1015_entity_common(
-            &mut main_reader,
-            &mut handle_reader,
-            Handle::new(0x40),
-        )
-        .unwrap();
+        let common =
+            parse_ac1015_entity_common(&mut main_reader, &mut handle_reader, Handle::new(0x40))
+                .unwrap();
 
         assert_eq!(common.owner_handle, Handle::NULL);
         assert_eq!(common.layer_handle, Handle::new(0x20));
@@ -447,12 +444,9 @@ mod tests {
 
         let mut main_reader = BitReader::new(&main);
         let mut handle_reader = BitReader::new(&handle_bytes);
-        let common = parse_ac1015_entity_common(
-            &mut main_reader,
-            &mut handle_reader,
-            Handle::new(0x40),
-        )
-        .unwrap();
+        let common =
+            parse_ac1015_entity_common(&mut main_reader, &mut handle_reader, Handle::new(0x40))
+                .unwrap();
 
         assert_eq!(common.owner_handle, Handle::new(0x10));
         assert_eq!(common.layer_handle, Handle::new(0x20));
@@ -472,12 +466,9 @@ mod tests {
 
         let mut main_reader = BitReader::new(&main);
         let mut handle_reader = BitReader::new(&handles);
-        let common = parse_ac1015_non_entity_common(
-            &mut main_reader,
-            &mut handle_reader,
-            Handle::new(0x40),
-        )
-        .unwrap();
+        let common =
+            parse_ac1015_non_entity_common(&mut main_reader, &mut handle_reader, Handle::new(0x40))
+                .unwrap();
         assert_eq!(common.owner_handle, Handle::new(0x77));
     }
 

@@ -85,11 +85,16 @@ static FONTS: OnceLock<HashMap<String, CxfFile>> = OnceLock::new();
 static WARNED_GLYPHS: OnceLock<Mutex<HashSet<(String, char)>>> = OnceLock::new();
 
 fn warn_missing_glyph(font_name: &str, ch: char) {
-    if ch.is_ascii() { return; }
+    if ch.is_ascii() {
+        return;
+    }
     let set = WARNED_GLYPHS.get_or_init(|| Mutex::new(HashSet::new()));
     if let Ok(mut guard) = set.lock() {
         if guard.insert((font_name.to_string(), ch)) {
-            eprintln!("cxf: glyph U+{:04X} ('{}') not found in font '{font_name}'", ch as u32, ch);
+            eprintln!(
+                "cxf: glyph U+{:04X} ('{}') not found in font '{font_name}'",
+                ch as u32, ch
+            );
         }
     }
 }
@@ -265,7 +270,9 @@ pub fn tessellate_text_ex(
             match chars.peek().copied() {
                 Some('L') => {
                     chars.next();
-                    if underline.is_none() { underline = Some(cursor_x); }
+                    if underline.is_none() {
+                        underline = Some(cursor_x);
+                    }
                     continue;
                 }
                 Some('l') => {
@@ -277,7 +284,9 @@ pub fn tessellate_text_ex(
                 }
                 Some('O') => {
                     chars.next();
-                    if overline.is_none() { overline = Some(cursor_x); }
+                    if overline.is_none() {
+                        overline = Some(cursor_x);
+                    }
                     continue;
                 }
                 Some('o') => {
@@ -289,13 +298,18 @@ pub fn tessellate_text_ex(
                 }
                 Some('K') => {
                     chars.next();
-                    if strikethrough.is_none() { strikethrough = Some(cursor_x); }
+                    if strikethrough.is_none() {
+                        strikethrough = Some(cursor_x);
+                    }
                     continue;
                 }
                 Some('k') => {
                     chars.next();
                     if let Some(s) = strikethrough.take() {
-                        out.push(vec![xform(s, STRIKE_Y, 0.0), xform(cursor_x, STRIKE_Y, 0.0)]);
+                        out.push(vec![
+                            xform(s, STRIKE_Y, 0.0),
+                            xform(cursor_x, STRIKE_Y, 0.0),
+                        ]);
                     }
                     continue;
                 }
@@ -307,15 +321,30 @@ pub fn tessellate_text_ex(
         let render_ch: char = if ch == '%' && chars.peek() == Some(&'%') {
             chars.next(); // consume second '%'
             match chars.peek().map(|c| c.to_ascii_lowercase()) {
-                Some('d') => { chars.next(); '°' }
-                Some('p') => { chars.next(); '±' }
-                Some('c') => { chars.next(); '⌀' }
-                Some('%') => { chars.next(); '%' }
+                Some('d') => {
+                    chars.next();
+                    '°'
+                }
+                Some('p') => {
+                    chars.next();
+                    '±'
+                }
+                Some('c') => {
+                    chars.next();
+                    '⌀'
+                }
+                Some('%') => {
+                    chars.next();
+                    '%'
+                }
                 Some('u') => {
                     chars.next();
                     underline = match underline.take() {
                         Some(start) => {
-                            out.push(vec![xform(start, UNDER_Y, 0.0), xform(cursor_x, UNDER_Y, 0.0)]);
+                            out.push(vec![
+                                xform(start, UNDER_Y, 0.0),
+                                xform(cursor_x, UNDER_Y, 0.0),
+                            ]);
                             None
                         }
                         None => Some(cursor_x),
@@ -326,7 +355,10 @@ pub fn tessellate_text_ex(
                     chars.next();
                     overline = match overline.take() {
                         Some(start) => {
-                            out.push(vec![xform(start, OVER_Y, 0.0), xform(cursor_x, OVER_Y, 0.0)]);
+                            out.push(vec![
+                                xform(start, OVER_Y, 0.0),
+                                xform(cursor_x, OVER_Y, 0.0),
+                            ]);
                             None
                         }
                         None => Some(cursor_x),
@@ -338,7 +370,9 @@ pub fn tessellate_text_ex(
                     let mut digits = String::with_capacity(3);
                     for _ in 0..3 {
                         match chars.peek() {
-                            Some(&c) if c.is_ascii_digit() => { digits.push(chars.next().unwrap()); }
+                            Some(&c) if c.is_ascii_digit() => {
+                                digits.push(chars.next().unwrap());
+                            }
                             _ => break,
                         }
                     }
@@ -346,15 +380,21 @@ pub fn tessellate_text_ex(
                         if let Ok(n) = digits.parse::<u32>() {
                             if let Some(c) = char::from_u32(n) {
                                 c
-                            } else { continue; }
-                        } else { continue; }
+                            } else {
+                                continue;
+                            }
+                        } else {
+                            continue;
+                        }
                     } else {
                         // Partial digit sequence — advance as unknown glyph and move on
                         cursor_x += (6.0 + font.letter_spacing) * wf;
                         continue;
                     }
                 }
-                _ => { continue; } // unknown %%x — skip silently
+                _ => {
+                    continue;
+                } // unknown %%x — skip silently
             }
         } else {
             ch
@@ -388,13 +428,22 @@ pub fn tessellate_text_ex(
 
     // Close any decoration spans that weren't explicitly closed.
     if let Some(start) = underline {
-        out.push(vec![xform(start, UNDER_Y, 0.0), xform(cursor_x, UNDER_Y, 0.0)]);
+        out.push(vec![
+            xform(start, UNDER_Y, 0.0),
+            xform(cursor_x, UNDER_Y, 0.0),
+        ]);
     }
     if let Some(start) = overline {
-        out.push(vec![xform(start, OVER_Y, 0.0), xform(cursor_x, OVER_Y, 0.0)]);
+        out.push(vec![
+            xform(start, OVER_Y, 0.0),
+            xform(cursor_x, OVER_Y, 0.0),
+        ]);
     }
     if let Some(start) = strikethrough {
-        out.push(vec![xform(start, STRIKE_Y, 0.0), xform(cursor_x, STRIKE_Y, 0.0)]);
+        out.push(vec![
+            xform(start, STRIKE_Y, 0.0),
+            xform(cursor_x, STRIKE_Y, 0.0),
+        ]);
     }
 
     out

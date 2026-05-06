@@ -392,7 +392,12 @@ impl CadCommand for PolyCommand {
             _ => {
                 let r = self.center.distance(pt);
                 let sa = angle_xy(self.center, pt);
-                CmdResult::CommitAndExitNative(make_pline(&poly_verts_xy(self.center, r, self.sides, sa)))
+                CmdResult::CommitAndExitNative(make_pline(&poly_verts_xy(
+                    self.center,
+                    r,
+                    self.sides,
+                    sa,
+                )))
             }
         }
     }
@@ -586,7 +591,9 @@ impl CadCommand for PolyECommand {
             }
             _ => {
                 if let Some((center, vr, sa)) = edge_poly_params(self.a, pt, self.sides) {
-                    CmdResult::CommitAndExitNative(make_pline(&poly_verts_xy(center, vr, self.sides, sa)))
+                    CmdResult::CommitAndExitNative(make_pline(&poly_verts_xy(
+                        center, vr, self.sides, sa,
+                    )))
                 } else {
                     CmdResult::Cancel
                 }

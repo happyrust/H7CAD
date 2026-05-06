@@ -38,8 +38,14 @@ fn header_writes_paper_space_and_misc_flags() {
     let doc = read_dxf(&dxf).unwrap();
     let output = write_dxf(&doc).unwrap();
     for var in &[
-        "$PSTYLEMODE", "$TILEMODE", "$MAXACTVP", "$PSVPSCALE",
-        "$TREEDEPTH", "$VISRETAIN", "$DELOBJ", "$PROXYGRAPHICS",
+        "$PSTYLEMODE",
+        "$TILEMODE",
+        "$MAXACTVP",
+        "$PSVPSCALE",
+        "$TREEDEPTH",
+        "$VISRETAIN",
+        "$DELOBJ",
+        "$PROXYGRAPHICS",
     ] {
         assert!(output.contains(var), "output must contain {var}");
     }

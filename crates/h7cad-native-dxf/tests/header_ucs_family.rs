@@ -42,10 +42,7 @@ fn header_writes_all_5_ucs_vars() {
 
     let text = write_dxf(&doc).expect("write");
     for var in &["$UCSBASE", "$UCSNAME", "$UCSORG", "$UCSXDIR", "$UCSYDIR"] {
-        assert!(
-            text.contains(var),
-            "writer must emit {var}; got:\n{text}"
-        );
+        assert!(text.contains(var), "writer must emit {var}; got:\n{text}");
     }
     assert!(text.contains("LEFT"));
     assert!(text.contains("WorkPlaneA"));

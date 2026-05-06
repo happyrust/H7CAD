@@ -9,8 +9,8 @@
 //   Pick two lines (line-only; arcs are not chamferable).
 //   Finds intersection, backs off dist1 along line 1 and dist2 along line 2.
 
-use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
 use crate::types::Vector3;
+use acadrust::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
@@ -149,15 +149,16 @@ fn compute_fillet(
     let arc_cx = px + arc_dist * bx / blen;
     let arc_cy = py + arc_dist * by / blen;
 
-    let a_start = (t1[1] - arc_cy).atan2(t1[0] - arc_cx);
-    let a_end = (t2[1] - arc_cy).atan2(t2[0] - arc_cx);
+    // Arc angles in degrees
+    let a_start_deg = (t1[1] - arc_cy).atan2(t1[0] - arc_cx).to_degrees();
+    let a_end_deg = (t2[1] - arc_cy).atan2(t2[0] - arc_cx).to_degrees();
 
     // Pick CCW direction that fills the concave corner
     let cross = dir1[0] * dir2[1] - dir1[1] * dir2[0];
-    let (start_angle, end_angle) = if cross <= 0.0 {
-        (a_start, a_end)
+    let (start_deg, end_deg) = if cross <= 0.0 {
+        (a_start_deg, a_end_deg)
     } else {
-        (a_end, a_start)
+        (a_end_deg, a_start_deg)
     };
 
     // Trim l1 to T1 and l2 to T2
@@ -170,8 +171,8 @@ fn compute_fillet(
     arc.common.handle = Handle::NULL;
     arc.center = Vector3::new(arc_cx, arc_cy, z);
     arc.radius = radius;
-    arc.start_angle = norm_angle(start_angle);
-    arc.end_angle = norm_angle(end_angle);
+    arc.start_angle = start_deg;
+    arc.end_angle = end_deg;
 
     Some((
         EntityType::Line(new_l1),
@@ -264,9 +265,13 @@ fn line_pts(l: &LineEnt) -> Vec<[f32; 3]> {
     ]
 }
 
-fn arc_pts(cx: f64, cy: f64, r: f64, a0: f64, a1: f64, z: f64) -> Vec<[f32; 3]> {
+fn arc_pts(cx: f64, cy: f64, r: f64, a0_deg: f64, a1_deg: f64, z: f64) -> Vec<[f32; 3]> {
+    use std::f64::consts::TAU;
+    let fn_norm = |a: f64| -> f64 { ((a % TAU) + TAU) % TAU };
+    let a0 = a0_deg.to_radians();
+    let a1 = a1_deg.to_radians();
     let span = {
-        let s = norm_angle(a1) - norm_angle(a0);
+        let s = fn_norm(a1) - fn_norm(a0);
         if s <= 0.0 {
             s + TAU
         } else {
@@ -276,7 +281,7 @@ fn arc_pts(cx: f64, cy: f64, r: f64, a0: f64, a1: f64, z: f64) -> Vec<[f32; 3]> 
     let steps = (span.abs() * 20.0).ceil().max(4.0) as usize;
     (0..=steps)
         .map(|i| {
-            let ang = norm_angle(a0) + span * (i as f64 / steps as f64);
+            let ang = fn_norm(a0) + span * (i as f64 / steps as f64);
             [
                 (cx + r * ang.cos()) as f32,
                 (cy + r * ang.sin()) as f32,
@@ -304,41 +309,57 @@ fn entity_pts(e: &EntityType) -> Vec<[f32; 3]> {
 
 // ── Arc geometry helpers ───────────────────────────────────────────────────
 
-/// Extract center, radius, start/end angle (radians), elevation from an arc.
+/// Extract center, radius, start/end angle (degrees), elevation from an arc.
 fn arc_geom(a: &ArcEnt) -> ([f64; 2], f64, f64, f64, f64) {
-    ([a.center.x, a.center.y], a.radius, a.start_angle, a.end_angle, a.center.z)
+    (
+        [a.center.x, a.center.y],
+        a.radius,
+        a.start_angle,
+        a.end_angle,
+        a.center.z,
+    )
 }
 
-/// Normalize angle to [0, 2π).
-fn norm_angle(a: f64) -> f64 { ((a % TAU) + TAU) % TAU }
+/// Normalize angle to [0, 360).
+fn norm360(a: f64) -> f64 {
+    ((a % 360.0) + 360.0) % 360.0
+}
 
 /// Return the CCW angular span from `start` to `end`.
 fn arc_span(start: f64, end: f64) -> f64 {
-    let s = (end - start).rem_euclid(TAU);
-    if s < 1e-6 { TAU } else { s }
+    let s = (end - start + 360.0) % 360.0;
+    if s < 1e-6 {
+        360.0
+    } else {
+        s
+    }
 }
 
-/// Project a pick point onto an arc: return the angle in radians.
+/// Project a pick point onto an arc: return the parameter t ∈ [0, 360) = the angle.
 fn arc_angle_at(center: [f64; 2], pt: [f64; 2]) -> f64 {
-    norm_angle((pt[1] - center[1]).atan2(pt[0] - center[0]))
+    norm360((pt[1] - center[1]).atan2(pt[0] - center[0]).to_degrees())
 }
 
 /// Clamp angle `a` into the arc range (CCW from `start` to `end`).
 /// Returns the nearer endpoint if `a` is outside.
 fn clamp_angle_to_arc(a: f64, start: f64, end: f64) -> f64 {
     let span = arc_span(start, end);
-    let rel = (a - start).rem_euclid(TAU);
-    if rel <= span { a }
-    else if rel < span + (TAU - span) / 2.0 { end }
-    else { start }
+    let rel = (a - start + 360.0) % 360.0;
+    if rel <= span {
+        a
+    } else if rel < span + (360.0 - span) / 2.0 {
+        end
+    } else {
+        start
+    }
 }
 
-/// Trim an arc so it goes from `new_start` to `new_end` (both in radians).
+/// Trim an arc so it goes from `new_start` to `new_end` (both in degrees).
 fn trim_arc(orig: &ArcEnt, new_start: f64, new_end: f64) -> ArcEnt {
     let mut a = orig.clone();
     a.common.handle = Handle::NULL;
-    a.start_angle = norm_angle(new_start);
-    a.end_angle   = norm_angle(new_end);
+    a.start_angle = norm360(new_start);
+    a.end_angle = norm360(new_end);
     a
 }
 
@@ -351,7 +372,9 @@ fn line_circle_ts(px: f64, py: f64, dx: f64, dy: f64, cx: f64, cy: f64, r: f64) 
     let b = 2.0 * (fx * dx + fy * dy);
     let c = fx * fx + fy * fy - r * r;
     let disc = b * b - 4.0 * a * c;
-    if disc < 0.0 { return vec![]; }
+    if disc < 0.0 {
+        return vec![];
+    }
     let sq = disc.sqrt();
     if disc < 1e-14 {
         vec![(-b) / (2.0 * a)]
@@ -365,10 +388,14 @@ fn circle_circle_pts(c1: [f64; 2], r1: f64, c2: [f64; 2], r2: f64) -> Vec<[f64; 
     let dx = c2[0] - c1[0];
     let dy = c2[1] - c1[1];
     let d = (dx * dx + dy * dy).sqrt();
-    if d < 1e-12 || d > r1 + r2 + 1e-9 || d < (r1 - r2).abs() - 1e-9 { return vec![]; }
+    if d < 1e-12 || d > r1 + r2 + 1e-9 || d < (r1 - r2).abs() - 1e-9 {
+        return vec![];
+    }
     let a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d);
     let h2 = r1 * r1 - a * a;
-    if h2 < 0.0 { return vec![]; }
+    if h2 < 0.0 {
+        return vec![];
+    }
     let h = h2.sqrt();
     let mx = c1[0] + a * dx / d;
     let my = c1[1] + a * dy / d;
@@ -387,7 +414,11 @@ fn circle_circle_pts(c1: [f64; 2], r1: f64, c2: [f64; 2], r2: f64) -> Vec<[f64; 
 /// Find the index of the LwPolyline segment nearest to `click` (DXF XY).
 fn lwpoly_nearest_seg(poly: &LwPolyline, click: [f64; 2]) -> usize {
     let n = poly.vertices.len();
-    let seg_count = if poly.is_closed { n } else { n.saturating_sub(1) };
+    let seg_count = if poly.is_closed {
+        n
+    } else {
+        n.saturating_sub(1)
+    };
     let mut best_idx = 0;
     let mut best_dist = f64::MAX;
     for i in 0..seg_count {
@@ -424,7 +455,7 @@ fn lwpoly_seg_as_line(poly: &LwPolyline, seg_idx: usize) -> LineEnt {
     l.common = poly.common.clone();
     l.common.handle = Handle::NULL;
     l.start = Vector3::new(v0.location.x, v0.location.y, poly.elevation);
-    l.end   = Vector3::new(v1.location.x, v1.location.y, poly.elevation);
+    l.end = Vector3::new(v1.location.x, v1.location.y, poly.elevation);
     l
 }
 
@@ -441,10 +472,10 @@ fn compute_bulge(t1: [f64; 2], t2: [f64; 2], arc_center: [f64; 2]) -> f64 {
     let to_c = [arc_center[0] - mid[0], arc_center[1] - mid[1]];
     let cross = chord[0] * to_c[1] - chord[1] * to_c[0];
     if cross >= 0.0 {
-        (span_ccw / 4.0).tan()        // CCW arc
+        (span_ccw / 4.0).tan() // CCW arc
     } else {
         let span_cw = TAU - span_ccw;
-        -(span_cw / 4.0).tan()        // CW arc
+        -(span_cw / 4.0).tan() // CW arc
     }
 }
 
@@ -503,7 +534,11 @@ fn lwpoly_shorten_seg(
 fn lwpoly_pts(poly: &LwPolyline) -> Vec<[f32; 3]> {
     let elev = poly.elevation as f32;
     let n = poly.vertices.len();
-    let seg_count = if poly.is_closed { n } else { n.saturating_sub(1) };
+    let seg_count = if poly.is_closed {
+        n
+    } else {
+        n.saturating_sub(1)
+    };
     let mut pts = Vec::with_capacity(seg_count * 2);
     for i in 0..seg_count {
         let v0 = &poly.vertices[i];
@@ -522,27 +557,35 @@ enum FilletEntity {
     Line(LineEnt),
     Arc(ArcEnt),
     /// A segment of an LwPolyline identified by its entity handle and segment index.
-    LwPoly { poly: LwPolyline, handle: Handle, seg_idx: usize },
+    LwPoly {
+        poly: LwPolyline,
+        handle: Handle,
+        seg_idx: usize,
+    },
 }
 
 impl FilletEntity {
     fn from_entity(e: &EntityType) -> Option<Self> {
         match e {
             EntityType::Line(l) => Some(Self::Line(l.clone())),
-            EntityType::Arc(a)  => Some(Self::Arc(a.clone())),
+            EntityType::Arc(a) => Some(Self::Arc(a.clone())),
             _ => None,
         }
     }
 
     fn from_lwpoly(poly: &LwPolyline, handle: Handle, click: [f64; 2]) -> Self {
         let seg_idx = lwpoly_nearest_seg(poly, click);
-        Self::LwPoly { poly: poly.clone(), handle, seg_idx }
+        Self::LwPoly {
+            poly: poly.clone(),
+            handle,
+            seg_idx,
+        }
     }
 
     fn to_entity_type(&self) -> EntityType {
         match self {
             Self::Line(l) => EntityType::Line(l.clone()),
-            Self::Arc(a)  => EntityType::Arc(a.clone()),
+            Self::Arc(a) => EntityType::Arc(a.clone()),
             Self::LwPoly { poly, .. } => EntityType::LwPolyline(poly.clone()),
         }
     }
@@ -550,7 +593,7 @@ impl FilletEntity {
     fn elevation(&self) -> f64 {
         match self {
             Self::Line(l) => l.start.z,
-            Self::Arc(a)  => a.center.z,
+            Self::Arc(a) => a.center.z,
             Self::LwPoly { poly, .. } => poly.elevation,
         }
     }
@@ -587,23 +630,35 @@ fn compute_fillet_entities(
         }
         // ── LwPoly × LwPoly (same entity — corner fillet) ─────────────────
         (
-            FilletEntity::LwPoly { poly: p1, handle: h1, seg_idx: s1 },
-            FilletEntity::LwPoly { handle: h2, seg_idx: s2, .. },
+            FilletEntity::LwPoly {
+                poly: p1,
+                handle: h1,
+                seg_idx: s1,
+            },
+            FilletEntity::LwPoly {
+                handle: h2,
+                seg_idx: s2,
+                ..
+            },
         ) if h1 == h2 => {
             // Adjacent segments share a corner vertex — fillet that corner.
             let (low, high) = if *s1 < *s2 { (*s1, *s2) } else { (*s2, *s1) };
             let n = p1.vertices.len();
             // Segments must be consecutive (high == low+1, or wrap-around on closed poly).
-            let consecutive = high == low + 1
-                || (p1.is_closed && low == 0 && high == n.saturating_sub(1));
+            let consecutive =
+                high == low + 1 || (p1.is_closed && low == 0 && high == n.saturating_sub(1));
             if !consecutive {
                 return None;
             }
             let corner_idx = high % n; // vertex shared by both segments
             let l1 = lwpoly_seg_as_line(p1, low);
             let l2 = lwpoly_seg_as_line(p1, high % n.max(1)); // seg after corner
-            // Re-map click to whichever segment each was picked on.
-            let (c1, c2) = if *s1 == low { (click1, click2) } else { (click2, click1) };
+                                                              // Re-map click to whichever segment each was picked on.
+            let (c1, c2) = if *s1 == low {
+                (click1, click2)
+            } else {
+                (click2, click1)
+            };
             match compute_fillet(&l1, c1, &l2, c2, radius)? {
                 (EntityType::Line(tl1), EntityType::Line(tl2), maybe_arc) => {
                     let t1 = [tl1.end.x, tl1.end.y]; // trimmed end of seg before corner
@@ -624,8 +679,16 @@ fn compute_fillet_entities(
         }
         // ── LwPoly × LwPoly (different entities) ──────────────────────────
         (
-            FilletEntity::LwPoly { poly: p1, seg_idx: s1, .. },
-            FilletEntity::LwPoly { poly: p2, seg_idx: s2, .. },
+            FilletEntity::LwPoly {
+                poly: p1,
+                seg_idx: s1,
+                ..
+            },
+            FilletEntity::LwPoly {
+                poly: p2,
+                seg_idx: s2,
+                ..
+            },
         ) => {
             let l1 = lwpoly_seg_as_line(p1, *s1);
             let l2 = lwpoly_seg_as_line(p2, *s2);
@@ -633,7 +696,11 @@ fn compute_fillet_entities(
             if let (EntityType::Line(tl1), EntityType::Line(tl2)) = (&tl1_e, &tl2_e) {
                 let np1 = rebuild_poly_from_trimmed_line(p1, *s1, &l1, tl1);
                 let np2 = rebuild_poly_from_trimmed_line(p2, *s2, &l2, tl2);
-                Some((EntityType::LwPolyline(np1), EntityType::LwPolyline(np2), maybe_arc))
+                Some((
+                    EntityType::LwPolyline(np1),
+                    EntityType::LwPolyline(np2),
+                    maybe_arc,
+                ))
             } else {
                 None
             }
@@ -692,9 +759,17 @@ fn rebuild_poly_from_trimmed_line(
     trimmed: &LineEnt,
 ) -> LwPolyline {
     let start_moved = (trimmed.start.x - orig.start.x).hypot(trimmed.start.y - orig.start.y) > 1e-9;
-    let end_moved   = (trimmed.end.x   - orig.end.x  ).hypot(trimmed.end.y   - orig.end.y  ) > 1e-9;
-    let new_start = if start_moved { Some([trimmed.start.x, trimmed.start.y]) } else { None };
-    let new_end   = if end_moved   { Some([trimmed.end.x,   trimmed.end.y  ]) } else { None };
+    let end_moved = (trimmed.end.x - orig.end.x).hypot(trimmed.end.y - orig.end.y) > 1e-9;
+    let new_start = if start_moved {
+        Some([trimmed.start.x, trimmed.start.y])
+    } else {
+        None
+    };
+    let new_end = if end_moved {
+        Some([trimmed.end.x, trimmed.end.y])
+    } else {
+        None
+    };
     lwpoly_shorten_seg(poly, seg_idx, new_start, new_end)
 }
 
@@ -715,12 +790,13 @@ fn fillet_line_arc(
 
     if radius < 1e-9 {
         // r=0: trim to intersection (nearest to each click)
-        let t_best = ts.iter().copied()
-            .min_by(|a, b| {
-                let da = (p1[0]+a*u[0]-click_line[0]).powi(2)+(p1[1]+a*u[1]-click_line[1]).powi(2);
-                let db = (p1[0]+b*u[0]-click_line[0]).powi(2)+(p1[1]+b*u[1]-click_line[1]).powi(2);
-                da.partial_cmp(&db).unwrap()
-            })?;
+        let t_best = ts.iter().copied().min_by(|a, b| {
+            let da = (p1[0] + a * u[0] - click_line[0]).powi(2)
+                + (p1[1] + a * u[1] - click_line[1]).powi(2);
+            let db = (p1[0] + b * u[0] - click_line[0]).powi(2)
+                + (p1[1] + b * u[1] - click_line[1]).powi(2);
+            da.partial_cmp(&db).unwrap()
+        })?;
         let ix = p1[0] + t_best * u[0];
         let iy = p1[1] + t_best * u[1];
 
@@ -749,7 +825,7 @@ fn fillet_line_arc(
     // and at distance |ar ± radius| from the arc center.
     // Sign: outside=ar+radius (external), inside=ar-radius (internal).
     let perp_x = -u[1];
-    let perp_y =  u[0];
+    let perp_y = u[0];
 
     let mut best: Option<(EntityType, EntityType, EntityType)> = None;
     let mut best_dist = f64::MAX;
@@ -759,7 +835,9 @@ fn fillet_line_arc(
             // Candidate fillet center offset from line by ±radius in perp direction.
             // Find point on offset line closest to arc center at distance |ar + sign*radius|.
             let off_dist = ar + sign_circle * radius;
-            if off_dist < 1e-9 { continue; }
+            if off_dist < 1e-9 {
+                continue;
+            }
 
             // The fillet center is at distance `off_dist` from the arc center
             // and also at distance `radius` from the line (perpendicular).
@@ -769,43 +847,54 @@ fn fillet_line_arc(
             let qx = p1[0] + sign_perp * radius * perp_x - ac[0];
             let qy = p1[1] + sign_perp * radius * perp_y - ac[1];
             // (qx + t*u[0])^2 + (qy + t*u[1])^2 = off_dist^2
-            let qa = u[0]*u[0] + u[1]*u[1]; // = 1.0
-            let qb = 2.0*(qx*u[0] + qy*u[1]);
-            let qc = qx*qx + qy*qy - off_dist*off_dist;
-            let disc = qb*qb - 4.0*qa*qc;
-            if disc < 0.0 { continue; }
+            let qa = u[0] * u[0] + u[1] * u[1]; // = 1.0
+            let qb = 2.0 * (qx * u[0] + qy * u[1]);
+            let qc = qx * qx + qy * qy - off_dist * off_dist;
+            let disc = qb * qb - 4.0 * qa * qc;
+            if disc < 0.0 {
+                continue;
+            }
             let sq = disc.sqrt();
             for &sign_t in &[-1.0_f64, 1.0_f64] {
                 let t_fc = (-qb + sign_t * sq) / (2.0 * qa);
-                let fc = [p1[0] + t_fc*u[0] + sign_perp*radius*perp_x,
-                          p1[1] + t_fc*u[1] + sign_perp*radius*perp_y];
+                let fc = [
+                    p1[0] + t_fc * u[0] + sign_perp * radius * perp_x,
+                    p1[1] + t_fc * u[1] + sign_perp * radius * perp_y,
+                ];
 
                 // Tangent point on the line
-                let tp_line = [p1[0] + t_fc*u[0], p1[1] + t_fc*u[1]];
+                let tp_line = [p1[0] + t_fc * u[0], p1[1] + t_fc * u[1]];
                 // Tangent point on the arc circle
                 let fd = [(ac[0] - fc[0]), (ac[1] - fc[1])];
-                let fdl = (fd[0]*fd[0]+fd[1]*fd[1]).sqrt().max(1e-12);
-                let tp_arc = [ac[0] + fd[0]/fdl * ar, ac[1] + fd[1]/fdl * ar];
+                let fdl = (fd[0] * fd[0] + fd[1] * fd[1]).sqrt().max(1e-12);
+                let tp_arc = [ac[0] + fd[0] / fdl * ar, ac[1] + fd[1] / fdl * ar];
 
                 // The tangent point on the arc must be within the arc's angular range
                 let tp_arc_angle = arc_angle_at(ac, tp_arc);
                 let tp_arc_clamped = clamp_angle_to_arc(tp_arc_angle, a_start, a_end);
-                if (norm_angle(tp_arc_angle) - norm_angle(tp_arc_clamped)).abs() > 0.01 { continue; }
+                if (norm360(tp_arc_angle) - norm360(tp_arc_clamped)).abs() > 0.5 {
+                    continue;
+                }
 
                 // The tangent point on the line must be on the correct side of the click
                 // (prefer the intersection closest to the click)
-                let dist_to_click_line = (tp_line[0]-click_line[0]).hypot(tp_line[1]-click_line[1]);
-                let dist_to_click_arc  = (tp_arc[0]-click_arc[0]).hypot(tp_arc[1]-click_arc[1]);
+                let dist_to_click_line =
+                    (tp_line[0] - click_line[0]).hypot(tp_line[1] - click_line[1]);
+                let dist_to_click_arc = (tp_arc[0] - click_arc[0]).hypot(tp_arc[1] - click_arc[1]);
                 let dist_total = dist_to_click_line + dist_to_click_arc;
-                if dist_total >= best_dist { continue; }
+                if dist_total >= best_dist {
+                    continue;
+                }
 
                 // Build trimmed line
-                let Some(new_line) = trim_line_to_point(line, tp_line, click_line) else { continue };
+                let Some(new_line) = trim_line_to_point(line, tp_line, click_line) else {
+                    continue;
+                };
 
                 // Build trimmed arc
                 let arc_click_angle = arc_angle_at(ac, click_arc);
-                let arc_click_rel = (arc_click_angle - a_start).rem_euclid(TAU);
-                let tp_arc_rel = (tp_arc_clamped - a_start).rem_euclid(TAU);
+                let arc_click_rel = (arc_click_angle - a_start + 360.0) % 360.0;
+                let tp_arc_rel = (tp_arc_clamped - a_start + 360.0) % 360.0;
                 let new_arc = if tp_arc_rel <= arc_click_rel {
                     trim_arc(arc, tp_arc_clamped, a_end)
                 } else {
@@ -814,19 +903,28 @@ fn fillet_line_arc(
 
                 // Build fillet arc angles
                 let fa_line = arc_angle_at(fc, tp_line);
-                let fa_arc  = arc_angle_at(fc, tp_arc);
-                let cross = (tp_line[0]-fc[0])*(tp_arc[1]-fc[1]) - (tp_line[1]-fc[1])*(tp_arc[0]-fc[0]);
-                let (fstart, fend) = if cross >= 0.0 { (fa_line, fa_arc) } else { (fa_arc, fa_line) };
+                let fa_arc = arc_angle_at(fc, tp_arc);
+                let cross = (tp_line[0] - fc[0]) * (tp_arc[1] - fc[1])
+                    - (tp_line[1] - fc[1]) * (tp_arc[0] - fc[0]);
+                let (fstart, fend) = if cross >= 0.0 {
+                    (fa_line, fa_arc)
+                } else {
+                    (fa_arc, fa_line)
+                };
                 let mut fillet_arc = ArcEnt::new();
                 fillet_arc.common = line.common.clone();
                 fillet_arc.common.handle = Handle::NULL;
                 fillet_arc.center = Vector3::new(fc[0], fc[1], z);
                 fillet_arc.radius = radius;
-                fillet_arc.start_angle = norm_angle(fstart);
-                fillet_arc.end_angle   = norm_angle(fend);
+                fillet_arc.start_angle = norm360(fstart);
+                fillet_arc.end_angle = norm360(fend);
 
                 best_dist = dist_total;
-                best = Some((EntityType::Line(new_line), EntityType::Arc(new_arc), EntityType::Arc(fillet_arc)));
+                best = Some((
+                    EntityType::Line(new_line),
+                    EntityType::Arc(new_arc),
+                    EntityType::Arc(fillet_arc),
+                ));
             }
         }
     }
@@ -849,12 +947,17 @@ fn fillet_arc_arc(
     if radius < 1e-9 {
         // r=0: trim both arcs to their intersection point
         let pts = circle_circle_pts(c1, r1, c2, r2);
-        if pts.is_empty() { return None; }
+        if pts.is_empty() {
+            return None;
+        }
         // Pick the intersection point nearest to the average of the two clicks
         let cx = (click1[0] + click2[0]) / 2.0;
         let cy = (click1[1] + click2[1]) / 2.0;
         let ip = *pts.iter().min_by(|a, b| {
-            (a[0]-cx).hypot(a[1]-cy).partial_cmp(&(b[0]-cx).hypot(b[1]-cy)).unwrap()
+            (a[0] - cx)
+                .hypot(a[1] - cy)
+                .partial_cmp(&(b[0] - cx).hypot(b[1] - cy))
+                .unwrap()
         })?;
 
         let ia1 = arc_angle_at(c1, ip);
@@ -865,12 +968,12 @@ fn fillet_arc_arc(
         let ca1 = clamp_angle_to_arc(arc_angle_at(c1, click1), s1, e1);
         let ca2 = clamp_angle_to_arc(arc_angle_at(c2, click2), s2, e2);
 
-        let new_a1 = if (ic1 - s1).rem_euclid(TAU) <= (ca1 - s1).rem_euclid(TAU) {
+        let new_a1 = if (ic1 - s1 + 360.0) % 360.0 <= (ca1 - s1 + 360.0) % 360.0 {
             trim_arc(a1, ic1, e1)
         } else {
             trim_arc(a1, s1, ic1)
         };
-        let new_a2 = if (ic2 - s2).rem_euclid(TAU) <= (ca2 - s2).rem_euclid(TAU) {
+        let new_a2 = if (ic2 - s2 + 360.0) % 360.0 <= (ca2 - s2 + 360.0) % 360.0 {
             trim_arc(a2, ic2, e2)
         } else {
             trim_arc(a2, s2, ic2)
@@ -885,41 +988,51 @@ fn fillet_arc_arc(
 
     for sign1 in &[-1.0_f64, 1.0_f64] {
         let d1 = r1 + sign1 * radius;
-        if d1 < 1e-9 { continue; }
+        if d1 < 1e-9 {
+            continue;
+        }
         for sign2 in &[-1.0_f64, 1.0_f64] {
             let d2 = r2 + sign2 * radius;
-            if d2 < 1e-9 { continue; }
+            if d2 < 1e-9 {
+                continue;
+            }
             for fc in circle_circle_pts(c1, d1, c2, d2) {
                 // Tangent points on each arc
-                let fd1 = [(c1[0]-fc[0]), (c1[1]-fc[1])];
-                let fdl1 = (fd1[0]*fd1[0]+fd1[1]*fd1[1]).sqrt().max(1e-12);
-                let tp1 = [c1[0]+fd1[0]/fdl1*r1, c1[1]+fd1[1]/fdl1*r1];
+                let fd1 = [(c1[0] - fc[0]), (c1[1] - fc[1])];
+                let fdl1 = (fd1[0] * fd1[0] + fd1[1] * fd1[1]).sqrt().max(1e-12);
+                let tp1 = [c1[0] + fd1[0] / fdl1 * r1, c1[1] + fd1[1] / fdl1 * r1];
 
-                let fd2 = [(c2[0]-fc[0]), (c2[1]-fc[1])];
-                let fdl2 = (fd2[0]*fd2[0]+fd2[1]*fd2[1]).sqrt().max(1e-12);
-                let tp2 = [c2[0]+fd2[0]/fdl2*r2, c2[1]+fd2[1]/fdl2*r2];
+                let fd2 = [(c2[0] - fc[0]), (c2[1] - fc[1])];
+                let fdl2 = (fd2[0] * fd2[0] + fd2[1] * fd2[1]).sqrt().max(1e-12);
+                let tp2 = [c2[0] + fd2[0] / fdl2 * r2, c2[1] + fd2[1] / fdl2 * r2];
 
                 // Tangent points must lie within respective arc ranges
                 let tp1a = arc_angle_at(c1, tp1);
                 let tp2a = arc_angle_at(c2, tp2);
                 let tc1 = clamp_angle_to_arc(tp1a, s1, e1);
                 let tc2 = clamp_angle_to_arc(tp2a, s2, e2);
-                if (norm_angle(tp1a) - norm_angle(tc1)).abs() > 0.01 { continue; }
-                if (norm_angle(tp2a) - norm_angle(tc2)).abs() > 0.01 { continue; }
+                if (norm360(tp1a) - norm360(tc1)).abs() > 0.5 {
+                    continue;
+                }
+                if (norm360(tp2a) - norm360(tc2)).abs() > 0.5 {
+                    continue;
+                }
 
-                let dist_total = (tp1[0]-click1[0]).hypot(tp1[1]-click1[1])
-                               + (tp2[0]-click2[0]).hypot(tp2[1]-click2[1]);
-                if dist_total >= best_dist { continue; }
+                let dist_total = (tp1[0] - click1[0]).hypot(tp1[1] - click1[1])
+                    + (tp2[0] - click2[0]).hypot(tp2[1] - click2[1]);
+                if dist_total >= best_dist {
+                    continue;
+                }
 
                 let ca1 = clamp_angle_to_arc(arc_angle_at(c1, click1), s1, e1);
                 let ca2 = clamp_angle_to_arc(arc_angle_at(c2, click2), s2, e2);
 
-                let new_a1 = if (tc1 - s1).rem_euclid(TAU) <= (ca1 - s1).rem_euclid(TAU) {
+                let new_a1 = if (tc1 - s1 + 360.0) % 360.0 <= (ca1 - s1 + 360.0) % 360.0 {
                     trim_arc(a1, tc1, e1)
                 } else {
                     trim_arc(a1, s1, tc1)
                 };
-                let new_a2 = if (tc2 - s2).rem_euclid(TAU) <= (ca2 - s2).rem_euclid(TAU) {
+                let new_a2 = if (tc2 - s2 + 360.0) % 360.0 <= (ca2 - s2 + 360.0) % 360.0 {
                     trim_arc(a2, tc2, e2)
                 } else {
                     trim_arc(a2, s2, tc2)
@@ -927,18 +1040,23 @@ fn fillet_arc_arc(
 
                 let fa1 = arc_angle_at(fc, tp1);
                 let fa2 = arc_angle_at(fc, tp2);
-                let cross = (tp1[0]-fc[0])*(tp2[1]-fc[1]) - (tp1[1]-fc[1])*(tp2[0]-fc[0]);
+                let cross =
+                    (tp1[0] - fc[0]) * (tp2[1] - fc[1]) - (tp1[1] - fc[1]) * (tp2[0] - fc[0]);
                 let (fstart, fend) = if cross >= 0.0 { (fa1, fa2) } else { (fa2, fa1) };
                 let mut fillet_arc = ArcEnt::new();
                 fillet_arc.common = a1.common.clone();
                 fillet_arc.common.handle = Handle::NULL;
                 fillet_arc.center = Vector3::new(fc[0], fc[1], z);
                 fillet_arc.radius = radius;
-                fillet_arc.start_angle = norm_angle(fstart);
-                fillet_arc.end_angle   = norm_angle(fend);
+                fillet_arc.start_angle = norm360(fstart);
+                fillet_arc.end_angle = norm360(fend);
 
                 best_dist = dist_total;
-                best = Some((EntityType::Arc(new_a1), EntityType::Arc(new_a2), EntityType::Arc(fillet_arc)));
+                best = Some((
+                    EntityType::Arc(new_a1),
+                    EntityType::Arc(new_a2),
+                    EntityType::Arc(fillet_arc),
+                ));
             }
         }
     }
@@ -951,16 +1069,18 @@ fn trim_line_to_point(line: &LineEnt, isect: [f64; 2], click: [f64; 2]) -> Optio
     let mut l = line.clone();
     l.common.handle = Handle::NULL;
     let (p1, _, u, len) = line_geom(line);
-    if len < 1e-12 { return None; }
+    if len < 1e-12 {
+        return None;
+    }
     // Parameter of intersection
-    let t_i = (isect[0]-p1[0])*u[0] + (isect[1]-p1[1])*u[1];
+    let t_i = (isect[0] - p1[0]) * u[0] + (isect[1] - p1[1]) * u[1];
     // Parameter of click
-    let t_c = (click[0]-p1[0])*u[0] + (click[1]-p1[1])*u[1];
+    let t_c = (click[0] - p1[0]) * u[0] + (click[1] - p1[1]) * u[1];
     // If click is past intersection on the + side, keep intersection..end
     if t_c >= t_i {
         l.start = Vector3::new(isect[0], isect[1], line.start.z);
     } else {
-        l.end   = Vector3::new(isect[0], isect[1], line.end.z);
+        l.end = Vector3::new(isect[0], isect[1], line.end.z);
     }
     Some(l)
 }
@@ -1060,12 +1180,14 @@ impl CadCommand for FilletCommand {
                 "FILLET  Select first object (Line/Arc/LwPolyline)  [R={:.4} | type R to change]:",
                 self.radius
             ),
-            FilletStep::WaitingForRadius => format!(
-                "FILLET  Enter fillet radius <{:.4}>:",
-                self.radius
-            ),
+            FilletStep::WaitingForRadius => {
+                format!("FILLET  Enter fillet radius <{:.4}>:", self.radius)
+            }
             FilletStep::Second { .. } => {
-                format!("FILLET  Select second object (Line/Arc/LwPolyline)  [R={:.4}]:", self.radius)
+                format!(
+                    "FILLET  Select second object (Line/Arc/LwPolyline)  [R={:.4}]:",
+                    self.radius
+                )
             }
         }
     }
@@ -1145,7 +1267,11 @@ impl CadCommand for FilletCommand {
                         other => FilletEntity::from_entity(other),
                     });
                 if let Some(e) = e1 {
-                    self.step = FilletStep::Second { h1: handle, e1: e, click1: click };
+                    self.step = FilletStep::Second {
+                        h1: handle,
+                        e1: e,
+                        click1: click,
+                    };
                     CmdResult::NeedPoint
                 } else {
                     CmdResult::NeedPoint
@@ -1177,7 +1303,9 @@ impl CadCommand for FilletCommand {
                     match compute_fillet_entities(&e1, click1, &e2, click, self.radius) {
                         Some((new_e1, new_e2, maybe_arc)) => {
                             let mut additions = vec![];
-                            if let Some(arc) = maybe_arc { additions.push(arc); }
+                            if let Some(arc) = maybe_arc {
+                                additions.push(arc);
+                            }
                             if same_entity {
                                 // Corner fillet: both results are the same rebuilt poly.
                                 CmdResult::ReplaceMany(vec![(h1, vec![new_e1])], additions)
@@ -1214,7 +1342,12 @@ impl CadCommand for FilletCommand {
                         FilletEntity::from_entity(e).map(|fe| entity_pts(&fe.to_entity_type()))
                     });
                 if let Some(pts) = pts {
-                    vec![WireModel::solid("fillet_hover".into(), pts, WireModel::CYAN, false)]
+                    vec![WireModel::solid(
+                        "fillet_hover".into(),
+                        pts,
+                        WireModel::CYAN,
+                        false,
+                    )]
                 } else {
                     vec![]
                 }
@@ -1240,11 +1373,26 @@ impl CadCommand for FilletCommand {
                         compute_fillet_entities(&e1, click1, &e2, click, self.radius)
                     {
                         let mut out = vec![
-                            WireModel::solid("fillet_e1".into(), entity_pts(&new_e1), WireModel::CYAN, false),
-                            WireModel::solid("fillet_e2".into(), entity_pts(&new_e2), WireModel::CYAN, false),
+                            WireModel::solid(
+                                "fillet_e1".into(),
+                                entity_pts(&new_e1),
+                                WireModel::CYAN,
+                                false,
+                            ),
+                            WireModel::solid(
+                                "fillet_e2".into(),
+                                entity_pts(&new_e2),
+                                WireModel::CYAN,
+                                false,
+                            ),
                         ];
                         if let Some(arc) = maybe_arc {
-                            out.push(WireModel::solid("fillet_arc".into(), entity_pts(&arc), WireModel::CYAN, false));
+                            out.push(WireModel::solid(
+                                "fillet_arc".into(),
+                                entity_pts(&arc),
+                                WireModel::CYAN,
+                                false,
+                            ));
                         }
                         return out;
                     }
@@ -1309,10 +1457,9 @@ impl CadCommand for ChamferCommand {
                 "CHAMFER  Select first line  [D1={:.4} D2={:.4} | type D to change]:",
                 self.dist1, self.dist2
             ),
-            ChamferStep::WaitingForDist1 => format!(
-                "CHAMFER  Enter first chamfer distance <{:.4}>:",
-                self.dist1
-            ),
+            ChamferStep::WaitingForDist1 => {
+                format!("CHAMFER  Enter first chamfer distance <{:.4}>:", self.dist1)
+            }
             ChamferStep::WaitingForDist2 => format!(
                 "CHAMFER  Enter second chamfer distance <{:.4}>:",
                 self.dist2

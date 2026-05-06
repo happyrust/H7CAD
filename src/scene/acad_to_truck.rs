@@ -1,12 +1,12 @@
 // acadrust -> truck topology conversion layer.
 
 use acadrust::{CadDocument, EntityType};
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 use truck_modeling::{Edge, Solid, Vertex, Wire};
 
-use crate::entities::{arc, circle, line, lwpolyline, mtext, point, text};
 use crate::entities::traits::EntityTypeOps;
+use crate::entities::{arc, circle, ellipse, line, lwpolyline, mtext, point, spline, text};
 use crate::scene::wire_model::{SnapHint, TangentGeom};
 
 /// One group of glyph strokes with its world-space origin stored in f64.
@@ -14,7 +14,31 @@ use crate::scene::wire_model::{SnapHint, TangentGeom};
 /// world offset can be subtracted with f64 precision in tessellate.rs.
 pub struct TextStroke {
     pub strokes: Vec<Vec<[f32; 2]>>,
-    pub origin:  [f64; 2],
+    pub origin: [f64; 2],
+}
+
+impl TextStroke {
+    pub fn len(&self) -> usize {
+        self.strokes.iter().map(Vec::len).sum()
+    }
+}
+
+impl IntoIterator for TextStroke {
+    type Item = [f32; 2];
+    type IntoIter = std::iter::Flatten<std::vec::IntoIter<Vec<[f32; 2]>>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.strokes.into_iter().flatten()
+    }
+}
+
+impl<'a> IntoIterator for &'a TextStroke {
+    type Item = &'a [f32; 2];
+    type IntoIter = std::iter::Flatten<std::slice::Iter<'a, Vec<[f32; 2]>>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.strokes.iter().flatten()
+    }
 }
 
 #[allow(dead_code)]
@@ -62,14 +86,39 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
             *end_angle,
             entity.extrusion,
         )),
-        nm::EntityData::LwPolyline { vertices, closed, .. } => {
-            Some(lwpolyline::to_truck_with_normal(
-                vertices,
-                *closed,
-                0.0,
-                entity.extrusion,
-            ))
-        }
+        nm::EntityData::Ellipse {
+            center,
+            major_axis,
+            ratio,
+            start_param,
+            end_param,
+        } => Some(ellipse::to_truck_with_normal(
+            center,
+            major_axis,
+            *ratio,
+            *start_param,
+            *end_param,
+            entity.extrusion,
+        )),
+        nm::EntityData::Spline {
+            degree,
+            knots,
+            control_points,
+            ..
+        } => Some(spline::to_truck_with_normal(
+            *degree,
+            knots,
+            control_points,
+            entity.extrusion,
+        )),
+        nm::EntityData::LwPolyline {
+            vertices, closed, ..
+        } => Some(lwpolyline::to_truck_with_normal(
+            vertices,
+            *closed,
+            0.0,
+            entity.extrusion,
+        )),
         nm::EntityData::Text {
             insertion,
             height,
@@ -144,7 +193,11 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
                     continue;
                 }
                 let connection = text_location.unwrap_or(*root.last().unwrap());
-                let cp = [connection[0] as f32, connection[1] as f32, connection[2] as f32];
+                let cp = [
+                    connection[0] as f32,
+                    connection[1] as f32,
+                    connection[2] as f32,
+                ];
 
                 if !invisible {
                     if !first_segment {
@@ -160,8 +213,16 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
 
                     for window in root.windows(2) {
                         tangents.push(TangentGeom::Line {
-                            p1: [window[0][0] as f32, window[0][1] as f32, window[0][2] as f32],
-                            p2: [window[1][0] as f32, window[1][1] as f32, window[1][2] as f32],
+                            p1: [
+                                window[0][0] as f32,
+                                window[0][1] as f32,
+                                window[0][2] as f32,
+                            ],
+                            p2: [
+                                window[1][0] as f32,
+                                window[1][1] as f32,
+                                window[1][2] as f32,
+                            ],
                         });
                     }
 
@@ -265,7 +326,12 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
                 Some(TruckEntity {
                     object: TruckObject::Lines(points),
                     snap_pts: text_location
-                        .map(|loc| vec![(Vec3::new(loc[0] as f32, loc[1] as f32, loc[2] as f32), SnapHint::Insertion)])
+                        .map(|loc| {
+                            vec![(
+                                Vec3::new(loc[0] as f32, loc[1] as f32, loc[2] as f32),
+                                SnapHint::Insertion,
+                            )]
+                        })
                         .unwrap_or_default(),
                     tangent_geoms: tangents,
                     key_vertices,
@@ -327,6 +393,72 @@ mod tests {
         let entity = doc.get_entity(handle).expect("line should exist");
         let truck = convert_native(entity, &doc).expect("native line should convert");
         assert_eq!(truck.key_vertices.len(), 2);
+    }
+
+    #[test]
+    fn convert_native_ellipse_returns_truck_geometry() {
+        let mut doc = nm::CadDocument::new();
+        let handle = doc
+            .add_entity(nm::Entity::new(nm::EntityData::Ellipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [10.0, 0.0, 0.0],
+                ratio: 0.5,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            }))
+            .expect("ellipse should be added");
+
+        let entity = doc.get_entity(handle).expect("ellipse should exist");
+        let truck = convert_native(entity, &doc).expect("native ellipse should convert");
+        match truck.object {
+            TruckObject::Contour(_) | TruckObject::Curve(_) => {}
+            _ => panic!("expected curve geometry"),
+        }
+    }
+
+    #[test]
+    fn convert_native_ellipse_uses_extrusion_normal_for_minor_axis() {
+        let mut doc = nm::CadDocument::new();
+        let handle = doc
+            .add_entity(nm::Entity::new(nm::EntityData::Ellipse {
+                center: [0.0, 0.0, 0.0],
+                major_axis: [0.0, 10.0, 0.0],
+                ratio: 0.5,
+                start_param: 0.0,
+                end_param: std::f64::consts::TAU,
+            }))
+            .expect("ellipse should be added");
+        let entity = doc.get_entity_mut(handle).expect("ellipse should exist");
+        entity.extrusion = [1.0, 0.0, 0.0];
+
+        let entity = doc.get_entity(handle).expect("ellipse should exist");
+        let truck = convert_native(entity, &doc).expect("native ellipse should convert");
+
+        assert!(
+            truck.snap_pts.iter().any(|(point, _)| point.z.abs() > 0.1),
+            "tilted ellipse minor-axis quadrants should leave the XY plane"
+        );
+    }
+
+    #[test]
+    fn convert_native_spline_returns_truck_geometry() {
+        let mut doc = nm::CadDocument::new();
+        let handle = doc
+            .add_entity(nm::Entity::new(nm::EntityData::Spline {
+                degree: 2,
+                closed: false,
+                knots: vec![],
+                control_points: vec![[0.0, 0.0, 0.0], [5.0, 5.0, 0.0], [10.0, 0.0, 0.0]],
+                weights: vec![],
+                fit_points: vec![],
+                start_tangent: [0.0, 0.0, 0.0],
+                end_tangent: [0.0, 0.0, 0.0],
+            }))
+            .expect("spline should be added");
+
+        let entity = doc.get_entity(handle).expect("spline should exist");
+        let truck = convert_native(entity, &doc).expect("native spline should convert");
+        assert_eq!(truck.key_vertices.len(), 3);
     }
 
     #[test]

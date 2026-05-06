@@ -1,7 +1,9 @@
 use truck_modeling::{builder, Point3};
 
 use crate::command::EntityTransform;
-use crate::entities::common::{edit_prop as edit, parse_f64, pt_to_vec3, square_grip, transform_pt};
+use crate::entities::common::{
+    edit_prop as edit, parse_f64, pt_to_vec3, square_grip, transform_pt,
+};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
@@ -61,4 +63,3 @@ pub fn apply_grip(position: &mut [f64; 3], _grip_id: usize, apply: GripApply) {
 pub fn apply_transform(position: &mut [f64; 3], t: &EntityTransform) {
     transform_pt(position, t);
 }
-

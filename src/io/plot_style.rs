@@ -18,8 +18,7 @@ use std::path::Path;
 /// Lineweight table: index value → mm, matching AutoCAD's LWEIGHT codes.
 /// Index 0 = 0.00 mm (hairline), others follow the DXF lineweight enum.
 pub const LW_TABLE: &[f32] = &[
-    0.00, 0.05, 0.09, 0.10, 0.13, 0.15, 0.18, 0.20,
-    0.25, 0.30, 0.35, 0.40, 0.50, 0.53, 0.60, 0.70,
+    0.00, 0.05, 0.09, 0.10, 0.13, 0.15, 0.18, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.53, 0.60, 0.70,
     0.80, 0.90, 1.00, 1.06, 1.20, 1.40, 1.58, 2.00, 2.11,
 ];
 
@@ -81,8 +80,11 @@ impl PlotStyleTable {
     /// Load a CTB or STB file from disk.
     pub fn load(path: &Path) -> Result<Self, String> {
         let raw = std::fs::read(path).map_err(|e| e.to_string())?;
-        let name = path.file_name()
-            .unwrap_or_default().to_string_lossy().into_owned();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         let is_stb = name.to_lowercase().ends_with(".stb");
         let text = decompress_ctb(&raw)?;
         parse_plot_style_text(&text, name, is_stb)
@@ -100,9 +102,9 @@ impl PlotStyleTable {
     /// Returns None if no override (use object color).
     pub fn resolve_color(&self, aci: u8) -> Option<[f32; 3]> {
         let entry = self.aci_entries.get(aci as usize)?;
-        entry.color.map(|[r, g, b]| {
-            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
-        })
+        entry
+            .color
+            .map(|[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
     }
 
     /// Resolve the effective lineweight in mm for the given ACI index.
@@ -158,7 +160,9 @@ impl PlotStyleTable {
 /// (with the two-byte zlib header 0x78 0x9C) instead — we handle both.
 fn decompress_ctb(data: &[u8]) -> Result<String, String> {
     // Find the first newline — everything after it is the compressed payload.
-    let split_at = data.iter().position(|&b| b == b'\n')
+    let split_at = data
+        .iter()
+        .position(|&b| b == b'\n')
         .map(|p| p + 1)
         .unwrap_or(0);
     let payload = &data[split_at..];
@@ -196,12 +200,9 @@ fn compress_ctb(text: &[u8]) -> Result<Vec<u8>, String> {
 
 // ── Text parser ───────────────────────────────────────────────────────────────
 
-fn parse_plot_style_text(
-    text: &str,
-    name: String,
-    is_stb: bool,
-) -> Result<PlotStyleTable, String> {
-    let mut aci_entries: Vec<PlotStyleEntry> = (0..=255).map(|_| PlotStyleEntry::default()).collect();
+fn parse_plot_style_text(text: &str, name: String, is_stb: bool) -> Result<PlotStyleTable, String> {
+    let mut aci_entries: Vec<PlotStyleEntry> =
+        (0..=255).map(|_| PlotStyleEntry::default()).collect();
     let mut named_entries: HashMap<String, PlotStyleEntry> = HashMap::new();
     let mut style_index: usize = 1; // CTB: 1-based ACI index
     let mut current: Option<PlotStyleEntry> = None;
@@ -225,7 +226,9 @@ fn parse_plot_style_text(
             }
             continue;
         }
-        let Some(entry) = current.as_mut() else { continue };
+        let Some(entry) = current.as_mut() else {
+            continue;
+        };
         if let Some((key, val)) = line.split_once('=') {
             let key = key.trim();
             let val = val.trim();
@@ -237,10 +240,14 @@ fn parse_plot_style_text(
                     }
                 }
                 "screen" => {
-                    if let Ok(v) = val.parse::<u8>() { entry.screening = v; }
+                    if let Ok(v) = val.parse::<u8>() {
+                        entry.screening = v;
+                    }
                 }
                 "lineweight" => {
-                    if let Ok(v) = val.parse::<u8>() { entry.lineweight = v; }
+                    if let Ok(v) = val.parse::<u8>() {
+                        entry.lineweight = v;
+                    }
                 }
                 "color1" => {
                     if val.starts_with('#') && val.len() == 7 {
@@ -255,8 +262,8 @@ fn parse_plot_style_text(
                         if packed != -1056964608i32 {
                             let u = packed as u32;
                             let r = ((u >> 16) & 0xFF) as u8;
-                            let g = ((u >>  8) & 0xFF) as u8;
-                            let b = ( u        & 0xFF) as u8;
+                            let g = ((u >> 8) & 0xFF) as u8;
+                            let b = (u & 0xFF) as u8;
                             entry.color = Some([r, g, b]);
                         }
                     }
@@ -266,5 +273,10 @@ fn parse_plot_style_text(
         }
     }
 
-    Ok(PlotStyleTable { name, is_stb, aci_entries, named_entries })
+    Ok(PlotStyleTable {
+        name,
+        is_stb,
+        aci_entries,
+        named_entries,
+    })
 }

@@ -141,9 +141,11 @@ pub fn decompress_ac18_lz77(
     // before entering the main state machine.
     // Cf. ACadSharp DwgLZ77AC18Decompressor.cs L37..L41.
     if (opcode1 & 0xF0) == 0 {
-        let lit = literal_count(opcode1, &mut src)?
-            .checked_add(3)
-            .ok_or(Lz77DecodeError::LengthOutOfRange { value: i64::from(i32::MAX) + 3 })?;
+        let lit = literal_count(opcode1, &mut src)?.checked_add(3).ok_or(
+            Lz77DecodeError::LengthOutOfRange {
+                value: i64::from(i32::MAX) + 3,
+            },
+        )?;
         opcode1 = copy_literal(lit, &mut src, &mut dst, decompressed_size)?;
     }
 
@@ -375,14 +377,14 @@ fn apply_back_reference(
             dst_len: dst.len(),
         });
     }
-    let attempted = dst
-        .len()
-        .checked_add(compressed_bytes)
-        .ok_or(Lz77DecodeError::OutputOverflow {
-            current: dst.len(),
-            attempted_push: compressed_bytes,
-            cap,
-        })?;
+    let attempted =
+        dst.len()
+            .checked_add(compressed_bytes)
+            .ok_or(Lz77DecodeError::OutputOverflow {
+                current: dst.len(),
+                attempted_push: compressed_bytes,
+                cap,
+            })?;
     if attempted > cap {
         return Err(Lz77DecodeError::OutputOverflow {
             current: dst.len(),
@@ -516,8 +518,7 @@ mod tests {
             b'1', b'2', b'3', b'4', b'5', // 5 trailing literal bytes
             0x11, // terminator
         ];
-        let out =
-            decompress_ac18_lz77(&bytes, 17).expect("extended-literal stream decodes");
+        let out = decompress_ac18_lz77(&bytes, 17).expect("extended-literal stream decodes");
         assert_eq!(out, b"ABCDEFGHEFGH12345");
     }
 
@@ -540,8 +541,7 @@ mod tests {
         bytes.extend(std::iter::repeat(0x41).take(278)); // 278 literal bytes
         bytes.push(0x11); // terminator (read by copy_literal as next opcode)
 
-        let out = decompress_ac18_lz77(&bytes, 278)
-            .expect("extended literal_count chain decodes");
+        let out = decompress_ac18_lz77(&bytes, 278).expect("extended literal_count chain decodes");
         assert_eq!(out.len(), 278);
         assert!(out.iter().all(|&b| b == 0x41));
     }
@@ -581,9 +581,7 @@ mod tests {
     /// preamble announces 8 bytes but the cap is only 4.
     #[test]
     fn output_overflow_returns_output_overflow_error() {
-        let bytes = [
-            0x05, b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H', 0x11,
-        ];
+        let bytes = [0x05, b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H', 0x11];
         let err = decompress_ac18_lz77(&bytes, 4).unwrap_err();
         assert_eq!(
             err,
@@ -629,10 +627,7 @@ mod tests {
         assert!(offset.contains("offset -1"));
         assert!(offset.contains("dst_len=0"));
 
-        let length = format!(
-            "{}",
-            Lz77DecodeError::LengthOutOfRange { value: -2 }
-        );
+        let length = format!("{}", Lz77DecodeError::LengthOutOfRange { value: -2 });
         assert!(length.contains("length -2"));
 
         let overflow = format!(

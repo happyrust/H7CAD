@@ -1,20 +1,20 @@
+mod cmd_result;
+mod commands;
 mod document;
 mod helpers;
 mod history;
-mod properties;
 mod layers;
-mod commands;
-mod cmd_result;
-mod view;
+mod properties;
 mod update;
+mod view;
 pub(crate) mod workspace;
 
 use document::DocumentTab;
 
-use crate::types::{Color as AcadColor, LineWeight};
 use crate::modules::ModuleEvent;
 use crate::scene::CubeRegion;
 use crate::snap::Snapper;
+use crate::types::{Color as AcadColor, LineWeight};
 use crate::ui::{AppMenu, CommandLine, Ribbon, StatusBar};
 
 use iced::time::Instant;
@@ -80,15 +80,15 @@ pub(super) struct H7CAD {
     /// OS window Id of the primary application window.
     main_window: Option<window::Id>,
     // ── Floating panel windows ────────────────────────────────────────────
-    page_setup_window:      Option<window::Id>,
-    textstyle_window:       Option<window::Id>,
-    tablestyle_window:      Option<window::Id>,
-    mlstyle_window:         Option<window::Id>,
-    layout_manager_window:  Option<window::Id>,
-    plotstyle_window:       Option<window::Id>,
-    dimstyle_window:        Option<window::Id>,
-    shortcuts_window:       Option<window::Id>,
-    about_window:           Option<window::Id>,
+    page_setup_window: Option<window::Id>,
+    textstyle_window: Option<window::Id>,
+    tablestyle_window: Option<window::Id>,
+    mlstyle_window: Option<window::Id>,
+    layout_manager_window: Option<window::Id>,
+    plotstyle_window: Option<window::Id>,
+    dimstyle_window: Option<window::Id>,
+    shortcuts_window: Option<window::Id>,
+    about_window: Option<window::Id>,
     /// In-memory clipboard: cloned entities waiting to be pasted.
     clipboard: Vec<acadrust::EntityType>,
     /// Centroid of the clipboard entities (XZ plane, Y-up).
@@ -189,29 +189,67 @@ pub(super) struct H7CAD {
     /// Active tab: 0=Lines, 1=Arrows, 2=Text, 3=Scale/Units, 4=Tolerances.
     dimstyle_tab: u8,
     // Edit buffers (strings while typing):
-    ds_dimdle: String, ds_dimdli: String, ds_dimgap: String,
-    ds_dimexe: String, ds_dimexo: String,
-    ds_dimsd1: bool,   ds_dimsd2: bool,
-    ds_dimse1: bool,   ds_dimse2: bool,
-    ds_dimasz: String, ds_dimcen: String, ds_dimtsz: String,
-    ds_dimtxt: String, ds_dimtxsty: String, ds_dimtad: String,
-    ds_dimtih: bool,   ds_dimtoh: bool,
-    ds_dimscale: String, ds_dimlfac: String,
-    ds_dimlunit: String, ds_dimdec: String, ds_dimpost: String,
-    ds_dimtol: bool,   ds_dimlim: bool,
-    ds_dimtp: String,  ds_dimtm: String,
-    ds_dimtdec: String, ds_dimtfac: String,
+    ds_dimdle: String,
+    ds_dimdli: String,
+    ds_dimgap: String,
+    ds_dimexe: String,
+    ds_dimexo: String,
+    ds_dimsd1: bool,
+    ds_dimsd2: bool,
+    ds_dimse1: bool,
+    ds_dimse2: bool,
+    ds_dimasz: String,
+    ds_dimcen: String,
+    ds_dimtsz: String,
+    ds_dimtxt: String,
+    ds_dimtxsty: String,
+    ds_dimtad: String,
+    ds_dimtih: bool,
+    ds_dimtoh: bool,
+    ds_dimscale: String,
+    ds_dimlfac: String,
+    ds_dimlunit: String,
+    ds_dimdec: String,
+    ds_dimpost: String,
+    ds_dimtol: bool,
+    ds_dimlim: bool,
+    ds_dimtp: String,
+    ds_dimtm: String,
+    ds_dimtdec: String,
+    ds_dimtfac: String,
 }
 
 /// Identifies a DimStyle field that can be edited in the dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DsField {
-    Dimdle, Dimdli, Dimgap, Dimexe, Dimexo,
-    Dimsd1, Dimsd2, Dimse1, Dimse2,
-    Dimasz, Dimcen, Dimtsz,
-    Dimtxt, Dimtxsty, Dimtad, Dimtih, Dimtoh,
-    Dimscale, Dimlfac, Dimlunit, Dimdec, Dimpost,
-    Dimtol, Dimlim, Dimtp, Dimtm, Dimtdec, Dimtfac,
+    Dimdle,
+    Dimdli,
+    Dimgap,
+    Dimexe,
+    Dimexo,
+    Dimsd1,
+    Dimsd2,
+    Dimse1,
+    Dimse2,
+    Dimasz,
+    Dimcen,
+    Dimtsz,
+    Dimtxt,
+    Dimtxsty,
+    Dimtad,
+    Dimtih,
+    Dimtoh,
+    Dimscale,
+    Dimlfac,
+    Dimlunit,
+    Dimdec,
+    Dimpost,
+    Dimtol,
+    Dimlim,
+    Dimtp,
+    Dimtm,
+    Dimtdec,
+    Dimtfac,
 }
 
 /// Identifies a single editable field inside the SVG Export dialog.
@@ -392,7 +430,10 @@ pub enum Message {
     /// User changed the active lineweight in the Properties toolbar.
     RibbonLineweightChanged(LineWeight),
     /// User selected a style from a style combobox in the ribbon.
-    RibbonStyleChanged { key: crate::modules::StyleKey, name: String },
+    RibbonStyleChanged {
+        key: crate::modules::StyleKey,
+        name: String,
+    },
 
     // ── Properties panel ──────────────────────────────────────────────────
     /// User selected a layer from the layer pick_list in the Properties panel.
@@ -509,7 +550,10 @@ pub enum Message {
     /// Show the SVG save-file dialog and trigger SVG export with given options.
     SvgExport(crate::io::svg_export::SvgExportOptions),
     /// Callback after the user picks (or cancels) the SVG export path.
-    SvgExportPath(Option<std::path::PathBuf>, crate::io::svg_export::SvgExportOptions),
+    SvgExportPath(
+        Option<std::path::PathBuf>,
+        crate::io::svg_export::SvgExportOptions,
+    ),
     /// Open the PDF Export options dialog (三十三轮 Phase 2b).
     PdfExportDialogOpen,
     /// Close the PDF Export options dialog without exporting.
@@ -524,7 +568,10 @@ pub enum Message {
     PdfExportDialogCommit,
     /// Callback after the user picks (or cancels) the PDF export path from the
     /// dialog flow, carrying the committed options alongside.
-    PlotExportPathWithOpts(Option<std::path::PathBuf>, crate::io::pdf_export::PdfExportOptions),
+    PlotExportPathWithOpts(
+        Option<std::path::PathBuf>,
+        crate::io::pdf_export::PdfExportOptions,
+    ),
 
     /// Open the SVG Export options dialog.  `SVGEXPORTDIALOG` / `SVGOPTIONS`.
     SvgExportDialogOpen,
@@ -572,7 +619,10 @@ pub enum Message {
     TextStyleDialogNew,
     TextStyleDialogDelete,
     /// Edit a string field (FontFile / Width / Oblique).
-    TextStyleEdit { field: &'static str, value: String },
+    TextStyleEdit {
+        field: &'static str,
+        value: String,
+    },
     /// Commit edits to the selected text style.
     TextStyleApply,
     /// Select a font from the built-in font list.
@@ -714,15 +764,15 @@ impl H7CAD {
             last_point: None,
             layer_window: None,
             main_window: None,
-            page_setup_window:     None,
-            textstyle_window:      None,
-            tablestyle_window:     None,
-            mlstyle_window:        None,
+            page_setup_window: None,
+            textstyle_window: None,
+            tablestyle_window: None,
+            mlstyle_window: None,
             layout_manager_window: None,
-            plotstyle_window:      None,
-            dimstyle_window:       None,
-            shortcuts_window:      None,
-            about_window:          None,
+            plotstyle_window: None,
+            dimstyle_window: None,
+            shortcuts_window: None,
+            about_window: None,
             clipboard: Vec::new(),
             clipboard_centroid: glam::Vec3::ZERO,
             layout_context_menu: None,
@@ -774,22 +824,34 @@ impl H7CAD {
             // DimStyle dialog
             dimstyle_selected: "Standard".to_string(),
             dimstyle_tab: 0,
-            ds_dimdle: "0".to_string(),       ds_dimdli: "3.75".to_string(),
-            ds_dimgap: "0.625".to_string(),   ds_dimexe: "1.25".to_string(),
+            ds_dimdle: "0".to_string(),
+            ds_dimdli: "3.75".to_string(),
+            ds_dimgap: "0.625".to_string(),
+            ds_dimexe: "1.25".to_string(),
             ds_dimexo: "0.625".to_string(),
-            ds_dimsd1: false, ds_dimsd2: false,
-            ds_dimse1: false, ds_dimse2: false,
-            ds_dimasz: "0.18".to_string(),    ds_dimcen: "0.09".to_string(),
+            ds_dimsd1: false,
+            ds_dimsd2: false,
+            ds_dimse1: false,
+            ds_dimse2: false,
+            ds_dimasz: "0.18".to_string(),
+            ds_dimcen: "0.09".to_string(),
             ds_dimtsz: "0".to_string(),
-            ds_dimtxt: "0.18".to_string(),    ds_dimtxsty: "Standard".to_string(),
+            ds_dimtxt: "0.18".to_string(),
+            ds_dimtxsty: "Standard".to_string(),
             ds_dimtad: "1".to_string(),
-            ds_dimtih: false, ds_dimtoh: false,
-            ds_dimscale: "1".to_string(),     ds_dimlfac: "1".to_string(),
-            ds_dimlunit: "2".to_string(),     ds_dimdec: "2".to_string(),
+            ds_dimtih: false,
+            ds_dimtoh: false,
+            ds_dimscale: "1".to_string(),
+            ds_dimlfac: "1".to_string(),
+            ds_dimlunit: "2".to_string(),
+            ds_dimdec: "2".to_string(),
             ds_dimpost: "<>".to_string(),
-            ds_dimtol: false, ds_dimlim: false,
-            ds_dimtp: "0".to_string(),        ds_dimtm: "0".to_string(),
-            ds_dimtdec: "2".to_string(),      ds_dimtfac: "1".to_string(),
+            ds_dimtol: false,
+            ds_dimlim: false,
+            ds_dimtp: "0".to_string(),
+            ds_dimtm: "0".to_string(),
+            ds_dimtdec: "2".to_string(),
+            ds_dimtfac: "1".to_string(),
         };
         app.sync_ribbon_layers();
         app
@@ -818,10 +880,7 @@ impl H7CAD {
         if let Some(arg) = std::env::args().nth(1) {
             let path = PathBuf::from(&arg);
             if path.is_file() {
-                let load = Task::perform(
-                    crate::io::open_path(path),
-                    Message::FileOpened,
-                );
+                let load = Task::perform(crate::io::open_path(path), Message::FileOpened);
                 task = Task::batch([task, load]);
             } else {
                 eprintln!(
@@ -841,18 +900,42 @@ pub fn run() -> iced::Result {
     iced::daemon(H7CAD::boot, H7CAD::update, H7CAD::view)
         .subscription(H7CAD::subscription)
         .title(|state: &H7CAD, window_id: window::Id| {
-            if Some(window_id) == state.layer_window         { return "Layer Properties Manager".into(); }
-            if Some(window_id) == state.page_setup_window    { return "Page Setup".into(); }
-            if Some(window_id) == state.textstyle_window     { return "Text Style".into(); }
-            if Some(window_id) == state.tablestyle_window    { return "Table Style".into(); }
-            if Some(window_id) == state.mlstyle_window       { return "Multiline Style".into(); }
-            if Some(window_id) == state.layout_manager_window { return "Layout Manager".into(); }
-            if Some(window_id) == state.plotstyle_window     { return "Plot Style Table Editor".into(); }
-            if Some(window_id) == state.dimstyle_window      { return "Dimension Style Manager".into(); }
-            if Some(window_id) == state.shortcuts_window     { return "Keyboard Shortcuts".into(); }
-            if Some(window_id) == state.svg_export_window    { return "SVG Export Options".into(); }
-            if Some(window_id) == state.pdf_export_window    { return "PDF Export Options".into(); }
-            if Some(window_id) == state.about_window         { return "About H7CAD".into(); }
+            if Some(window_id) == state.layer_window {
+                return "Layer Properties Manager".into();
+            }
+            if Some(window_id) == state.page_setup_window {
+                return "Page Setup".into();
+            }
+            if Some(window_id) == state.textstyle_window {
+                return "Text Style".into();
+            }
+            if Some(window_id) == state.tablestyle_window {
+                return "Table Style".into();
+            }
+            if Some(window_id) == state.mlstyle_window {
+                return "Multiline Style".into();
+            }
+            if Some(window_id) == state.layout_manager_window {
+                return "Layout Manager".into();
+            }
+            if Some(window_id) == state.plotstyle_window {
+                return "Plot Style Table Editor".into();
+            }
+            if Some(window_id) == state.dimstyle_window {
+                return "Dimension Style Manager".into();
+            }
+            if Some(window_id) == state.shortcuts_window {
+                return "Keyboard Shortcuts".into();
+            }
+            if Some(window_id) == state.svg_export_window {
+                return "SVG Export Options".into();
+            }
+            if Some(window_id) == state.pdf_export_window {
+                return "PDF Export Options".into();
+            }
+            if Some(window_id) == state.about_window {
+                return "About H7CAD".into();
+            }
             if let Some(tab) = state.tabs.get(state.active_tab) {
                 let dot = if tab.dirty { "● " } else { "" };
                 let name = tab.tab_display_name();

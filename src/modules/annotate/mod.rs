@@ -1,9 +1,9 @@
 // Annotate module — dimension, text, leader, table, and markup tools.
 
 pub mod aligned_dim;
+pub mod angular_dim;
 pub mod data_extract;
 pub mod data_link;
-pub mod angular_dim;
 pub mod ddedit;
 pub mod diameter_dim;
 pub mod dim_baseline;
@@ -38,7 +38,7 @@ impl CadModule for AnnotateModule {
     }
 
     fn ribbon_groups(&self) -> Vec<RibbonGroup> {
-        use crate::modules::home::draw::{wipeout, revcloud};
+        use crate::modules::home::draw::{revcloud, wipeout};
 
         vec![
             // ── Text ─────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ impl CadModule for AnnotateModule {
                         icon: mtext::ICON,
                         items: vec![
                             (mtext::tool().id, mtext::tool().label, mtext::tool().icon),
-                            (text::tool().id,  text::tool().label,  text::tool().icon),
+                            (text::tool().id, text::tool().label, text::tool().icon),
                             (ddedit::tool().id, ddedit::tool().label, ddedit::tool().icon),
                         ],
                         default: "MTEXT",
@@ -60,16 +60,14 @@ impl CadModule for AnnotateModule {
                         style_key: StyleKey::TextStyle,
                         combo_id: "TEXT_STYLE_COMBO",
                         manager_cmd: Some("STYLE"),
-                        rows: vec![
-                            vec![
-                                crate::modules::ToolDef {
-                                    id: "FIND",
-                                    label: "Find",
-                                    icon: crate::modules::IconKind::Svg(include_bytes!("../../../assets/icons/find.svg")),
-                                    event: crate::modules::ModuleEvent::Command("FIND".to_string()),
-                                },
-                            ],
-                        ],
+                        rows: vec![vec![crate::modules::ToolDef {
+                            id: "FIND",
+                            label: "Find",
+                            icon: crate::modules::IconKind::Svg(include_bytes!(
+                                "../../../assets/icons/find.svg"
+                            )),
+                            event: crate::modules::ModuleEvent::Command("FIND".to_string()),
+                        }]],
                     },
                 ],
             },
@@ -82,12 +80,36 @@ impl CadModule for AnnotateModule {
                         label: "Dimension",
                         icon: linear_dim::ICON,
                         items: vec![
-                            (linear_dim::tool().id,  linear_dim::tool().label,  linear_dim::tool().icon),
-                            (aligned_dim::tool().id, aligned_dim::tool().label, aligned_dim::tool().icon),
-                            (angular_dim::tool().id, angular_dim::tool().label, angular_dim::tool().icon),
-                            (radius_dim::tool().id,  radius_dim::tool().label,  radius_dim::tool().icon),
-                            (diameter_dim::tool().id, diameter_dim::tool().label, diameter_dim::tool().icon),
-                            (ordinate_dim::tool().id, ordinate_dim::tool().label, ordinate_dim::tool().icon),
+                            (
+                                linear_dim::tool().id,
+                                linear_dim::tool().label,
+                                linear_dim::tool().icon,
+                            ),
+                            (
+                                aligned_dim::tool().id,
+                                aligned_dim::tool().label,
+                                aligned_dim::tool().icon,
+                            ),
+                            (
+                                angular_dim::tool().id,
+                                angular_dim::tool().label,
+                                angular_dim::tool().icon,
+                            ),
+                            (
+                                radius_dim::tool().id,
+                                radius_dim::tool().label,
+                                radius_dim::tool().icon,
+                            ),
+                            (
+                                diameter_dim::tool().id,
+                                diameter_dim::tool().label,
+                                diameter_dim::tool().icon,
+                            ),
+                            (
+                                ordinate_dim::tool().id,
+                                ordinate_dim::tool().label,
+                                ordinate_dim::tool().icon,
+                            ),
                             (qdim::tool().id, qdim::tool().label, qdim::tool().icon),
                         ],
                         default: "DIMLINEAR",
@@ -97,11 +119,7 @@ impl CadModule for AnnotateModule {
                         combo_id: "DIM_STYLE_COMBO",
                         manager_cmd: Some("DIMSTYLE"),
                         rows: vec![
-                            vec![
-                                qdim::tool(),
-                                dim_continue::tool(),
-                                dim_baseline::tool(),
-                            ],
+                            vec![qdim::tool(), dim_continue::tool(), dim_baseline::tool()],
                             vec![
                                 tolerance_cmd::tool(),
                                 dimedit::tool(),
@@ -123,8 +141,16 @@ impl CadModule for AnnotateModule {
                         label: "Multileader",
                         icon: mleader_cmd::ICON,
                         items: vec![
-                            (mleader_cmd::tool().id, mleader_cmd::tool().label, mleader_cmd::tool().icon),
-                            (leader_cmd::tool().id,  leader_cmd::tool().label,  leader_cmd::tool().icon),
+                            (
+                                mleader_cmd::tool().id,
+                                mleader_cmd::tool().label,
+                                mleader_cmd::tool().icon,
+                            ),
+                            (
+                                leader_cmd::tool().id,
+                                leader_cmd::tool().label,
+                                leader_cmd::tool().icon,
+                            ),
                         ],
                         default: "MLEADER",
                     },
@@ -133,14 +159,8 @@ impl CadModule for AnnotateModule {
                         combo_id: "MLEADER_STYLE_COMBO",
                         manager_cmd: Some("MLEADERSTYLE"),
                         rows: vec![
-                            vec![
-                                mleader_edit::tool_add(),
-                                mleader_edit::tool_remove(),
-                            ],
-                            vec![
-                                mleader_edit::tool_align(),
-                                mleader_edit::tool_collect(),
-                            ],
+                            vec![mleader_edit::tool_add(), mleader_edit::tool_remove()],
+                            vec![mleader_edit::tool_align(), mleader_edit::tool_collect()],
                         ],
                     },
                 ],
@@ -154,12 +174,7 @@ impl CadModule for AnnotateModule {
                         style_key: StyleKey::TableStyle,
                         combo_id: "TABLE_STYLE_COMBO",
                         manager_cmd: Some("TABLESTYLE"),
-                        rows: vec![
-                            vec![
-                                data_extract::tool(),
-                                data_link::tool(),
-                            ],
-                        ],
+                        rows: vec![vec![data_extract::tool(), data_link::tool()]],
                     },
                 ],
             },

@@ -59,3 +59,44 @@ pub fn reflect_xy_point(x: &mut f64, y: &mut f64, p1: Vec3, p2: Vec3) {
     *y = p1.y as f64 + my;
 }
 
+pub fn mirror_xy_line(line: &mut acadrust::entities::Line, p1: Vec3, p2: Vec3) {
+    reflect_xy_point(&mut line.start.x, &mut line.start.y, p1, p2);
+    reflect_xy_point(&mut line.end.x, &mut line.end.y, p1, p2);
+}
+
+pub fn ocs_point_to_wcs(point: (f64, f64, f64), normal: (f64, f64, f64)) -> (f64, f64, f64) {
+    let (x, y, z) = point;
+    let (nx, ny, nz) = normal;
+    let n_len = (nx * nx + ny * ny + nz * nz).sqrt();
+    if n_len < 1e-12 {
+        return point;
+    }
+
+    let nz_axis = (nx / n_len, ny / n_len, nz / n_len);
+    let up = if nz_axis.0.abs() < 1.0 / 64.0 && nz_axis.1.abs() < 1.0 / 64.0 {
+        (0.0, 1.0, 0.0)
+    } else {
+        (0.0, 0.0, 1.0)
+    };
+    let ax = (
+        up.1 * nz_axis.2 - up.2 * nz_axis.1,
+        up.2 * nz_axis.0 - up.0 * nz_axis.2,
+        up.0 * nz_axis.1 - up.1 * nz_axis.0,
+    );
+    let ax_len = (ax.0 * ax.0 + ax.1 * ax.1 + ax.2 * ax.2).sqrt();
+    if ax_len < 1e-12 {
+        return point;
+    }
+    let ax = (ax.0 / ax_len, ax.1 / ax_len, ax.2 / ax_len);
+    let ay = (
+        nz_axis.1 * ax.2 - nz_axis.2 * ax.1,
+        nz_axis.2 * ax.0 - nz_axis.0 * ax.2,
+        nz_axis.0 * ax.1 - nz_axis.1 * ax.0,
+    );
+
+    (
+        x * ax.0 + y * ay.0 + z * nz_axis.0,
+        x * ax.1 + y * ay.1 + z * nz_axis.1,
+        x * ax.2 + y * ay.2 + z * nz_axis.2,
+    )
+}

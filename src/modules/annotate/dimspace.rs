@@ -34,18 +34,24 @@ pub struct DimSpaceCommand {
 
 impl DimSpaceCommand {
     pub fn new() -> Self {
-        Self { step: Step::PickBase }
+        Self {
+            step: Step::PickBase,
+        }
     }
 }
 
 impl CadCommand for DimSpaceCommand {
-    fn name(&self) -> &'static str { "DIMSPACE" }
+    fn name(&self) -> &'static str {
+        "DIMSPACE"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             Step::PickBase => "DIMSPACE  Select base dimension:".into(),
-            Step::PickOthers { others, .. } =>
-                format!("DIMSPACE  Select dimension to space ({} selected, Enter when done):", others.len()),
+            Step::PickOthers { others, .. } => format!(
+                "DIMSPACE  Select dimension to space ({} selected, Enter when done):",
+                others.len()
+            ),
             Step::EnterSpacing { .. } => "DIMSPACE  Enter value (0 = auto):".into(),
         }
     }
@@ -55,10 +61,15 @@ impl CadCommand for DimSpaceCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
         match &mut self.step {
             Step::PickBase => {
-                self.step = Step::PickOthers { base: handle, others: vec![] };
+                self.step = Step::PickOthers {
+                    base: handle,
+                    others: vec![],
+                };
                 CmdResult::NeedPoint
             }
             Step::PickOthers { others, .. } => {
@@ -84,13 +95,23 @@ impl CadCommand for DimSpaceCommand {
             use acadrust::entities::XLine;
             let mut xl = XLine::default();
             let handles_str: Vec<String> = o.iter().map(|h| h.value().to_string()).collect();
-            xl.common.layer = format!("__DIMSPACE__{},{},{}", b.value(), handles_str.join(";"), spacing);
-            return Some(CmdResult::ReplaceEntity(b, vec![acadrust::EntityType::XLine(xl)]));
+            xl.common.layer = format!(
+                "__DIMSPACE__{},{},{}",
+                b.value(),
+                handles_str.join(";"),
+                spacing
+            );
+            return Some(CmdResult::ReplaceEntity(
+                b,
+                vec![acadrust::EntityType::XLine(xl)],
+            ));
         }
         None
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
 
     fn on_enter(&mut self) -> CmdResult {
         match &self.step {

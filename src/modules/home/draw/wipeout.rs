@@ -4,8 +4,8 @@
 //   WIPEOUT (default): two-corner rectangular wipeout
 //   WIPEOUT P:         polygonal wipeout (pick corners, Enter to close)
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -35,15 +35,25 @@ enum WipeoutMode {
 
 impl WipeoutCommand {
     pub fn new_rectangular() -> Self {
-        Self { mode: WipeoutMode::Rectangular, first: None, poly_pts: vec![] }
+        Self {
+            mode: WipeoutMode::Rectangular,
+            first: None,
+            poly_pts: vec![],
+        }
     }
     pub fn new_polygonal() -> Self {
-        Self { mode: WipeoutMode::Polygonal, first: None, poly_pts: vec![] }
+        Self {
+            mode: WipeoutMode::Polygonal,
+            first: None,
+            poly_pts: vec![],
+        }
     }
 }
 
 impl CadCommand for WipeoutCommand {
-    fn name(&self) -> &'static str { "WIPEOUT" }
+    fn name(&self) -> &'static str {
+        "WIPEOUT"
+    }
 
     fn prompt(&self) -> String {
         match &self.mode {
@@ -58,7 +68,10 @@ impl CadCommand for WipeoutCommand {
                 if self.poly_pts.is_empty() {
                     "WIPEOUT (Polygon)  Specify first point:".into()
                 } else {
-                    format!("WIPEOUT (Polygon)  Specify next point ({} pts, Enter to close):", self.poly_pts.len())
+                    format!(
+                        "WIPEOUT (Polygon)  Specify next point ({} pts, Enter to close):",
+                        self.poly_pts.len()
+                    )
                 }
             }
         }
@@ -115,14 +128,16 @@ impl CadCommand for WipeoutCommand {
                     snap_pts: vec![],
                     tangent_geoms: vec![],
                     aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+                    key_vertices: vec![],
+                    aabb: WireModel::UNBOUNDED_AABB,
+                    plinegen: true,
+                    vp_scissor: None,
                 })
             }
             WipeoutMode::Polygonal => {
-                if self.poly_pts.is_empty() { return None; }
+                if self.poly_pts.is_empty() {
+                    return None;
+                }
                 let mut pts: Vec<[f32; 3]> =
                     self.poly_pts.iter().map(|p| [p.x, p.y, p.z]).collect();
                 pts.push([pt.x, pt.y, pt.z]);
@@ -138,10 +153,10 @@ impl CadCommand for WipeoutCommand {
                     snap_pts: vec![],
                     tangent_geoms: vec![],
                     aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+                    key_vertices: vec![],
+                    aabb: WireModel::UNBOUNDED_AABB,
+                    plinegen: true,
+                    vp_scissor: None,
                 })
             }
         }
@@ -167,10 +182,7 @@ fn make_rect_wipeout_native(p1: Vec3, p2: Vec3) -> nm::Entity {
 }
 
 fn make_poly_wipeout_native(pts: &[Vec3]) -> nm::Entity {
-    let clip_vertices: Vec<[f64; 2]> = pts
-        .iter()
-        .map(|p| [p.x as f64, p.z as f64])
-        .collect();
+    let clip_vertices: Vec<[f64; 2]> = pts.iter().map(|p| [p.x as f64, p.z as f64]).collect();
     let elevation = pts.first().map(|p| p.y as f64).unwrap_or(0.0);
     nm::Entity::new(nm::EntityData::Wipeout {
         clip_vertices,

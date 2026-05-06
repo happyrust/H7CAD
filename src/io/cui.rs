@@ -67,7 +67,12 @@ pub fn serialize_cui(doc: &CuiDocument) -> String {
 pub fn parse_cui(text: &str) -> Result<CuiDocument, String> {
     let mut doc = CuiDocument::default();
     #[derive(Copy, Clone)]
-    enum Section { None, Aliases, Shortcuts, Unknown }
+    enum Section {
+        None,
+        Aliases,
+        Shortcuts,
+        Unknown,
+    }
     let mut section = Section::None;
     for raw in text.lines() {
         let line = raw.trim();

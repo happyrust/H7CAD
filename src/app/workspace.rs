@@ -93,11 +93,7 @@ impl Workspace {
 /// directory are silently skipped — we do not want a single unreadable
 /// folder to abort the whole scan.  A top-level error on the root itself
 /// returns an `Err`.
-pub fn scan_workspace(
-    root: &Path,
-    max_depth: u8,
-    max_entries: usize,
-) -> Result<Workspace, String> {
+pub fn scan_workspace(root: &Path, max_depth: u8, max_entries: usize) -> Result<Workspace, String> {
     if !root.is_dir() {
         return Err(format!("{} is not a directory", root.display()));
     }
@@ -176,7 +172,10 @@ fn scan_recursive(
             None => continue,
         };
         if child.is_dir() {
-            if BLACKLIST_DIR_NAMES.iter().any(|b| name.eq_ignore_ascii_case(b)) {
+            if BLACKLIST_DIR_NAMES
+                .iter()
+                .any(|b| name.eq_ignore_ascii_case(b))
+            {
                 continue;
             }
             out.push(WorkspaceEntry {
@@ -246,7 +245,8 @@ mod tests {
     use std::fs;
 
     fn tmp_dir(name: &str) -> PathBuf {
-        let base = std::env::temp_dir().join(format!("h7cad-ws-test-{}-{}", name, std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("h7cad-ws-test-{}-{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).expect("create tmp dir");
         base
@@ -265,8 +265,14 @@ mod tests {
         assert!(names.contains(&"foo.dxf"));
         assert!(names.contains(&"bar.DWG"));
         assert!(names.contains(&"diagram.pid"));
-        assert!(ws.entries.iter().any(|e| e.name == "diagram.pid" && matches!(e.kind, EntryKind::PidFile)));
-        assert!(!names.contains(&"ignore.txt"), "non-CAD files must be filtered");
+        assert!(ws
+            .entries
+            .iter()
+            .any(|e| e.name == "diagram.pid" && matches!(e.kind, EntryKind::PidFile)));
+        assert!(
+            !names.contains(&"ignore.txt"),
+            "non-CAD files must be filtered"
+        );
     }
 
     #[test]
@@ -337,7 +343,9 @@ mod tests {
         let ws = scan_workspace(&root, 1, 3).unwrap();
         assert!(ws.truncated, "should mark truncated at cap=3");
         assert!(
-            ws.entries.iter().any(|e| matches!(e.kind, EntryKind::Truncated)),
+            ws.entries
+                .iter()
+                .any(|e| matches!(e.kind, EntryKind::Truncated)),
             "a truncation marker row must be appended"
         );
     }

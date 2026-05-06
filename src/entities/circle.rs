@@ -37,19 +37,31 @@ pub fn to_truck(center: &[f64; 3], radius: f64) -> TruckEntity {
 /// When `normal == (0, 0, 1)` and the center already lies in the WCS,
 /// this function reduces to the legacy [`to_truck`] behaviour up to
 /// floating-point round-off.
-pub fn to_truck_with_normal(
-    center: &[f64; 3],
-    radius: f64,
-    normal: [f64; 3],
-) -> TruckEntity {
+pub fn to_truck_with_normal(center: &[f64; 3], radius: f64, normal: [f64; 3]) -> TruckEntity {
     let (ax, ay, _n) = arbitrary_axis(normal);
     let wcs_center = ocs_to_wcs(*center, [0.0, 0.0, 0.0], normal);
     let r = radius;
 
-    let right_ocs = [wcs_center[0] + r * ax[0], wcs_center[1] + r * ax[1], wcs_center[2] + r * ax[2]];
-    let left_ocs = [wcs_center[0] - r * ax[0], wcs_center[1] - r * ax[1], wcs_center[2] - r * ax[2]];
-    let top_ocs = [wcs_center[0] + r * ay[0], wcs_center[1] + r * ay[1], wcs_center[2] + r * ay[2]];
-    let bot_ocs = [wcs_center[0] - r * ay[0], wcs_center[1] - r * ay[1], wcs_center[2] - r * ay[2]];
+    let right_ocs = [
+        wcs_center[0] + r * ax[0],
+        wcs_center[1] + r * ax[1],
+        wcs_center[2] + r * ax[2],
+    ];
+    let left_ocs = [
+        wcs_center[0] - r * ax[0],
+        wcs_center[1] - r * ax[1],
+        wcs_center[2] - r * ax[2],
+    ];
+    let top_ocs = [
+        wcs_center[0] + r * ay[0],
+        wcs_center[1] + r * ay[1],
+        wcs_center[2] + r * ay[2],
+    ];
+    let bot_ocs = [
+        wcs_center[0] - r * ay[0],
+        wcs_center[1] - r * ay[1],
+        wcs_center[2] - r * ay[2],
+    ];
 
     let right = builder::vertex(Point3::new(right_ocs[0], right_ocs[1], right_ocs[2]));
     let left = builder::vertex(Point3::new(left_ocs[0], left_ocs[1], left_ocs[2]));
@@ -75,7 +87,11 @@ pub fn to_truck_with_normal(
             (cv - ay_v * rf, SnapHint::Quadrant),
         ],
         tangent_geoms: vec![TangentGeom::Circle {
-            center: [wcs_center[0] as f32, wcs_center[1] as f32, wcs_center[2] as f32],
+            center: [
+                wcs_center[0] as f32,
+                wcs_center[1] as f32,
+                wcs_center[2] as f32,
+            ],
             radius: rf,
         }],
         key_vertices: vec![],
@@ -123,12 +139,7 @@ pub fn apply_geom_prop(center: &mut [f64; 3], radius: &mut f64, field: &str, val
     }
 }
 
-pub fn apply_grip(
-    center: &mut [f64; 3],
-    radius: &mut f64,
-    grip_id: usize,
-    apply: GripApply,
-) {
+pub fn apply_grip(center: &mut [f64; 3], radius: &mut f64, grip_id: usize, apply: GripApply) {
     match (grip_id, apply) {
         (0, GripApply::Absolute(p)) => {
             center[0] = p.x as f64;
@@ -194,7 +205,10 @@ mod tests {
             .collect();
         assert_eq!(quadrants.len(), 4);
         for q in &quadrants {
-            assert!(q.x.abs() < 1.0e-5, "quadrant should lie in YZ plane (x≈0): {q:?}");
+            assert!(
+                q.x.abs() < 1.0e-5,
+                "quadrant should lie in YZ plane (x≈0): {q:?}"
+            );
             let r2 = q.y * q.y + q.z * q.z;
             assert!(
                 (r2 - 1.0).abs() < 1.0e-5,
@@ -212,10 +226,18 @@ mod tests {
             .find(|(_, h)| matches!(h, SnapHint::Center))
             .map(|(p, _)| *p)
             .expect("center snap pt");
-        let TangentGeom::Circle { center: tg_c, radius: tg_r } = entity.tangent_geoms[0] else {
+        let TangentGeom::Circle {
+            center: tg_c,
+            radius: tg_r,
+        } = entity.tangent_geoms[0]
+        else {
             panic!("expected Circle tangent geometry");
         };
-        assert!(approx_eq_v3(center, Vec3::new(tg_c[0], tg_c[1], tg_c[2]), 1.0e-5));
+        assert!(approx_eq_v3(
+            center,
+            Vec3::new(tg_c[0], tg_c[1], tg_c[2]),
+            1.0e-5
+        ));
         assert!((tg_r - 2.0).abs() < 1.0e-5);
     }
 
@@ -248,4 +270,3 @@ mod tests {
         );
     }
 }
-

@@ -39,19 +39,21 @@ pub struct SplineditCommand {
 
 impl SplineditCommand {
     pub fn new() -> Self {
-        Self { step: Step::SelectSpline }
+        Self {
+            step: Step::SelectSpline,
+        }
     }
 }
 
 impl CadCommand for SplineditCommand {
-    fn name(&self) -> &'static str { "SPLINEDIT" }
+    fn name(&self) -> &'static str {
+        "SPLINEDIT"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             Step::SelectSpline => "SPLINEDIT  Select spline:".to_string(),
-            Step::SubCommand { .. } => {
-                "SPLINEDIT  [CLOSE/OPEN/REVERSE/EXIT]:".to_string()
-            }
+            Step::SubCommand { .. } => "SPLINEDIT  [CLOSE/OPEN/REVERSE/EXIT]:".to_string(),
         }
     }
 
@@ -72,7 +74,9 @@ impl CadCommand for SplineditCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let Step::SubCommand { handle } = &self.step else { return None; };
+        let Step::SubCommand { handle } = &self.step else {
+            return None;
+        };
         let handle = *handle;
         match text.trim().to_uppercase().as_str() {
             "CLOSE" | "C" => Some(CmdResult::ReplaceEntity(
@@ -92,9 +96,15 @@ impl CadCommand for SplineditCommand {
         }
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> { vec![] }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> {
+        vec![]
+    }
 }
 
 // ── Spline operation helpers ───────────────────────────────────────────────
@@ -108,7 +118,11 @@ impl CadCommand for SplineditCommand {
 // we only have the handle.  The real transformation (close/open/reverse) is
 // applied in the Scene via `apply_spline_op`.
 
-enum SplineOp { Close, Open, Reverse }
+enum SplineOp {
+    Close,
+    Open,
+    Reverse,
+}
 
 impl SplineOp {
     /// Return a placeholder that encodes the op in a comment field.
@@ -130,8 +144,8 @@ impl SplineOp {
             crate::types::Vector3::new(1.0, 0.0, 0.0),
         );
         sentinel.common.layer = match self {
-            SplineOp::Close   => "__SPLINEDIT_CLOSE__".to_string(),
-            SplineOp::Open    => "__SPLINEDIT_OPEN__".to_string(),
+            SplineOp::Close => "__SPLINEDIT_CLOSE__".to_string(),
+            SplineOp::Open => "__SPLINEDIT_OPEN__".to_string(),
             SplineOp::Reverse => "__SPLINEDIT_REVERSE__".to_string(),
         };
         EntityType::XLine(sentinel)
@@ -139,7 +153,9 @@ impl SplineOp {
 }
 
 pub fn apply_spline_op_entity(entity: &EntityType, op: &str) -> Option<EntityType> {
-    let EntityType::Spline(source) = entity else { return None; };
+    let EntityType::Spline(source) = entity else {
+        return None;
+    };
     let mut spline = source.clone();
     match op {
         "__SPLINEDIT_CLOSE__" => {
@@ -185,4 +201,3 @@ pub fn apply_spline_op_entity(entity: &EntityType, op: &str) -> Option<EntityTyp
     }
     Some(EntityType::Spline(spline))
 }
-

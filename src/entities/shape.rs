@@ -13,12 +13,7 @@ use crate::scene::wire_model::SnapHint;
 
 /// Build a diamond-shaped marker centred at `o` with half-extent
 /// `size/2` along the local OCS axes `ax` and `ay`.
-fn shape_marker_ocs(
-    o: [f32; 3],
-    ax: [f32; 3],
-    ay: [f32; 3],
-    size: f32,
-) -> Vec<[f32; 3]> {
+fn shape_marker_ocs(o: [f32; 3], ax: [f32; 3], ay: [f32; 3], size: f32) -> Vec<[f32; 3]> {
     let s = size * 0.5;
     let pt = |dx: f32, dy: f32| -> [f32; 3] {
         [
@@ -49,11 +44,7 @@ pub fn to_truck(insertion: &[f64; 3], size: f64) -> TruckEntity {
 ///
 /// `insertion` is the OCS insertion point; the diamond marker is
 /// drawn in the OCS plane defined by `normal`.
-pub fn to_truck_with_normal(
-    insertion: &[f64; 3],
-    size: f64,
-    normal: [f64; 3],
-) -> TruckEntity {
+pub fn to_truck_with_normal(insertion: &[f64; 3], size: f64, normal: [f64; 3]) -> TruckEntity {
     let (ax, ay, _n) = arbitrary_axis(normal);
     let wcs_insertion = ocs_to_wcs(*insertion, [0.0, 0.0, 0.0], normal);
     let ox = wcs_insertion[0] as f32;
@@ -138,4 +129,3 @@ pub fn apply_grip(insertion: &mut [f64; 3], grip_id: usize, apply: GripApply) {
 pub fn apply_transform(insertion: &mut [f64; 3], t: &EntityTransform) {
     transform_pt(insertion, t);
 }
-

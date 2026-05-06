@@ -60,9 +60,8 @@ pub fn to_truck_with_normal(
     let mut tangents: Vec<TangentGeom> = Vec::new();
     let mut key_verts: Vec<[f32; 3]> = Vec::new();
 
-    let lift = |x: f64, y: f64| -> [f64; 3] {
-        ocs2d_to_wcs(x, y, elevation, [0.0, 0.0, 0.0], normal)
-    };
+    let lift =
+        |x: f64, y: f64| -> [f64; 3] { ocs2d_to_wcs(x, y, elevation, [0.0, 0.0, 0.0], normal) };
     let lift_pt = |x: f64, y: f64| -> Point3 {
         let p = lift(x, y);
         Point3::new(p[0], p[1], p[2])
@@ -122,7 +121,11 @@ pub fn to_truck_with_normal(
             let tv1 = builder::vertex(p1);
             edges.push(builder::circle_arc(&tv0, &tv1, p_mid));
             tangents.push(TangentGeom::Circle {
-                center: [center_wcs[0] as f32, center_wcs[1] as f32, center_wcs[2] as f32],
+                center: [
+                    center_wcs[0] as f32,
+                    center_wcs[1] as f32,
+                    center_wcs[2] as f32,
+                ],
                 radius: r as f32,
             });
         }
@@ -209,7 +212,11 @@ mod tests {
 
     #[test]
     fn to_truck_default_normal_matches_legacy_2d() {
-        let verts = vec![vert(0.0, 0.0, 0.0), vert(1.0, 0.0, 0.0), vert(1.0, 1.0, 0.0)];
+        let verts = vec![
+            vert(0.0, 0.0, 0.0),
+            vert(1.0, 0.0, 0.0),
+            vert(1.0, 1.0, 0.0),
+        ];
         let legacy = to_truck(&verts, false, 0.0);
         let with_n = to_truck_with_normal(&verts, false, 0.0, [0.0, 0.0, 1.0]);
         assert_eq!(legacy.key_vertices.len(), with_n.key_vertices.len());
@@ -225,7 +232,11 @@ mod tests {
 
     #[test]
     fn to_truck_with_x_normal_lifts_vertices_into_yz_plane() {
-        let verts = vec![vert(0.0, 0.0, 0.0), vert(1.0, 0.0, 0.0), vert(0.0, 1.0, 0.0)];
+        let verts = vec![
+            vert(0.0, 0.0, 0.0),
+            vert(1.0, 0.0, 0.0),
+            vert(0.0, 1.0, 0.0),
+        ];
         let entity = to_truck_with_normal(&verts, false, 0.0, [1.0, 0.0, 0.0]);
         assert_eq!(entity.key_vertices.len(), 3);
         for kv in &entity.key_vertices {
@@ -255,8 +266,10 @@ mod tests {
         let verts = vec![vert(0.0, 0.0, 0.0), vert(1.0, 0.0, 0.0)];
         let entity = to_truck_with_normal(&verts, false, 5.0, [0.0, 0.0, 1.0]);
         for kv in &entity.key_vertices {
-            assert!((kv[2] - 5.0).abs() < 1e-4, "vertex z should equal elevation 5: {kv:?}");
+            assert!(
+                (kv[2] - 5.0).abs() < 1e-4,
+                "vertex z should equal elevation 5: {kv:?}"
+            );
         }
     }
 }
-

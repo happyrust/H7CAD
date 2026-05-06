@@ -5,8 +5,8 @@ mod attedit;
 mod attman;
 pub(crate) mod attsync;
 pub(crate) mod base_point;
-pub(crate) mod create_block;
 mod content_browser;
+pub(crate) mod create_block;
 mod design_center;
 mod edit_block;
 pub(crate) mod insert_block;
@@ -19,8 +19,8 @@ pub(crate) mod solid3d_cmds;
 mod underlay_frames;
 mod underlay_layers;
 pub(crate) mod wblock;
-pub(crate) mod xattach;
 mod xadjust;
+pub(crate) mod xattach;
 mod xclip;
 
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem};
@@ -47,11 +47,31 @@ impl CadModule for InsertModule {
                     RibbonItem::Tool(underlay_layers::tool()),
                     RibbonItem::Dropdown {
                         id: "FRAMES_DROPDOWN",
-                        icon: IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg")),
+                        icon: IconKind::Svg(include_bytes!(
+                            "../../../assets/icons/underlay_frames.svg"
+                        )),
                         items: vec![
-                            ("FRAMES0", "Frames Off",    IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg"))),
-                            ("FRAMES1", "Frames On",     IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg"))),
-                            ("FRAMES2", "Frames & Print",IconKind::Svg(include_bytes!("../../../assets/icons/underlay_frames.svg"))),
+                            (
+                                "FRAMES0",
+                                "Frames Off",
+                                IconKind::Svg(include_bytes!(
+                                    "../../../assets/icons/underlay_frames.svg"
+                                )),
+                            ),
+                            (
+                                "FRAMES1",
+                                "Frames On",
+                                IconKind::Svg(include_bytes!(
+                                    "../../../assets/icons/underlay_frames.svg"
+                                )),
+                            ),
+                            (
+                                "FRAMES2",
+                                "Frames & Print",
+                                IconKind::Svg(include_bytes!(
+                                    "../../../assets/icons/underlay_frames.svg"
+                                )),
+                            ),
                         ],
                         default: "FRAMES1",
                     },
@@ -61,9 +81,7 @@ impl CadModule for InsertModule {
             // ── Point Cloud ───────────────────────────────────────────────────
             RibbonGroup {
                 title: "Point Cloud",
-                tools: vec![
-                    RibbonItem::LargeTool(pc_attach::tool()),
-                ],
+                tools: vec![RibbonItem::LargeTool(pc_attach::tool())],
             },
             // ── Block ─────────────────────────────────────────────────────────
             RibbonGroup {

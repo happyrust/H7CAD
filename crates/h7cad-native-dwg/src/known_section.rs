@@ -153,7 +153,10 @@ mod tests {
         assert_eq!(KnownSection::record_number_from_name(""), None);
         assert_eq!(KnownSection::record_number_from_name("AcDb:AppInfo"), None);
         assert_eq!(KnownSection::record_number_from_name("AcDb:Preview"), None);
-        assert_eq!(KnownSection::record_number_from_name("AcDb:SummaryInfo"), None);
+        assert_eq!(
+            KnownSection::record_number_from_name("AcDb:SummaryInfo"),
+            None
+        );
     }
 
     #[test]

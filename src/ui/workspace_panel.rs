@@ -20,13 +20,48 @@ const ROW_HEIGHT: f32 = 22.0;
 const HEADER_HEIGHT: f32 = 28.0;
 const INDENT_PX: f32 = 12.0;
 
-const PANEL_BG: Color = Color { r: 0.145, g: 0.145, b: 0.145, a: 1.0 };
-const HEADER_BG: Color = Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 };
-const ROW_HOVER: Color = Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 };
-const ROW_ACTIVE: Color = Color { r: 0.20, g: 0.35, b: 0.55, a: 1.0 };
-const TEXT_COLOR: Color = Color { r: 0.85, g: 0.85, b: 0.85, a: 1.0 };
-const TEXT_MUTED: Color = Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 };
-const BORDER_COLOR: Color = Color { r: 0.25, g: 0.25, b: 0.25, a: 1.0 };
+const PANEL_BG: Color = Color {
+    r: 0.145,
+    g: 0.145,
+    b: 0.145,
+    a: 1.0,
+};
+const HEADER_BG: Color = Color {
+    r: 0.18,
+    g: 0.18,
+    b: 0.18,
+    a: 1.0,
+};
+const ROW_HOVER: Color = Color {
+    r: 0.22,
+    g: 0.22,
+    b: 0.22,
+    a: 1.0,
+};
+const ROW_ACTIVE: Color = Color {
+    r: 0.20,
+    g: 0.35,
+    b: 0.55,
+    a: 1.0,
+};
+const TEXT_COLOR: Color = Color {
+    r: 0.85,
+    g: 0.85,
+    b: 0.85,
+    a: 1.0,
+};
+const TEXT_MUTED: Color = Color {
+    r: 0.55,
+    g: 0.55,
+    b: 0.55,
+    a: 1.0,
+};
+const BORDER_COLOR: Color = Color {
+    r: 0.25,
+    g: 0.25,
+    b: 0.25,
+    a: 1.0,
+};
 
 /// Render the workspace side panel.  `active_path` is highlighted in
 /// blue when it matches a file row.
@@ -78,7 +113,12 @@ fn panel_header<'a>(ws: &'a Workspace) -> Element<'a, Message> {
         .on_press(Message::WorkspaceClose)
         .style(|_: &Theme, status| button::Style {
             background: Some(Background::Color(match status {
-                button::Status::Hovered => Color { r: 0.5, g: 0.2, b: 0.2, a: 1.0 },
+                button::Status::Hovered => Color {
+                    r: 0.5,
+                    g: 0.2,
+                    b: 0.2,
+                    a: 1.0,
+                },
                 _ => Color::TRANSPARENT,
             })),
             text_color: TEXT_COLOR,
@@ -87,22 +127,24 @@ fn panel_header<'a>(ws: &'a Workspace) -> Element<'a, Message> {
         })
         .padding([2, 6]);
 
-    container(row![label, refresh_btn, close_btn]
-        .spacing(0)
-        .align_y(iced::Center))
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(HEADER_BG)),
-            border: Border {
-                color: BORDER_COLOR,
-                width: 0.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .width(Length::Fill)
-        .height(Length::Fixed(HEADER_HEIGHT))
-        .padding([0, 8])
-        .into()
+    container(
+        row![label, refresh_btn, close_btn]
+            .spacing(0)
+            .align_y(iced::Center),
+    )
+    .style(|_: &Theme| container::Style {
+        background: Some(Background::Color(HEADER_BG)),
+        border: Border {
+            color: BORDER_COLOR,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    })
+    .width(Length::Fill)
+    .height(Length::Fixed(HEADER_HEIGHT))
+    .padding([0, 8])
+    .into()
 }
 
 fn panel_body<'a>(
@@ -113,9 +155,7 @@ fn panel_body<'a>(
     let visible = visible_entries(&ws.entries, expanded_dirs);
 
     if visible.is_empty() {
-        let msg = text("(empty workspace)")
-            .size(11)
-            .color(TEXT_MUTED);
+        let msg = text("(empty workspace)").size(11).color(TEXT_MUTED);
         return container(msg).padding(8).into();
     }
 
@@ -149,7 +189,9 @@ fn row_element<'a>(
     let _ = expanded; // reserved for future tooltip variations
 
     let is_active = !is_dir
-        && active_path.map(|p| p == entry.path.as_path()).unwrap_or(false);
+        && active_path
+            .map(|p| p == entry.path.as_path())
+            .unwrap_or(false);
 
     let label_color = match entry.kind {
         EntryKind::Truncated => TEXT_MUTED,

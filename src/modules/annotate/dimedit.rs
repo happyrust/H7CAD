@@ -32,17 +32,23 @@ pub struct DimEditCommand {
 
 impl DimEditCommand {
     pub fn new() -> Self {
-        Self { step: Step::PickDim }
+        Self {
+            step: Step::PickDim,
+        }
     }
 }
 
 impl CadCommand for DimEditCommand {
-    fn name(&self) -> &'static str { "DIMEDIT" }
+    fn name(&self) -> &'static str {
+        "DIMEDIT"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             Step::PickDim => "DIMEDIT  Select dimension:".into(),
-            Step::EnterText { .. } => "DIMEDIT  Enter text override (blank = reset to measured):".into(),
+            Step::EnterText { .. } => {
+                "DIMEDIT  Enter text override (blank = reset to measured):".into()
+            }
         }
     }
 
@@ -51,7 +57,9 @@ impl CadCommand for DimEditCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
         self.step = Step::EnterText { handle };
         CmdResult::NeedPoint
     }
@@ -70,6 +78,10 @@ impl CadCommand for DimEditCommand {
         Some(CmdResult::DdeditEntity { handle, new_text })
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 }

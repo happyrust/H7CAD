@@ -12,15 +12,15 @@ const STANDARD_SCALES: &[(&str, f64)] = &[
     ("1:500", 0.002),
     ("1:200", 0.005),
     ("1:100", 0.01),
-    ("1:50",  0.02),
-    ("1:20",  0.05),
-    ("1:10",  0.1),
-    ("1:5",   0.2),
-    ("1:2",   0.5),
-    ("1:1",   1.0),
-    ("2:1",   2.0),
-    ("5:1",   5.0),
-    ("10:1",  10.0),
+    ("1:50", 0.02),
+    ("1:20", 0.05),
+    ("1:10", 0.1),
+    ("1:5", 0.2),
+    ("1:2", 0.5),
+    ("1:1", 1.0),
+    ("2:1", 2.0),
+    ("5:1", 5.0),
+    ("10:1", 10.0),
 ];
 
 fn scale_label(scale: f64) -> String {
@@ -29,24 +29,35 @@ fn scale_label(scale: f64) -> String {
             return label.to_string();
         }
     }
-    format!("{:.6}", scale).trim_end_matches('0').trim_end_matches('.').to_string()
+    format!("{:.6}", scale)
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
 
 // ── Render mode options ───────────────────────────────────────────────────
 
 const RENDER_MODES: &[(&str, ViewportRenderMode)] = &[
-    ("2D Wireframe",            ViewportRenderMode::Wireframe2D),
-    ("3D Wireframe",            ViewportRenderMode::Wireframe3D),
-    ("Hidden Line",             ViewportRenderMode::HiddenLine),
-    ("Flat Shaded",             ViewportRenderMode::FlatShaded),
-    ("Gouraud Shaded",          ViewportRenderMode::GouraudShaded),
-    ("Flat Shaded + Edges",     ViewportRenderMode::FlatShadedWithEdges),
-    ("Gouraud Shaded + Edges",  ViewportRenderMode::GouraudShadedWithEdges),
+    ("2D Wireframe", ViewportRenderMode::Wireframe2D),
+    ("3D Wireframe", ViewportRenderMode::Wireframe3D),
+    ("Hidden Line", ViewportRenderMode::HiddenLine),
+    ("Flat Shaded", ViewportRenderMode::FlatShaded),
+    ("Gouraud Shaded", ViewportRenderMode::GouraudShaded),
+    (
+        "Flat Shaded + Edges",
+        ViewportRenderMode::FlatShadedWithEdges,
+    ),
+    (
+        "Gouraud Shaded + Edges",
+        ViewportRenderMode::GouraudShadedWithEdges,
+    ),
 ];
 
 fn render_mode_label(mode: &ViewportRenderMode) -> &'static str {
     for (label, m) in RENDER_MODES {
-        if m == mode { return label; }
+        if m == mode {
+            return label;
+        }
     }
     "2D Wireframe"
 }
@@ -56,14 +67,25 @@ fn render_mode_label(mode: &ViewportRenderMode) -> &'static str {
 const SHADE_PLOT_LABELS: &[&str] = &["As Displayed", "Wireframe", "Hidden", "Rendered"];
 
 fn shade_plot_label(mode: i16) -> &'static str {
-    SHADE_PLOT_LABELS.get(mode as usize).copied().unwrap_or("As Displayed")
+    SHADE_PLOT_LABELS
+        .get(mode as usize)
+        .copied()
+        .unwrap_or("As Displayed")
 }
 
 // ── Standard view options ─────────────────────────────────────────────────
 
 const STD_VIEWS: &[&str] = &[
-    "Top", "Bottom", "Front", "Back", "Left", "Right",
-    "SW Isometric", "SE Isometric", "NE Isometric", "NW Isometric",
+    "Top",
+    "Bottom",
+    "Front",
+    "Back",
+    "Left",
+    "Right",
+    "SW Isometric",
+    "SE Isometric",
+    "NE Isometric",
+    "NW Isometric",
 ];
 
 fn grips(vp: &Viewport) -> Vec<GripDef> {
@@ -144,27 +166,42 @@ fn properties(vp: &Viewport) -> PropSection {
             Property {
                 label: "Locked".into(),
                 field: "vp_locked",
-                value: PropValue::BoolToggle { field: "vp_locked", value: vp.status.locked },
+                value: PropValue::BoolToggle {
+                    field: "vp_locked",
+                    value: vp.status.locked,
+                },
             },
             Property {
                 label: "On".into(),
                 field: "vp_on",
-                value: PropValue::BoolToggle { field: "vp_on", value: vp.status.is_on },
+                value: PropValue::BoolToggle {
+                    field: "vp_on",
+                    value: vp.status.is_on,
+                },
             },
             Property {
                 label: "Perspective".into(),
                 field: "vp_perspective",
-                value: PropValue::BoolToggle { field: "vp_perspective", value: vp.status.perspective },
+                value: PropValue::BoolToggle {
+                    field: "vp_perspective",
+                    value: vp.status.perspective,
+                },
             },
             Property {
                 label: "Hide Plot".into(),
                 field: "vp_hide_plot",
-                value: PropValue::BoolToggle { field: "vp_hide_plot", value: vp.status.hide_plot },
+                value: PropValue::BoolToggle {
+                    field: "vp_hide_plot",
+                    value: vp.status.hide_plot,
+                },
             },
             Property {
                 label: "UCS Icon".into(),
                 field: "vp_ucs_icon",
-                value: PropValue::BoolToggle { field: "vp_ucs_icon", value: vp.ucs_icon_visible },
+                value: PropValue::BoolToggle {
+                    field: "vp_ucs_icon",
+                    value: vp.ucs_icon_visible,
+                },
             },
             edit("Target X", "vtgt_x", vp.view_target.x),
             edit("Target Z", "vtgt_z", vp.view_target.z),
@@ -174,7 +211,10 @@ fn properties(vp: &Viewport) -> PropSection {
             Property {
                 label: "UCS Per Viewport".into(),
                 field: "vp_ucs_per_vp",
-                value: PropValue::BoolToggle { field: "vp_ucs_per_vp", value: vp.ucs_per_viewport },
+                value: PropValue::BoolToggle {
+                    field: "vp_ucs_per_vp",
+                    value: vp.ucs_per_viewport,
+                },
             },
             edit("UCS Origin X", "vp_ucs_ox", vp.ucs_origin.x),
             edit("UCS Origin Y", "vp_ucs_oy", vp.ucs_origin.y),
@@ -197,16 +237,36 @@ fn viewport_view_label(vp: &Viewport) -> String {
     let dz = d.z;
 
     // Use a simple threshold comparison to classify the view direction.
-    if dx.abs() < 0.1 && dy.abs() < 0.1 && dz > 0.5 { return "Top".into(); }
-    if dx.abs() < 0.1 && dy.abs() < 0.1 && dz < -0.5 { return "Bottom".into(); }
-    if dx.abs() < 0.1 && dy < -0.5 && dz.abs() < 0.1 { return "Front".into(); }
-    if dx.abs() < 0.1 && dy > 0.5 && dz.abs() < 0.1 { return "Back".into(); }
-    if dx < -0.5 && dy.abs() < 0.1 && dz.abs() < 0.1 { return "Left".into(); }
-    if dx > 0.5 && dy.abs() < 0.1 && dz.abs() < 0.1 { return "Right".into(); }
-    if dx < -0.4 && dy < -0.4 && dz > 0.4 { return "SW Isometric".into(); }
-    if dx > 0.4 && dy < -0.4 && dz > 0.4 { return "SE Isometric".into(); }
-    if dx > 0.4 && dy > 0.4 && dz > 0.4 { return "NE Isometric".into(); }
-    if dx < -0.4 && dy > 0.4 && dz > 0.4 { return "NW Isometric".into(); }
+    if dx.abs() < 0.1 && dy.abs() < 0.1 && dz > 0.5 {
+        return "Top".into();
+    }
+    if dx.abs() < 0.1 && dy.abs() < 0.1 && dz < -0.5 {
+        return "Bottom".into();
+    }
+    if dx.abs() < 0.1 && dy < -0.5 && dz.abs() < 0.1 {
+        return "Front".into();
+    }
+    if dx.abs() < 0.1 && dy > 0.5 && dz.abs() < 0.1 {
+        return "Back".into();
+    }
+    if dx < -0.5 && dy.abs() < 0.1 && dz.abs() < 0.1 {
+        return "Left".into();
+    }
+    if dx > 0.5 && dy.abs() < 0.1 && dz.abs() < 0.1 {
+        return "Right".into();
+    }
+    if dx < -0.4 && dy < -0.4 && dz > 0.4 {
+        return "SW Isometric".into();
+    }
+    if dx > 0.4 && dy < -0.4 && dz > 0.4 {
+        return "SE Isometric".into();
+    }
+    if dx > 0.4 && dy > 0.4 && dz > 0.4 {
+        return "NE Isometric".into();
+    }
+    if dx < -0.4 && dy > 0.4 && dz > 0.4 {
+        return "NW Isometric".into();
+    }
     "Custom".into()
 }
 
@@ -216,27 +276,51 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
     // Boolean / toggle fields handled first (value = "toggle" or "true"/"false").
     match field {
         "vp_locked" => {
-            vp.status.locked = if value == "toggle" { !vp.status.locked } else { value == "true" };
+            vp.status.locked = if value == "toggle" {
+                !vp.status.locked
+            } else {
+                value == "true"
+            };
             return;
         }
         "vp_on" => {
-            vp.status.is_on = if value == "toggle" { !vp.status.is_on } else { value == "true" };
+            vp.status.is_on = if value == "toggle" {
+                !vp.status.is_on
+            } else {
+                value == "true"
+            };
             return;
         }
         "vp_perspective" => {
-            vp.status.perspective = if value == "toggle" { !vp.status.perspective } else { value == "true" };
+            vp.status.perspective = if value == "toggle" {
+                !vp.status.perspective
+            } else {
+                value == "true"
+            };
             return;
         }
         "vp_hide_plot" => {
-            vp.status.hide_plot = if value == "toggle" { !vp.status.hide_plot } else { value == "true" };
+            vp.status.hide_plot = if value == "toggle" {
+                !vp.status.hide_plot
+            } else {
+                value == "true"
+            };
             return;
         }
         "vp_ucs_icon" => {
-            vp.ucs_icon_visible = if value == "toggle" { !vp.ucs_icon_visible } else { value == "true" };
+            vp.ucs_icon_visible = if value == "toggle" {
+                !vp.ucs_icon_visible
+            } else {
+                value == "true"
+            };
             return;
         }
         "vp_ucs_per_vp" => {
-            vp.ucs_per_viewport = if value == "toggle" { !vp.ucs_per_viewport } else { value == "true" };
+            vp.ucs_per_viewport = if value == "toggle" {
+                !vp.ucs_per_viewport
+            } else {
+                value == "true"
+            };
             return;
         }
         _ => {}
@@ -272,16 +356,16 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
     // Standard view direction picker.
     if field == "vp_view" {
         let dir: Option<(f64, f64, f64)> = match value {
-            "Top"          => Some(( 0.0,  0.0,  1.0)),
-            "Bottom"       => Some(( 0.0,  0.0, -1.0)),
-            "Front"        => Some(( 0.0, -1.0,  0.0)),
-            "Back"         => Some(( 0.0,  1.0,  0.0)),
-            "Left"         => Some((-1.0,  0.0,  0.0)),
-            "Right"        => Some(( 1.0,  0.0,  0.0)),
-            "SW Isometric" => Some((-1.0, -1.0,  1.0)),
-            "SE Isometric" => Some(( 1.0, -1.0,  1.0)),
-            "NE Isometric" => Some(( 1.0,  1.0,  1.0)),
-            "NW Isometric" => Some((-1.0,  1.0,  1.0)),
+            "Top" => Some((0.0, 0.0, 1.0)),
+            "Bottom" => Some((0.0, 0.0, -1.0)),
+            "Front" => Some((0.0, -1.0, 0.0)),
+            "Back" => Some((0.0, 1.0, 0.0)),
+            "Left" => Some((-1.0, 0.0, 0.0)),
+            "Right" => Some((1.0, 0.0, 0.0)),
+            "SW Isometric" => Some((-1.0, -1.0, 1.0)),
+            "SE Isometric" => Some((1.0, -1.0, 1.0)),
+            "NE Isometric" => Some((1.0, 1.0, 1.0)),
+            "NW Isometric" => Some((-1.0, 1.0, 1.0)),
             _ => None,
         };
         if let Some((dx, dy, dz)) = dir {

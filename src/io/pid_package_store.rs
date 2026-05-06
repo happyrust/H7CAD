@@ -221,7 +221,7 @@ mod tests {
         const TAG: &str = "stats-filter-";
         let a = unique_path(&format!("{TAG}a"));
         let b = unique_path(&format!("{TAG}b"));
-        cache_package(&a, fixture_pkg("hello"));   // 5 bytes, 1 stream
+        cache_package(&a, fixture_pkg("hello")); // 5 bytes, 1 stream
         cache_package(&b, fixture_pkg("world!!")); // 7 bytes, 1 stream
 
         let our_entries: Vec<_> = cached_entry_summaries()

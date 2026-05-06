@@ -142,8 +142,18 @@ impl WireGpu {
 
         for wire in wires {
             let color = wire.color;
-            let pat0 = [wire.pattern[0], wire.pattern[1], wire.pattern[2], wire.pattern[3]];
-            let pat1 = [wire.pattern[4], wire.pattern[5], wire.pattern[6], wire.pattern[7]];
+            let pat0 = [
+                wire.pattern[0],
+                wire.pattern[1],
+                wire.pattern[2],
+                wire.pattern[3],
+            ];
+            let pat1 = [
+                wire.pattern[4],
+                wire.pattern[5],
+                wire.pattern[6],
+                wire.pattern[7],
+            ];
             let half_width = wire.line_weight_px * 0.5;
             let n = wire.points.len();
 
@@ -170,8 +180,12 @@ impl WireGpu {
             for i in 0..n.saturating_sub(1) {
                 let a = wire.points[i];
                 let b = wire.points[i + 1];
-                if !a[0].is_finite() || !a[1].is_finite() || !a[2].is_finite()
-                    || !b[0].is_finite() || !b[1].is_finite() || !b[2].is_finite()
+                if !a[0].is_finite()
+                    || !a[1].is_finite()
+                    || !a[2].is_finite()
+                    || !b[0].is_finite()
+                    || !b[1].is_finite()
+                    || !b[2].is_finite()
                 {
                     continue;
                 }
@@ -180,18 +194,25 @@ impl WireGpu {
                 let make = |which_end: f32, side: f32| -> WireVertex {
                     let dist = if which_end < 0.5 { dist_a } else { dist_b };
                     WireVertex {
-                        pos_a: a, pos_b: b, which_end, side, color,
-                        distance: dist, half_width,
+                        pos_a: a,
+                        pos_b: b,
+                        which_end,
+                        side,
+                        color,
+                        distance: dist,
+                        half_width,
                         pattern_length: wire.pattern_length,
-                        _pad: 0.0, pat0, pat1,
+                        _pad: 0.0,
+                        pat0,
+                        pat1,
                     }
                 };
                 vertices.push(make(0.0, -1.0));
                 vertices.push(make(1.0, -1.0));
-                vertices.push(make(1.0,  1.0));
+                vertices.push(make(1.0, 1.0));
                 vertices.push(make(0.0, -1.0));
-                vertices.push(make(1.0,  1.0));
-                vertices.push(make(0.0,  1.0));
+                vertices.push(make(1.0, 1.0));
+                vertices.push(make(0.0, 1.0));
             }
         }
 

@@ -615,23 +615,29 @@ impl Pipeline {
     pub fn compute_wire_scissors(&mut self, view_proj: glam::Mat4, clip_w: u32, clip_h: u32) {
         let w = clip_w as f32;
         let h = clip_h as f32;
-        self.wire_pixel_scissors = self.gpu_wires.iter().map(|wire| {
-            let [x0, y0, x1, y1] = wire.vp_scissor?;
-            let corners = [
-                view_proj.project_point3(glam::Vec3::new(x0, y0, 0.0)),
-                view_proj.project_point3(glam::Vec3::new(x1, y0, 0.0)),
-                view_proj.project_point3(glam::Vec3::new(x0, y1, 0.0)),
-                view_proj.project_point3(glam::Vec3::new(x1, y1, 0.0)),
-            ];
-            let px: Vec<f32> = corners.iter().map(|c| (c.x + 1.0) * 0.5 * w).collect();
-            let py: Vec<f32> = corners.iter().map(|c| (1.0 - c.y) * 0.5 * h).collect();
-            let sx0 = px.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
-            let sy0 = py.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
-            let sx1 = (px.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_w);
-            let sy1 = (py.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_h);
-            if sx1 <= sx0 || sy1 <= sy0 { return None; }
-            Some([sx0, sy0, sx1 - sx0, sy1 - sy0])
-        }).collect();
+        self.wire_pixel_scissors = self
+            .gpu_wires
+            .iter()
+            .map(|wire| {
+                let [x0, y0, x1, y1] = wire.vp_scissor?;
+                let corners = [
+                    view_proj.project_point3(glam::Vec3::new(x0, y0, 0.0)),
+                    view_proj.project_point3(glam::Vec3::new(x1, y0, 0.0)),
+                    view_proj.project_point3(glam::Vec3::new(x0, y1, 0.0)),
+                    view_proj.project_point3(glam::Vec3::new(x1, y1, 0.0)),
+                ];
+                let px: Vec<f32> = corners.iter().map(|c| (c.x + 1.0) * 0.5 * w).collect();
+                let py: Vec<f32> = corners.iter().map(|c| (1.0 - c.y) * 0.5 * h).collect();
+                let sx0 = px.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
+                let sy0 = py.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
+                let sx1 = (px.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_w);
+                let sy1 = (py.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_h);
+                if sx1 <= sx0 || sy1 <= sy0 {
+                    return None;
+                }
+                Some([sx0, sy0, sx1 - sx0, sy1 - sy0])
+            })
+            .collect();
     }
 
     /// Upload all 3DFACE entities as two batched GPU objects:
@@ -697,7 +703,12 @@ impl Pipeline {
         let vp = clip_bounds;
         let msaa = &self.msaa_view;
         let [r, g, b, a] = bg_color;
-        let clear_color = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: a as f64 };
+        let clear_color = wgpu::Color {
+            r: r as f64,
+            g: g as f64,
+            b: b as f64,
+            a: a as f64,
+        };
 
         // ── Pass 1: hatch fills ────────────────────────────────────────────
         {

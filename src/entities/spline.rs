@@ -16,11 +16,7 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 /// Callers with access to the entity's `extrusion` vector should
 /// prefer [`to_truck_with_normal`].
 #[allow(dead_code)]
-pub fn to_truck(
-    degree: i32,
-    knots: &[f64],
-    control_points: &[[f64; 3]],
-) -> TruckEntity {
+pub fn to_truck(degree: i32, knots: &[f64], control_points: &[[f64; 3]]) -> TruckEntity {
     to_truck_with_normal(degree, knots, control_points, [0.0, 0.0, 1.0])
 }
 
@@ -111,7 +107,11 @@ pub fn grips(control_points: &[[f64; 3]]) -> Vec<GripDef> {
         .collect()
 }
 
-pub fn properties(degree: i32, control_points: &[[f64; 3]], fit_points: &[[f64; 3]]) -> PropSection {
+pub fn properties(
+    degree: i32,
+    control_points: &[[f64; 3]],
+    fit_points: &[[f64; 3]],
+) -> PropSection {
     PropSection {
         title: "Geometry".into(),
         props: vec![
@@ -151,4 +151,3 @@ pub fn apply_transform(
         transform_pt(fp, t);
     }
 }
-

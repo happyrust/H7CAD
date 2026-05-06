@@ -6,7 +6,9 @@ use acadrust::Entity;
 use glam::Vec3;
 
 use crate::command::EntityTransform;
-use crate::entities::common::{diamond_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
+use crate::entities::common::{
+    diamond_grip, edit_prop as edit, parse_f64, ro_prop as ro, square_grip,
+};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 
@@ -33,9 +35,21 @@ fn base_props(base: &DimensionBase) -> Vec<crate::scene::object::Property> {
         edit("Text Y", "text_y", base.text_middle_point.y),
         edit("Text Z", "text_z", base.text_middle_point.z),
         edit("Text Rotation", "text_rotation", base.text_rotation),
-        edit("Horizontal Dir", "horizontal_direction", base.horizontal_direction),
-        edit("Line Spacing", "line_spacing_factor", base.line_spacing_factor),
-        ro("Measurement", "measurement", format!("{:.4}", base.actual_measurement)),
+        edit(
+            "Horizontal Dir",
+            "horizontal_direction",
+            base.horizontal_direction,
+        ),
+        edit(
+            "Line Spacing",
+            "line_spacing_factor",
+            base.line_spacing_factor,
+        ),
+        ro(
+            "Measurement",
+            "measurement",
+            format!("{:.4}", base.actual_measurement),
+        ),
     ]
 }
 
@@ -43,13 +57,29 @@ fn properties(dim: &Dimension) -> PropSection {
     let mut props = base_props(dim.base());
     match dim {
         Dimension::Aligned(d) => {
-            props.extend(linear_like_props(d.first_point, d.second_point, d.definition_point));
-            props.push(edit("Ext Rotation", "ext_line_rotation", d.ext_line_rotation));
+            props.extend(linear_like_props(
+                d.first_point,
+                d.second_point,
+                d.definition_point,
+            ));
+            props.push(edit(
+                "Ext Rotation",
+                "ext_line_rotation",
+                d.ext_line_rotation,
+            ));
         }
         Dimension::Linear(d) => {
-            props.extend(linear_like_props(d.first_point, d.second_point, d.definition_point));
+            props.extend(linear_like_props(
+                d.first_point,
+                d.second_point,
+                d.definition_point,
+            ));
             props.push(edit("Rotation", "rotation", d.rotation));
-            props.push(edit("Ext Rotation", "ext_line_rotation", d.ext_line_rotation));
+            props.push(edit(
+                "Ext Rotation",
+                "ext_line_rotation",
+                d.ext_line_rotation,
+            ));
         }
         Dimension::Radius(d) => {
             props.extend(radius_like_props(d.angle_vertex, d.definition_point));
@@ -438,9 +468,7 @@ fn apply_ordinate_fields(d: &mut DimensionOrdinate, field: &str, value: &str) {
 fn apply_transform(dim: &mut Dimension, t: &EntityTransform) {
     match t {
         EntityTransform::Translate(d) => dim.translate(crate::types::Vector3::new(
-            d.x as f64,
-            d.y as f64,
-            d.z as f64,
+            d.x as f64, d.y as f64, d.z as f64,
         )),
         EntityTransform::Rotate { center, angle_rad } => {
             transform_dimension_points(dim, |pt| rotate_point(pt, *center, *angle_rad))

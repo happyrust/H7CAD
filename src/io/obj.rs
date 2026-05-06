@@ -16,7 +16,9 @@ pub fn parse_obj(src: &str, color: [f32; 4]) -> Option<MeshModel> {
 
     for line in src.lines() {
         let line = line.trim();
-        if line.starts_with('#') || line.is_empty() { continue; }
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
 
         let mut parts = line.split_whitespace();
         let keyword = parts.next().unwrap_or("");
@@ -64,9 +66,9 @@ pub fn parse_obj(src: &str, color: [f32; 4]) -> Option<MeshModel> {
     }
 
     // Build flat (un-indexed) vertex + normal arrays.
-    let mut verts:   Vec<[f32; 3]> = Vec::with_capacity(face_verts.len());
-    let mut norms:   Vec<[f32; 3]> = Vec::with_capacity(face_verts.len());
-    let mut indices: Vec<u32>      = Vec::with_capacity(face_verts.len());
+    let mut verts: Vec<[f32; 3]> = Vec::with_capacity(face_verts.len());
+    let mut norms: Vec<[f32; 3]> = Vec::with_capacity(face_verts.len());
+    let mut indices: Vec<u32> = Vec::with_capacity(face_verts.len());
 
     for (vi, (pos_i, norm_i)) in face_verts.iter().enumerate() {
         let pos = *positions.get(*pos_i).unwrap_or(&[0.0; 3]);
@@ -84,13 +86,13 @@ pub fn parse_obj(src: &str, color: [f32; 4]) -> Option<MeshModel> {
             let a = verts[tri[0] as usize];
             let b = verts[tri[1] as usize];
             let c = verts[tri[2] as usize];
-            let ab = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
-            let ac = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
-            let nx = ab[1]*ac[2] - ab[2]*ac[1];
-            let ny = ab[2]*ac[0] - ab[0]*ac[2];
-            let nz = ab[0]*ac[1] - ab[1]*ac[0];
-            let len = (nx*nx + ny*ny + nz*nz).sqrt().max(1e-12);
-            let n = [nx/len, ny/len, nz/len];
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let nx = ab[1] * ac[2] - ab[2] * ac[1];
+            let ny = ab[2] * ac[0] - ab[0] * ac[2];
+            let nz = ab[0] * ac[1] - ab[1] * ac[0];
+            let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-12);
+            let n = [nx / len, ny / len, nz / len];
             norms[tri[0] as usize] = n;
             norms[tri[1] as usize] = n;
             norms[tri[2] as usize] = n;

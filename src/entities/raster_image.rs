@@ -57,13 +57,7 @@ fn image_wire(corners: [[f32; 3]; 4], with_x: bool) -> Vec<[f32; 3]> {
     pts
 }
 
-fn reflect_vec3(
-    vx: &mut f64,
-    vy: &mut f64,
-    ax: f64,
-    ay: f64,
-    len2: f64,
-) {
+fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
     let dot = *vx * ax + *vy * ay;
     *vx = 2.0 * dot * ax / len2 - *vx;
     *vy = 2.0 * dot * ay / len2 - *vy;
@@ -97,11 +91,8 @@ impl TruckConvertible for RasterImage {
             let cb = &self.clip_boundary;
             match cb.clip_type {
                 acadrust::entities::ClipType::Polygonal if cb.vertices.len() >= 3 => {
-                    let mut poly: Vec<[f32; 3]> = cb
-                        .vertices
-                        .iter()
-                        .map(|v| px_to_world(v.x, v.y))
-                        .collect();
+                    let mut poly: Vec<[f32; 3]> =
+                        cb.vertices.iter().map(|v| px_to_world(v.x, v.y)).collect();
                     if let Some(&first) = poly.first() {
                         poly.push(first);
                     }
@@ -197,13 +188,18 @@ impl PropertyEditable for RasterImage {
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         match field {
             "ri_clip" => {
-                self.clipping_enabled =
-                    if value == "toggle" { !self.clipping_enabled } else { value == "true" };
+                self.clipping_enabled = if value == "toggle" {
+                    !self.clipping_enabled
+                } else {
+                    value == "true"
+                };
                 return;
             }
             _ => {}
         }
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         match field {
             "ri_ox" => self.insertion_point.x = v,
             "ri_oy" => self.insertion_point.y = v,
@@ -254,8 +250,7 @@ impl TruckConvertible for Wipeout {
             && matches!(
                 self.clip_type,
                 acadrust::entities::WipeoutClipType::Polygonal
-            )
-        {
+            ) {
             // Convert pixel-space boundary vertices to world space:
             // world = insertion_point + u_vector * v.x * size.x + v_vector * v.y * size.y
             let ox = self.insertion_point.x as f32;
@@ -356,13 +351,18 @@ impl Grippable for Wipeout {
                 let ox = self.insertion_point.x;
                 let oy = self.insertion_point.y;
                 let oz = self.insertion_point.z;
-                let cur_wx = ox + self.u_vector.x * v.x * self.size.x + self.v_vector.x * v.y * self.size.y;
-                let cur_wy = oy + self.u_vector.y * v.x * self.size.x + self.v_vector.y * v.y * self.size.y;
-                let cur_wz = oz + self.u_vector.z * v.x * self.size.x + self.v_vector.z * v.y * self.size.y;
+                let cur_wx =
+                    ox + self.u_vector.x * v.x * self.size.x + self.v_vector.x * v.y * self.size.y;
+                let cur_wy =
+                    oy + self.u_vector.y * v.x * self.size.x + self.v_vector.y * v.y * self.size.y;
+                let cur_wz =
+                    oz + self.u_vector.z * v.x * self.size.x + self.v_vector.z * v.y * self.size.y;
                 let new_w = match apply {
-                    GripApply::Translate(d) => {
-                        [cur_wx + d.x as f64, cur_wy + d.y as f64, cur_wz + d.z as f64]
-                    }
+                    GripApply::Translate(d) => [
+                        cur_wx + d.x as f64,
+                        cur_wy + d.y as f64,
+                        cur_wz + d.z as f64,
+                    ],
                     GripApply::Absolute(p) => [p.x as f64, p.y as f64, p.z as f64],
                 };
                 // Back-project: solve for pixel coords using u_vector and v_vector.
@@ -422,13 +422,18 @@ impl PropertyEditable for Wipeout {
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         match field {
             "wo_clip" => {
-                self.clipping_enabled =
-                    if value == "toggle" { !self.clipping_enabled } else { value == "true" };
+                self.clipping_enabled = if value == "toggle" {
+                    !self.clipping_enabled
+                } else {
+                    value == "true"
+                };
                 return;
             }
             _ => {}
         }
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         match field {
             "wo_ox" => self.insertion_point.x = v,
             "wo_oy" => self.insertion_point.y = v,

@@ -8,9 +8,9 @@
 //   Result: BlockRecord + Block entities are created with is_xref=true,
 //           then an INSERT entity is committed.
 
+use crate::types::Vector3;
 use acadrust::entities::{Block, BlockEnd, Insert};
 use acadrust::tables::block_record::{BlockFlags, BlockRecord};
-use crate::types::Vector3;
 use acadrust::EntityType;
 use glam::Vec3;
 
@@ -98,7 +98,10 @@ impl CadCommand for XAttachCommand {
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         match &self.step {
             Step::FilePath => CmdResult::NeedPoint,
-            Step::InsertionPoint { path: _, block_name } => {
+            Step::InsertionPoint {
+                path: _,
+                block_name,
+            } => {
                 // We return the INSERT entity; the command handler in
                 // commands.rs will call `prepare_xref_block` on the scene
                 // before committing.
@@ -163,7 +166,9 @@ pub fn prepare_xref_block(scene: &mut Scene, path: &str) -> String {
     // Create BLOCK entity.
     let b = Block::new(&block_name, Vector3::zero()).with_xref_path(path);
     let _ = scene.document.add_entity(EntityType::Block(b));
-    let _ = scene.document.add_entity(EntityType::BlockEnd(BlockEnd::new()));
+    let _ = scene
+        .document
+        .add_entity(EntityType::BlockEnd(BlockEnd::new()));
 
     // Resolve the XREF content immediately.
     let path_buf = std::path::PathBuf::from(path);

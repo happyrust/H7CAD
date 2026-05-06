@@ -11,7 +11,7 @@ use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
 use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
-use crate::ui::properties::{LwItem, acad_color_display};
+use crate::ui::properties::{acad_color_display, LwItem};
 
 use super::LayerInfo;
 
@@ -51,24 +51,114 @@ pub(super) const PROP_LW_ID: &str = "PROP_LW";
 
 // ── Colours ────────────────────────────────────────────────────────────────
 
-pub(super) const LOGO_RED: Color = Color { r: 0.75, g: 0.10, b: 0.10, a: 1.0 };
-pub(super) const TOPBAR_BG: Color = Color { r: 0.17, g: 0.17, b: 0.17, a: 1.0 };
-pub(super) const RIBBON_BG: Color = Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 };
-pub(super) const BORDER_DARK: Color = Color { r: 0.12, g: 0.12, b: 0.12, a: 1.0 };
-pub(super) const ACCENT_BLUE: Color = Color { r: 0.20, g: 0.55, b: 0.90, a: 1.0 };
-pub(super) const ACCENT_GOLD: Color = Color { r: 0.90, g: 0.65, b: 0.10, a: 1.0 };
-pub(super) const LABEL_COLOR: Color = Color { r: 0.82, g: 0.82, b: 0.82, a: 1.0 };
-pub(super) const GROUP_LABEL: Color = Color { r: 0.50, g: 0.50, b: 0.50, a: 1.0 };
-pub(super) const TOOL_HOVER: Color = Color { r: 0.32, g: 0.32, b: 0.32, a: 1.0 };
-pub(super) const TOOL_ACTIVE: Color = Color { r: 0.18, g: 0.42, b: 0.70, a: 1.0 };
-pub(super) const ARROW_COLOR: Color = Color { r: 0.65, g: 0.65, b: 0.65, a: 1.0 };
-pub(super) const PANEL_BG: Color = Color { r: 0.16, g: 0.16, b: 0.16, a: 0.98 };
-pub(super) const PANEL_BORDER: Color = Color { r: 0.32, g: 0.32, b: 0.32, a: 1.0 };
-pub(super) const ROW_HOVER: Color = Color { r: 0.24, g: 0.24, b: 0.24, a: 1.0 };
-pub(super) const CHECK_COLOR: Color = Color { r: 0.20, g: 0.75, b: 0.35, a: 1.0 };
-pub(super) const ICON_COLOR: Color = Color { r: 0.25, g: 0.75, b: 0.45, a: 1.0 };
-pub(super) const LABEL_ON: Color = Color { r: 0.92, g: 0.92, b: 0.92, a: 1.0 };
-pub(super) const LABEL_OFF: Color = Color { r: 0.72, g: 0.72, b: 0.72, a: 1.0 };
+pub(super) const LOGO_RED: Color = Color {
+    r: 0.75,
+    g: 0.10,
+    b: 0.10,
+    a: 1.0,
+};
+pub(super) const TOPBAR_BG: Color = Color {
+    r: 0.17,
+    g: 0.17,
+    b: 0.17,
+    a: 1.0,
+};
+pub(super) const RIBBON_BG: Color = Color {
+    r: 0.22,
+    g: 0.22,
+    b: 0.22,
+    a: 1.0,
+};
+pub(super) const BORDER_DARK: Color = Color {
+    r: 0.12,
+    g: 0.12,
+    b: 0.12,
+    a: 1.0,
+};
+pub(super) const ACCENT_BLUE: Color = Color {
+    r: 0.20,
+    g: 0.55,
+    b: 0.90,
+    a: 1.0,
+};
+pub(super) const ACCENT_GOLD: Color = Color {
+    r: 0.90,
+    g: 0.65,
+    b: 0.10,
+    a: 1.0,
+};
+pub(super) const LABEL_COLOR: Color = Color {
+    r: 0.82,
+    g: 0.82,
+    b: 0.82,
+    a: 1.0,
+};
+pub(super) const GROUP_LABEL: Color = Color {
+    r: 0.50,
+    g: 0.50,
+    b: 0.50,
+    a: 1.0,
+};
+pub(super) const TOOL_HOVER: Color = Color {
+    r: 0.32,
+    g: 0.32,
+    b: 0.32,
+    a: 1.0,
+};
+pub(super) const TOOL_ACTIVE: Color = Color {
+    r: 0.18,
+    g: 0.42,
+    b: 0.70,
+    a: 1.0,
+};
+pub(super) const ARROW_COLOR: Color = Color {
+    r: 0.65,
+    g: 0.65,
+    b: 0.65,
+    a: 1.0,
+};
+pub(super) const PANEL_BG: Color = Color {
+    r: 0.16,
+    g: 0.16,
+    b: 0.16,
+    a: 0.98,
+};
+pub(super) const PANEL_BORDER: Color = Color {
+    r: 0.32,
+    g: 0.32,
+    b: 0.32,
+    a: 1.0,
+};
+pub(super) const ROW_HOVER: Color = Color {
+    r: 0.24,
+    g: 0.24,
+    b: 0.24,
+    a: 1.0,
+};
+pub(super) const CHECK_COLOR: Color = Color {
+    r: 0.20,
+    g: 0.75,
+    b: 0.35,
+    a: 1.0,
+};
+pub(super) const ICON_COLOR: Color = Color {
+    r: 0.25,
+    g: 0.75,
+    b: 0.45,
+    a: 1.0,
+};
+pub(super) const LABEL_ON: Color = Color {
+    r: 0.92,
+    g: 0.92,
+    b: 0.92,
+    a: 1.0,
+};
+pub(super) const LABEL_OFF: Color = Color {
+    r: 0.72,
+    g: 0.72,
+    b: 0.72,
+    a: 1.0,
+};
 
 // ── Style context (passed from Ribbon to render_large) ────────────────────
 
@@ -86,18 +176,18 @@ pub(super) struct StyleContext {
 impl StyleContext {
     fn names_for(&self, key: StyleKey) -> &[String] {
         match key {
-            StyleKey::TextStyle    => &self.text_style_names,
-            StyleKey::DimStyle     => &self.dim_style_names,
+            StyleKey::TextStyle => &self.text_style_names,
+            StyleKey::DimStyle => &self.dim_style_names,
             StyleKey::MLeaderStyle => &self.mleader_style_names,
-            StyleKey::TableStyle   => &self.table_style_names,
+            StyleKey::TableStyle => &self.table_style_names,
         }
     }
     fn active_for(&self, key: StyleKey) -> &str {
         match key {
-            StyleKey::TextStyle    => &self.active_text_style,
-            StyleKey::DimStyle     => &self.active_dim_style,
+            StyleKey::TextStyle => &self.active_text_style,
+            StyleKey::DimStyle => &self.active_dim_style,
             StyleKey::MLeaderStyle => &self.active_mleader_style,
-            StyleKey::TableStyle   => &self.active_table_style,
+            StyleKey::TableStyle => &self.active_table_style,
         }
     }
 }
@@ -177,7 +267,12 @@ pub(super) fn tip_style(_theme: &Theme) -> container::Style {
             a: 0.97,
         })),
         border: Border {
-            color: Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+            color: Color {
+                r: 0.35,
+                g: 0.35,
+                b: 0.35,
+                a: 1.0,
+            },
             width: 1.0,
             radius: 3.0.into(),
         },
@@ -216,7 +311,13 @@ pub(super) fn render_small<'a>(
                 .into()
         }
 
-        RibbonItem::Dropdown { id, icon, items, default, .. } => {
+        RibbonItem::Dropdown {
+            id,
+            icon,
+            items,
+            default,
+            ..
+        } => {
             let active = active_tool.as_deref() == Some(id)
                 || items
                     .iter()
@@ -227,7 +328,10 @@ pub(super) fn render_small<'a>(
                 .get(id)
                 .copied()
                 .and_then(|cmd| {
-                    items.iter().find(|(c, _, _)| *c == cmd).map(|(_, _, ik)| *ik)
+                    items
+                        .iter()
+                        .find(|(c, _, _)| *c == cmd)
+                        .map(|(_, _, ik)| *ik)
                 })
                 .or_else(|| items.first().map(|(_, _, ik)| *ik))
                 .unwrap_or(icon);
@@ -236,7 +340,10 @@ pub(super) fn render_small<'a>(
                 .get(id)
                 .copied()
                 .and_then(|cmd| {
-                    items.iter().find(|(c, _, _)| *c == cmd).map(|(_, lbl, _)| *lbl)
+                    items
+                        .iter()
+                        .find(|(c, _, _)| *c == cmd)
+                        .map(|(_, lbl, _)| *lbl)
                 })
                 .or_else(|| items.first().map(|(_, lbl, _)| *lbl))
                 .unwrap_or(id);
@@ -267,7 +374,10 @@ pub(super) fn render_small<'a>(
                     _ if dd_open => TOOL_ACTIVE,
                     _ => Color::TRANSPARENT,
                 })),
-                border: Border { radius: 2.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 2.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .width(Length::Fixed(ARROW_W))
@@ -283,7 +393,10 @@ pub(super) fn render_small<'a>(
                 .delay(Duration::from_millis(400))
                 .style(tip_style);
 
-            row![icon_with_tip, arr_with_tip].spacing(0).height(ROW_H).into()
+            row![icon_with_tip, arr_with_tip]
+                .spacing(0)
+                .height(ROW_H)
+                .into()
         }
 
         _ => text("").into(),
@@ -325,7 +438,12 @@ pub(super) fn render_large<'a>(
             .style(move |_: &Theme, status| tool_btn_style(active, status))
             .width(Length::Fixed(LARGE_W))
             .height(Fill)
-            .padding(Padding { top: 6.0, right: 4.0, bottom: 4.0, left: 4.0 });
+            .padding(Padding {
+                top: 6.0,
+                right: 4.0,
+                bottom: 4.0,
+                left: 4.0,
+            });
             tooltip(btn, make_tip(tip_text), TipPos::Bottom)
                 .gap(6.0)
                 .delay(Duration::from_millis(400))
@@ -333,7 +451,13 @@ pub(super) fn render_large<'a>(
                 .into()
         }
 
-        RibbonItem::LargeDropdown { id, label, icon, items, default } => {
+        RibbonItem::LargeDropdown {
+            id,
+            label,
+            icon,
+            items,
+            default,
+        } => {
             let active = active_tool.as_deref() == Some(id)
                 || items
                     .iter()
@@ -344,7 +468,10 @@ pub(super) fn render_large<'a>(
                 .get(id)
                 .copied()
                 .and_then(|cmd| {
-                    items.iter().find(|(c, _, _)| *c == cmd).map(|(_, _, ik)| *ik)
+                    items
+                        .iter()
+                        .find(|(c, _, _)| *c == cmd)
+                        .map(|(_, _, ik)| *ik)
                 })
                 .or_else(|| items.first().map(|(_, _, ik)| *ik))
                 .unwrap_or(icon);
@@ -353,7 +480,10 @@ pub(super) fn render_large<'a>(
                 .get(id)
                 .copied()
                 .and_then(|cmd| {
-                    items.iter().find(|(c, _, _)| *c == cmd).map(|(_, lbl, _)| *lbl)
+                    items
+                        .iter()
+                        .find(|(c, _, _)| *c == cmd)
+                        .map(|(_, lbl, _)| *lbl)
                 })
                 .or_else(|| items.first().map(|(_, lbl, _)| *lbl))
                 .unwrap_or(label);
@@ -375,7 +505,12 @@ pub(super) fn render_large<'a>(
             .style(move |_: &Theme, status| tool_btn_style(active, status))
             .width(Length::Fixed(LARGE_W))
             .height(Fill)
-            .padding(Padding { top: 6.0, right: 4.0, bottom: 2.0, left: 4.0 });
+            .padding(Padding {
+                top: 6.0,
+                right: 4.0,
+                bottom: 2.0,
+                left: 4.0,
+            });
 
             let arr_btn = button(
                 container(text("▾").size(9).color(ARROW_COLOR))
@@ -391,7 +526,10 @@ pub(super) fn render_large<'a>(
                     _ if dd_open => TOOL_ACTIVE,
                     _ => Color::TRANSPARENT,
                 })),
-                border: Border { radius: 3.0.into(), ..Default::default() },
+                border: Border {
+                    radius: 3.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .width(Length::Fixed(LARGE_W))
@@ -424,23 +562,61 @@ pub(super) fn render_large<'a>(
             let ll = info.map(|l| l.locked).unwrap_or(false);
             let is_open = open_dd.as_deref() == Some(LAYER_COMBO_ID);
 
-            let vis_icon = text(if lv { "●" } else { "○" }).size(10).color(
-                if lv { Color { r: 0.95, g: 0.85, b: 0.20, a: 1.0 } }
-                else   { Color { r: 0.45, g: 0.45, b: 0.45, a: 1.0 } },
-            );
-            let freeze_icon = text("✱").size(10).color(
-                if lf { Color { r: 0.40, g: 0.80, b: 1.00, a: 1.0 } }
-                else  { Color { r: 0.95, g: 0.85, b: 0.20, a: 1.0 } },
-            );
-            let lock_icon = text(if ll { "🔒" } else { "🔓" }).size(10).color(
-                if ll { Color { r: 0.95, g: 0.70, b: 0.20, a: 1.0 } }
-                else  { Color { r: 0.65, g: 0.65, b: 0.65, a: 1.0 } },
-            );
+            let vis_icon = text(if lv { "●" } else { "○" }).size(10).color(if lv {
+                Color {
+                    r: 0.95,
+                    g: 0.85,
+                    b: 0.20,
+                    a: 1.0,
+                }
+            } else {
+                Color {
+                    r: 0.45,
+                    g: 0.45,
+                    b: 0.45,
+                    a: 1.0,
+                }
+            });
+            let freeze_icon = text("✱").size(10).color(if lf {
+                Color {
+                    r: 0.40,
+                    g: 0.80,
+                    b: 1.00,
+                    a: 1.0,
+                }
+            } else {
+                Color {
+                    r: 0.95,
+                    g: 0.85,
+                    b: 0.20,
+                    a: 1.0,
+                }
+            });
+            let lock_icon = text(if ll { "🔒" } else { "🔓" }).size(10).color(if ll {
+                Color {
+                    r: 0.95,
+                    g: 0.70,
+                    b: 0.20,
+                    a: 1.0,
+                }
+            } else {
+                Color {
+                    r: 0.65,
+                    g: 0.65,
+                    b: 0.65,
+                    a: 1.0,
+                }
+            });
             let swatch = container(text(""))
                 .style(move |_: &Theme| container::Style {
                     background: Some(Background::Color(lc)),
                     border: Border {
-                        color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.5 },
+                        color: Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.5,
+                        },
                         width: 1.0,
                         radius: 1.0.into(),
                     },
@@ -454,10 +630,19 @@ pub(super) fn render_large<'a>(
 
             let combo_btn = button(
                 row![
-                    vis_icon, freeze_icon, lock_icon, swatch,
+                    vis_icon,
+                    freeze_icon,
+                    lock_icon,
+                    swatch,
                     container(text(active_layer).size(11).color(Color::WHITE))
-                        .width(name_w).clip(true),
-                    text("▾").size(9).color(Color { r: 0.7, g: 0.7, b: 0.7, a: 1.0 }),
+                        .width(name_w)
+                        .clip(true),
+                    text("▾").size(9).color(Color {
+                        r: 0.7,
+                        g: 0.7,
+                        b: 0.7,
+                        a: 1.0
+                    }),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -465,14 +650,34 @@ pub(super) fn render_large<'a>(
             .on_press(Message::ToggleRibbonDropdown(LAYER_COMBO_ID.to_string()))
             .style(move |_: &Theme, status| button::Style {
                 background: Some(Background::Color(match (is_open, status) {
-                    (true, _) => Color { r: 0.14, g: 0.14, b: 0.14, a: 1.0 },
-                    (_, button::Status::Hovered) => Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
-                    _ => Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 },
+                    (true, _) => Color {
+                        r: 0.14,
+                        g: 0.14,
+                        b: 0.14,
+                        a: 1.0,
+                    },
+                    (_, button::Status::Hovered) => Color {
+                        r: 0.26,
+                        g: 0.26,
+                        b: 0.26,
+                        a: 1.0,
+                    },
+                    _ => Color {
+                        r: 0.18,
+                        g: 0.18,
+                        b: 0.18,
+                        a: 1.0,
+                    },
                 })),
                 border: Border {
                     radius: 3.0.into(),
                     width: 1.0,
-                    color: Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+                    color: Color {
+                        r: 0.35,
+                        g: 0.35,
+                        b: 0.35,
+                        a: 1.0,
+                    },
                 },
                 ..Default::default()
             })
@@ -488,12 +693,12 @@ pub(super) fn render_large<'a>(
                         let event = t.event.clone();
                         let icon_el: Element<Message> = match t.icon {
                             IconKind::Glyph(g) => text(g).size(13).color(Color::WHITE).into(),
-                            IconKind::Svg(bytes) => iced::widget::svg(
-                                iced::widget::svg::Handle::from_memory(bytes),
-                            )
-                            .width(16)
-                            .height(16)
-                            .into(),
+                            IconKind::Svg(bytes) => {
+                                iced::widget::svg(iced::widget::svg::Handle::from_memory(bytes))
+                                    .width(16)
+                                    .height(16)
+                                    .into()
+                            }
                         };
                         let msg = module_event_to_message(event);
                         tooltip(
@@ -524,7 +729,12 @@ pub(super) fn render_large<'a>(
             .width(Length::Fixed(COMBO_W))
             .height(Fill)
             .align_y(iced::Center)
-            .padding(Padding { top: 4.0, bottom: 4.0, left: 4.0, right: 4.0 })
+            .padding(Padding {
+                top: 4.0,
+                bottom: 4.0,
+                left: 4.0,
+                right: 4.0,
+            })
             .into()
         }
 
@@ -541,11 +751,19 @@ pub(super) fn render_large<'a>(
                 .align_x(iced::Center)
                 .spacing(3),
             )
-            .on_press(Message::RibbonToolClick { tool_id: mp_id, event: mp_event })
+            .on_press(Message::RibbonToolClick {
+                tool_id: mp_id,
+                event: mp_event,
+            })
             .style(move |_: &Theme, status| tool_btn_style(mp_active, status))
             .width(Length::Fixed(LARGE_W))
             .height(Fill)
-            .padding(Padding { top: 6.0, right: 4.0, bottom: 4.0, left: 4.0 });
+            .padding(Padding {
+                top: 6.0,
+                right: 4.0,
+                bottom: 4.0,
+                left: 4.0,
+            });
             let mp_el = tooltip(mp_btn, make_tip(mp_tip), TipPos::Bottom)
                 .gap(6.0)
                 .delay(Duration::from_millis(400))
@@ -560,7 +778,12 @@ pub(super) fn render_large<'a>(
                         .style(move |_: &Theme| container::Style {
                             background: Some(Background::Color(c)),
                             border: Border {
-                                color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.5 },
+                                color: Color {
+                                    r: 0.0,
+                                    g: 0.0,
+                                    b: 0.0,
+                                    a: 0.5,
+                                },
                                 width: 1.0,
                                 radius: 1.0.into(),
                             },
@@ -578,9 +801,12 @@ pub(super) fn render_large<'a>(
                         container(text(label).size(10).color(Color::WHITE))
                             .width(Fill)
                             .clip(true),
-                        text(if is_open { "▲" } else { "▼" })
-                            .size(7)
-                            .color(Color { r: 0.6, g: 0.6, b: 0.6, a: 1.0 }),
+                        text(if is_open { "▲" } else { "▼" }).size(7).color(Color {
+                            r: 0.6,
+                            g: 0.6,
+                            b: 0.6,
+                            a: 1.0
+                        }),
                     ]
                     .spacing(4)
                     .align_y(iced::Center),
@@ -588,19 +814,42 @@ pub(super) fn render_large<'a>(
                 .on_press(Message::ToggleRibbonDropdown(dd_id.to_string()))
                 .style(move |_: &Theme, status| button::Style {
                     background: Some(Background::Color(match (is_open, status) {
-                        (true, _) => Color { r: 0.14, g: 0.14, b: 0.14, a: 1.0 },
-                        (_, button::Status::Hovered) => {
-                            Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 }
-                        }
-                        _ => Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 },
+                        (true, _) => Color {
+                            r: 0.14,
+                            g: 0.14,
+                            b: 0.14,
+                            a: 1.0,
+                        },
+                        (_, button::Status::Hovered) => Color {
+                            r: 0.26,
+                            g: 0.26,
+                            b: 0.26,
+                            a: 1.0,
+                        },
+                        _ => Color {
+                            r: 0.18,
+                            g: 0.18,
+                            b: 0.18,
+                            a: 1.0,
+                        },
                     })),
                     border: Border {
                         radius: 2.0.into(),
                         width: 1.0,
                         color: if is_open {
-                            Color { r: 0.45, g: 0.65, b: 0.90, a: 1.0 }
+                            Color {
+                                r: 0.45,
+                                g: 0.65,
+                                b: 0.90,
+                                a: 1.0,
+                            }
                         } else {
-                            Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 }
+                            Color {
+                                r: 0.35,
+                                g: 0.35,
+                                b: 0.35,
+                                a: 1.0,
+                            }
                         },
                     },
                     ..Default::default()
@@ -615,11 +864,18 @@ pub(super) fn render_large<'a>(
             let lw_row = prop_row(LwItem(active_lineweight).to_string(), PROP_LW_ID, None);
 
             let combos = container(
-                column![color_row, lt_row, lw_row].spacing(2).align_x(iced::Left),
+                column![color_row, lt_row, lw_row]
+                    .spacing(2)
+                    .align_x(iced::Left),
             )
             .height(Fill)
             .align_y(iced::Center)
-            .padding(Padding { top: 4.0, bottom: 4.0, left: 0.0, right: 4.0 });
+            .padding(Padding {
+                top: 4.0,
+                bottom: 4.0,
+                left: 0.0,
+                right: 4.0,
+            });
 
             row![mp_el, combos]
                 .spacing(4)
@@ -628,7 +884,12 @@ pub(super) fn render_large<'a>(
                 .into()
         }
 
-        RibbonItem::StyleComboGroup { style_key, combo_id, manager_cmd, rows } => {
+        RibbonItem::StyleComboGroup {
+            style_key,
+            combo_id,
+            manager_cmd,
+            rows,
+        } => {
             const STYLE_COMBO_W: f32 = LARGE_W * 2.3;
             let names: Vec<String> = style_ctx.names_for(style_key).to_vec();
             let active: String = style_ctx.active_for(style_key).to_string();
@@ -640,9 +901,12 @@ pub(super) fn render_large<'a>(
                     container(text(active.clone()).size(11).color(Color::WHITE))
                         .width(Fill)
                         .clip(true),
-                    text(if is_open { "▲" } else { "▾" })
-                        .size(9)
-                        .color(Color { r: 0.7, g: 0.7, b: 0.7, a: 1.0 }),
+                    text(if is_open { "▲" } else { "▾" }).size(9).color(Color {
+                        r: 0.7,
+                        g: 0.7,
+                        b: 0.7,
+                        a: 1.0
+                    }),
                 ]
                 .spacing(4)
                 .align_y(iced::Center),
@@ -650,17 +914,42 @@ pub(super) fn render_large<'a>(
             .on_press(Message::ToggleRibbonDropdown(combo_id.to_string()))
             .style(move |_: &Theme, status| button::Style {
                 background: Some(Background::Color(match (is_open, status) {
-                    (true, _) => Color { r: 0.14, g: 0.14, b: 0.14, a: 1.0 },
-                    (_, button::Status::Hovered) => Color { r: 0.26, g: 0.26, b: 0.26, a: 1.0 },
-                    _ => Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 },
+                    (true, _) => Color {
+                        r: 0.14,
+                        g: 0.14,
+                        b: 0.14,
+                        a: 1.0,
+                    },
+                    (_, button::Status::Hovered) => Color {
+                        r: 0.26,
+                        g: 0.26,
+                        b: 0.26,
+                        a: 1.0,
+                    },
+                    _ => Color {
+                        r: 0.18,
+                        g: 0.18,
+                        b: 0.18,
+                        a: 1.0,
+                    },
                 })),
                 border: Border {
                     radius: 3.0.into(),
                     width: 1.0,
                     color: if is_open {
-                        Color { r: 0.45, g: 0.65, b: 0.90, a: 1.0 }
+                        Color {
+                            r: 0.45,
+                            g: 0.65,
+                            b: 0.90,
+                            a: 1.0,
+                        }
                     } else {
-                        Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 }
+                        Color {
+                            r: 0.35,
+                            g: 0.35,
+                            b: 0.35,
+                            a: 1.0,
+                        }
                     },
                 },
                 ..Default::default()
@@ -681,7 +970,12 @@ pub(super) fn render_large<'a>(
                                 text(if is_sel { "✓" } else { " " })
                                     .size(10)
                                     .color(if is_sel {
-                                        Color { r: 0.2, g: 0.8, b: 0.4, a: 1.0 }
+                                        Color {
+                                            r: 0.2,
+                                            g: 0.8,
+                                            b: 0.4,
+                                            a: 1.0,
+                                        }
                                     } else {
                                         Color::TRANSPARENT
                                     }),
@@ -693,11 +987,24 @@ pub(super) fn render_large<'a>(
                         .on_press(Message::RibbonStyleChanged { key, name: n })
                         .style(move |_: &Theme, status| button::Style {
                             background: Some(Background::Color(match status {
-                                button::Status::Hovered | button::Status::Pressed => {
-                                    Color { r: 0.28, g: 0.28, b: 0.28, a: 1.0 }
-                                }
-                                _ if is_sel => Color { r: 0.20, g: 0.35, b: 0.55, a: 1.0 },
-                                _ => Color { r: 0.16, g: 0.16, b: 0.16, a: 1.0 },
+                                button::Status::Hovered | button::Status::Pressed => Color {
+                                    r: 0.28,
+                                    g: 0.28,
+                                    b: 0.28,
+                                    a: 1.0,
+                                },
+                                _ if is_sel => Color {
+                                    r: 0.20,
+                                    g: 0.35,
+                                    b: 0.55,
+                                    a: 1.0,
+                                },
+                                _ => Color {
+                                    r: 0.16,
+                                    g: 0.16,
+                                    b: 0.16,
+                                    a: 1.0,
+                                },
                             })),
                             ..Default::default()
                         })
@@ -711,15 +1018,27 @@ pub(super) fn render_large<'a>(
                 let mut full_col = items_col;
                 if let Some(mgr_cmd) = manager_cmd {
                     full_col.push(
-                        button(
-                            text(format!("Manage…")).size(10)
-                                .color(Color { r: 0.5, g: 0.8, b: 1.0, a: 1.0 }),
-                        )
+                        button(text(format!("Manage…")).size(10).color(Color {
+                            r: 0.5,
+                            g: 0.8,
+                            b: 1.0,
+                            a: 1.0,
+                        }))
                         .on_press(Message::Command(mgr_cmd.to_string()))
                         .style(|_: &Theme, status| button::Style {
                             background: Some(Background::Color(match status {
-                                button::Status::Hovered => Color { r: 0.24, g: 0.24, b: 0.24, a: 1.0 },
-                                _ => Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 },
+                                button::Status::Hovered => Color {
+                                    r: 0.24,
+                                    g: 0.24,
+                                    b: 0.24,
+                                    a: 1.0,
+                                },
+                                _ => Color {
+                                    r: 0.13,
+                                    g: 0.13,
+                                    b: 0.13,
+                                    a: 1.0,
+                                },
                             })),
                             ..Default::default()
                         })
@@ -740,11 +1059,19 @@ pub(super) fn render_large<'a>(
                 .max_height(180.0)
                 .width(Length::Fixed(STYLE_COMBO_W))
                 .style(|_: &Theme| container::Style {
-                    background: Some(Background::Color(
-                        Color { r: 0.14, g: 0.14, b: 0.14, a: 0.98 },
-                    )),
+                    background: Some(Background::Color(Color {
+                        r: 0.14,
+                        g: 0.14,
+                        b: 0.14,
+                        a: 0.98,
+                    })),
                     border: Border {
-                        color: Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+                        color: Color {
+                            r: 0.35,
+                            g: 0.35,
+                            b: 0.35,
+                            a: 1.0,
+                        },
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -765,12 +1092,12 @@ pub(super) fn render_large<'a>(
                         let event = t.event.clone();
                         let icon_el: Element<Message> = match t.icon {
                             IconKind::Glyph(g) => text(g).size(13).color(Color::WHITE).into(),
-                            IconKind::Svg(bytes) => iced::widget::svg(
-                                iced::widget::svg::Handle::from_memory(bytes),
-                            )
-                            .width(16)
-                            .height(16)
-                            .into(),
+                            IconKind::Svg(bytes) => {
+                                iced::widget::svg(iced::widget::svg::Handle::from_memory(bytes))
+                                    .width(16)
+                                    .height(16)
+                                    .into()
+                            }
                         };
                         let msg = module_event_to_message(event);
                         tooltip(
@@ -790,11 +1117,10 @@ pub(super) fn render_large<'a>(
                 row(btns).spacing(2).align_y(iced::Center).into()
             };
 
-            let mut col_items: Vec<Element<Message>> = vec![
-                container(row![combo_btn, items_panel].spacing(0))
+            let mut col_items: Vec<Element<Message>> =
+                vec![container(row![combo_btn, items_panel].spacing(0))
                     .width(Fill)
-                    .into(),
-            ];
+                    .into()];
             for row_tools in rows {
                 col_items.push(make_tool_row(row_tools));
             }
@@ -803,7 +1129,12 @@ pub(super) fn render_large<'a>(
                 .width(Length::Fixed(STYLE_COMBO_W))
                 .height(Fill)
                 .align_y(iced::Center)
-                .padding(Padding { top: 4.0, bottom: 4.0, left: 4.0, right: 4.0 })
+                .padding(Padding {
+                    top: 4.0,
+                    bottom: 4.0,
+                    left: 4.0,
+                    right: 4.0,
+                })
                 .into()
         }
 
@@ -814,10 +1145,7 @@ pub(super) fn render_large<'a>(
 // ── Dropdown position helpers ──────────────────────────────────────────────
 
 /// Calculate the left pixel offset of a dropdown button inside the ribbon tool area.
-pub(super) fn compute_dropdown_left(
-    groups: &[RibbonGroup],
-    open_id: &str,
-) -> f32 {
+pub(super) fn compute_dropdown_left(groups: &[RibbonGroup], open_id: &str) -> f32 {
     let sum_with_spacing = |widths: &[f32]| -> f32 {
         widths
             .iter()
@@ -826,7 +1154,11 @@ pub(super) fn compute_dropdown_left(
             .sum::<f32>()
     };
     let next_item_x = |widths: &[f32]| -> f32 {
-        if widths.is_empty() { 0.0 } else { sum_with_spacing(widths) + 2.0 }
+        if widths.is_empty() {
+            0.0
+        } else {
+            sum_with_spacing(widths) + 2.0
+        }
     };
 
     let mut x = 0.0f32;
@@ -950,7 +1282,9 @@ pub(super) fn render_history_control<'a>(
 
     let main_btn = {
         let btn = button(
-            text(glyph).size(14).color(if active { Color::WHITE } else { LABEL_OFF }),
+            text(glyph)
+                .size(14)
+                .color(if active { Color::WHITE } else { LABEL_OFF }),
         )
         .style(move |_: &Theme, status| top_hist_btn_style(active, dd_open, status))
         .width(Length::Fixed(TOP_HIST_W))
@@ -978,7 +1312,9 @@ pub(super) fn render_history_control<'a>(
     let arrow_btn = {
         let btn = button(
             container(
-                text("▾").size(7).color(if active { ARROW_COLOR } else { LABEL_OFF }),
+                text("▾")
+                    .size(7)
+                    .color(if active { ARROW_COLOR } else { LABEL_OFF }),
             )
             .width(Fill)
             .height(Fill)
@@ -1014,7 +1350,12 @@ pub(super) fn top_hist_btn_style(
 ) -> button::Style {
     button::Style {
         background: Some(Background::Color(match (active, open, status) {
-            (false, _, _) => Color { r: 0.20, g: 0.20, b: 0.20, a: 1.0 },
+            (false, _, _) => Color {
+                r: 0.20,
+                g: 0.20,
+                b: 0.20,
+                a: 1.0,
+            },
             (_, true, _) => TOOL_ACTIVE,
             (_, _, button::Status::Hovered) => TOOL_HOVER,
             (_, _, button::Status::Pressed) => TOOL_ACTIVE,

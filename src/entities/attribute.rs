@@ -16,7 +16,11 @@ impl TruckConvertible for AttributeDefinition {
     fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
         let normal = (self.normal.x, self.normal.y, self.normal.z);
         let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
-            (self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
+            (
+                self.insertion_point.x,
+                self.insertion_point.y,
+                self.insertion_point.z,
+            ),
             normal,
         );
         let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
@@ -94,7 +98,9 @@ impl PropertyEditable for AttributeDefinition {
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         match field {
             "att_ix" => self.insertion_point.x = v,
             "att_iy" => self.insertion_point.y = v,
@@ -125,7 +131,11 @@ impl TruckConvertible for AttributeEntity {
     fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
         let normal = (self.normal.x, self.normal.y, self.normal.z);
         let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
-            (self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
+            (
+                self.insertion_point.x,
+                self.insertion_point.y,
+                self.insertion_point.z,
+            ),
             normal,
         );
         let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
@@ -197,7 +207,9 @@ impl PropertyEditable for AttributeEntity {
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         match field {
             "atte_ix" => self.insertion_point.x = v,
             "atte_iy" => self.insertion_point.y = v,

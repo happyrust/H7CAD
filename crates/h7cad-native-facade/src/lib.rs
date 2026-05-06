@@ -58,7 +58,10 @@ mod tests {
             err, "native DWG reader not implemented yet",
             "facade DWG load should no longer return the legacy placeholder"
         );
-        assert!(!err.is_empty(), "DWG reader error message should be non-empty");
+        assert!(
+            !err.is_empty(),
+            "DWG reader error message should be non-empty"
+        );
     }
 
     #[test]

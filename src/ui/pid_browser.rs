@@ -98,8 +98,7 @@ pub fn view_panel<'a>(
     container(
         column![
             header,
-            container(column![sections_top, sections_bottom, search].spacing(8))
-                .padding([8, 8]),
+            container(column![sections_top, sections_bottom, search].spacing(8)).padding([8, 8]),
             body
         ]
         .spacing(0),
@@ -118,7 +117,10 @@ pub fn view_panel<'a>(
     .into()
 }
 
-fn section_button(section: PidBrowserSection, active_section: PidBrowserSection) -> iced::widget::Button<'static, Message> {
+fn section_button(
+    section: PidBrowserSection,
+    active_section: PidBrowserSection,
+) -> iced::widget::Button<'static, Message> {
     let active = section == active_section;
     button(text(section.label()).size(11))
         .on_press(Message::PidBrowserSectionSelect(section))

@@ -237,12 +237,8 @@ fn build_pdf_full(
     // Collect handles that will be drawn natively, so we skip the corresponding
     // wires below. Only active when a native doc is provided — otherwise fall
     // back to wires-only behaviour (print_to_printer path).
-    let (
-        native_text_handles,
-        native_image_handles,
-        native_curve_handles,
-        native_spline_handles,
-    ) = collect_native_handles(native_doc, options);
+    let (native_text_handles, native_image_handles, native_curve_handles, native_spline_handles) =
+        collect_native_handles(native_doc, options);
 
     // Register raster images up front so their XObject ids are available
     // when we emit UseXobject below.
@@ -433,9 +429,7 @@ fn emit_wires(
         }
 
         if last_color
-            .map(|c| {
-                (c[0] - r).abs() > 0.01 || (c[1] - g).abs() > 0.01 || (c[2] - b).abs() > 0.01
-            })
+            .map(|c| (c[0] - r).abs() > 0.01 || (c[1] - g).abs() > 0.01 || (c[2] - b).abs() > 0.01)
             .unwrap_or(true)
         {
             ops.push(Op::SetOutlineColor {
@@ -507,9 +501,7 @@ fn emit_hatch_fills(
                 emit_hatch_pattern_lines(ops, hatch, families, ox, oy, options);
             }
             HatchPattern::Gradient { angle_deg, color2 } if options.gradient_hatches => {
-                emit_hatch_gradient_strips(
-                    ops, hatch, *angle_deg, *color2, ox, oy, options,
-                );
+                emit_hatch_gradient_strips(ops, hatch, *angle_deg, *color2, ox, oy, options);
             }
             HatchPattern::Pattern(_) | HatchPattern::Gradient { .. } => {
                 // Phase 1 / 2 compatibility: when hatch_patterns=false or
@@ -554,12 +546,7 @@ fn emit_hatch_gradient_strips(
     let perp = [-sin_t, cos_t];
 
     // Project all 4 AABB corners onto `dir` to find the gradient range.
-    let corners = [
-        [bx0, by0],
-        [bx1, by0],
-        [bx1, by1],
-        [bx0, by1],
-    ];
+    let corners = [[bx0, by0], [bx1, by0], [bx1, by1], [bx0, by1]];
     let mut t_min = f32::INFINITY;
     let mut t_max = f32::NEG_INFINITY;
     for &[cx, cy] in &corners {
@@ -614,12 +601,7 @@ fn emit_hatch_gradient_strips(
         }
 
         // Four corners of the strip in world space (post-offset).
-        let corners_ws = [
-            (t0, p_min),
-            (t1, p_min),
-            (t1, p_max),
-            (t0, p_max),
-        ];
+        let corners_ws = [(t0, p_min), (t1, p_min), (t1, p_max), (t0, p_max)];
         let ring_points: Vec<LinePoint> = corners_ws
             .iter()
             .map(|&(t, p)| {
@@ -767,20 +749,12 @@ fn emit_hatch_pattern_lines(
 
         // Project all AABB corners onto the perpendicular axis to find the
         // range of N (line index) that touches the AABB.
-        let corners = [
-            (bx0, by0),
-            (bx1, by0),
-            (bx1, by1),
-            (bx0, by1),
-        ];
+        let corners = [(bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1)];
         let perp_offsets: Vec<f32> = corners
             .iter()
             .map(|&(x, y)| (x - base_x) * perp_x + (y - base_y) * perp_y)
             .collect();
-        let min_perp = perp_offsets
-            .iter()
-            .cloned()
-            .fold(f32::INFINITY, f32::min);
+        let min_perp = perp_offsets.iter().cloned().fold(f32::INFINITY, f32::min);
         let max_perp = perp_offsets
             .iter()
             .cloned()
@@ -798,9 +772,9 @@ fn emit_hatch_pattern_lines(
             let origin_x = base_x + nf * dy * perp_x + nf * dx * dir_x;
             let origin_y = base_y + nf * dy * perp_y + nf * dx * dir_y;
 
-            if let Some((t0, t1)) = clip_line_aabb(
-                origin_x, origin_y, dir_x, dir_y, bx0, by0, bx1, by1,
-            ) {
+            if let Some((t0, t1)) =
+                clip_line_aabb(origin_x, origin_y, dir_x, dir_y, bx0, by0, bx1, by1)
+            {
                 let p0x = origin_x + t0 * dir_x + ox;
                 let p0y = origin_y + t0 * dir_y + oy;
                 let p1x = origin_x + t1 * dir_x + ox;
@@ -1081,10 +1055,7 @@ fn collect_and_register_images(
 
         // Attach the affine parameters as part of the spec so we can emit
         // matrix + Do in the page stream.
-        out.push(PdfImageSpec {
-            id,
-            transform,
-        });
+        out.push(PdfImageSpec { id, transform });
     }
 
     out
@@ -1166,11 +1137,8 @@ fn emit_native_curves(
         match &entity.data {
             nm::EntityData::Circle { center, radius } => {
                 emit_stroke_setup(ops, r, g, b, lw_pt);
-                let line = build_circle_line(
-                    center[0] as f32 + ox,
-                    center[1] as f32 + oy,
-                    *radius as f32,
-                );
+                let line =
+                    build_circle_line(center[0] as f32 + ox, center[1] as f32 + oy, *radius as f32);
                 ops.push(Op::DrawLine { line });
             }
             nm::EntityData::Arc {
@@ -1268,14 +1236,14 @@ fn resolve_entity_lineweight_pt(entity: &nm::Entity, plot_style: Option<&PlotSty
 /// exposing that helper as `pub(crate)` just for PDF consumption.)
 fn aci_to_rgb(aci: u8) -> (u8, u8, u8) {
     match aci {
-        1 => (255, 0, 0),       // red
-        2 => (255, 255, 0),     // yellow
-        3 => (0, 255, 0),       // green
-        4 => (0, 255, 255),     // cyan
-        5 => (0, 0, 255),       // blue
-        6 => (255, 0, 255),     // magenta
-        7 | 0 => (0, 0, 0),     // white / ByBlock → black on white paper
-        _ => (0, 0, 0),         // default to black for 8-255
+        1 => (255, 0, 0),   // red
+        2 => (255, 255, 0), // yellow
+        3 => (0, 255, 0),   // green
+        4 => (0, 255, 255), // cyan
+        5 => (0, 0, 255),   // blue
+        6 => (255, 0, 255), // magenta
+        7 | 0 => (0, 0, 0), // white / ByBlock → black on white paper
+        _ => (0, 0, 0),     // default to black for 8-255
     }
 }
 
@@ -1389,9 +1357,8 @@ fn build_ellipse_line(
     start_param: f32,
     end_param: f32,
 ) -> Line {
-    let major_len = (major_axis_xy[0] * major_axis_xy[0]
-        + major_axis_xy[1] * major_axis_xy[1])
-        .sqrt();
+    let major_len =
+        (major_axis_xy[0] * major_axis_xy[0] + major_axis_xy[1] * major_axis_xy[1]).sqrt();
     if major_len < 1e-6 {
         return Line {
             points: vec![lp(cx, cy, false)],
@@ -1511,14 +1478,9 @@ fn emit_native_splines(
             continue;
         };
 
-        let Some(strategy) = spline_emit_strategy(
-            *degree,
-            *closed,
-            knots,
-            control_points,
-            weights,
-            fit_points,
-        ) else {
+        let Some(strategy) =
+            spline_emit_strategy(*degree, *closed, knots, control_points, weights, fit_points)
+        else {
             continue; // falls back to wire path (not skipped above)
         };
 
@@ -1557,10 +1519,7 @@ fn emit_polyline(ops: &mut Vec<Op>, pts: &[[f64; 3]], ox: f32, oy: f32, is_close
         })
         .collect();
     ops.push(Op::DrawLine {
-        line: Line {
-            points,
-            is_closed,
-        },
+        line: Line { points, is_closed },
     });
 }
 
@@ -1641,7 +1600,12 @@ fn emit_bezier_spline(
 fn collect_native_handles(
     native_doc: Option<&nm::CadDocument>,
     options: &PdfExportOptions,
-) -> (HashSet<String>, HashSet<String>, HashSet<String>, HashSet<String>) {
+) -> (
+    HashSet<String>,
+    HashSet<String>,
+    HashSet<String>,
+    HashSet<String>,
+) {
     let mut text = HashSet::new();
     let mut image = HashSet::new();
     let mut curve = HashSet::new();
@@ -1927,14 +1891,18 @@ mod tests {
 
     fn tmp_path(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("h7cad_pdf_test_{}_{}.pdf", name, std::process::id()));
+        p.push(format!(
+            "h7cad_pdf_test_{}_{}.pdf",
+            name,
+            std::process::id()
+        ));
         p
     }
 
     fn find_any(bytes: &[u8], needles: &[&[u8]]) -> bool {
-        needles.iter().any(|needle| {
-            bytes.windows(needle.len()).any(|w| w == *needle)
-        })
+        needles
+            .iter()
+            .any(|needle| bytes.windows(needle.len()).any(|w| w == *needle))
     }
 
     fn line_wire(points: Vec<[f32; 3]>) -> WireModel {
@@ -1996,10 +1964,7 @@ mod tests {
         // At least one of the two must appear in the stream.  Flate
         // compression is enabled by default, so look for the text itself
         // only after decompression (skipped here — we trust printpdf).
-        assert!(
-            bytes.starts_with(b"%PDF-"),
-            "expected PDF magic header"
-        );
+        assert!(bytes.starts_with(b"%PDF-"), "expected PDF magic header");
         // The font resource dict references BuiltinFont identifier "F1" or
         // similar — the Helvetica built-in id is documented as `F1`.
         assert!(
@@ -2167,11 +2132,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xDD),
             HatchModel {
-                boundary: vec![
-                    [0.0, 0.0],
-                    [50.0, 0.0],
-                    [25.0, 30.0],
-                ],
+                boundary: vec![[0.0, 0.0], [50.0, 0.0], [25.0, 30.0]],
                 pattern: HatchPattern::Pattern(vec![PatFamily {
                     angle_deg: 45.0,
                     x0: 0.0,
@@ -2293,12 +2254,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xFF),
             HatchModel {
-                boundary: vec![
-                    [0.0, 0.0],
-                    [100.0, 0.0],
-                    [100.0, 100.0],
-                    [0.0, 100.0],
-                ],
+                boundary: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]],
                 pattern: HatchPattern::Pattern(vec![PatFamily {
                     angle_deg: 0.0,
                     x0: 0.0,
@@ -2491,8 +2447,7 @@ mod tests {
         for (i, p) in line.points.iter().enumerate() {
             let expected_anchor = i % 3 == 0;
             assert_eq!(
-                p.bezier,
-                !expected_anchor,
+                p.bezier, !expected_anchor,
                 "point {i} should have bezier={}",
                 !expected_anchor
             );
@@ -2505,20 +2460,20 @@ mod tests {
         // (2×90°) → 1 start anchor + 2 × 3 control/anchor = 7 points.
         let line = build_arc_line(0.0, 0.0, 5.0, 0.0, std::f32::consts::PI);
         assert!(!line.is_closed, "arc line must NOT be closed (open path)");
-        assert_eq!(line.points.len(), 7, "half-circle = 2 bezier chunks + anchor");
+        assert_eq!(
+            line.points.len(),
+            7,
+            "half-circle = 2 bezier chunks + anchor"
+        );
     }
 
     #[test]
     fn fixture_pdf_ellipse_full_sweep_produces_closed_path() {
-        let line = build_ellipse_line(
-            0.0,
-            0.0,
-            [10.0, 0.0],
-            0.5,
-            0.0,
-            std::f32::consts::TAU,
+        let line = build_ellipse_line(0.0, 0.0, [10.0, 0.0], 0.5, 0.0, std::f32::consts::TAU);
+        assert!(
+            line.is_closed,
+            "full ellipse sweep must produce closed path"
         );
-        assert!(line.is_closed, "full ellipse sweep must produce closed path");
         // 4 bezier chunks × 3 points + 1 start anchor = 13.
         assert_eq!(line.points.len(), 13);
     }
@@ -2531,11 +2486,7 @@ mod tests {
             degree: 1,
             closed: false,
             knots: vec![0.0, 0.0, 1.0, 2.0, 2.0],
-            control_points: vec![
-                [0.0, 0.0, 0.0],
-                [10.0, 5.0, 0.0],
-                [20.0, 0.0, 0.0],
-            ],
+            control_points: vec![[0.0, 0.0, 0.0], [10.0, 5.0, 0.0], [20.0, 0.0, 0.0]],
             weights: vec![],
             fit_points: vec![],
             start_tangent: [0.0, 0.0, 0.0],
@@ -2703,12 +2654,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xEE),
             HatchModel {
-                boundary: vec![
-                    [0.0, 0.0],
-                    [50.0, 0.0],
-                    [50.0, 30.0],
-                    [0.0, 30.0],
-                ],
+                boundary: vec![[0.0, 0.0], [50.0, 0.0], [50.0, 30.0], [0.0, 30.0]],
                 pattern: HatchPattern::Gradient {
                     angle_deg: 0.0,
                     color2: [0.0, 0.0, 1.0, 1.0],
@@ -2804,18 +2750,8 @@ mod tests {
         mono.monochrome = true;
         let mut colour = PdfExportOptions::default();
         colour.monochrome = false;
-        let mono_bytes = build_pdf_full(
-            &[],
-            &hatches,
-            None,
-            297.0,
-            210.0,
-            0.0,
-            0.0,
-            0,
-            None,
-            &mono,
-        );
+        let mono_bytes =
+            build_pdf_full(&[], &hatches, None, 297.0, 210.0, 0.0, 0.0, 0, None, &mono);
         let colour_bytes = build_pdf_full(
             &[],
             &hatches,

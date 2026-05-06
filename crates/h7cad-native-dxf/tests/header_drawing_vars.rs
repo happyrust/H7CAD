@@ -133,7 +133,10 @@ fn header_default_values_survive_roundtrip() {
     assert!(!restored.header.orthomode, "default orthomode = false");
     assert!(!restored.header.gridmode);
     assert!(!restored.header.snapmode);
-    assert!(restored.header.fillmode, "default fillmode = true (AutoCAD convention)");
+    assert!(
+        restored.header.fillmode,
+        "default fillmode = true (AutoCAD convention)"
+    );
     assert!(!restored.header.mirrtext);
     assert_eq!(restored.header.attmode, 1, "default attmode = 1 (normal)");
     assert_eq!(restored.header.clayer, "0", "default current layer");
@@ -207,9 +210,9 @@ fn assert_var_i16(text: &str, var: &str, code: i16, expected: i16) {
         &code.to_string(),
         "{var} group code mismatch (expected {code}, got `{got_code}`)"
     );
-    let parsed: i16 = got_val.parse().unwrap_or_else(|_| {
-        panic!("{var} value `{got_val}` is not parseable as i16")
-    });
+    let parsed: i16 = got_val
+        .parse()
+        .unwrap_or_else(|_| panic!("{var} value `{got_val}` is not parseable as i16"));
     assert_eq!(
         parsed, expected,
         "{var} value mismatch: got {parsed}, expected {expected}"
@@ -223,9 +226,9 @@ fn assert_var_i32(text: &str, var: &str, code: i16, expected: i32) {
         &code.to_string(),
         "{var} group code mismatch (expected {code}, got `{got_code}`)"
     );
-    let parsed: i32 = got_val.parse().unwrap_or_else(|_| {
-        panic!("{var} value `{got_val}` is not parseable as i32")
-    });
+    let parsed: i32 = got_val
+        .parse()
+        .unwrap_or_else(|_| panic!("{var} value `{got_val}` is not parseable as i32"));
     assert_eq!(parsed, expected, "{var} value mismatch");
 }
 
@@ -236,9 +239,9 @@ fn assert_var_f64_approx(text: &str, var: &str, code: i16, expected: f64) {
         &code.to_string(),
         "{var} group code mismatch (expected {code}, got `{got_code}`)"
     );
-    let parsed: f64 = got_val.parse().unwrap_or_else(|_| {
-        panic!("{var} value `{got_val}` is not parseable as f64")
-    });
+    let parsed: f64 = got_val
+        .parse()
+        .unwrap_or_else(|_| panic!("{var} value `{got_val}` is not parseable as f64"));
     assert!(
         (parsed - expected).abs() < 1e-9,
         "{var} value mismatch: got {parsed}, expected {expected}"

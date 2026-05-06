@@ -146,9 +146,7 @@ impl CadCommand for EllipseCommand {
             CtrStep::MinorRatio { center, major } => {
                 let (center, major) = (*center, *major);
                 let ratio = minor_ratio(center, major, pt);
-                CmdResult::CommitAndExitNative(make_ellipse(
-                    center, major, ratio, 0.0, TAU,
-                ))
+                CmdResult::CommitAndExitNative(make_ellipse(center, major, ratio, 0.0, TAU))
             }
         }
     }
@@ -234,9 +232,7 @@ impl CadCommand for EllipseAxisCommand {
             AxisStep::MinorRatio { center, major } => {
                 let (center, major) = (*center, *major);
                 let ratio = minor_ratio(center, major, pt);
-                CmdResult::CommitAndExitNative(make_ellipse(
-                    center, major, ratio, 0.0, TAU,
-                ))
+                CmdResult::CommitAndExitNative(make_ellipse(center, major, ratio, 0.0, TAU))
             }
         }
     }
@@ -523,9 +519,9 @@ fn line_wire(from: Vec3, to: Vec3) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }

@@ -137,11 +137,7 @@ pub fn ray_apply_grip(
     }
 }
 
-pub fn ray_apply_transform(
-    origin: &mut [f64; 3],
-    direction: &mut [f64; 3],
-    t: &EntityTransform,
-) {
+pub fn ray_apply_transform(origin: &mut [f64; 3], direction: &mut [f64; 3], t: &EntityTransform) {
     transform_pt(origin, t);
     crate::entities::common::transform_dir(direction, t);
 }
@@ -166,4 +162,3 @@ pub fn xline_to_truck(origin: &[f64; 3], direction: &[f64; 3]) -> TruckEntity {
         key_vertices: vec![[origin[0] as f32, origin[1] as f32, origin[2] as f32]],
     }
 }
-

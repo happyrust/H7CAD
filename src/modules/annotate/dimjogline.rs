@@ -33,12 +33,16 @@ pub struct DimJogLineCommand {
 
 impl DimJogLineCommand {
     pub fn new() -> Self {
-        Self { step: Step::PickDim }
+        Self {
+            step: Step::PickDim,
+        }
     }
 }
 
 impl CadCommand for DimJogLineCommand {
-    fn name(&self) -> &'static str { "DIMJOGLINE" }
+    fn name(&self) -> &'static str {
+        "DIMJOGLINE"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
@@ -52,7 +56,9 @@ impl CadCommand for DimJogLineCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
         self.step = Step::PickJogPos { handle };
         CmdResult::NeedPoint
     }
@@ -69,7 +75,9 @@ impl CadCommand for DimJogLineCommand {
         CmdResult::NeedPoint
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         if !matches!(self.step, Step::PickJogPos { .. }) {

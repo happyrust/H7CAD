@@ -5,8 +5,8 @@
 //   2. AskText       — wants_text_input; blank Enter = no text
 //   → commit single MultiLeader entity
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -34,21 +34,30 @@ pub struct MLeaderCommand {
 
 impl MLeaderCommand {
     pub fn new() -> Self {
-        Self { step: Step::CollectPoints { verts: Vec::new() } }
+        Self {
+            step: Step::CollectPoints { verts: Vec::new() },
+        }
     }
 }
 
 impl CadCommand for MLeaderCommand {
-    fn name(&self) -> &'static str { "MLEADER" }
+    fn name(&self) -> &'static str {
+        "MLEADER"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
-            Step::CollectPoints { verts } if verts.is_empty() =>
-                "MLEADER  Specify arrowhead point:".into(),
-            Step::CollectPoints { verts } =>
-                format!("MLEADER  Specify next point [{} pts — Enter to finish]:", verts.len()),
-            Step::AskText { verts } =>
-                format!("MLEADER  Enter annotation text [{} pts — blank = no text]:", verts.len()),
+            Step::CollectPoints { verts } if verts.is_empty() => {
+                "MLEADER  Specify arrowhead point:".into()
+            }
+            Step::CollectPoints { verts } => format!(
+                "MLEADER  Specify next point [{} pts — Enter to finish]:",
+                verts.len()
+            ),
+            Step::AskText { verts } => format!(
+                "MLEADER  Enter annotation text [{} pts — blank = no text]:",
+                verts.len()
+            ),
         }
     }
 
@@ -65,7 +74,9 @@ impl CadCommand for MLeaderCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         if let Step::CollectPoints { verts } = &self.step {
-            if verts.len() < 2 { return CmdResult::Cancel; }
+            if verts.len() < 2 {
+                return CmdResult::Cancel;
+            }
             let verts = verts.clone();
             self.step = Step::AskText { verts };
             CmdResult::NeedPoint
@@ -84,11 +95,15 @@ impl CadCommand for MLeaderCommand {
         }
     }
 
-    fn on_escape(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         if let Step::CollectPoints { verts } = &self.step {
-            if verts.is_empty() { return None; }
+            if verts.is_empty() {
+                return None;
+            }
             let mut pts = verts.clone();
             pts.push(pt);
             Some(preview_wire(&pts))
@@ -113,7 +128,11 @@ fn build_mleader_native(text: &str, verts: &[Vec3]) -> nm::Entity {
     } else {
         vec![leader_vertices.len()]
     };
-    let text_location = Some([content_pt.x as f64, content_pt.y as f64, content_pt.z as f64]);
+    let text_location = Some([
+        content_pt.x as f64,
+        content_pt.y as f64,
+        content_pt.z as f64,
+    ]);
 
     nm::Entity::new(nm::EntityData::MultiLeader {
         content_type: 1,
@@ -159,10 +178,10 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            vp_scissor: None,
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }
 
@@ -173,7 +192,15 @@ fn arrowhead_wings(tip: Vec3, next: Vec3, size: f32) -> [Vec3; 2] {
     let angle = std::f32::consts::PI / 6.0;
     let (s, c) = angle.sin_cos();
     [
-        Vec3::new(tip.x + (dx*c - dy*s)*size, tip.y + (dx*s + dy*c)*size, tip.z),
-        Vec3::new(tip.x + (dx*c + dy*s)*size, tip.y + (-dx*s + dy*c)*size, tip.z),
+        Vec3::new(
+            tip.x + (dx * c - dy * s) * size,
+            tip.y + (dx * s + dy * c) * size,
+            tip.z,
+        ),
+        Vec3::new(
+            tip.x + (dx * c + dy * s) * size,
+            tip.y + (-dx * s + dy * c) * size,
+            tip.z,
+        ),
     ]
 }

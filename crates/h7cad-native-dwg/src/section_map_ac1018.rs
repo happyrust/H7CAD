@@ -332,19 +332,21 @@ pub fn parse_ac1018_section_map(
     section_map_id: u32,
 ) -> Result<SectionDescriptorMap, SectionMapDecodeError> {
     // 1) Resolve the on-disk seeker for the section map page via R46-C.
-    let section_map_record = page_map.lookup(section_map_id as i32).ok_or(
-        SectionMapDecodeError::PageMap(PageMapDecodeError::TruncatedRecordStream {
-            decompressed_len: 0,
-            cursor: 0,
-        }),
-    )?;
-    let section_map_offset: usize = section_map_record
-        .seeker
-        .try_into()
-        .map_err(|_| SectionMapDecodeError::TruncatedHeader {
+    let section_map_record =
+        page_map
+            .lookup(section_map_id as i32)
+            .ok_or(SectionMapDecodeError::PageMap(
+                PageMapDecodeError::TruncatedRecordStream {
+                    decompressed_len: 0,
+                    cursor: 0,
+                },
+            ))?;
+    let section_map_offset: usize = section_map_record.seeker.try_into().map_err(|_| {
+        SectionMapDecodeError::TruncatedHeader {
             offset: 0,
             expected_at_least: SYSTEM_PAGE_HEADER_LEN,
-        })?;
+        }
+    })?;
 
     // 2) Read the 20-byte system page header at that seeker.
     let header = parse_system_page_header(bytes, section_map_offset).map_err(|err| match err {
@@ -383,18 +385,19 @@ pub fn parse_ac1018_section_map(
             expected_at_least: SYSTEM_PAGE_HEADER_LEN,
         })?;
     let compressed_len = header.compressed_size as usize;
-    let payload_end = payload_start
-        .checked_add(compressed_len)
-        .ok_or(SectionMapDecodeError::TruncatedHeader {
+    let payload_end = payload_start.checked_add(compressed_len).ok_or(
+        SectionMapDecodeError::TruncatedHeader {
             offset: payload_start,
             expected_at_least: compressed_len,
-        })?;
-    let compressed = bytes
-        .get(payload_start..payload_end)
-        .ok_or(SectionMapDecodeError::TruncatedHeader {
-            offset: payload_start,
-            expected_at_least: compressed_len,
-        })?;
+        },
+    )?;
+    let compressed =
+        bytes
+            .get(payload_start..payload_end)
+            .ok_or(SectionMapDecodeError::TruncatedHeader {
+                offset: payload_start,
+                expected_at_least: compressed_len,
+            })?;
 
     // 4) Decompress with R46-B.
     let decompressed = decompress_ac18_lz77(compressed, header.decompressed_size as usize)?;
@@ -433,13 +436,13 @@ pub fn parse_descriptors(
 
     for descriptor_index in 0..descriptor_count {
         // 5b) 96-byte SectionDescriptor fixed header.
-        let descriptor_end = cursor
-            .checked_add(SECTION_DESCRIPTOR_LEN)
-            .ok_or(SectionMapDecodeError::TruncatedDescriptorStream {
+        let descriptor_end = cursor.checked_add(SECTION_DESCRIPTOR_LEN).ok_or(
+            SectionMapDecodeError::TruncatedDescriptorStream {
                 decompressed_len: decompressed.len(),
                 cursor,
                 descriptor_index,
-            })?;
+            },
+        )?;
         if descriptor_end > decompressed.len() {
             return Err(SectionMapDecodeError::TruncatedDescriptorStream {
                 decompressed_len: decompressed.len(),
@@ -651,17 +654,7 @@ mod tests {
         // Descriptor 0: AcDb:Empty, page_count=0, no local sections.
         // Descriptor 1: AcDb:Handles, page_count=2, two local sections.
         let mut payload = build_in_payload_header(2);
-        push_descriptor(
-            &mut payload,
-            0,
-            0,
-            0x7400,
-            2,
-            0,
-            0,
-            "AcDb:Empty",
-            &[],
-        );
+        push_descriptor(&mut payload, 0, 0, 0x7400, 2, 0, 0, "AcDb:Empty", &[]);
         push_descriptor(
             &mut payload,
             0xE800, // 2 * 0x7400 — clean multiple, no tail correction
@@ -704,17 +697,7 @@ mod tests {
     fn parse_descriptors_handles_zero_page_count_descriptor() {
         let page_map = PageMap { records: vec![] };
         let mut payload = build_in_payload_header(1);
-        push_descriptor(
-            &mut payload,
-            0,
-            0,
-            0x7400,
-            2,
-            0,
-            0,
-            "AcDb:Empty",
-            &[],
-        );
+        push_descriptor(&mut payload, 0, 0, 0x7400, 2, 0, 0, "AcDb:Empty", &[]);
         let map = parse_descriptors(&payload, &page_map).expect("zero-page descriptor decodes");
         assert_eq!(map.len(), 1);
         let empty = map.lookup("AcDb:Empty").unwrap();
@@ -779,7 +762,8 @@ mod tests {
             "AcDb:AcDbObjects",
             &[(1, 0x7400, 0), (2, 0xC00, 0x7400)],
         );
-        let map = parse_descriptors(&payload, &page_map).expect("tail correction descriptor decodes");
+        let map =
+            parse_descriptors(&payload, &page_map).expect("tail correction descriptor decodes");
         let objects = map.lookup("AcDb:AcDbObjects").unwrap();
         assert_eq!(objects.local_sections[0].decompressed_size, 0x7400);
         assert_eq!(
