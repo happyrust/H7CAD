@@ -108,10 +108,7 @@ mod tests {
     #[test]
     fn preserves_existing_values_for_matching_tags() {
         let defs = vec![attdef("SIZE", "10"), attdef("COLOR", "red")];
-        let existing = vec![
-            existing_attr("SIZE", "42"),
-            existing_attr("COLOR", "blue"),
-        ];
+        let existing = vec![existing_attr("SIZE", "42"), existing_attr("COLOR", "blue")];
         let (out, d) = sync_insert_attributes(&defs, &existing);
         assert_eq!(d.added, 0);
         assert_eq!(d.removed, 0);
@@ -143,10 +140,7 @@ mod tests {
             attdef("B", "b-default"),
             attdef("C", "c-default"),
         ];
-        let existing = vec![
-            existing_attr("B", "b-user"),
-            existing_attr("X", "stale"),
-        ];
+        let existing = vec![existing_attr("B", "b-user"), existing_attr("X", "stale")];
         let (out, d) = sync_insert_attributes(&defs, &existing);
         assert_eq!(d.added, 2, "A and C are new");
         assert_eq!(d.removed, 1, "X is dropped");

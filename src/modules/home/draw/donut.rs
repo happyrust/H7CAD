@@ -10,8 +10,8 @@
 //   2. Type outer diameter
 //   3. Click center point(s); Enter to finish
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 
@@ -38,12 +38,14 @@ impl DonutCommand {
 }
 
 impl CadCommand for DonutCommand {
-    fn name(&self) -> &'static str { "DONUT" }
+    fn name(&self) -> &'static str {
+        "DONUT"
+    }
 
     fn prompt(&self) -> String {
         match &self.state {
-            DonutState::AskInner  => "DONUT  Specify inside diameter <0>:".into(),
-            DonutState::AskOuter  => "DONUT  Specify outside diameter:".into(),
+            DonutState::AskInner => "DONUT  Specify inside diameter <0>:".into(),
+            DonutState::AskOuter => "DONUT  Specify outside diameter:".into(),
             DonutState::PlaceCenter => "DONUT  Specify center of donut (Enter to exit):".into(),
         }
     }
@@ -53,7 +55,12 @@ impl CadCommand for DonutCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let val: f64 = text.trim().replace(',', ".").parse().ok().filter(|&v: &f64| v >= 0.0)?;
+        let val: f64 = text
+            .trim()
+            .replace(',', ".")
+            .parse()
+            .ok()
+            .filter(|&v: &f64| v >= 0.0)?;
         match &self.state {
             DonutState::AskInner => {
                 self.inner_r = val / 2.0;
@@ -61,7 +68,9 @@ impl CadCommand for DonutCommand {
                 Some(CmdResult::NeedPoint)
             }
             DonutState::AskOuter => {
-                if val <= 0.0 { return None; }
+                if val <= 0.0 {
+                    return None;
+                }
                 self.outer_r = val / 2.0;
                 if self.inner_r > self.outer_r {
                     std::mem::swap(&mut self.inner_r, &mut self.outer_r);
@@ -76,7 +85,8 @@ impl CadCommand for DonutCommand {
     fn on_point(&mut self, pt: Vec3) -> CmdResult {
         match &self.state {
             DonutState::PlaceCenter => {
-                let entity = make_donut_native(pt.x as f64, pt.z as f64, self.inner_r, self.outer_r);
+                let entity =
+                    make_donut_native(pt.x as f64, pt.z as f64, self.inner_r, self.outer_r);
                 CmdResult::CommitEntityNative(entity)
             }
             _ => CmdResult::NeedPoint,

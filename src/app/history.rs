@@ -1,4 +1,4 @@
-use super::{H7CAD, document::HistorySnapshot};
+use super::{document::HistorySnapshot, H7CAD};
 use std::collections::HashSet;
 
 impl H7CAD {
@@ -10,7 +10,11 @@ impl H7CAD {
             .unwrap_or_else(|| fallback.to_string())
     }
 
-    pub(super) fn capture_history_snapshot(&self, i: usize, label: impl Into<String>) -> HistorySnapshot {
+    pub(super) fn capture_history_snapshot(
+        &self,
+        i: usize,
+        label: impl Into<String>,
+    ) -> HistorySnapshot {
         HistorySnapshot {
             document: self.tabs[i].scene.document.clone(),
             native_doc_clone: self.tabs[i].scene.native_doc().cloned(),
@@ -47,7 +51,9 @@ impl H7CAD {
         self.tabs[i].dirty = snapshot.dirty;
         let doc_layers = self.tabs[i].scene.document.layers.clone();
         let vp_info = self.tabs[i].scene.viewport_list();
-        self.tabs[i].layers.sync_with_viewports(&doc_layers, vp_info);
+        self.tabs[i]
+            .layers
+            .sync_with_viewports(&doc_layers, vp_info);
         self.sync_ribbon_layers();
         self.refresh_properties();
     }
@@ -80,7 +86,8 @@ impl H7CAD {
             self.restore_history_snapshot(i, snapshot);
             last_label = label;
         }
-        self.command_line.push_output(&format!("Undo: {last_label}"));
+        self.command_line
+            .push_output(&format!("Undo: {last_label}"));
     }
 
     pub(super) fn redo_steps(&mut self, steps: usize) {
@@ -103,10 +110,15 @@ impl H7CAD {
             self.restore_history_snapshot(i, snapshot);
             last_label = label;
         }
-        self.command_line.push_output(&format!("Redo: {last_label}"));
+        self.command_line
+            .push_output(&format!("Redo: {last_label}"));
     }
 }
 
 pub(super) fn history_dropdown_labels(stack: &[HistorySnapshot]) -> Vec<String> {
-    stack.iter().rev().map(|snapshot| snapshot.label.clone()).collect()
+    stack
+        .iter()
+        .rev()
+        .map(|snapshot| snapshot.label.clone())
+        .collect()
 }

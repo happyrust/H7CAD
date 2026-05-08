@@ -18,16 +18,21 @@ mod entity_text;
 mod entity_viewport;
 mod error;
 mod file_header;
+mod file_header_ac1018;
 mod handle_map;
 mod known_section;
+mod lz77_ac18;
 mod modular;
 mod object_header;
 mod object_reader;
 mod object_stream;
+mod page_map_ac1018;
 mod pending;
 mod reader;
 mod resolver;
+mod section_data_ac1018;
 mod section_map;
+mod section_map_ac1018;
 mod version;
 
 use h7cad_native_model::CadDocument;
@@ -37,14 +42,14 @@ use h7cad_native_model::Handle;
 
 pub use bit_reader::BitReader;
 pub use entity_arc::{read_arc_geometry, ArcGeometry};
+pub use entity_attrib::{
+    read_attdef_geometry, read_attrib_geometry, AttDefGeometry, AttribGeometry,
+};
 pub use entity_circle::{read_circle_geometry, CircleGeometry};
 pub use entity_common::{
     dwg_lineweight_from_index, parse_ac1015_entity_common, parse_ac1015_non_entity_common,
     probe_ac1015_entity_common, skip_ac1015_entity_common_main_stream, Ac1015EntityCommonData,
     Ac1015EntityCommonProbeFailure, Ac1015EntityCommonProbeStage, Ac1015NonEntityCommonData,
-};
-pub use entity_attrib::{
-    read_attdef_geometry, read_attrib_geometry, AttDefGeometry, AttribGeometry,
 };
 pub use entity_dimension::{read_dimension_geometry, DimensionGeometry};
 pub use entity_ellipse::{read_ellipse_geometry, EllipseGeometry};
@@ -61,29 +66,51 @@ pub use entity_text::{read_text_geometry, TextGeometry};
 pub use entity_viewport::{read_viewport_geometry, ViewportGeometry};
 pub use error::DwgReadError;
 pub use file_header::DwgFileHeader;
+pub use file_header_ac1018::{
+    parse_ac1018_encrypted_metadata, Ac1018EncryptedMetadata, AC1018_ENCRYPTED_BLOCK_LEN,
+    AC1018_ENCRYPTED_BLOCK_OFFSET, AC1018_FILE_ID,
+};
 pub use handle_map::{parse_handle_map, HandleMapEntry};
 pub use known_section::KnownSection;
+pub use lz77_ac18::{decompress_ac18_lz77, Lz77DecodeError};
 pub use object_header::{
-    read_ac1015_object_header, split_ac1015_object_streams, ObjectHeader,
-    HANDLE_CODE_HARD_OWNER,
+    read_ac1015_object_header, split_ac1015_object_streams, ObjectHeader, HANDLE_CODE_HARD_OWNER,
 };
 pub use object_reader::{
     dispatch_entity_record, dispatch_object, dispatch_object_record, dispatch_table_record,
     record_index, record_payload_size, summarize_object, DispatchTarget, ParsedRecordSummary,
 };
 pub use object_stream::ObjectStreamCursor;
+pub use page_map_ac1018::{
+    parse_ac1018_page_map, parse_system_page_header, PageMap, PageMapDecodeError, PageMapRecord,
+    SystemPageHeader, COMPRESSION_TYPE_LZ77, INITIAL_SEEKER, MAX_DECOMPRESSED_SIZE,
+    PAGE_MAP_SECTION_TYPE, SECTION_MAP_SECTION_TYPE, SYSTEM_PAGE_HEADER_LEN,
+};
 pub use pending::{
     PendingDocument, PendingEntity, PendingLayer, PendingObject, PendingObjectKind, PendingSection,
 };
 pub use reader::DwgReaderCursor;
 pub use resolver::resolve_document;
+pub use section_data_ac1018::{
+    decrypt_page_header as decrypt_ac1018_page_header,
+    read_section_payload as read_ac1018_section_payload,
+    EncryptedPageHeader as Ac1018EncryptedPageHeader, SectionDataDecodeError,
+    DATA_SECTION_PAGE_TYPE, PAGE_HEADER_LEN, PAGE_HEADER_XOR_MAGIC,
+};
 pub use section_map::{SectionDescriptor, SectionMap};
+pub use section_map_ac1018::{
+    parse_ac1018_section_map, parse_descriptors as parse_ac1018_section_descriptors,
+    LocalSectionMap as Ac1018LocalSectionMap, SectionDescriptor as Ac1018SectionDescriptor,
+    SectionDescriptorMap as Ac1018SectionDescriptorMap, SectionMapDecodeError,
+    LOCAL_SECTION_MAP_LEN, SECTION_DESCRIPTOR_LEN, SECTION_DESCRIPTOR_MAP_HEADER_LEN,
+    SECTION_NAME_LEN,
+};
 pub use version::DwgVersion;
 
 pub fn sniff_version(bytes: &[u8]) -> Result<DwgVersion, DwgReadError> {
-    let magic = bytes
-        .get(..6)
-        .ok_or(DwgReadError::TruncatedHeader { expected_at_least: 6 })?;
+    let magic = bytes.get(..6).ok_or(DwgReadError::TruncatedHeader {
+        expected_at_least: 6,
+    })?;
     let magic = std::str::from_utf8(magic).map_err(|_| DwgReadError::InvalidMagic {
         found: String::from_utf8_lossy(magic).into_owned(),
     })?;
@@ -91,12 +118,153 @@ pub fn sniff_version(bytes: &[u8]) -> Result<DwgVersion, DwgReadError> {
 }
 
 pub fn read_dwg(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
+    // Dispatch by version sniff so AC1018 can take its own path
+    // through R46-A → R46-E1 instead of bouncing off
+    // `DwgFileHeader::parse(Ac1018) → UnsupportedHeaderLayout`.
+    // AC1015 stays on the original code path with zero behavioural
+    // change. Any other version still bubbles up as
+    // `UnsupportedVersion` from the AC1015 branch's
+    // `DwgFileHeader::parse`.
+    let version = sniff_version(bytes)?;
+    if matches!(version, DwgVersion::Ac1018) {
+        return read_dwg_ac1018(bytes);
+    }
+
     let header = DwgFileHeader::parse(bytes)?;
     let sections = SectionMap::parse(bytes, &header)?;
     let payloads = sections.read_section_payloads(bytes)?;
     let pending = build_pending_document(&header, &sections, payloads)?;
     let mut doc = resolve_document(&pending)?;
     enrich_with_real_entities(&mut doc, bytes, &pending);
+    Ok(doc)
+}
+
+/// AC1018 (R2004) end-to-end read path. R46-E2 wires R46-A
+/// (encrypted metadata) → R46-C (page map) → R46-D (section
+/// descriptors map) → R46-E1 (per-section payload reassembly) into
+/// the existing AC1015 [`build_pending_document`] +
+/// [`resolve_document`] + [`enrich_with_real_entities`] pipeline.
+///
+/// AC1018 descriptors that map to one of the six well-known AC1015
+/// section names (`AcDb:Header`, `AcDb:Classes`, `AcDb:Handles`,
+/// `AcDb:ObjFreeSpace`, `AcDb:Template`, `AcDb:AuxHeader`) are
+/// promoted into a synthetic AC1015-style [`SectionMap`] so the
+/// downstream pipeline can consume them as-is. Other descriptors
+/// (`AcDb:AppInfo`, `AcDb:Preview`, `AcDb:SummaryInfo`,
+/// `AcDb:RevHistory`, `AcDb:AppInfoHistory`, the empty-name section
+/// 0) are silently dropped — R46-F-and-beyond may pull them in once
+/// the AC1018 entity recovery proves stable on the core six.
+fn read_dwg_ac1018(bytes: &[u8]) -> Result<CadDocument, DwgReadError> {
+    let metadata = file_header_ac1018::parse_ac1018_encrypted_metadata(bytes).map_err(|e| {
+        // R46-A returns a `DwgReadError` already (it predates R46-E2's
+        // `Ac1018Decode` variant), so propagate verbatim.
+        e
+    })?;
+    let page_map_offset = metadata.page_map_address() as usize;
+    let page_map = page_map_ac1018::parse_ac1018_page_map(bytes, page_map_offset).map_err(|e| {
+        DwgReadError::Ac1018Decode {
+            stage: "page_map",
+            reason: e.to_string(),
+        }
+    })?;
+    let descriptor_map =
+        section_map_ac1018::parse_ac1018_section_map(bytes, &page_map, metadata.section_map_id)
+            .map_err(|e| DwgReadError::Ac1018Decode {
+                stage: "section_descriptor_map",
+                reason: e.to_string(),
+            })?;
+
+    // Walk the descriptor map in on-disk order and keep only the
+    // entries that map to an AC1015 well-known record number.
+    //
+    // Empty descriptors (`page_count == 0`, `local_sections.is_empty()`)
+    // are legal on AC1018 — `sample_AC1018.dwg` ships AcDb:Template as
+    // an empty section because the file carries no template metadata.
+    // R46-E1's `read_section_payload` rejects them with `EmptyDescriptor`
+    // (because synthetic / mistaken descriptors should not silently
+    // produce empty payloads), so we special-case that path here and
+    // emit an empty payload for `build_pending_document` to consume —
+    // exactly what AC1015 would do for a zero-byte locator entry.
+    let mut bridged: Vec<(u8, Vec<u8>)> = Vec::new();
+    for name in &descriptor_map.order {
+        let Some(record_number) = KnownSection::record_number_from_name(name) else {
+            continue;
+        };
+        let Some(descriptor) = descriptor_map.lookup(name) else {
+            continue;
+        };
+        let payload = if descriptor.local_sections.is_empty() {
+            Vec::new()
+        } else {
+            section_data_ac1018::read_section_payload(bytes, descriptor).map_err(|e| {
+                DwgReadError::Ac1018Decode {
+                    stage: "section_payload",
+                    reason: format!("{name}: {e}"),
+                }
+            })?
+        };
+        bridged.push((record_number, payload));
+    }
+
+    // Reassemble the AcDb:AcDbObjects section payload too — AC1018
+    // entity recovery needs it as the "object stream" buffer. On
+    // AC1015 the entire file is plaintext so `handle_offsets[i].offset`
+    // is a file-absolute offset and `enrich_with_real_entities` reads
+    // straight from `bytes`. On AC1018 the AcDbObjects bytes live
+    // inside a (possibly multi-page, LZ77-compressed, XOR-encrypted)
+    // section; once R46-E1 reassembles them, the same `handle_offsets`
+    // values become AcDbObjects-relative offsets that
+    // `enrich_with_real_entities` can chew through as if they were a
+    // mini AC1015 file.
+    //
+    // If `AcDb:AcDbObjects` is absent or empty (extremely unusual —
+    // sample_AC1018.dwg always has it), fall back to a zero-length
+    // buffer so `enrich_with_real_entities` short-circuits and the
+    // pipeline still produces a (possibly entity-less) `CadDocument`.
+    let acdb_objects_payload = match descriptor_map.lookup("AcDb:AcDbObjects") {
+        Some(descriptor) if !descriptor.local_sections.is_empty() => {
+            section_data_ac1018::read_section_payload(bytes, descriptor).map_err(|e| {
+                DwgReadError::Ac1018Decode {
+                    stage: "section_payload",
+                    reason: format!("AcDb:AcDbObjects: {e}"),
+                }
+            })?
+        }
+        _ => Vec::new(),
+    };
+
+    // Synthesise the AC1015-style header + section map. `offset` /
+    // `size` are diagnostic placeholders on this path because we
+    // already own the per-section payload bytes; `build_pending_document`
+    // routes by `record_number` (via `KnownSection::from_record_number`)
+    // and consumes `payloads` directly.
+    let synthetic_header = DwgFileHeader {
+        version: DwgVersion::Ac1018,
+        magic: "AC1018".to_string(),
+        section_directory_offset: 0,
+        section_count: bridged.len() as u32,
+    };
+    let synthetic_descriptors: Vec<SectionDescriptor> = bridged
+        .iter()
+        .enumerate()
+        .map(|(index, (record_number, payload))| SectionDescriptor {
+            index: index as u32,
+            record_number: *record_number,
+            offset: 0,
+            size: payload.len() as u32,
+        })
+        .collect();
+    let synthetic_section_map = SectionMap {
+        version: DwgVersion::Ac1018,
+        descriptors: synthetic_descriptors,
+    };
+    let payloads: Vec<Vec<u8>> = bridged.into_iter().map(|(_, p)| p).collect();
+
+    let pending = build_pending_document(&synthetic_header, &synthetic_section_map, payloads)?;
+    let mut doc = resolve_document(&pending)?;
+    // Use the AcDbObjects payload as the "object stream bytes" rather
+    // than the raw file bytes. See the long comment above for why.
+    enrich_with_real_entities(&mut doc, &acdb_objects_payload, &pending);
     Ok(doc)
 }
 
@@ -152,7 +320,6 @@ struct DecodedEntity {
     thickness: f64,
     extrusion: [f64; 3],
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Ac1015RecoveryFailureKind {
@@ -218,7 +385,10 @@ pub struct Ac1015RecoveryDiagnostics {
     pub recovered_total: usize,
     pub recovered_by_family: std::collections::BTreeMap<&'static str, usize>,
     pub failure_counts: std::collections::BTreeMap<Ac1015RecoveryFailureKind, usize>,
-    pub failure_counts_by_family: std::collections::BTreeMap<&'static str, std::collections::BTreeMap<Ac1015RecoveryFailureKind, usize>>,
+    pub failure_counts_by_family: std::collections::BTreeMap<
+        &'static str,
+        std::collections::BTreeMap<Ac1015RecoveryFailureKind, usize>,
+    >,
     pub failures: Vec<Ac1015RecoveryFailure>,
 }
 
@@ -264,7 +434,12 @@ impl Ac1015RecoveryDiagnostics {
     ) {
         *self.failure_counts.entry(kind).or_insert(0) += 1;
         if let Some(family) = family {
-            *self.failure_counts_by_family.entry(family).or_default().entry(kind).or_insert(0) += 1;
+            *self
+                .failure_counts_by_family
+                .entry(family)
+                .or_default()
+                .entry(kind)
+                .or_insert(0) += 1;
         }
         self.failures.push(Ac1015RecoveryFailure {
             handle,
@@ -284,8 +459,10 @@ impl Ac1015RecoveryDiagnostics {
         &'static str,
         std::collections::BTreeMap<Ac1015RecoveryFailureKind, Vec<Ac1015RecoveryFailure>>,
     > {
-        let family_filter: std::collections::BTreeSet<&'static str> = families.iter().copied().collect();
-        let kind_filter: std::collections::BTreeSet<Ac1015RecoveryFailureKind> = kinds.iter().copied().collect();
+        let family_filter: std::collections::BTreeSet<&'static str> =
+            families.iter().copied().collect();
+        let kind_filter: std::collections::BTreeSet<Ac1015RecoveryFailureKind> =
+            kinds.iter().copied().collect();
         let mut grouped = std::collections::BTreeMap::<
             &'static str,
             std::collections::BTreeMap<Ac1015RecoveryFailureKind, Vec<Ac1015RecoveryFailure>>,
@@ -338,7 +515,6 @@ impl Ac1015RecoveryDiagnostics {
     }
 }
 
-
 /// Walk the pending handle map on the real file bytes and append any
 /// successfully decoded built-in entities to `doc.entities`.
 ///
@@ -390,7 +566,9 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
             );
             continue;
         };
-        let Ok((obj_header, mut main_reader, mut handle_reader)) = object_header::split_ac1015_object_streams(slice) else {
+        let Ok((obj_header, mut main_reader, mut handle_reader)) =
+            object_header::split_ac1015_object_streams(slice)
+        else {
             diagnostics.record_failure(
                 entry.handle,
                 hint.object_type,
@@ -404,7 +582,8 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
             diagnostics.record_failure(
                 entry.handle,
                 hint.object_type.or(Some(obj_header.object_type)),
-                hint.family.or_else(|| object_type_family(obj_header.object_type)),
+                hint.family
+                    .or_else(|| object_type_family(obj_header.object_type)),
                 Ac1015RecoveryFailureKind::HandleMismatch,
                 hint.probe_stage.or(Some("object_header_decode")),
             );
@@ -421,17 +600,37 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
             Err(kind) => diagnostics.record_failure(
                 entry.handle,
                 hint.object_type.or(Some(obj_header.object_type)),
-                hint.family.or_else(|| object_type_family(obj_header.object_type)),
+                hint.family
+                    .or_else(|| object_type_family(obj_header.object_type)),
                 kind,
                 hint.probe_stage.or(Some(ac1015_failure_stage(kind))),
             ),
         }
     }
     diagnostics.promote_header_failures_to_supported_families(&supported_family_hints);
+    // R51-DIAGNOSTICS-FALLBACK-DEDUP (2026-04-28): build the set of handles
+    // the main loop already iterated over so the fallback below can skip
+    // them. The previous logic used `has_family_failure` as the only guard,
+    // which mis-classified handles that the main loop processed
+    // **successfully** (Ok branch records nothing). Those handles ended up
+    // double-tagged as `BodyDecodeFail` by the fallback even though they
+    // appeared in `doc.entities`, inflating `body_decode_fail` numbers
+    // (e.g. LINE recovered=82 vs body_decode_fail=82 on sample_AC1015.dwg).
+    let processed_in_main_loop: std::collections::BTreeSet<Handle> = pending
+        .handle_offsets
+        .iter()
+        .map(|entry| entry.handle)
+        .collect();
     for (handle, hint) in supported_family_hints.iter() {
         let Some(family) = hint.family else {
             continue;
         };
+        if processed_in_main_loop.contains(handle) {
+            // Main loop already saw this handle; either it failed (recorded
+            // above) or it succeeded silently — either way the fallback must
+            // not invent a synthetic failure record.
+            continue;
+        }
         let has_family_failure = diagnostics
             .failures
             .iter()
@@ -451,7 +650,9 @@ pub fn collect_ac1015_recovery_diagnostics_with_known_successes(
             *handle,
             fallback_stage.object_type.or(hint.object_type),
             Some(family),
-            fallback_stage.kind.unwrap_or(Ac1015RecoveryFailureKind::CommonDecodeFail),
+            fallback_stage
+                .kind
+                .unwrap_or(Ac1015RecoveryFailureKind::CommonDecodeFail),
             fallback_stage
                 .stage
                 .or(hint.probe_stage)
@@ -488,7 +689,9 @@ pub fn trace_ac1015_targeted_failure_before_fallback(
                 object_type_hint: None,
                 family_hint: None,
                 stage_before_fallback: None,
-                first_missing_record: Some(Ac1015TargetedTraceFirstMissingRecord::SplitObjectStreams),
+                first_missing_record: Some(
+                    Ac1015TargetedTraceFirstMissingRecord::SplitObjectStreams,
+                ),
                 common_probe_stage: None,
             })
             .collect();
@@ -559,18 +762,18 @@ pub fn trace_ac1015_targeted_failure_before_fallback(
                 &symbol_names,
             ) {
                 Ok(_) => {}
-        Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => {
-            trace.stage_before_fallback = Some(if common_probe_failed {
-                "common_entity_decode"
-            } else {
-                "entity_body_decode"
-            });
-            trace.first_missing_record = Some(if common_probe_failed {
-                Ac1015TargetedTraceFirstMissingRecord::CommonEntityDecode
-            } else {
-                Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode
-            });
-        }
+                Err(Ac1015RecoveryFailureKind::CommonDecodeFail) => {
+                    trace.stage_before_fallback = Some(if common_probe_failed {
+                        "common_entity_decode"
+                    } else {
+                        "entity_body_decode"
+                    });
+                    trace.first_missing_record = Some(if common_probe_failed {
+                        Ac1015TargetedTraceFirstMissingRecord::CommonEntityDecode
+                    } else {
+                        Ac1015TargetedTraceFirstMissingRecord::EntityBodyDecode
+                    });
+                }
                 Err(Ac1015RecoveryFailureKind::BodyDecodeFail) => {
                     trace.stage_before_fallback = Some("entity_body_decode");
                     trace.first_missing_record =
@@ -666,14 +869,12 @@ fn try_decode_entity_body_with_reason(
     handle_reader: &mut BitReader<'_>,
     symbol_names: &SymbolNameMaps,
 ) -> Result<DecodedEntity, Ac1015RecoveryFailureKind> {
-    let common = entity_common::parse_ac1015_entity_common(main_reader, handle_reader, object_handle)
-        .map_err(|_| Ac1015RecoveryFailureKind::CommonDecodeFail)?;
+    let common =
+        entity_common::parse_ac1015_entity_common(main_reader, handle_reader, object_handle)
+            .map_err(|_| Ac1015RecoveryFailureKind::CommonDecodeFail)?;
     let layer_name = resolve_layer_name(common.layer_handle, symbol_names);
-    let linetype_name = resolve_linetype_name(
-        common.linetype_flags,
-        common.linetype_handle,
-        symbol_names,
-    );
+    let linetype_name =
+        resolve_linetype_name(common.linetype_flags, common.linetype_handle, symbol_names);
     object_type_family(object_type).ok_or(Ac1015RecoveryFailureKind::UnsupportedType)?;
     let (data, thickness, extrusion) = match object_type {
         LINE_OBJECT_TYPE => {
@@ -863,9 +1064,8 @@ fn try_decode_entity_body_with_reason(
             )
         }
         MTEXT_OBJECT_TYPE => {
-            let geom =
-                entity_mtext::read_mtext_geometry(main_reader, handle_reader, object_handle)
-                    .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
+            let geom = entity_mtext::read_mtext_geometry(main_reader, handle_reader, object_handle)
+                .map_err(|_| Ac1015RecoveryFailureKind::BodyDecodeFail)?;
             (
                 EntityData::MText {
                     insertion: geom.insertion,
@@ -1050,7 +1250,8 @@ fn collect_supported_family_hints(
             hinted.insert(entry.handle, hint);
             continue;
         };
-        let Ok((obj_header, mut main_reader)) = object_header::read_ac1015_object_header(slice) else {
+        let Ok((obj_header, mut main_reader)) = object_header::read_ac1015_object_header(slice)
+        else {
             hinted.insert(entry.handle, hint);
             continue;
         };
@@ -1237,7 +1438,8 @@ pub fn collect_ac1015_preheader_object_type_hints(
         .handle_offsets
         .iter()
         .map(|entry| {
-            let hint = if let Some(object_type) = object_type_hint_from_offset(bytes, entry.offset) {
+            let hint = if let Some(object_type) = object_type_hint_from_offset(bytes, entry.offset)
+            {
                 Ac1015PreheaderObjectTypeHint {
                     handle: entry.handle,
                     offset: entry.offset,
@@ -1569,7 +1771,10 @@ pub fn build_pending_document(
         .flat_map(|(_, records)| records.iter().filter_map(|record| semantic_layer(record)))
         .chain(semantic_layers)
         .fold(Vec::<PendingLayer>::new(), |mut layers, layer| {
-            if !layers.iter().any(|existing| existing.handle == layer.handle) {
+            if !layers
+                .iter()
+                .any(|existing| existing.handle == layer.handle)
+            {
                 layers.push(layer);
             }
             layers
@@ -1666,8 +1871,7 @@ fn decode_semantic_section_records(
     while index < payload.len() {
         if payload[index] == 0 {
             let tail = &payload[index + 1..];
-            if tail.starts_with(b"TBL:") || tail.starts_with(b"ENT:") || tail.starts_with(b"OBJ:")
-            {
+            if tail.starts_with(b"TBL:") || tail.starts_with(b"ENT:") || tail.starts_with(b"OBJ:") {
                 if current.is_empty() {
                     return Err(DwgReadError::SemanticDecode {
                         section_index,
@@ -1811,10 +2015,9 @@ fn parse_handle_fragment(fragment: &str, prefix: char) -> Option<Handle> {
 
 fn semantic_handle(record: &[u8]) -> Option<Handle> {
     let fields = semantic_fields(record)?;
-    fields
-        .iter()
-        .rev()
-        .find_map(|field| parse_handle_fragment(field, 'H').or_else(|| parse_handle_fragment(field, 'E')))
+    fields.iter().rev().find_map(|field| {
+        parse_handle_fragment(field, 'H').or_else(|| parse_handle_fragment(field, 'E'))
+    })
 }
 
 fn semantic_owner_handle(record: &[u8]) -> Option<Handle> {
@@ -1915,7 +2118,8 @@ fn semantic_link(record: &[u8]) -> Option<String> {
             let owner = semantic_owner_handle(record)
                 .filter(|handle| *handle != Handle::NULL)
                 .map(|handle| format!("owner:{:X}", handle.value()));
-            let layer_handle = layer_handle.map(|handle| format!("layer_handle:{:X}", handle.value()));
+            let layer_handle =
+                layer_handle.map(|handle| format!("layer_handle:{:X}", handle.value()));
             let layer = layer.map(|layer| format!("layer:{layer}"));
             let mut parts = Vec::new();
             if let Some(layer_handle) = layer_handle {
@@ -1998,7 +2202,9 @@ mod tests {
     fn sniff_version_rejects_short_headers() {
         assert_eq!(
             sniff_version(b"AC10").unwrap_err(),
-            DwgReadError::TruncatedHeader { expected_at_least: 6 }
+            DwgReadError::TruncatedHeader {
+                expected_at_least: 6
+            }
         );
     }
 
@@ -2107,7 +2313,10 @@ mod tests {
     #[test]
     fn classify_section_records_splits_on_zero_delimiters() {
         let records = classify_section_records(b"ABC\0DE\0F").unwrap();
-        assert_eq!(records, vec![b"ABC".to_vec(), b"DE".to_vec(), b"F".to_vec()]);
+        assert_eq!(
+            records,
+            vec![b"ABC".to_vec(), b"DE".to_vec(), b"F".to_vec()]
+        );
     }
 
     #[test]
@@ -2153,8 +2362,9 @@ mod tests {
 
     #[test]
     fn classify_section_records_rejects_structurally_valid_semantic_corruption() {
-        let err = decode_semantic_section_records(1, b"OBJ:LAYOUT:Broken:H95:BFF\0ENT:LINE:EXX:OFF")
-            .unwrap_err();
+        let err =
+            decode_semantic_section_records(1, b"OBJ:LAYOUT:Broken:H95:BFF\0ENT:LINE:EXX:OFF")
+                .unwrap_err();
         assert_eq!(
             err,
             DwgReadError::SemanticDecode {
@@ -2168,7 +2378,10 @@ mod tests {
     #[test]
     fn classify_section_records_preserves_nonsemantic_zero_delimiter_behavior() {
         let records = classify_section_records(b"ABC\0DE\0F").unwrap();
-        assert_eq!(records, vec![b"ABC".to_vec(), b"DE".to_vec(), b"F".to_vec()]);
+        assert_eq!(
+            records,
+            vec![b"ABC".to_vec(), b"DE".to_vec(), b"F".to_vec()]
+        );
     }
 
     #[test]
@@ -2239,11 +2452,7 @@ mod tests {
         }
     }
 
-    fn fixture_ac1015(
-        section_count: u32,
-        entries: &[(u32, u32)],
-        payloads: &[&[u8]],
-    ) -> Vec<u8> {
+    fn fixture_ac1015(section_count: u32, entries: &[(u32, u32)], payloads: &[&[u8]]) -> Vec<u8> {
         fixture_with_layout(DwgVersion::Ac1015, section_count, entries, payloads)
     }
 
@@ -2251,11 +2460,7 @@ mod tests {
     /// synthetic byte layout never matched real AC1018 structure. All
     /// such fixtures are now routed through the AC1015 layout so they
     /// keep exercising the section-map + pending-graph code paths.
-    fn fixture_ac1018(
-        section_count: u32,
-        entries: &[(u32, u32)],
-        payloads: &[&[u8]],
-    ) -> Vec<u8> {
+    fn fixture_ac1018(section_count: u32, entries: &[(u32, u32)], payloads: &[&[u8]]) -> Vec<u8> {
         fixture_with_layout(DwgVersion::Ac1015, section_count, entries, payloads)
     }
 

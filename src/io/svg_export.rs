@@ -151,7 +151,8 @@ pub fn export_svg_full(
         options,
     );
     let mut file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    file.write_all(content.as_bytes()).map_err(|e| e.to_string())
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 /// Show an SVG save-file dialog and return the chosen path (or `None` if cancelled).
@@ -522,8 +523,7 @@ fn emit_gradient_hatch_svg(
     // to the AABB extent along that direction.
     let cx = 0.5 * (min_x + max_x);
     let cy = 0.5 * (min_y + max_y);
-    let half = 0.5
-        * ((max_x - min_x).abs() + (max_y - min_y).abs());
+    let half = 0.5 * ((max_x - min_x).abs() + (max_y - min_y).abs());
     let (s, c) = angle_deg.to_radians().sin_cos();
     let (x1, y1) = (cx - c * half, cy - s * half);
     let (x2, y2) = (cx + c * half, cy + s * half);
@@ -682,9 +682,8 @@ pub(crate) fn spline_emit_strategy(
     // Phase 7: NURBS → piecewise Bezier for degree 2/3, clamped, non-rational.
     // Closed/periodic and true rational curves still defer to fit-poly / wire.
     if !closed && (degree == 2 || degree == 3) {
-        let non_rational = weights.is_empty()
-            || weights.iter().all(|w| (w - 1.0).abs() < 1e-9)
-            || {
+        let non_rational =
+            weights.is_empty() || weights.iter().all(|w| (w - 1.0).abs() < 1e-9) || {
                 let first = weights[0];
                 weights.iter().all(|w| (w - first).abs() < 1e-9)
             };
@@ -761,7 +760,10 @@ pub(crate) fn bspline_to_bezier(
     let mut i = k + 1;
     while i < m - k {
         let u = ks[i];
-        if distinct.last().map_or(true, |&prev| (prev - u).abs() > 1e-12) {
+        if distinct
+            .last()
+            .map_or(true, |&prev| (prev - u).abs() > 1e-12)
+        {
             distinct.push(u);
         }
         i += 1;
@@ -1261,7 +1263,11 @@ fn dim_fallback_position(
         return text_midpoint;
     }
     let avg = |a: [f64; 3], b: [f64; 3]| {
-        [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5]
+        [
+            (a[0] + b[0]) * 0.5,
+            (a[1] + b[1]) * 0.5,
+            (a[2] + b[2]) * 0.5,
+        ]
     };
     match dim_type & 0x0F {
         0 | 1 => avg(first_point, second_point),
@@ -1281,7 +1287,11 @@ fn dim_measurement_text_height(entity: &nm::Entity) -> f64 {
         _ => return 0.25,
     };
     let scale = (measurement.abs() * 0.12).clamp(0.25, 2.0);
-    if scale.is_finite() { scale } else { 0.25 }
+    if scale.is_finite() {
+        scale
+    } else {
+        0.25
+    }
 }
 
 /// Compute an SVG `stroke="..."` value for a native entity, honouring
@@ -1402,8 +1412,7 @@ fn emit_ellipse(
     while sweep <= 0.0 {
         sweep += std::f64::consts::TAU;
     }
-    let is_full = (sweep - std::f64::consts::TAU).abs() < 1e-6
-        || (sweep - 0.0).abs() < 1e-6;
+    let is_full = (sweep - std::f64::consts::TAU).abs() < 1e-6 || (sweep - 0.0).abs() < 1e-6;
 
     if is_full {
         let _ = write!(
@@ -1606,15 +1615,12 @@ fn guess_image_mime(path: &Path) -> Option<&'static str> {
 /// SVG exporter stays free of extra dependencies even though `base64` is
 /// already transitively resolved in `Cargo.lock`.
 fn base64_encode(bytes: &[u8]) -> String {
-    const TAB: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TAB: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
     let full_chunks = bytes.len() / 3;
     for chunk in 0..full_chunks {
         let i = chunk * 3;
-        let n = ((bytes[i] as u32) << 16)
-            | ((bytes[i + 1] as u32) << 8)
-            | (bytes[i + 2] as u32);
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
         out.push(TAB[((n >> 18) & 0x3F) as usize] as char);
         out.push(TAB[((n >> 12) & 0x3F) as usize] as char);
         out.push(TAB[((n >> 6) & 0x3F) as usize] as char);
@@ -2115,14 +2121,14 @@ fn resolve_entity_fill(entity: &nm::Entity, options: &SvgExportOptions) -> Strin
     // ACI color index: map common indices to RGB.
     let aci = entity.color_index;
     let (r, g, b) = match aci {
-        1 => (255, 0, 0),       // red
-        2 => (255, 255, 0),     // yellow
-        3 => (0, 255, 0),       // green
-        4 => (0, 255, 255),     // cyan
-        5 => (0, 0, 255),       // blue
-        6 => (255, 0, 255),     // magenta
-        7 | 0 => (0, 0, 0),     // white/ByBlock → black on white paper
-        _ => (0, 0, 0),         // default to black
+        1 => (255, 0, 0),   // red
+        2 => (255, 255, 0), // yellow
+        3 => (0, 255, 0),   // green
+        4 => (0, 255, 255), // cyan
+        5 => (0, 0, 255),   // blue
+        6 => (255, 0, 255), // magenta
+        7 | 0 => (0, 0, 0), // white/ByBlock → black on white paper
+        _ => (0, 0, 0),     // default to black
     };
     format!("rgb({r},{g},{b})")
 }
@@ -2580,6 +2586,9 @@ mod tests {
             snap_pts: Vec::new(),
             tangent_geoms: Vec::new(),
             key_vertices: Vec::new(),
+            aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         }
     }
 
@@ -2592,7 +2601,16 @@ mod tests {
         let wires: Vec<WireModel> = Vec::new();
         let hatches: HashMap<Handle, HatchModel> = HashMap::new();
         let svg = build_svg_full(
-            &wires, &hatches, None, 210.0, 297.0, 0.0, 0.0, 0, None, &default_opts(),
+            &wires,
+            &hatches,
+            None,
+            210.0,
+            297.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &default_opts(),
         );
         assert!(svg.starts_with("<?xml version=\"1.0\""));
         assert!(svg.contains("viewBox=\"0 0 210 297\""));
@@ -2604,10 +2622,23 @@ mod tests {
 
     #[test]
     fn single_line_wire_becomes_polyline() {
-        let wires = vec![make_wire("100", vec![[0.0, 0.0, 0.0], [10.0, 20.0, 0.0]], 7)];
+        let wires = vec![make_wire(
+            "100",
+            vec![[0.0, 0.0, 0.0], [10.0, 20.0, 0.0]],
+            7,
+        )];
         let hatches: HashMap<Handle, HatchModel> = HashMap::new();
         let svg = build_svg_full(
-            &wires, &hatches, None, 50.0, 50.0, 0.0, 0.0, 0, None, &default_opts(),
+            &wires,
+            &hatches,
+            None,
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &default_opts(),
         );
         assert!(svg.contains("<polyline"));
         assert!(svg.contains("0,0"));
@@ -2672,7 +2703,16 @@ mod tests {
         ];
         let hatches: HashMap<Handle, HatchModel> = HashMap::new();
         let svg = build_svg_full(
-            &wires, &hatches, None, 50.0, 50.0, 0.0, 0.0, 0, None, &default_opts(),
+            &wires,
+            &hatches,
+            None,
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &default_opts(),
         );
         // Only one polyline should be emitted.
         assert_eq!(svg.matches("<polyline").count(), 1);
@@ -2694,7 +2734,16 @@ mod tests {
 
         let wires: Vec<WireModel> = Vec::new();
         let svg = build_svg_full(
-            &wires, &hatches, None, 50.0, 50.0, 0.0, 0.0, 0, None, &default_opts(),
+            &wires,
+            &hatches,
+            None,
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            0,
+            None,
+            &default_opts(),
         );
         assert!(svg.contains("<polygon"));
         assert!(svg.contains("0,0 10,0 10,10 0,10"));
@@ -2831,7 +2880,10 @@ mod tests {
             None,
             &default_opts(),
         );
-        assert!(!svg.contains("<polyline"), "text wire should be skipped: {svg}");
+        assert!(
+            !svg.contains("<polyline"),
+            "text wire should be skipped: {svg}"
+        );
         assert!(svg.contains("<text"));
     }
 
@@ -2871,7 +2923,10 @@ mod tests {
             &opts,
         );
         assert!(svg.contains("<polyline"), "wire kept as geometry: {svg}");
-        assert!(!svg.contains("<text"), "native <text> suppressed in geometry mode: {svg}");
+        assert!(
+            !svg.contains("<text"),
+            "native <text> suppressed in geometry mode: {svg}"
+        );
     }
 
     #[test]
@@ -2924,7 +2979,10 @@ mod tests {
             &default_opts(),
         );
 
-        assert!(svg.contains("<text"), "dimension text should be emitted: {svg}");
+        assert!(
+            svg.contains("<text"),
+            "dimension text should be emitted: {svg}"
+        );
         assert!(
             svg.contains("font-family=\"romans\""),
             "dimension text should honor DIMSTYLE text style font: {svg}",
@@ -3155,7 +3213,10 @@ mod tests {
         );
         assert!(!svg.contains("id=\"blk_3000\""));
         assert!(!svg.contains("<use href=\"#blk_3000\""));
-        assert!(svg.contains("<polyline"), "fallback wire must be emitted: {svg}");
+        assert!(
+            svg.contains("<polyline"),
+            "fallback wire must be emitted: {svg}"
+        );
     }
 
     #[test]
@@ -3305,7 +3366,7 @@ mod tests {
             insertion: [0.0, 0.0, 0.0],
             scale: [1.0, 1.0, 1.0],
             rotation: 0.0,
-            has_attribs: true,  // ← per-instance attribs disable defs/use
+            has_attribs: true, // ← per-instance attribs disable defs/use
             attribs: Vec::new(),
         });
         insert.handle = nm::Handle::new(700);
@@ -3383,9 +3444,15 @@ mod tests {
         );
         // Phase 4 T2: bulged polylines now compile into `<path>` with an
         // `A` command instead of disqualifying the block.
-        assert!(svg.contains("id=\"blk_8000\""), "block should be emitted: {svg}");
+        assert!(
+            svg.contains("id=\"blk_8000\""),
+            "block should be emitted: {svg}"
+        );
         assert!(svg.contains("<path d=\"M 0 0"));
-        assert!(svg.contains(" A "), "bulge must map to an arc command: {svg}");
+        assert!(
+            svg.contains(" A "),
+            "bulge must map to an arc command: {svg}"
+        );
     }
 
     // ── S1: Raster image emission ────────────────────────────────────────
@@ -3439,12 +3506,12 @@ mod tests {
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // magic
         0x00, 0x00, 0x00, 0x0D, // IHDR length
         0x49, 0x48, 0x44, 0x52, // "IHDR"
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00,
-        0x1F, 0x15, 0xC4, 0x89, // IHDR CRC
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15,
+        0xC4, 0x89, // IHDR CRC
         0x00, 0x00, 0x00, 0x0D, // IDAT length
         0x49, 0x44, 0x41, 0x54, // "IDAT"
-        0x78, 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4,
-        0x00, 0x00, 0x00, 0x00, // IDAT CRC slot 1
+        0x78, 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+        0x00, 0x00, 0x00, // IDAT CRC slot 1
         0x49, 0x45, 0x4E, 0x44, // "IEND"
         0xAE, 0x42, 0x60, 0x82, // IEND CRC
     ];
@@ -3506,13 +3573,19 @@ mod tests {
             None,
             &default_opts(),
         );
-        assert!(svg.contains("<image "), "image element should be emitted: {svg}");
+        assert!(
+            svg.contains("<image "),
+            "image element should be emitted: {svg}"
+        );
         assert!(svg.contains("href=\"data:image/png;base64,"));
         // Transform matrix captures u/v vectors (a,b,c,d,e,f):
         //   a = u.x = 0.1, b = u.y = 0, c = -v.x = 0, d = -v.y = -0.1
         //   e = insertion.x + v.x * h = 1 + 0 * 1 = 1
         //   f = insertion.y + v.y * h = 2 + 0.1 * 1 = 2.1
-        assert!(svg.contains("matrix(0.1,0,0,-0.1,1,2.1)"), "transform: {svg}");
+        assert!(
+            svg.contains("matrix(0.1,0,0,-0.1,1,2.1)"),
+            "transform: {svg}"
+        );
         assert!(svg.contains("width=\"1\""));
         assert!(svg.contains("height=\"1\""));
 
@@ -3580,7 +3653,10 @@ mod tests {
             None,
             &default_opts(),
         );
-        assert!(!svg.contains("<image "), "missing image must be skipped: {svg}");
+        assert!(
+            !svg.contains("<image "),
+            "missing image must be skipped: {svg}"
+        );
     }
 
     #[test]
@@ -3787,7 +3863,7 @@ mod tests {
             nm::EntityData::Ellipse {
                 center: [10.0, 20.0, 0.0],
                 major_axis: [5.0, 0.0, 0.0], // horizontal, length 5
-                ratio: 0.5,                   // minor = 2.5
+                ratio: 0.5,                  // minor = 2.5
                 start_param: 0.0,
                 end_param: std::f64::consts::TAU,
             },
@@ -3923,7 +3999,10 @@ mod tests {
             None,
             &opts_default,
         );
-        assert!(svg_default.contains("stroke-width=\"2.646\""), "default: {svg_default}");
+        assert!(
+            svg_default.contains("stroke-width=\"2.646\""),
+            "default: {svg_default}"
+        );
 
         // Override scale = 0.5 → lw = 10 * 0.5 = 5
         let opts_big = SvgExportOptions {
@@ -4051,38 +4130,14 @@ mod tests {
              polyline={polyline} text={text} mtext={mtext} insert={insert} \
              spline={spline} image={image} other={other}",
         );
-        eprintln!(
-            "  <text>   count   : {}",
-            svg.matches("<text ").count()
-        );
-        eprintln!(
-            "  <circle> count   : {}",
-            svg.matches("<circle ").count()
-        );
-        eprintln!(
-            "  <path>   count   : {}",
-            svg.matches("<path ").count()
-        );
-        eprintln!(
-            "  <ellipse> count  : {}",
-            svg.matches("<ellipse ").count()
-        );
-        eprintln!(
-            "  <polyline> count : {}",
-            svg.matches("<polyline ").count()
-        );
-        eprintln!(
-            "  <polygon> count  : {}",
-            svg.matches("<polygon ").count()
-        );
-        eprintln!(
-            "  <image>  count   : {}",
-            svg.matches("<image ").count()
-        );
-        eprintln!(
-            "  <use>    count   : {}",
-            svg.matches("<use ").count()
-        );
+        eprintln!("  <text>   count   : {}", svg.matches("<text ").count());
+        eprintln!("  <circle> count   : {}", svg.matches("<circle ").count());
+        eprintln!("  <path>   count   : {}", svg.matches("<path ").count());
+        eprintln!("  <ellipse> count  : {}", svg.matches("<ellipse ").count());
+        eprintln!("  <polyline> count : {}", svg.matches("<polyline ").count());
+        eprintln!("  <polygon> count  : {}", svg.matches("<polygon ").count());
+        eprintln!("  <image>  count   : {}", svg.matches("<image ").count());
+        eprintln!("  <use>    count   : {}", svg.matches("<use ").count());
 
         // Sanity assertions — keep the threshold loose to avoid flakiness.
         assert!(!svg.is_empty(), "SVG output should not be empty");
@@ -4231,10 +4286,7 @@ mod tests {
             &mut doc,
             202,
             nm::EntityData::LwPolyline {
-                vertices: vec![
-                    lwvertex(0.0, 0.0, 1.0),
-                    lwvertex(2.0, 0.0, 0.0),
-                ],
+                vertices: vec![lwvertex(0.0, 0.0, 1.0), lwvertex(2.0, 0.0, 0.0)],
                 closed: false,
                 constant_width: 0.0,
             },
@@ -4518,7 +4570,11 @@ mod tests {
         // The shared boundary control point (index 3) lies on the original
         // curve at u=0.5 and must sit at a sensible y-coordinate between
         // the inner hump and the descent — strictly positive for this shape.
-        assert!(out[3][1] > 0.0, "boundary y should be positive: {:?}", out[3]);
+        assert!(
+            out[3][1] > 0.0,
+            "boundary y should be positive: {:?}",
+            out[3]
+        );
     }
 
     #[test]
@@ -4859,7 +4915,10 @@ mod tests {
             &opts,
         );
         assert!(!svg.contains("<circle"));
-        assert!(svg.contains("<polyline"), "fallback wire should remain: {svg}");
+        assert!(
+            svg.contains("<polyline"),
+            "fallback wire should remain: {svg}"
+        );
     }
 
     // ── R39 gradient hatch fixtures ───────────────────────────────────────
@@ -4869,12 +4928,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xF0),
             HatchModel {
-                boundary: vec![
-                    [0.0, 0.0],
-                    [50.0, 0.0],
-                    [50.0, 30.0],
-                    [0.0, 30.0],
-                ],
+                boundary: vec![[0.0, 0.0], [50.0, 0.0], [50.0, 30.0], [0.0, 30.0]],
                 pattern: HatchPattern::Gradient {
                     angle_deg: 0.0,
                     color2: [0.0, 0.0, 1.0, 1.0],

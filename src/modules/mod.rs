@@ -77,7 +77,10 @@ pub enum RibbonItem {
     /// Layer combo + two rows of small tools below.
     /// row2: operates on the layer of a selected object (off/freeze/lock/make-current)
     /// row3: all-layers operations + match (on/thaw/unlock/match)
-    LayerComboGroup { row2: Vec<ToolDef>, row3: Vec<ToolDef> },
+    LayerComboGroup {
+        row2: Vec<ToolDef>,
+        row3: Vec<ToolDef>,
+    },
     /// Match Properties (large button) + Color / Linetype / Lineweight combos on the right.
     PropertiesGroup { match_prop: ToolDef },
     /// A style selector combobox (text / dim / mleader / table style) with

@@ -5,8 +5,8 @@
 // MLEADERALIGN:  select multileaders → pick base alignment direction
 // MLEADERCOLLECT: select block-content multileaders → pick collection point
 
-use acadrust::entities::{LeaderLine, MultiLeader};
 use crate::types::Vector3;
+use acadrust::entities::{LeaderLine, MultiLeader};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
@@ -16,7 +16,8 @@ use crate::scene::wire_model::WireModel;
 
 // ── MLEADERADD ────────────────────────────────────────────────────────────────
 
-pub const ICON_ADD: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/mleader_add.svg"));
+pub const ICON_ADD: IconKind =
+    IconKind::Svg(include_bytes!("../../../assets/icons/mleader_add.svg"));
 
 pub fn tool_add() -> ToolDef {
     ToolDef {
@@ -29,8 +30,15 @@ pub fn tool_add() -> ToolDef {
 
 enum AddStep {
     PickMLeader,
-    PickArrowhead { handle: Handle, entity: Option<EntityType> },
-    CollectPoints { handle: Handle, entity: EntityType, pts: Vec<Vec3> },
+    PickArrowhead {
+        handle: Handle,
+        entity: Option<EntityType>,
+    },
+    CollectPoints {
+        handle: Handle,
+        entity: EntityType,
+        pts: Vec<Vec3>,
+    },
 }
 
 pub struct MLeaderAddCommand {
@@ -38,20 +46,26 @@ pub struct MLeaderAddCommand {
 }
 
 impl MLeaderAddCommand {
-    pub fn new() -> Self { Self { step: AddStep::PickMLeader } }
-
-
+    pub fn new() -> Self {
+        Self {
+            step: AddStep::PickMLeader,
+        }
+    }
 }
 
 impl CadCommand for MLeaderAddCommand {
-    fn name(&self) -> &'static str { "MLEADERADD" }
+    fn name(&self) -> &'static str {
+        "MLEADERADD"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             AddStep::PickMLeader => "MLEADERADD  Select a multileader:".into(),
             AddStep::PickArrowhead { .. } => "MLEADERADD  Specify arrowhead location:".into(),
-            AddStep::CollectPoints { pts, .. } =>
-                format!("MLEADERADD  Specify next leader point ({} pts, Enter to finish):", pts.len()),
+            AddStep::CollectPoints { pts, .. } => format!(
+                "MLEADERADD  Specify next leader point ({} pts, Enter to finish):",
+                pts.len()
+            ),
         }
     }
 
@@ -60,8 +74,13 @@ impl CadCommand for MLeaderAddCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
-        self.step = AddStep::PickArrowhead { handle, entity: None };
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        self.step = AddStep::PickArrowhead {
+            handle,
+            entity: None,
+        };
         CmdResult::NeedPoint
     }
 
@@ -70,7 +89,11 @@ impl CadCommand for MLeaderAddCommand {
             AddStep::PickArrowhead { handle, entity } => {
                 if let Some(ent) = entity.take() {
                     let h = *handle;
-                    self.step = AddStep::CollectPoints { handle: h, entity: ent, pts: vec![pt] };
+                    self.step = AddStep::CollectPoints {
+                        handle: h,
+                        entity: ent,
+                        pts: vec![pt],
+                    };
                     return CmdResult::NeedPoint;
                 }
                 CmdResult::NeedPoint
@@ -84,12 +107,20 @@ impl CadCommand for MLeaderAddCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        if let AddStep::CollectPoints { handle, entity, pts } = &mut self.step {
-            if pts.len() < 1 { return CmdResult::Cancel; }
+        if let AddStep::CollectPoints {
+            handle,
+            entity,
+            pts,
+        } = &mut self.step
+        {
+            if pts.len() < 1 {
+                return CmdResult::Cancel;
+            }
             let h = *handle;
             if let EntityType::MultiLeader(ref mut ml) = entity {
                 // Add a new leader root with the collected points
-                let points: Vec<Vector3> = pts.iter()
+                let points: Vec<Vector3> = pts
+                    .iter()
                     .map(|p| Vector3::new(p.x as f64, p.y as f64, p.z as f64))
                     .collect();
                 let root = ml.context.add_leader_root();
@@ -120,7 +151,8 @@ impl CadCommand for MLeaderAddCommand {
 
 // ── MLEADERREMOVE ─────────────────────────────────────────────────────────────
 
-pub const ICON_REMOVE: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/mleader_remove.svg"));
+pub const ICON_REMOVE: IconKind =
+    IconKind::Svg(include_bytes!("../../../assets/icons/mleader_remove.svg"));
 
 pub fn tool_remove() -> ToolDef {
     ToolDef {
@@ -133,7 +165,10 @@ pub fn tool_remove() -> ToolDef {
 
 enum RemoveStep {
     PickMLeader,
-    PickLeaderToRemove { handle: Handle, entity: Option<EntityType> },
+    PickLeaderToRemove {
+        handle: Handle,
+        entity: Option<EntityType>,
+    },
 }
 
 pub struct MLeaderRemoveCommand {
@@ -141,18 +176,24 @@ pub struct MLeaderRemoveCommand {
 }
 
 impl MLeaderRemoveCommand {
-    pub fn new() -> Self { Self { step: RemoveStep::PickMLeader } }
-
-
+    pub fn new() -> Self {
+        Self {
+            step: RemoveStep::PickMLeader,
+        }
+    }
 }
 
 impl CadCommand for MLeaderRemoveCommand {
-    fn name(&self) -> &'static str { "MLEADERREMOVE" }
+    fn name(&self) -> &'static str {
+        "MLEADERREMOVE"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             RemoveStep::PickMLeader => "MLEADERREMOVE  Select a multileader:".into(),
-            RemoveStep::PickLeaderToRemove { .. } => "MLEADERREMOVE  Click near the leader line to remove:".into(),
+            RemoveStep::PickLeaderToRemove { .. } => {
+                "MLEADERREMOVE  Click near the leader line to remove:".into()
+            }
         }
     }
 
@@ -161,8 +202,13 @@ impl CadCommand for MLeaderRemoveCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
-        self.step = RemoveStep::PickLeaderToRemove { handle, entity: None };
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        self.step = RemoveStep::PickLeaderToRemove {
+            handle,
+            entity: None,
+        };
         CmdResult::NeedPoint
     }
 
@@ -173,15 +219,17 @@ impl CadCommand for MLeaderRemoveCommand {
                 if let EntityType::MultiLeader(ref mut ml) = ent {
                     // Remove the leader root whose first point is closest to `pt`
                     let pick = Vector3::new(pt.x as f64, pt.y as f64, pt.z as f64);
-                    let best = ml.context.leader_roots.iter().enumerate()
+                    let best = ml
+                        .context
+                        .leader_roots
+                        .iter()
+                        .enumerate()
                         .filter_map(|(i, root)| {
-                            root.lines.first()
-                                .and_then(|l| l.points.first())
-                                .map(|p| {
-                                    let dx = p.x - pick.x;
-                                    let dz = p.z - pick.z;
-                                    (i, dx * dx + dz * dz)
-                                })
+                            root.lines.first().and_then(|l| l.points.first()).map(|p| {
+                                let dx = p.x - pick.x;
+                                let dz = p.z - pick.z;
+                                (i, dx * dx + dz * dz)
+                            })
                         })
                         .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                     if let Some((idx, _)) = best {
@@ -196,8 +244,12 @@ impl CadCommand for MLeaderRemoveCommand {
         CmdResult::NeedPoint
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> { None }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> {
+        None
+    }
 
     fn inject_picked_entity(&mut self, entity: EntityType) {
         if let RemoveStep::PickLeaderToRemove { entity: slot, .. } = &mut self.step {
@@ -208,7 +260,8 @@ impl CadCommand for MLeaderRemoveCommand {
 
 // ── MLEADERALIGN ─────────────────────────────────────────────────────────────
 
-pub const ICON_ALIGN: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/mleader_align.svg"));
+pub const ICON_ALIGN: IconKind =
+    IconKind::Svg(include_bytes!("../../../assets/icons/mleader_align.svg"));
 
 pub fn tool_align() -> ToolDef {
     ToolDef {
@@ -230,17 +283,29 @@ pub struct MLeaderAlignCommand {
 }
 
 impl MLeaderAlignCommand {
-    pub fn new() -> Self { Self { step: AlignStep::Gathering } }
+    pub fn new() -> Self {
+        Self {
+            step: AlignStep::Gathering,
+        }
+    }
 }
 
 impl CadCommand for MLeaderAlignCommand {
-    fn name(&self) -> &'static str { "MLEADERALIGN" }
+    fn name(&self) -> &'static str {
+        "MLEADERALIGN"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
-            AlignStep::Gathering => "MLEADERALIGN  Select multileaders to align (Enter when done):".into(),
-            AlignStep::PickDirection { .. } => "MLEADERALIGN  Specify direction — pick start point:".into(),
-            AlignStep::PickEndDir { .. } => "MLEADERALIGN  Specify end point of alignment direction:".into(),
+            AlignStep::Gathering => {
+                "MLEADERALIGN  Select multileaders to align (Enter when done):".into()
+            }
+            AlignStep::PickDirection { .. } => {
+                "MLEADERALIGN  Specify direction — pick start point:".into()
+            }
+            AlignStep::PickEndDir { .. } => {
+                "MLEADERALIGN  Specify end point of alignment direction:".into()
+            }
         }
     }
 
@@ -249,7 +314,9 @@ impl CadCommand for MLeaderAlignCommand {
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        if handles.is_empty() { return CmdResult::Cancel; }
+        if handles.is_empty() {
+            return CmdResult::Cancel;
+        }
         self.step = AlignStep::PickDirection { handles };
         CmdResult::NeedPoint
     }
@@ -258,7 +325,10 @@ impl CadCommand for MLeaderAlignCommand {
         match &mut self.step {
             AlignStep::PickDirection { handles } => {
                 let h = handles.clone();
-                self.step = AlignStep::PickEndDir { handles: h, from: pt };
+                self.step = AlignStep::PickEndDir {
+                    handles: h,
+                    from: pt,
+                };
                 CmdResult::NeedPoint
             }
             AlignStep::PickEndDir { handles, from } => {
@@ -268,8 +338,14 @@ impl CadCommand for MLeaderAlignCommand {
                 use acadrust::entities::XLine;
                 let mut xl = XLine::default();
                 let hstr: Vec<String> = h.iter().map(|hh| hh.value().to_string()).collect();
-                xl.common.layer = format!("__MLEADERALIGN__{};{:.4},{:.4};{:.4},{:.4}",
-                    hstr.join(","), f.x, f.z, pt.x, pt.z);
+                xl.common.layer = format!(
+                    "__MLEADERALIGN__{};{:.4},{:.4};{:.4},{:.4}",
+                    hstr.join(","),
+                    f.x,
+                    f.z,
+                    pt.x,
+                    pt.z
+                );
                 // Use first handle as the "replaced" entity (sentinel)
                 if let Some(&first) = h.first() {
                     return CmdResult::ReplaceEntity(first, vec![EntityType::XLine(xl)]);
@@ -280,13 +356,18 @@ impl CadCommand for MLeaderAlignCommand {
         }
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> { None }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> {
+        None
+    }
 }
 
 // ── MLEADERCOLLECT ────────────────────────────────────────────────────────────
 
-pub const ICON_COLLECT: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/mleader_collect.svg"));
+pub const ICON_COLLECT: IconKind =
+    IconKind::Svg(include_bytes!("../../../assets/icons/mleader_collect.svg"));
 
 pub fn tool_collect() -> ToolDef {
     ToolDef {
@@ -307,16 +388,26 @@ pub struct MLeaderCollectCommand {
 }
 
 impl MLeaderCollectCommand {
-    pub fn new() -> Self { Self { step: CollectStep::Gathering } }
+    pub fn new() -> Self {
+        Self {
+            step: CollectStep::Gathering,
+        }
+    }
 }
 
 impl CadCommand for MLeaderCollectCommand {
-    fn name(&self) -> &'static str { "MLEADERCOLLECT" }
+    fn name(&self) -> &'static str {
+        "MLEADERCOLLECT"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
-            CollectStep::Gathering => "MLEADERCOLLECT  Select multileaders to collect (Enter when done):".into(),
-            CollectStep::PickLocation { .. } => "MLEADERCOLLECT  Specify collected multileader location:".into(),
+            CollectStep::Gathering => {
+                "MLEADERCOLLECT  Select multileaders to collect (Enter when done):".into()
+            }
+            CollectStep::PickLocation { .. } => {
+                "MLEADERCOLLECT  Specify collected multileader location:".into()
+            }
         }
     }
 
@@ -325,7 +416,9 @@ impl CadCommand for MLeaderCollectCommand {
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
-        if handles.is_empty() { return CmdResult::Cancel; }
+        if handles.is_empty() {
+            return CmdResult::Cancel;
+        }
         self.step = CollectStep::PickLocation { handles };
         CmdResult::NeedPoint
     }
@@ -338,7 +431,12 @@ impl CadCommand for MLeaderCollectCommand {
             use acadrust::entities::XLine;
             let mut xl = XLine::default();
             let hstr: Vec<String> = h.iter().map(|hh| hh.value().to_string()).collect();
-            xl.common.layer = format!("__MLEADERCOLLECT__{};{:.4},{:.4}", hstr.join(","), pt.x, pt.z);
+            xl.common.layer = format!(
+                "__MLEADERCOLLECT__{};{:.4},{:.4}",
+                hstr.join(","),
+                pt.x,
+                pt.z
+            );
             if let Some(&first) = h.first() {
                 return CmdResult::ReplaceEntity(first, vec![EntityType::XLine(xl)]);
             }
@@ -346,8 +444,12 @@ impl CadCommand for MLeaderCollectCommand {
         CmdResult::NeedPoint
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> { None }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_mouse_move(&mut self, _pt: Vec3) -> Option<WireModel> {
+        None
+    }
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -366,6 +468,8 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         aci: 0,
         key_vertices: vec![],
         aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }
 

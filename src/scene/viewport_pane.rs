@@ -10,12 +10,6 @@ pub enum ViewportPaneMode {
     /// Full model space — fills whatever bounds Iced assigns.
     Model,
     /// Model-space content rendered through a specific viewport's 3-D camera.
-    ///
-    /// NOTE: Currently unused because Iced 0.14 batches all shader `prepare()`
-    /// calls before any `render()` calls. Multiple widgets sharing the same
-    /// `Pipeline` type overwrite each other's GPU buffers.  A per-viewport
-    /// wgpu sub-renderer that accumulates data across frames would be needed to
-    /// revive this path.
     #[allow(dead_code)]
     Paper { handle: Handle },
 }
@@ -30,14 +24,22 @@ pub struct ViewportPane<'a> {
 
 impl<'a> ViewportPane<'a> {
     pub fn model(scene: &'a Scene, show_viewcube: bool) -> Self {
-        Self { scene, mode: ViewportPaneMode::Model, show_viewcube }
+        Self {
+            scene,
+            mode: ViewportPaneMode::Model,
+            show_viewcube,
+        }
     }
 
     /// One paper-space viewport: model content rendered through its own camera.
     /// See [`ViewportPaneMode::Paper`] for why this is currently unused.
     #[allow(dead_code)]
     pub fn paper(scene: &'a Scene, handle: Handle) -> Self {
-        Self { scene, mode: ViewportPaneMode::Paper { handle }, show_viewcube: false }
+        Self {
+            scene,
+            mode: ViewportPaneMode::Paper { handle },
+            show_viewcube: false,
+        }
     }
 }
 
@@ -68,7 +70,8 @@ impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for PaperViewportPan
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
-        self.scene.build_active_viewport_primitive(self.handle, state.hover_region, bounds)
+        self.scene
+            .build_active_viewport_primitive(self.handle, state.hover_region, bounds)
     }
 
     fn update(
@@ -107,10 +110,12 @@ impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for ViewportPane<'a>
     ) -> Self::Primitive {
         match &self.mode {
             ViewportPaneMode::Model => {
-                self.scene.build_primitive(state.hover_region, bounds, self.show_viewcube)
+                self.scene
+                    .build_primitive(state.hover_region, bounds, self.show_viewcube)
             }
             ViewportPaneMode::Paper { handle } => {
-                self.scene.build_viewport_primitive(*handle, state.hover_region, bounds)
+                self.scene
+                    .build_viewport_primitive(*handle, state.hover_region, bounds)
             }
         }
     }

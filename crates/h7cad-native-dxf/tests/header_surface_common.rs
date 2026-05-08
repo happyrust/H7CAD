@@ -44,9 +44,17 @@ fn header_writes_surface_and_common_vars() {
     let doc = read_dxf(&dxf).unwrap();
     let output = write_dxf(&doc).unwrap();
     for var in &[
-        "$SURFTAB1", "$SURFTAB2", "$SURFTYPE", "$SURFU", "$SURFV",
-        "$PFACEVMAX", "$MEASUREMENT", "$EXTNAMES", "$WORLDVIEW",
-        "$UNITMODE", "$SPLMAXDEG",
+        "$SURFTAB1",
+        "$SURFTAB2",
+        "$SURFTYPE",
+        "$SURFU",
+        "$SURFV",
+        "$PFACEVMAX",
+        "$MEASUREMENT",
+        "$EXTNAMES",
+        "$WORLDVIEW",
+        "$UNITMODE",
+        "$SPLMAXDEG",
     ] {
         assert!(output.contains(var), "output must contain {var}");
     }

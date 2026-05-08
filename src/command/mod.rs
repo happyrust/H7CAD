@@ -140,7 +140,12 @@ pub enum CmdResult {
     /// Replace the text content of a Text/MText entity in-place.
     DdeditEntity { handle: Handle, new_text: String },
     /// Apply new pattern/scale/angle to an existing hatch entity.
-    HatcheditApply { handle: Handle, name: String, scale: f32, angle: f32 },
+    HatcheditApply {
+        handle: Handle,
+        name: String,
+        scale: f32,
+        angle: f32,
+    },
     /// Stretch entities: move only vertices/endpoints inside the crossing window.
     StretchEntities {
         handles: Vec<Handle>,
@@ -157,7 +162,11 @@ pub enum CmdResult {
         mesh_fn: Box<dyn FnOnce(String) -> Option<crate::scene::mesh_model::MeshModel> + Send>,
     },
     /// Extrude the profile entity `handle` by `height` along Z.
-    ExtrudeEntity { handle: Handle, height: f32, color: [f32; 4] },
+    ExtrudeEntity {
+        handle: Handle,
+        height: f32,
+        color: [f32; 4],
+    },
     /// Revolve the profile entity `handle` around the given axis by `angle_deg`.
     RevolveEntity {
         handle: Handle,
@@ -300,7 +309,6 @@ pub trait CadCommand: Send {
     fn attreq_take_insert(&mut self) -> Option<acadrust::EntityType> {
         None
     }
-
 
     /// Called instead of `on_point` when the command needs a tangent pick
     /// and the snap system found a tangent object.

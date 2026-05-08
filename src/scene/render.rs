@@ -1,12 +1,12 @@
 // GPU rendering primitives, shader::Program / shader::Primitive impls,
 // and entity render-style helpers for the Scene.
 
-use acadrust::tables::LineType;
 use crate::types::aci_table::aci_to_rgb;
 use crate::types::{Color as AcadColor, LineWeight};
+use acadrust::tables::LineType;
 use acadrust::{CadDocument, EntityType, Handle};
-use h7cad_native_model as nm;
 use glam::Mat4;
+use h7cad_native_model as nm;
 use iced::mouse;
 use iced::widget::shader::{self, Viewport};
 use iced::{Rectangle, Size};
@@ -17,6 +17,8 @@ use super::pipeline::viewcube::{hover_id, VIEWCUBE_PX};
 use super::pipeline::Pipeline;
 use super::tessellate;
 use super::{HatchModel, ImageModel, MeshModel, Scene, Uniforms, WireModel};
+
+pub(super) type NativeRenderStyle = ([f32; 4], f32, [f32; 8], f32, u8);
 
 // ── PaperViewportPipeline / PaperViewportPrimitive ────────────────────────
 //
@@ -54,7 +56,8 @@ impl shader::Primitive for PaperViewportPrimitive {
         bounds: &Rectangle,
         viewport: &Viewport,
     ) {
-        self.0.prepare(&mut pipeline.0, device, queue, bounds, viewport);
+        self.0
+            .prepare(&mut pipeline.0, device, queue, bounds, viewport);
     }
 
     fn render(
@@ -80,9 +83,6 @@ pub struct CameraState {
 #[derive(Debug)]
 pub struct Primitive {
     pub(super) wires: Arc<Vec<WireModel>>,
-    /// 3DFACE entity wires — separated so they are uploaded to the dedicated
-    /// face3d pipeline (fill + batched edges) instead of N individual WireGpu.
-    pub(super) face3d_wires: Arc<Vec<WireModel>>,
     pub(super) hatches: Arc<Vec<HatchModel>>,
     /// Wipeout fills — rendered in a separate pass AFTER wires.
     pub(super) wipeout_hatches: Arc<Vec<HatchModel>>,
@@ -98,93 +98,6 @@ pub struct Primitive {
     /// Whether to draw the ViewCube pipeline in `render()`.
     pub(super) show_viewcube: bool,
     pub(super) geometry_epoch: u64,
-}
-
-// ── shader::Program impl ──────────────────────────────────────────────────
-
-impl<Msg: std::fmt::Debug + Clone> shader::Program<Msg> for Scene {
-    type State = CameraState;
-    type Primitive = Primitive;
-
-    fn draw(
-        &self,
-        state: &Self::State,
-        _cursor: mouse::Cursor,
-        bounds: Rectangle,
-    ) -> Self::Primitive {
-        let cam = self.camera.borrow();
-        self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
-
-        let mut all_wires = self.entity_wires();
-        if let Some(iw) = &self.interim_wire {
-            all_wires.push(iw.clone());
-        }
-        all_wires.extend(self.preview_wires.iter().cloned());
-
-        let bg_color = if self.current_layout == "Model" {
-            self.bg_color
-        } else {
-            self.paper_bg_color
-        };
-
-        let (face3d, other) = split_face3d_wires(&all_wires, &self.document);
-
-        Primitive {
-            wires: Arc::new(other),
-            face3d_wires: Arc::new(face3d),
-            hatches: Arc::new(self.synced_hatch_models()),
-            wipeout_hatches: Arc::new(self.wipeout_models()),
-            images: Arc::new(self.images.values().cloned().collect()),
-            meshes: Arc::new(self.meshes.values().cloned().collect()),
-            uniforms: Uniforms::new(&cam, bounds),
-            cam_rotation: cam.view_rotation_mat(),
-            hover_region: state.hover_region,
-            bg_color,
-            show_viewcube: self.show_viewcube,
-            geometry_epoch: self.geometry_epoch,
-        }
-    }
-
-    fn update(
-        &self,
-        state: &mut Self::State,
-        event: &iced::event::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<iced::widget::Action<Msg>> {
-        let pos = cursor.position_in(bounds);
-        let cam_rotation = { self.camera.borrow().view_rotation_mat() };
-        if self.show_viewcube {
-            if let Some(p) = pos {
-                state.hover_region = hover_id(
-                    p.x,
-                    p.y,
-                    bounds.width,
-                    bounds.height,
-                    cam_rotation,
-                    VIEWCUBE_PX,
-                );
-            } else {
-                state.hover_region = None;
-            }
-        } else {
-            state.hover_region = None;
-        }
-        let _ = event;
-        None
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &Self::State,
-        _b: Rectangle,
-        _c: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover_region.is_some() {
-            return mouse::Interaction::Pointer;
-        }
-        mouse::Interaction::default()
-    }
 }
 
 // ── shader::Primitive impl ────────────────────────────────────────────────
@@ -218,7 +131,6 @@ impl shader::Primitive for Primitive {
             pipeline.upload_images(device, queue, &self.images[..]);
             pipeline.upload_meshes(device, &self.meshes[..]);
             pipeline.upload_wires(device, &self.wires[..]);
-            pipeline.upload_face3d(device, &self.face3d_wires[..]);
             pipeline.cached_epoch = self.geometry_epoch;
         }
         if self.show_viewcube {
@@ -251,11 +163,8 @@ impl shader::Primitive for Primitive {
 impl Scene {
     /// Returns (entity_color, pattern_length, pattern, line_weight_px, aci).
     pub(super) fn render_style(&self, e: &EntityType) -> ([f32; 4], f32, [f32; 8], f32, u8) {
-        let (color, pl, pat, lw, aci) = render_style_for(&self.document, e);
-        let bg = if self.current_layout == "Model" { self.bg_color } else { self.paper_bg_color };
-        (adapt_to_bg(color, bg), pl, pat, lw, aci)
+        render_style_for(&self.document, e)
     }
-
 }
 
 // ── Document-only render-style helpers (no &self, safe to call from parallel contexts) ──
@@ -361,22 +270,6 @@ pub(super) fn render_style_for_block_sub(
     (final_color, final_pat_len, final_pat, final_lw, aci)
 }
 
-/// Adapt white→black or black→white based on background luminance.
-/// White entities on light backgrounds become black, black entities on dark
-/// backgrounds become white. All other colors pass through unchanged.
-pub(super) fn adapt_to_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
-    let lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
-    let is_white = color[0] > 0.95 && color[1] > 0.95 && color[2] > 0.95;
-    let is_black = color[0] < 0.05 && color[1] < 0.05 && color[2] < 0.05;
-    if is_white && lum > 0.5 {
-        [0.0, 0.0, 0.0, color[3]]
-    } else if is_black && lum <= 0.5 {
-        [1.0, 1.0, 1.0, color[3]]
-    } else {
-        color
-    }
-}
-
 // ── Primitive builder helpers (called by ViewportPane's shader::Program impl) ──
 
 impl Scene {
@@ -392,11 +285,10 @@ impl Scene {
         self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
 
         let entity_arc = self.entity_wires_arc();
-        let (face3d_wires, other_wires) = split_face3d_wires(&entity_arc, &self.document);
         let all_wires = if self.interim_wire.is_none() && self.preview_wires.is_empty() {
-            Arc::new(other_wires)
+            entity_arc
         } else {
-            let mut v = other_wires;
+            let mut v = (*entity_arc).clone();
             if let Some(iw) = &self.interim_wire {
                 v.push(iw.clone());
             }
@@ -412,7 +304,6 @@ impl Scene {
 
         Primitive {
             wires: all_wires,
-            face3d_wires: Arc::new(face3d_wires),
             hatches: self.hatch_models_arc(),
             wipeout_hatches: self.wipeout_models_arc(),
             images: self.images_arc(),
@@ -425,7 +316,6 @@ impl Scene {
             geometry_epoch: self.geometry_epoch,
         }
     }
-
 
     /// Build a Primitive that renders model-space content through a specific
     /// paper-space viewport's camera, applying its layer-freeze list.
@@ -441,11 +331,10 @@ impl Scene {
         };
 
         let base_arc = self.model_wires_for_viewport_arc(vp_handle);
-        let (face3d_wires, other_wires) = split_face3d_wires(&base_arc, &self.document);
         let all_wires = if self.interim_wire.is_none() && self.preview_wires.is_empty() {
-            Arc::new(other_wires)
+            base_arc
         } else {
-            let mut v = other_wires;
+            let mut v = (*base_arc).clone();
             if let Some(iw) = &self.interim_wire {
                 v.push(iw.clone());
             }
@@ -455,7 +344,6 @@ impl Scene {
 
         Primitive {
             wires: all_wires,
-            face3d_wires: Arc::new(face3d_wires),
             hatches: self.hatch_models_arc(),
             wipeout_hatches: self.wipeout_models_arc(),
             images: self.images_arc(),
@@ -503,10 +391,7 @@ impl Scene {
         }
     }
 
-    pub(super) fn viewcube_mouse_interaction(
-        &self,
-        state: &CameraState,
-    ) -> mouse::Interaction {
+    pub(super) fn viewcube_mouse_interaction(&self, state: &CameraState) -> mouse::Interaction {
         if state.hover_region.is_some() {
             mouse::Interaction::Pointer
         } else {
@@ -559,7 +444,7 @@ pub(super) fn resolve_pattern(
 pub(super) fn render_style_native(
     document: &nm::CadDocument,
     entity: &nm::Entity,
-) -> ([f32; 4], f32, [f32; 8], f32, u8) {
+) -> NativeRenderStyle {
     let (entity_color, aci) = if entity.true_color != 0 {
         let r = ((entity.true_color >> 16) & 0xFF) as f32 / 255.0;
         let g = ((entity.true_color >> 8) & 0xFF) as f32 / 255.0;
@@ -576,7 +461,10 @@ pub(super) fn render_style_native(
             } else {
                 let aci = document.resolve_color(entity).max(0) as u8;
                 let (r, g, b) = aci_to_rgb(aci).unwrap_or((255, 255, 255));
-                ([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0], aci)
+                (
+                    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0],
+                    aci,
+                )
             }
         } else {
             (WireModel::WHITE, 0)
@@ -584,7 +472,10 @@ pub(super) fn render_style_native(
     } else {
         let aci = document.resolve_color(entity).max(0) as u8;
         let (r, g, b) = aci_to_rgb(aci).unwrap_or((255, 255, 255));
-        ([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0], aci)
+        (
+            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0],
+            aci,
+        )
     };
 
     let (pattern_length, pattern) =
@@ -598,7 +489,45 @@ pub(super) fn render_style_native(
     };
 
     let alpha = 1.0 - (entity.transparency.clamp(0, 255) as f32 / 255.0);
-    ([entity_color[0], entity_color[1], entity_color[2], alpha], pattern_length, pattern, line_weight_px, aci)
+    (
+        [entity_color[0], entity_color[1], entity_color[2], alpha],
+        pattern_length,
+        pattern,
+        line_weight_px,
+        aci,
+    )
+}
+
+pub(super) fn render_style_native_inheriting(
+    document: &nm::CadDocument,
+    entity: &nm::Entity,
+    inherited: Option<NativeRenderStyle>,
+) -> NativeRenderStyle {
+    let (mut color, mut pattern_length, mut pattern, mut line_weight_px, mut aci) =
+        render_style_native(document, entity);
+
+    if let Some((
+        parent_color,
+        parent_pattern_length,
+        parent_pattern,
+        parent_line_weight_px,
+        parent_aci,
+    )) = inherited
+    {
+        if entity.true_color == 0 && entity.color_index == 0 {
+            color = parent_color;
+            aci = parent_aci;
+        }
+        if entity.linetype_name.eq_ignore_ascii_case("ByBlock") {
+            pattern_length = parent_pattern_length;
+            pattern = parent_pattern;
+        }
+        if entity.lineweight == -2 {
+            line_weight_px = parent_line_weight_px;
+        }
+    }
+
+    (color, pattern_length, pattern, line_weight_px, aci)
 }
 
 pub(super) fn resolve_pattern_native(

@@ -43,8 +43,12 @@ fn header_writes_all_6_spline_mline_vars() {
 
     let text = write_dxf(&doc).expect("write");
     for var in &[
-        "$SPLFRAME", "$SPLINESEGS", "$SPLINETYPE",
-        "$CMLSTYLE", "$CMLJUST", "$CMLSCALE",
+        "$SPLFRAME",
+        "$SPLINESEGS",
+        "$SPLINETYPE",
+        "$CMLSTYLE",
+        "$CMLJUST",
+        "$CMLSCALE",
     ] {
         assert!(text.contains(var), "writer must emit {var}");
     }

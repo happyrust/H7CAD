@@ -252,7 +252,6 @@ mod tests {
         assert_eq!(geom.extrusion, [1.0, 1.0, 1.0]);
     }
 
-
     #[test]
     fn line_geometry_reports_eof_on_truncated_payload() {
         // Just 1 bit (z_are_zero = 1) then nothing — sx read must fail.

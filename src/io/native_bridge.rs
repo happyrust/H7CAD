@@ -1,7 +1,7 @@
 //! Bridge between h7cad-native-model and acadrust type systems.
 
-use acadrust::entities as ar;
 use crate::types::{Color, Handle, LineWeight, Vector2, Vector3};
+use acadrust::entities as ar;
 use h7cad_native_model as nm;
 
 fn normalize_face3d_invisible_edges(bits: u8) -> i16 {
@@ -668,9 +668,7 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
         }
         nm::EntityData::Dimension { .. } => native_dimension_to_acadrust(entity),
         nm::EntityData::ArcDimension { .. } => native_arc_dimension_to_acadrust(entity),
-        nm::EntityData::LargeRadialDimension { .. } => {
-            native_large_radial_dim_to_acadrust(entity)
-        }
+        nm::EntityData::LargeRadialDimension { .. } => native_large_radial_dim_to_acadrust(entity),
         nm::EntityData::MultiLeader { .. } => native_multileader_to_acadrust(entity),
         nm::EntityData::Insert {
             block_name,
@@ -747,8 +745,10 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             while i < face_indices.len() {
                 let n = face_indices[i] as usize;
                 if i + 1 + n <= face_indices.len() {
-                    let verts: Vec<usize> =
-                        face_indices[i + 1..i + 1 + n].iter().map(|&v| v as usize).collect();
+                    let verts: Vec<usize> = face_indices[i + 1..i + 1 + n]
+                        .iter()
+                        .map(|&v| v as usize)
+                        .collect();
                     mesh.add_face(ar::MeshFace::new(verts));
                     i += 1 + n;
                 } else {
@@ -823,7 +823,9 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
                 oblique_angle: text.oblique_angle.to_degrees(),
                 horizontal_alignment: acad_text_halign(text.horizontal_alignment),
                 vertical_alignment: acad_text_valign(text.vertical_alignment),
-                alignment_point: text.alignment_point.map(|point| [point.x, point.y, point.z]),
+                alignment_point: text
+                    .alignment_point
+                    .map(|point| [point.x, point.y, point.z]),
             },
         )),
         ar::EntityType::MText(text) => Some(native_common_from_acadrust(
@@ -888,10 +890,26 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
             entity,
             nm::EntityData::Face3D {
                 corners: [
-                    [face.first_corner.x, face.first_corner.y, face.first_corner.z],
-                    [face.second_corner.x, face.second_corner.y, face.second_corner.z],
-                    [face.third_corner.x, face.third_corner.y, face.third_corner.z],
-                    [face.fourth_corner.x, face.fourth_corner.y, face.fourth_corner.z],
+                    [
+                        face.first_corner.x,
+                        face.first_corner.y,
+                        face.first_corner.z,
+                    ],
+                    [
+                        face.second_corner.x,
+                        face.second_corner.y,
+                        face.second_corner.z,
+                    ],
+                    [
+                        face.third_corner.x,
+                        face.third_corner.y,
+                        face.third_corner.z,
+                    ],
+                    [
+                        face.fourth_corner.x,
+                        face.fourth_corner.y,
+                        face.fourth_corner.z,
+                    ],
                 ],
                 invisible_edges: normalize_face3d_invisible_edges(face.invisible_edges.bits()),
             },
@@ -900,10 +918,26 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
             entity,
             nm::EntityData::Solid {
                 corners: [
-                    [solid.first_corner.x, solid.first_corner.y, solid.first_corner.z],
-                    [solid.second_corner.x, solid.second_corner.y, solid.second_corner.z],
-                    [solid.third_corner.x, solid.third_corner.y, solid.third_corner.z],
-                    [solid.fourth_corner.x, solid.fourth_corner.y, solid.fourth_corner.z],
+                    [
+                        solid.first_corner.x,
+                        solid.first_corner.y,
+                        solid.first_corner.z,
+                    ],
+                    [
+                        solid.second_corner.x,
+                        solid.second_corner.y,
+                        solid.second_corner.z,
+                    ],
+                    [
+                        solid.third_corner.x,
+                        solid.third_corner.y,
+                        solid.third_corner.z,
+                    ],
+                    [
+                        solid.fourth_corner.x,
+                        solid.fourth_corner.y,
+                        solid.fourth_corner.z,
+                    ],
                 ],
                 normal: [solid.normal.x, solid.normal.y, solid.normal.z],
                 thickness: solid.thickness,
@@ -1442,8 +1476,11 @@ fn native_dimension_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> {
             ar::Dimension::Angular3Pt(dim)
         }
         6 => {
-            let mut dim =
-                ar::DimensionOrdinate::new(v3(first_point), v3(second_point), (dim_type & 0x40) != 0);
+            let mut dim = ar::DimensionOrdinate::new(
+                v3(first_point),
+                v3(second_point),
+                (dim_type & 0x40) != 0,
+            );
             dim.definition_point = v3(definition_point);
             dim.base.definition_point = v3(definition_point);
             ar::Dimension::Ordinate(dim)
@@ -1496,11 +1533,7 @@ fn native_arc_dimension_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityTyp
         return None;
     };
 
-    let mut dim = ar::DimensionAngular3Pt::new(
-        v3(arc_center),
-        v3(first_point),
-        v3(second_point),
-    );
+    let mut dim = ar::DimensionAngular3Pt::new(v3(arc_center), v3(first_point), v3(second_point));
     dim.definition_point = v3(definition_point);
     dim.base.definition_point = v3(definition_point);
     let mut dimension = ar::Dimension::Angular3Pt(dim);
@@ -1560,7 +1593,10 @@ fn native_large_radial_dim_to_acadrust(entity: &nm::Entity) -> Option<ar::Entity
     Some(ar::EntityType::Dimension(dimension))
 }
 
-fn acad_dimension_to_native(entity: &ar::EntityType, dimension: &ar::Dimension) -> Option<nm::Entity> {
+fn acad_dimension_to_native(
+    entity: &ar::EntityType,
+    dimension: &ar::Dimension,
+) -> Option<nm::Entity> {
     let base = dimension.base();
     let (
         dim_type,
@@ -1575,7 +1611,11 @@ fn acad_dimension_to_native(entity: &ar::EntityType, dimension: &ar::Dimension) 
     ) = match dimension {
         ar::Dimension::Linear(dim) => (
             0,
-            [dim.definition_point.x, dim.definition_point.y, dim.definition_point.z],
+            [
+                dim.definition_point.x,
+                dim.definition_point.y,
+                dim.definition_point.z,
+            ],
             [dim.first_point.x, dim.first_point.y, dim.first_point.z],
             [dim.second_point.x, dim.second_point.y, dim.second_point.z],
             [0.0, 0.0, 0.0],
@@ -1586,7 +1626,11 @@ fn acad_dimension_to_native(entity: &ar::EntityType, dimension: &ar::Dimension) 
         ),
         ar::Dimension::Aligned(dim) => (
             1,
-            [dim.definition_point.x, dim.definition_point.y, dim.definition_point.z],
+            [
+                dim.definition_point.x,
+                dim.definition_point.y,
+                dim.definition_point.z,
+            ],
             [dim.first_point.x, dim.first_point.y, dim.first_point.z],
             [dim.second_point.x, dim.second_point.y, dim.second_point.z],
             [0.0, 0.0, 0.0],
@@ -1597,11 +1641,19 @@ fn acad_dimension_to_native(entity: &ar::EntityType, dimension: &ar::Dimension) 
         ),
         ar::Dimension::Angular2Ln(dim) => (
             2,
-            [dim.definition_point.x, dim.definition_point.y, dim.definition_point.z],
+            [
+                dim.definition_point.x,
+                dim.definition_point.y,
+                dim.definition_point.z,
+            ],
             [dim.first_point.x, dim.first_point.y, dim.first_point.z],
             [dim.second_point.x, dim.second_point.y, dim.second_point.z],
             [dim.angle_vertex.x, dim.angle_vertex.y, dim.angle_vertex.z],
-            [dim.dimension_arc.x, dim.dimension_arc.y, dim.dimension_arc.z],
+            [
+                dim.dimension_arc.x,
+                dim.dimension_arc.y,
+                dim.dimension_arc.z,
+            ],
             0.0,
             0.0,
             0.0,
@@ -1638,7 +1690,11 @@ fn acad_dimension_to_native(entity: &ar::EntityType, dimension: &ar::Dimension) 
         ),
         ar::Dimension::Angular3Pt(dim) => (
             5,
-            [dim.definition_point.x, dim.definition_point.y, dim.definition_point.z],
+            [
+                dim.definition_point.x,
+                dim.definition_point.y,
+                dim.definition_point.z,
+            ],
             [dim.first_point.x, dim.first_point.y, dim.first_point.z],
             [dim.second_point.x, dim.second_point.y, dim.second_point.z],
             [dim.angle_vertex.x, dim.angle_vertex.y, dim.angle_vertex.z],
@@ -1649,7 +1705,11 @@ fn acad_dimension_to_native(entity: &ar::EntityType, dimension: &ar::Dimension) 
         ),
         ar::Dimension::Ordinate(dim) => (
             if dim.is_ordinate_type_x { 6 | 0x40 } else { 6 },
-            [dim.definition_point.x, dim.definition_point.y, dim.definition_point.z],
+            [
+                dim.definition_point.x,
+                dim.definition_point.y,
+                dim.definition_point.z,
+            ],
             [
                 dim.feature_location.x,
                 dim.feature_location.y,
@@ -1725,10 +1785,7 @@ fn native_multileader_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType>
         return None;
     };
 
-    let text_point = text_location
-        .as_ref()
-        .map(v3)
-        .unwrap_or_else(Vector3::zero);
+    let text_point = text_location.as_ref().map(v3).unwrap_or_else(Vector3::zero);
     let split_roots = split_native_mleader_roots(leader_vertices, leader_root_lengths);
     let mut ml = ar::MultiLeader::with_text(
         text_label,
@@ -1852,8 +1909,8 @@ fn v3(arr: &[f64; 3]) -> Vector3 {
 
 fn native_color(color_index: i16) -> Color {
     match color_index {
+        0 => Color::ByBlock,
         256 => Color::ByLayer,
-        -2 => Color::ByBlock,
         value if value > 0 => Color::Index(value as u8),
         _ => Color::ByLayer,
     }
@@ -1980,7 +2037,7 @@ fn acad_mleader_path_type(value: ar::MultiLeaderPathType) -> i16 {
 fn color_to_native(color: &Color) -> (i16, i32) {
     match color {
         Color::ByLayer => (256, 0),
-        Color::ByBlock => (-2, 0),
+        Color::ByBlock => (0, 0),
         Color::Index(i) => (*i as i16, 0),
         Color::Rgb { r, g, b } => (256, pack_true_color(*r, *g, *b)),
     }
@@ -2281,6 +2338,50 @@ mod tests {
     }
 
     #[test]
+    fn native_to_acadrust_maps_color_zero_to_byblock() {
+        let mut native = nm::CadDocument::new();
+        let mut line = nm::Entity::new(nm::EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 0.0, 0.0],
+        });
+        line.color_index = 0;
+        native.add_entity(line).expect("line should be added");
+
+        let acad = native_doc_to_acadrust(&native);
+        let line = acad
+            .entities()
+            .find_map(|entity| {
+                if let ar::EntityType::Line(line) = entity {
+                    Some(line)
+                } else {
+                    None
+                }
+            })
+            .expect("line should survive bridge");
+
+        assert_eq!(line.common.color, Color::ByBlock);
+    }
+
+    #[test]
+    fn acadrust_to_native_maps_byblock_to_color_zero() {
+        let mut acad = acadrust::CadDocument::new();
+        let mut line =
+            ar::Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0));
+        line.common.color = Color::ByBlock;
+        acad.add_entity(ar::EntityType::Line(line))
+            .expect("line should be added");
+
+        let native = acadrust_doc_to_native(&acad);
+        let line = native
+            .entities
+            .iter()
+            .find(|entity| matches!(entity.data, nm::EntityData::Line { .. }))
+            .expect("line should survive bridge");
+
+        assert_eq!(line.color_index, 0);
+    }
+
+    #[test]
     fn spline_entity_bridge_roundtrips_basic_geometry() {
         let mut native = nm::Entity::new(nm::EntityData::Spline {
             degree: 3,
@@ -2301,7 +2402,8 @@ mod tests {
         native.layer_name = "SPL".into();
 
         let acad = native_entity_to_acadrust(&native).expect("native spline should bridge to acad");
-        let roundtrip = acadrust_entity_to_native(&acad).expect("acad spline should bridge to native");
+        let roundtrip =
+            acadrust_entity_to_native(&acad).expect("acad spline should bridge to native");
 
         match roundtrip.data {
             nm::EntityData::Spline {
@@ -2450,8 +2552,10 @@ mod tests {
         native.handle = nm::Handle::new(0x51);
         native.layer_name = "ELLIPSE".into();
 
-        let acad = native_entity_to_acadrust(&native).expect("native ellipse should bridge to acad");
-        let roundtrip = acadrust_entity_to_native(&acad).expect("acad ellipse should bridge to native");
+        let acad =
+            native_entity_to_acadrust(&native).expect("native ellipse should bridge to acad");
+        let roundtrip =
+            acadrust_entity_to_native(&acad).expect("acad ellipse should bridge to native");
 
         match roundtrip.data {
             nm::EntityData::Ellipse {
@@ -2546,12 +2650,16 @@ mod tests {
         }
 
         let entity = ar::EntityType::MultiLeader(ml);
-        let native = acadrust_entity_to_native(&entity).expect("multileader should bridge to native");
+        let native =
+            acadrust_entity_to_native(&entity).expect("multileader should bridge to native");
         let roundtrip =
             native_entity_to_acadrust(&native).expect("native multileader should bridge to acad");
 
         match native.data {
-            nm::EntityData::MultiLeader { leader_root_lengths, .. } => {
+            nm::EntityData::MultiLeader {
+                leader_root_lengths,
+                ..
+            } => {
                 assert_eq!(leader_root_lengths, vec![2, 2]);
             }
             other => panic!("expected native multileader, got {other:?}"),
@@ -2727,14 +2835,20 @@ mod tests {
                     assert_eq!(mesh.flags.contains(ar::PolyfaceMeshFlags::CLOSED), *closed);
                     assert_eq!(mesh.vertices[0].start_width, vertices[0].start_width);
                     assert_eq!(mesh.vertices[0].end_width, vertices[0].end_width);
-                    assert!(mesh.faces.is_empty(), "flat polyface bridge should not invent faces");
+                    assert!(
+                        mesh.faces.is_empty(),
+                        "flat polyface bridge should not invent faces"
+                    );
                 }
                 other => panic!("unexpected compat entity for {family_name}: {other:?}"),
             }
 
             let roundtrip = acadrust_entity_to_native(&acad)
                 .unwrap_or_else(|| panic!("{family_name} should bridge back to native"));
-            assert_eq!(roundtrip.data, data, "{family_name} payload should survive roundtrip");
+            assert_eq!(
+                roundtrip.data, data,
+                "{family_name} payload should survive roundtrip"
+            );
         }
     }
 
@@ -2773,10 +2887,9 @@ mod tests {
         solid.thickness = 2.5;
         solid.normal = Vector3::new(0.0, 0.6, 1.0);
         let solid = ar::EntityType::Solid(solid);
-        let solid_roundtrip = native_entity_to_acadrust(
-            &acadrust_entity_to_native(&solid).expect("solid to native"),
-        )
-        .expect("solid back to acad");
+        let solid_roundtrip =
+            native_entity_to_acadrust(&acadrust_entity_to_native(&solid).expect("solid to native"))
+                .expect("solid back to acad");
         match solid_roundtrip {
             ar::EntityType::Solid(solid) => {
                 assert!((solid.thickness - 2.5).abs() < 1e-9);
@@ -2797,10 +2910,9 @@ mod tests {
         shape.thickness = 1.25;
         shape.normal = Vector3::new(0.0, 1.0, 0.0);
         let shape = ar::EntityType::Shape(shape);
-        let shape_roundtrip = native_entity_to_acadrust(
-            &acadrust_entity_to_native(&shape).expect("shape to native"),
-        )
-        .expect("shape back to acad");
+        let shape_roundtrip =
+            native_entity_to_acadrust(&acadrust_entity_to_native(&shape).expect("shape to native"))
+                .expect("shape back to acad");
         match shape_roundtrip {
             ar::EntityType::Shape(shape) => {
                 assert_eq!(shape.shape_name, "DIP8");
@@ -2881,7 +2993,8 @@ mod tests {
             other => panic!("expected compat hatch, got {other:?}"),
         }
 
-        let roundtrip = acadrust_entity_to_native(&acad).expect("hatch should bridge back to native");
+        let roundtrip =
+            acadrust_entity_to_native(&acad).expect("hatch should bridge back to native");
         match &roundtrip.data {
             nm::EntityData::Hatch {
                 pattern_name,
@@ -2891,7 +3004,10 @@ mod tests {
                 assert_eq!(pattern_name, "ANSI31");
                 assert!(!solid_fill);
                 assert_eq!(boundary_paths.len(), 2);
-                assert!(matches!(boundary_paths[0].edges[0], nm::HatchEdge::Polyline { .. }));
+                assert!(matches!(
+                    boundary_paths[0].edges[0],
+                    nm::HatchEdge::Polyline { .. }
+                ));
                 assert_eq!(boundary_paths[1].edges.len(), 2);
             }
             other => panic!("expected native hatch, got {other:?}"),
@@ -3000,7 +3116,9 @@ mod tests {
                 }],
             },
         ] {
-            native.add_entity(nm::Entity::new(data)).expect("entity should add");
+            native
+                .add_entity(nm::Entity::new(data))
+                .expect("entity should add");
         }
 
         let compat = native_doc_to_acadrust(&native);
@@ -3057,7 +3175,12 @@ mod tests {
                 .unwrap_or_else(|| panic!("{} should bridge to acad", expected.type_name()));
             let roundtrip = acadrust_entity_to_native(&acad)
                 .unwrap_or_else(|| panic!("{} should bridge to native", expected.type_name()));
-            assert_eq!(roundtrip.data, expected, "{} payload should survive roundtrip", expected.type_name());
+            assert_eq!(
+                roundtrip.data,
+                expected,
+                "{} payload should survive roundtrip",
+                expected.type_name()
+            );
         }
     }
 
@@ -3098,7 +3221,12 @@ mod tests {
                 .unwrap_or_else(|| panic!("{} should bridge to acad", expected.type_name()));
             let roundtrip = acadrust_entity_to_native(&acad)
                 .unwrap_or_else(|| panic!("{} should bridge to native", expected.type_name()));
-            assert_eq!(roundtrip.data, expected, "{} payload should survive roundtrip", expected.type_name());
+            assert_eq!(
+                roundtrip.data,
+                expected,
+                "{} payload should survive roundtrip",
+                expected.type_name()
+            );
         }
     }
 
@@ -3331,7 +3459,9 @@ mod tests {
         ];
 
         for data in prioritized {
-            native.add_entity(nm::Entity::new(data)).expect("entity should add");
+            native
+                .add_entity(nm::Entity::new(data))
+                .expect("entity should add");
         }
 
         let compat = native_doc_to_acadrust(&native);
@@ -3428,7 +3558,10 @@ mod tests {
         assert!(saw_image, "image should be exposed on compat side");
         assert!(saw_wipeout, "wipeout should be exposed on compat side");
         assert_eq!(image_roundtrip.expect("image roundtrip").data, image_data);
-        assert_eq!(wipeout_roundtrip.expect("wipeout roundtrip").data, wipeout_data);
+        assert_eq!(
+            wipeout_roundtrip.expect("wipeout roundtrip").data,
+            wipeout_data
+        );
         let compat_wipeout = compat
             .entities()
             .find_map(|entity| match entity {
@@ -3472,8 +3605,7 @@ mod tests {
             Vector2::new(0.0, 1.0),
         ];
         assert_eq!(
-            compat_wipeout.clip_boundary_vertices,
-            expected_local_vertices,
+            compat_wipeout.clip_boundary_vertices, expected_local_vertices,
             "compat wipeout should retain local normalized clip vertices",
         );
 

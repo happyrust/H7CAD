@@ -6,8 +6,8 @@
 //
 // Creates one linear dimension per detected endpoint pair on the selected objects.
 
-use acadrust::entities::{Dimension, DimensionLinear};
 use crate::types::Vector3;
+use acadrust::entities::{Dimension, DimensionLinear};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
@@ -37,14 +37,16 @@ pub struct QdimCommand {
 
 impl QdimCommand {
     pub fn new() -> Self {
-        Self { step: Step::Gathering }
+        Self {
+            step: Step::Gathering,
+        }
     }
-
-
 }
 
 impl CadCommand for QdimCommand {
-    fn name(&self) -> &'static str { "QDIM" }
+    fn name(&self) -> &'static str {
+        "QDIM"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
@@ -76,7 +78,9 @@ impl CadCommand for QdimCommand {
         }
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         if !matches!(self.step, Step::PlaceLine { .. }) {
@@ -85,10 +89,7 @@ impl CadCommand for QdimCommand {
         let d = 0.5_f32;
         Some(WireModel {
             name: "qdim_preview".into(),
-            points: vec![
-                [pt.x - d * 3.0, pt.y, pt.z],
-                [pt.x + d * 3.0, pt.y, pt.z],
-            ],
+            points: vec![[pt.x - d * 3.0, pt.y, pt.z], [pt.x + d * 3.0, pt.y, pt.z]],
             color: WireModel::CYAN,
             selected: false,
             pattern_length: 0.0,
@@ -99,6 +100,8 @@ impl CadCommand for QdimCommand {
             aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         })
     }
 }
@@ -111,7 +114,11 @@ pub fn make_linear_dim(p1: Vec3, p2: Vec3, dim_pt: Vec3) -> EntityType {
     // Determine axis: horizontal if Δx > Δz, else vertical
     let dx = (p2.x - p1.x).abs();
     let dz = (p2.z - p1.z).abs();
-    dim.rotation = if dz > dx { std::f64::consts::FRAC_PI_2 } else { 0.0 };
+    dim.rotation = if dz > dx {
+        std::f64::consts::FRAC_PI_2
+    } else {
+        0.0
+    };
     dim.definition_point = v(dim_pt);
     dim.base.definition_point = v(dim_pt);
     let text_pos = (p1 + p2) * 0.5;

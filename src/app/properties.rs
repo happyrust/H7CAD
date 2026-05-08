@@ -1,13 +1,13 @@
-use super::{H7CAD, VARIES_LABEL};
 use super::helpers::{
     entity_type_key, entity_type_key_native, entity_type_label, entity_type_label_native,
     title_case_word,
 };
+use super::{H7CAD, VARIES_LABEL};
 use crate::io::pid_import::PidNodeKey;
+use crate::linetypes;
 use crate::scene::dispatch;
 use crate::scene::object::{PropSection, PropValue, Property};
 use crate::ui;
-use crate::linetypes;
 use acadrust::{EntityType, Handle};
 use h7cad_native_model as nm;
 
@@ -61,15 +61,16 @@ fn selected_entity_refs(scene: &crate::scene::Scene) -> Vec<SelectedEntityRef<'_
                 .document
                 .get_entity(handle)
                 .map(|entity| SelectedEntityRef::Compat(handle, entity))
-                .or_else(|| scene.native_entity(handle).map(|entity| SelectedEntityRef::Native(handle, entity)))
+                .or_else(|| {
+                    scene
+                        .native_entity(handle)
+                        .map(|entity| SelectedEntityRef::Native(handle, entity))
+                })
         })
         .collect()
 }
 
-fn inject_group_property(
-    sections: &mut [crate::scene::object::PropSection],
-    label: String,
-) {
+fn inject_group_property(sections: &mut [crate::scene::object::PropSection], label: String) {
     if let Some(general) = sections.first_mut() {
         general.props.push(crate::scene::object::Property {
             label: "Group".to_string(),
@@ -148,28 +149,41 @@ impl H7CAD {
                                     .frozen_layers
                                     .iter()
                                     .filter_map(|&h| {
-                                        self.tabs[i].scene.document.layers.iter()
+                                        self.tabs[i]
+                                            .scene
+                                            .document
+                                            .layers
+                                            .iter()
                                             .find(|l| l.handle == h)
                                             .map(|l| l.name.clone())
                                     })
                                     .collect();
 
                                 // Collect available UCS names for the name picker.
-                                let ucs_names: Vec<String> = self.tabs[i].scene.document.ucss
+                                let ucs_names: Vec<String> = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .ucss
                                     .iter()
                                     .map(|u| u.name.clone())
                                     .filter(|n| !n.is_empty())
                                     .collect();
 
                                 // Current UCS name (resolved from vp.ucs_handle).
-                                let current_ucs = self.tabs[i].scene.document.ucss
+                                let current_ucs = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .ucss
                                     .iter()
                                     .find(|u| u.handle == vp.ucs_handle)
                                     .map(|u| u.name.clone())
                                     .unwrap_or_default();
 
                                 // Collect available named view names.
-                                let view_names: Vec<String> = self.tabs[i].scene.document.views
+                                let view_names: Vec<String> = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .views
                                     .iter()
                                     .map(|v| v.name.clone())
                                     .filter(|n| !n.is_empty())
@@ -208,7 +222,10 @@ impl H7CAD {
 
                             // Inject DimStyle picker for Dimension entities.
                             if let acadrust::EntityType::Dimension(_) = entity {
-                                let dim_style_names: Vec<String> = self.tabs[i].scene.document.dim_styles
+                                let dim_style_names: Vec<String> = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .dim_styles
                                     .iter()
                                     .map(|s| s.name.clone())
                                     .filter(|n| !n.is_empty())
@@ -218,9 +235,13 @@ impl H7CAD {
                                     // replace/upgrade it to a Choice if we have a list.
                                     if let Some(geom) = sections.last_mut() {
                                         // Find and replace the style_name EditText with a Choice.
-                                        if let Some(prop) = geom.props.iter_mut().find(|p| p.field == "style_name") {
+                                        if let Some(prop) =
+                                            geom.props.iter_mut().find(|p| p.field == "style_name")
+                                        {
                                             let current = match &prop.value {
-                                                crate::scene::object::PropValue::EditText(s) => s.clone(),
+                                                crate::scene::object::PropValue::EditText(s) => {
+                                                    s.clone()
+                                                }
                                                 _ => String::new(),
                                             };
                                             prop.value = crate::scene::object::PropValue::Choice {
@@ -241,7 +262,9 @@ impl H7CAD {
                                     .iter()
                                     .flat_map(|section| section.props.iter())
                                     .filter_map(|prop| match &prop.value {
-                                        crate::scene::object::PropValue::Choice { options, .. } => Some((
+                                        crate::scene::object::PropValue::Choice {
+                                            options, ..
+                                        } => Some((
                                             prop.field.to_string(),
                                             iced::widget::combo_box::State::new(options.clone()),
                                         )),
@@ -250,8 +273,12 @@ impl H7CAD {
                                     .collect(),
                                 sections,
                                 title,
-                                layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
-                                linetype_combo: iced::widget::combo_box::State::new(linetype_items.clone()),
+                                layer_combo: iced::widget::combo_box::State::new(
+                                    layer_names.clone(),
+                                ),
+                                linetype_combo: iced::widget::combo_box::State::new(
+                                    linetype_items.clone(),
+                                ),
                                 hatch_pattern_combo: iced::widget::combo_box::State::new(
                                     crate::scene::hatch_patterns::names(),
                                 ),
@@ -278,7 +305,9 @@ impl H7CAD {
                                     .iter()
                                     .flat_map(|section| section.props.iter())
                                     .filter_map(|prop| match &prop.value {
-                                        crate::scene::object::PropValue::Choice { options, .. } => Some((
+                                        crate::scene::object::PropValue::Choice {
+                                            options, ..
+                                        } => Some((
                                             prop.field.to_string(),
                                             iced::widget::combo_box::State::new(options.clone()),
                                         )),
@@ -287,8 +316,12 @@ impl H7CAD {
                                     .collect(),
                                 sections,
                                 title,
-                                layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
-                                linetype_combo: iced::widget::combo_box::State::new(linetype_items.clone()),
+                                layer_combo: iced::widget::combo_box::State::new(
+                                    layer_names.clone(),
+                                ),
+                                linetype_combo: iced::widget::combo_box::State::new(
+                                    linetype_items.clone(),
+                                ),
                                 hatch_pattern_combo: iced::widget::combo_box::State::new(
                                     crate::scene::hatch_patterns::names(),
                                 ),
@@ -445,7 +478,11 @@ impl H7CAD {
                     .entities()
                     .filter_map(|e| {
                         if let acadrust::EntityType::Viewport(v) = e {
-                            if v.common.owner_handle == layout_block { Some(v.id) } else { None }
+                            if v.common.owner_handle == layout_block {
+                                Some(v.id)
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -455,18 +492,20 @@ impl H7CAD {
                 vp.id = (max_id + 1).max(2);
             }
 
-            let layout = self.tabs[i].scene.current_layout.clone();
-            match self.tabs[i]
-                .scene
-                .document
-                .add_entity_to_layout(entity, &layout)
-            {
-                Ok(new_handle) => {
-                    self.tabs[i].scene.auto_fit_viewport(new_handle);
-                }
-                Err(e) => self
-                    .command_line
-                    .push_error(&format!("Viewport could not be added: {e}")),
+            // R49-VIEWPORT-PAPER-SPACE-SYNC: route through `scene.add_entity`
+            // so the paper-space viewport is added to the layout block AND
+            // mirrored into `native_store`. Calling `document.add_entity_to_layout`
+            // directly previously bypassed the native mirror step
+            // (`scene::add_entity` line 1876+ does that automatically).
+            // `scene.add_entity` already detects paper-space layouts when
+            // `current_layout != "Model" && active_viewport.is_none()`, which
+            // matches the precondition that brought us into this branch.
+            let new_handle = self.tabs[i].scene.add_entity(entity);
+            if new_handle.is_null() {
+                self.command_line
+                    .push_error("Viewport could not be added to the active layout.");
+            } else {
+                self.tabs[i].scene.auto_fit_viewport(new_handle);
             }
         } else {
             self.tabs[i].scene.add_entity(entity);
@@ -556,13 +595,17 @@ fn merge_sections(
 ) -> Vec<crate::scene::object::PropSection> {
     left.iter()
         .filter_map(|section| {
-            let rhs = right.iter().find(|candidate| candidate.title == section.title)?;
+            let rhs = right
+                .iter()
+                .find(|candidate| candidate.title == section.title)?;
             let props: Vec<crate::scene::object::Property> = section
                 .props
                 .iter()
                 .filter_map(|prop| {
-                    let other =
-                        rhs.props.iter().find(|candidate| candidate.field == prop.field)?;
+                    let other = rhs
+                        .props
+                        .iter()
+                        .find(|candidate| candidate.field == prop.field)?;
                     Some(crate::scene::object::Property {
                         label: prop.label.clone(),
                         field: prop.field,
@@ -627,8 +670,7 @@ fn merge_prop_value(
         (
             PropValue::BoolToggle { field, .. },
             PropValue::BoolToggle {
-                field: other_field,
-                ..
+                field: other_field, ..
             },
         ) if field == other_field => PropValue::ReadOnly(VARIES_LABEL.into()),
         _ => left.clone(),
@@ -642,7 +684,10 @@ fn build_pid_properties_panel(tab: &super::document::DocumentTab) -> ui::Propert
 
     let (title, sections) = match pid_state.selected_key.as_ref() {
         Some(key) => pid_sections_for_key(pid_state, key),
-        None => ("P&ID Overview".to_string(), pid_overview_sections(pid_state)),
+        None => (
+            "P&ID Overview".to_string(),
+            pid_overview_sections(pid_state),
+        ),
     };
 
     ui::PropertiesPanel {
@@ -679,13 +724,19 @@ fn pid_sections_for_key(
         PidNodeKey::Overview => ("P&ID Overview".into(), pid_overview_sections(pid_state)),
         PidNodeKey::Object { drawing_id } => {
             let title = format!("Object {}", short_id(drawing_id));
-            let Some(object) = pid_state
-                .document
-                .object_graph
-                .as_ref()
-                .and_then(|graph| graph.objects.iter().find(|item| item.drawing_id == *drawing_id))
-            else {
-                return (title, vec![ro_section("Object", vec![ro_prop("Drawing ID", drawing_id.clone())])]);
+            let Some(object) = pid_state.document.object_graph.as_ref().and_then(|graph| {
+                graph
+                    .objects
+                    .iter()
+                    .find(|item| item.drawing_id == *drawing_id)
+            }) else {
+                return (
+                    title,
+                    vec![ro_section(
+                        "Object",
+                        vec![ro_prop("Drawing ID", drawing_id.clone())],
+                    )],
+                );
             };
 
             let details = vec![
@@ -698,7 +749,10 @@ fn pid_sections_for_key(
                         .clone()
                         .unwrap_or_else(|| "-".into()),
                 ),
-                ro_prop("Model ID", object.model_id.clone().unwrap_or_else(|| "-".into())),
+                ro_prop(
+                    "Model ID",
+                    object.model_id.clone().unwrap_or_else(|| "-".into()),
+                ),
                 ro_prop(
                     "Record ID",
                     object
@@ -721,13 +775,13 @@ fn pid_sections_for_key(
             if attrs.is_empty() {
                 attrs.push(ro_prop("Attributes", "None".into()));
             }
-            let mut sections = vec![ro_section("Object", details), ro_section("Attributes", attrs)];
+            let mut sections = vec![
+                ro_section("Object", details),
+                ro_section("Attributes", attrs),
+            ];
             if let Some(layout_item) = pid_layout_item_for_object(pid_state, drawing_id) {
                 let mut symbol_props = Vec::new();
-                symbol_props.push(ro_prop(
-                    "Layout ID",
-                    layout_item.layout_id.clone(),
-                ));
+                symbol_props.push(ro_prop("Layout ID", layout_item.layout_id.clone()));
                 symbol_props.push(ro_prop(
                     "Symbol Name",
                     layout_item
@@ -763,7 +817,10 @@ fn pid_sections_for_key(
             else {
                 return (
                     title,
-                    vec![ro_section("Relationship", vec![ro_prop("GUID", guid.clone())])],
+                    vec![ro_section(
+                        "Relationship",
+                        vec![ro_prop("GUID", guid.clone())],
+                    )],
                 );
             };
             (
@@ -813,7 +870,10 @@ fn pid_sections_for_key(
                 .iter()
                 .find(|sheet| sheet.name == *name)
             else {
-                return (title, vec![ro_section("Sheet", vec![ro_prop("Name", name.clone())])]);
+                return (
+                    title,
+                    vec![ro_section("Sheet", vec![ro_prop("Name", name.clone())])],
+                );
             };
             (
                 title,
@@ -854,13 +914,22 @@ fn pid_sections_for_key(
                             ro_prop("Path", sheet.path.clone()),
                             ro_prop("Size", sheet.size.to_string()),
                             ro_prop("Endpoint Records", sheet.endpoint_records.len().to_string()),
-                            ro_prop("Attribute Records", sheet.attribute_records.len().to_string()),
-                            ro_prop("Preview Text Count", sheet.extracted_texts.len().to_string()),
+                            ro_prop(
+                                "Attribute Records",
+                                sheet.attribute_records.len().to_string(),
+                            ),
+                            ro_prop(
+                                "Preview Text Count",
+                                sheet.extracted_texts.len().to_string(),
+                            ),
                         ],
                     )],
                 );
             }
-            (title, vec![ro_section("Stream", vec![ro_prop("Name", name.clone())])])
+            (
+                title,
+                vec![ro_section("Stream", vec![ro_prop("Name", name.clone())])],
+            )
         }
         PidNodeKey::Cluster { name } => {
             let title = format!("Cluster {name}");
@@ -920,7 +989,10 @@ fn pid_sections_for_key(
             else {
                 return (
                     title,
-                    vec![ro_section("Symbol", vec![ro_prop("Path", symbol_path.clone())])],
+                    vec![ro_section(
+                        "Symbol",
+                        vec![ro_prop("Path", symbol_path.clone())],
+                    )],
                 );
             };
 
@@ -967,7 +1039,10 @@ fn pid_sections_for_key(
             else {
                 return (
                     title,
-                    vec![ro_section("Class", vec![ro_prop("Name", class_name.clone())])],
+                    vec![ro_section(
+                        "Class",
+                        vec![ro_prop("Name", class_name.clone())],
+                    )],
                 );
             };
 
@@ -1008,7 +1083,10 @@ fn pid_sections_for_key(
                 .as_ref()
                 .and_then(|cross| cross.root_presence.iter().find(|root| root.name == *name))
             else {
-                return (title, vec![ro_section("Root", vec![ro_prop("Name", name.clone())])]);
+                return (
+                    title,
+                    vec![ro_section("Root", vec![ro_prop("Name", name.clone())])],
+                );
             };
             (
                 title,
@@ -1028,7 +1106,10 @@ fn pid_sections_for_key(
             let Some(tagged) = pid_state.document.tagged_storages.as_ref() else {
                 return (
                     title,
-                    vec![ro_section("TaggedText", vec![ro_prop("Storage", storage_name.clone())])],
+                    vec![ro_section(
+                        "TaggedText",
+                        vec![ro_prop("Storage", storage_name.clone())],
+                    )],
                 );
             };
             (
@@ -1047,7 +1128,10 @@ fn pid_sections_for_key(
             let Some(dynamic) = pid_state.document.dynamic_attributes.as_ref() else {
                 return (
                     "Dynamic Attributes".into(),
-                    vec![ro_section("Dynamic Attributes", vec![ro_prop("Status", "Unavailable".into())])],
+                    vec![ro_section(
+                        "Dynamic Attributes",
+                        vec![ro_prop("Status", "Unavailable".into())],
+                    )],
                 );
             };
             (
@@ -1059,9 +1143,15 @@ fn pid_sections_for_key(
                             ro_prop("Path", dynamic.path.clone()),
                             ro_prop("Size", dynamic.size.to_string()),
                             ro_prop("Class Names", dynamic.class_names.len().to_string()),
-                            ro_prop("Attribute Records", dynamic.attribute_records.len().to_string()),
+                            ro_prop(
+                                "Attribute Records",
+                                dynamic.attribute_records.len().to_string(),
+                            ),
                             ro_prop("Record Trailers", dynamic.record_trailers.len().to_string()),
-                            ro_prop("Relationship Probes", dynamic.relationship_probes.len().to_string()),
+                            ro_prop(
+                                "Relationship Probes",
+                                dynamic.relationship_probes.len().to_string(),
+                            ),
                         ],
                     ),
                     ro_section(
@@ -1069,7 +1159,12 @@ fn pid_sections_for_key(
                         if dynamic.class_names.is_empty() {
                             vec![ro_prop("Class", "None".into())]
                         } else {
-                            dynamic.class_names.iter().take(12).map(|name| ro_prop("Class", name.clone())).collect()
+                            dynamic
+                                .class_names
+                                .iter()
+                                .take(12)
+                                .map(|name| ro_prop("Class", name.clone()))
+                                .collect()
                         },
                     ),
                 ],
@@ -1079,7 +1174,10 @@ fn pid_sections_for_key(
             let Some(cross) = pid_state.document.cross_reference.as_ref() else {
                 return (
                     "Cluster Coverage".into(),
-                    vec![ro_section("Coverage", vec![ro_prop("Status", "Unavailable".into())])],
+                    vec![ro_section(
+                        "Coverage",
+                        vec![ro_prop("Status", "Unavailable".into())],
+                    )],
                 );
             };
             (
@@ -1088,14 +1186,20 @@ fn pid_sections_for_key(
                     ro_section(
                         "Coverage",
                         vec![
-                            ro_prop("Declared", cross.cluster_coverage.declared.len().to_string()),
+                            ro_prop(
+                                "Declared",
+                                cross.cluster_coverage.declared.len().to_string(),
+                            ),
                             ro_prop("Found", cross.cluster_coverage.found.len().to_string()),
                             ro_prop("Matched", cross.cluster_coverage.matched.len().to_string()),
                             ro_prop(
                                 "Declared Missing",
                                 cross.cluster_coverage.declared_missing.len().to_string(),
                             ),
-                            ro_prop("Found Extra", cross.cluster_coverage.found_extra.len().to_string()),
+                            ro_prop(
+                                "Found Extra",
+                                cross.cluster_coverage.found_extra.len().to_string(),
+                            ),
                         ],
                     ),
                     ro_section(
@@ -1121,7 +1225,10 @@ fn pid_sections_for_key(
         }
         PidNodeKey::Unresolved { label } => (
             "Unresolved".into(),
-            vec![ro_section("Evidence", vec![ro_prop("Message", label.clone())])],
+            vec![ro_section(
+                "Evidence",
+                vec![ro_prop("Message", label.clone())],
+            )],
         ),
     }
 }
@@ -1130,16 +1237,12 @@ fn pid_layout_item_for_object<'a>(
     pid_state: &'a super::document::PidTabState,
     drawing_id: &str,
 ) -> Option<&'a pid_parse::PidLayoutItem> {
-    pid_state
-        .document
-        .layout
-        .as_ref()
-        .and_then(|layout| {
-            layout
-                .items
-                .iter()
-                .find(|item| item.drawing_id.as_deref() == Some(drawing_id))
-        })
+    pid_state.document.layout.as_ref().and_then(|layout| {
+        layout
+            .items
+            .iter()
+            .find(|item| item.drawing_id.as_deref() == Some(drawing_id))
+    })
 }
 
 fn pid_overview_sections(pid_state: &super::document::PidTabState) -> Vec<PropSection> {
@@ -1186,7 +1289,10 @@ fn pid_overview_sections(pid_state: &super::document::PidTabState) -> Vec<PropSe
                 ro_prop("Clusters", summary.cluster_count.to_string()),
                 ro_prop("Sheets", summary.sheet_count.to_string()),
                 ro_prop("Streams", summary.stream_count.to_string()),
-                ro_prop("Attribute Classes", summary.attribute_class_count.to_string()),
+                ro_prop(
+                    "Attribute Classes",
+                    summary.attribute_class_count.to_string(),
+                ),
                 ro_prop("TaggedText", summary.tagged_text_count.to_string()),
                 ro_prop(
                     "Dynamic Attribute Records",
@@ -1406,7 +1512,10 @@ mod tests {
 
         app.refresh_selected_grips();
 
-        assert_eq!(app.tabs[0].selected_handle, Some(Handle::new(handle.value())));
+        assert_eq!(
+            app.tabs[0].selected_handle,
+            Some(Handle::new(handle.value()))
+        );
         assert!(
             !app.tabs[0].selected_grips.is_empty(),
             "native line selection should expose grips"

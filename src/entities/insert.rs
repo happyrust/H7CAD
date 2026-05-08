@@ -1,5 +1,5 @@
-use acadrust::entities::Insert;
 use crate::types::{Transform, Vector3};
+use acadrust::entities::Insert;
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -84,7 +84,11 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
         };
         let t = Transform::from_translation(Vector3::new(-(p1.x as f64), -(p1.y as f64), 0.0))
             .then(&Transform::from_matrix(mirror))
-            .then(&Transform::from_translation(Vector3::new(p1.x as f64, p1.y as f64, 0.0)));
+            .then(&Transform::from_translation(Vector3::new(
+                p1.x as f64,
+                p1.y as f64,
+                0.0,
+            )));
         acadrust::Entity::apply_transform(entity, &t);
     });
 }

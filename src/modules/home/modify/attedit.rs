@@ -7,8 +7,8 @@
 //            After all attributes are processed, commit via ReplaceMany.
 
 use acadrust::EntityType;
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::wire_model::WireModel;
@@ -32,19 +32,26 @@ enum Step {
 
 impl AtteditCommand {
     pub fn new() -> Self {
-        Self { step: Step::SelectInsert }
+        Self {
+            step: Step::SelectInsert,
+        }
     }
 }
 
 impl CadCommand for AtteditCommand {
-    fn name(&self) -> &'static str { "ATTEDIT" }
+    fn name(&self) -> &'static str {
+        "ATTEDIT"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             Step::SelectInsert => "ATTEDIT  Select block with attributes:".to_string(),
             Step::EditAttr { attrs, idx, .. } => {
                 let (tag, val) = &attrs[*idx];
-                format!("ATTEDIT  {} = <{}>  (Enter to keep, type new value):", tag, val)
+                format!(
+                    "ATTEDIT  {} = <{}>  (Enter to keep, type new value):",
+                    tag, val
+                )
             }
         }
     }
@@ -62,7 +69,7 @@ impl CadCommand for AtteditCommand {
         // Instead, signal the host to call prepare_attedit().
         self.step = Step::EditAttr {
             handle,
-            attrs: vec![],  // will be filled by init_with_attrs() in cmd_result.rs
+            attrs: vec![], // will be filled by init_with_attrs() in cmd_result.rs
             idx: 0,
         };
         CmdResult::NeedPoint
@@ -77,7 +84,9 @@ impl CadCommand for AtteditCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let Step::EditAttr { handle, attrs, idx } = &mut self.step else { return None; };
+        let Step::EditAttr { handle, attrs, idx } = &mut self.step else {
+            return None;
+        };
         let handle = *handle;
 
         // Update the current attribute value if the user typed something.
@@ -100,9 +109,15 @@ impl CadCommand for AtteditCommand {
         None
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> { vec![] }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_preview_wires(&mut self, _pt: Vec3) -> Vec<WireModel> {
+        vec![]
+    }
 
     fn attedit_pending_handle(&self) -> Option<acadrust::Handle> {
         if let Step::EditAttr { handle, attrs, .. } = &self.step {
@@ -123,10 +138,7 @@ impl CadCommand for AtteditCommand {
 
 /// Make a sentinel entity carrying the edited attribute values.
 /// Encodes all (tag=value) pairs in the layer field as "tag1\x01val1\x02tag2\x01val2...".
-fn make_attedit_sentinel(
-    _handle: acadrust::Handle,
-    pairs: &[(String, String)],
-) -> EntityType {
+fn make_attedit_sentinel(_handle: acadrust::Handle, pairs: &[(String, String)]) -> EntityType {
     let encoded: String = pairs
         .iter()
         .map(|(t, v)| format!("{}\x01{}", t, v))
@@ -155,11 +167,7 @@ pub fn native_insert_attrs(entity: &nm::Entity) -> Option<Vec<(String, String)>>
     )
 }
 
-pub fn apply_attedit_native(
-    doc: &mut nm::CadDocument,
-    handle: acadrust::Handle,
-    encoded: &str,
-) {
+pub fn apply_attedit_native(doc: &mut nm::CadDocument, handle: acadrust::Handle, encoded: &str) {
     let Some(entity) = doc.get_entity_mut(nm::Handle::new(handle.value())) else {
         return;
     };
@@ -168,8 +176,12 @@ pub fn apply_attedit_native(
     };
     for pair in encoded.split('\x02') {
         let mut parts = pair.splitn(2, '\x01');
-        let Some(tag) = parts.next() else { continue; };
-        let Some(val) = parts.next() else { continue; };
+        let Some(tag) = parts.next() else {
+            continue;
+        };
+        let Some(val) = parts.next() else {
+            continue;
+        };
         if let Some(attrib) = attribs.iter_mut().find(|attrib| {
             matches!(&attrib.data, nm::EntityData::Attrib { tag: attrib_tag, .. } if attrib_tag == tag)
         }) {
@@ -179,4 +191,3 @@ pub fn apply_attedit_native(
         }
     }
 }
-

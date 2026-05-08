@@ -40,14 +40,7 @@ impl DateTimeUtc {
     /// Build a fresh `DateTimeUtc`. No validation — invalid inputs
     /// (e.g. month = 13) silently flow through; upstream callers
     /// should validate before construction.
-    pub fn new(
-        year: i32,
-        month: u32,
-        day: u32,
-        hour: u32,
-        minute: u32,
-        second: u32,
-    ) -> Self {
+    pub fn new(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> Self {
         Self {
             year,
             month,
@@ -99,10 +92,7 @@ pub fn julian_date_to_utc(jd: f64) -> DateTimeUtc {
 /// `nanosecond` / `millisecond` upstream will truncate.
 pub fn utc_to_julian_date(dt: &DateTimeUtc) -> f64 {
     let jdn = gregorian_to_jdn(dt.year, dt.month, dt.day);
-    let sub_day = (dt.hour as f64 * 3600.0
-        + dt.minute as f64 * 60.0
-        + dt.second as f64)
-        / 86_400.0;
+    let sub_day = (dt.hour as f64 * 3600.0 + dt.minute as f64 * 60.0 + dt.second as f64) / 86_400.0;
     // Reverse of the `+ 0.5` shift in `julian_date_to_utc`: JDN ticks
     // at midnight, but Julian date's integer-tick is at noon, so we
     // subtract 0.5 to bring midnight JDN back to the JD coordinate.
@@ -313,8 +303,8 @@ mod tests {
             "2020-01-01T07:60:20Z",     // minute out of range
             "2020-01-01T07:54:61Z",     // second out of range (61 > 60)
             "2020-01-01T07:54:20+0000", // tz offset, not Z
-            "",                          // empty
-            "Z",                         // too short
+            "",                         // empty
+            "Z",                        // too short
         ] {
             assert!(
                 parse_iso8601(bad).is_none(),

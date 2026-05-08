@@ -1,17 +1,17 @@
 // Home module — Draw, Modify, Annotation and Layer tools.
 
-pub mod clipboard;
-pub mod defaults;
 mod about;
 mod changelog;
+pub mod clipboard;
+pub mod defaults;
 mod donate;
 pub mod draw;
-mod report;
 pub mod groups;
 pub mod inquiry;
 pub mod layers;
 pub mod modify;
 pub mod properties;
+mod report;
 pub mod select;
 
 use crate::modules::{CadModule, RibbonGroup, RibbonItem};
@@ -27,21 +27,25 @@ impl CadModule for HomeModule {
     }
 
     fn ribbon_groups(&self) -> Vec<RibbonGroup> {
-        use crate::modules::annotate::{angular_dim, leader_cmd, linear_dim, mleader_cmd, mtext, radius_dim, text};
+        use crate::modules::annotate::{
+            angular_dim, leader_cmd, linear_dim, mleader_cmd, mtext, radius_dim, text,
+        };
         use crate::modules::insert::{create_block, insert_block};
-        use clipboard::{copy_clip, cut, paste};
         use about;
         use changelog;
+        use clipboard::{copy_clip, cut, paste};
         use donate;
-        use report;
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
-        use layers::{layfrz, laylck, layoff, layon, laythw, layulk, make_current, match_layer, panel};
         use groups::{group, ungroup};
+        use layers::{
+            layfrz, laylck, layoff, layon, laythw, layulk, make_current, match_layer, panel,
+        };
         use modify::{
             array, copy, delete, explode, fillet, mirror, offset, rotate, scale, stretch,
             translate, trim,
         };
         use properties::match_prop;
+        use report;
 
         vec![
             RibbonGroup {
@@ -133,9 +137,21 @@ impl CadModule for HomeModule {
                         label: "Dimensions",
                         icon: linear_dim::ICON,
                         items: vec![
-                            (linear_dim::tool().id, linear_dim::tool().label, linear_dim::tool().icon),
-                            (radius_dim::tool().id, radius_dim::tool().label, radius_dim::tool().icon),
-                            (angular_dim::tool().id, angular_dim::tool().label, angular_dim::tool().icon),
+                            (
+                                linear_dim::tool().id,
+                                linear_dim::tool().label,
+                                linear_dim::tool().icon,
+                            ),
+                            (
+                                radius_dim::tool().id,
+                                radius_dim::tool().label,
+                                radius_dim::tool().icon,
+                            ),
+                            (
+                                angular_dim::tool().id,
+                                angular_dim::tool().label,
+                                angular_dim::tool().icon,
+                            ),
                         ],
                         default: "DIMLINEAR",
                     },
@@ -144,8 +160,16 @@ impl CadModule for HomeModule {
                         label: "Leader",
                         icon: leader_cmd::ICON,
                         items: vec![
-                            (mleader_cmd::tool().id, mleader_cmd::tool().label, mleader_cmd::tool().icon),
-                            (leader_cmd::tool().id, leader_cmd::tool().label, leader_cmd::tool().icon),
+                            (
+                                mleader_cmd::tool().id,
+                                mleader_cmd::tool().label,
+                                mleader_cmd::tool().icon,
+                            ),
+                            (
+                                leader_cmd::tool().id,
+                                leader_cmd::tool().label,
+                                leader_cmd::tool().icon,
+                            ),
                         ],
                         default: "MLEADER",
                     },
@@ -156,8 +180,18 @@ impl CadModule for HomeModule {
                 tools: vec![
                     RibbonItem::LargeTool(panel::tool()),
                     RibbonItem::LayerComboGroup {
-                        row2: vec![layoff::tool(), layfrz::tool(), laylck::tool(), make_current::tool()],
-                        row3: vec![layon::tool(), laythw::tool(), layulk::tool(), match_layer::tool()],
+                        row2: vec![
+                            layoff::tool(),
+                            layfrz::tool(),
+                            laylck::tool(),
+                            make_current::tool(),
+                        ],
+                        row3: vec![
+                            layon::tool(),
+                            laythw::tool(),
+                            layulk::tool(),
+                            match_layer::tool(),
+                        ],
                     },
                 ],
             },
@@ -170,9 +204,9 @@ impl CadModule for HomeModule {
             },
             RibbonGroup {
                 title: "Properties",
-                tools: vec![
-                    RibbonItem::PropertiesGroup { match_prop: match_prop::tool() },
-                ],
+                tools: vec![RibbonItem::PropertiesGroup {
+                    match_prop: match_prop::tool(),
+                }],
             },
             RibbonGroup {
                 title: "Groups",

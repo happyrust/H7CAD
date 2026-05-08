@@ -3,10 +3,16 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DwgReadError {
-    TruncatedHeader { expected_at_least: usize },
-    InvalidMagic { found: String },
+    TruncatedHeader {
+        expected_at_least: usize,
+    },
+    InvalidMagic {
+        found: String,
+    },
     UnsupportedVersion(DwgVersion),
-    UnsupportedHeaderLayout { version: DwgVersion },
+    UnsupportedHeaderLayout {
+        version: DwgVersion,
+    },
     TruncatedSectionDirectory {
         version: DwgVersion,
         expected_at_least: usize,
@@ -25,6 +31,17 @@ pub enum DwgReadError {
     },
     UnexpectedEof {
         context: &'static str,
+    },
+    /// AC1018 sub-brick decode failure (R46-A `encrypted_metadata`,
+    /// R46-C `page_map`, R46-D `section_descriptor_map`, or R46-E1
+    /// `section_payload`). `stage` identifies which brick raised the
+    /// error; `reason` is the brick's own error rendered to a string.
+    /// R46-E2 introduced this variant to bridge the per-brick error
+    /// types into the top-level `DwgReadError` without forcing a
+    /// shared error hierarchy across the AC1018 reader stack.
+    Ac1018Decode {
+        stage: &'static str,
+        reason: String,
     },
 }
 
@@ -67,6 +84,9 @@ impl fmt::Display for DwgReadError {
                 "semantic decode failure in section {section_index} record {record_index}: {reason}"
             ),
             Self::UnexpectedEof { context } => write!(f, "unexpected EOF: {context}"),
+            Self::Ac1018Decode { stage, reason } => {
+                write!(f, "AC1018 {stage} decode failed: {reason}")
+            }
         }
     }
 }

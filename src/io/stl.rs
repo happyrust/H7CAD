@@ -52,7 +52,10 @@ pub fn build_stl(meshes: &[&MeshModel]) -> Option<Vec<u8>> {
                 [nx / len, ny / len, nz / len]
             };
 
-            tris.push(Tri { normal, v: [a, b, c] });
+            tris.push(Tri {
+                normal,
+                v: [a, b, c],
+            });
         }
     }
 

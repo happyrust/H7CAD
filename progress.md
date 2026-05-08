@@ -1,0 +1,88 @@
+# Progress
+
+## 2026-05-06
+
+- Created DXF integration development plan.
+- Chose first execution slice: DXF open diagnostics for preserved unknown/proxy content.
+- Implemented native DXF advisory notices for unknown/proxy entities and objects.
+- Ran `cargo fmt`.
+- Ran `cargo test -p H7CAD io::diagnostics`: 10 passed.
+- Checked lints for `src/io/diagnostics.rs` and `src/io/mod.rs`: no linter errors.
+- Added native conversion/render eligibility for `Ellipse` and `Spline`.
+- Ran `cargo test -p H7CAD scene::acad_to_truck`: 4 passed.
+- Checked lints for `src/scene/acad_to_truck.rs` and `src/scene/mod.rs`: no linter errors.
+- Ran `cargo test -p h7cad-native-dxf --test entity_2d_roundtrip`: 38 passed.
+- Ran `cargo check --workspace`: passed with existing unused/dead_code warnings.
+- Checked lints for all changed Rust files: no linter errors.
+- Added `io::tests::dxf_open_path_surfaces_unknown_entity_notice`.
+- Ran `cargo test -p H7CAD io::tests::dxf_open_path_surfaces_unknown_entity_notice`: 1 passed.
+- Checked lints for `src/io/mod.rs`: no linter errors.
+- Ran `cargo test --workspace`: passed.
+- Ran `git diff --check` on touched DXF files: no whitespace errors; Git reported LF→CRLF normalization warnings for two Rust files.
+- Ran scoped `git diff --stat`; note `src/scene/mod.rs` already has a large diff footprint in the dirty workspace.
+- Ran `cargo fmt --check`: failed on unrelated `src/modules/registry.rs` tab indentation.
+- Ran `rustfmt --check` without edition on touched files: failed because default edition rejected async fn in `src/io/mod.rs`.
+- Ran `rustfmt --edition 2021 --check` on touched Rust files: passed.
+- Created `docs/plans/2026-05-06-dxf-native-integration-brainstorm-plan.md` using brainstorm flow: options, recommendation, phases, file targets, tests, acceptance criteria.
+- Started Phase 1 observability with TDD.
+- RED: `scene::tests::native_render_stats_classify_native_fallback_and_preserved_entities` failed because `Scene::native_render_stats` did not exist.
+- GREEN: added `NativeRenderStats` and `Scene::native_render_stats` to classify native-rendered, compat-fallback, and preserved-only model-space entities.
+- Ran `cargo test -p H7CAD scene::tests::native_render_stats_classify_native_fallback_and_preserved_entities`: passed.
+- Removed two newly introduced dead-code warnings with targeted `#[allow(dead_code)]`.
+- Checked lints for `src/scene/mod.rs`: no linter errors.
+- Updated `docs/plans/2026-05-06-dxf-native-integration-brainstorm-plan.md` with Phase 1 execution progress.
+- Re-ran `cargo test -p H7CAD scene::tests::native_render_stats_classify_native_fallback_and_preserved_entities`: passed.
+- Re-ran `rustfmt --edition 2021 --check src/scene/mod.rs`: passed.
+- Started Phase 2 OCS/WCS with TDD.
+- RED: `convert_native_ellipse_uses_extrusion_normal_for_minor_axis` failed because native ellipse conversion ignored `entity.extrusion`.
+- GREEN: added `ellipse::to_truck_with_normal`, passed `entity.extrusion` from native conversion, and fixed quadrant snap z calculation.
+- Ran `cargo test -p H7CAD scene::acad_to_truck`: 5 passed.
+- Checked lints for `src/entities/ellipse.rs` and `src/scene/acad_to_truck.rs`: no linter errors.
+- Verified existing LwPolyline OCS coverage with `cargo test -p H7CAD entities::lwpolyline`: 4 passed.
+- Ran `cargo test --workspace` after Phase 1/2 changes: passed.
+- Ran `cargo check --workspace` after Phase 1/2 changes: passed with existing unused/dead_code warnings.
+- Created `docs/plans/2026-05-06-dxf-next-slice-brainstorm-plan.md` for the next recommended development slice.
+- Recommended next slice: Dimension dimstyle display parameters before nested ByBlock inheritance.
+- Started Dimension dimstyle TDD.
+- RED: `tessellate_native_dimension_uses_native_dimstyle_arrow_size` failed because native dimension geometry hardcoded arrow size `0.12`.
+- GREEN: `native_dimension_geometry` now receives the native document and uses native dimstyle `dimasz * dimscale` and `dimexo * dimscale`.
+- Noted native `DimStyleProperties` has no `dimexe`; extension overshoot remains default `0.0` pending model support.
+- Ran `cargo test -p H7CAD tessellate_native_dimension`: 3 passed.
+- Checked lints for `src/scene/tessellate.rs`: no linter errors.
+- Verified DIMSTYLE code mapping: standard is `44=DIMEXE`, `147=DIMGAP`.
+- RED: `roundtrip_dimstyle_table_preserves_render_relevant_fields` failed because `DimStyleProperties` had no `dimexe`.
+- GREEN: added `dimexe` to native model, mapped DIMSTYLE parser/writer to `44=dimexe` and `147=dimgap`.
+- Re-ran `cargo test -p h7cad-native-dxf --test entity_2d_roundtrip`: 38 passed.
+- Re-ran `cargo test -p H7CAD tessellate_native_dimension`: 3 passed.
+- Ran `cargo check --workspace` after DIMSTYLE changes: passed with existing warnings.
+- Ran `cargo test --workspace` after DIMSTYLE changes: passed.
+- Started nested ByBlock exploration.
+- Located current single-level inheritance helper: `src/scene/render.rs::render_style_for_block_sub`.
+- Located INSERT/block rendering path in `src/scene/mod.rs`; next RED test should construct three-level INSERT inheritance before changing recursion.
+- RED: `nativerender_nested_insert_byblock_uses_nearest_insert_color` failed with wire ACI 0 instead of middle insert ACI 5.
+- GREEN: added native render inherited style propagation through nested inserts.
+- Added `render::NativeRenderStyle` and `render_style_native_inheriting` for ByBlock color/linetype/lineweight.
+- Ran `cargo test -p H7CAD nativerender_nested_insert_byblock_uses_nearest_insert_color`: passed.
+- Ran `cargo test -p H7CAD nativerender_insert`: 5 passed.
+- Checked lints for `src/scene/mod.rs` and `src/scene/render.rs`: no linter errors.
+- Ran `cargo check --workspace` after Hatch ByBlock fix: passed with existing warnings.
+- Ran `cargo test --workspace` after Hatch ByBlock fix: passed.
+- Added a boundary transform regression assertion to `nativerender_insert_with_hatch_adds_native_hatch_model`.
+- Verified `cargo test -p H7CAD nativerender_insert_with_hatch_adds_native_hatch_model`: passed.
+- Checked lints for `src/scene/mod.rs`: no linter errors.
+- Added `nativerender_insert_hatch_boundary_applies_scale_and_rotation` regression for hatch boundary scale/rotation.
+- Verified `cargo test -p H7CAD nativerender_insert_hatch_boundary_applies_scale_and_rotation`: passed.
+- Re-ran `cargo test -p H7CAD nativerender_insert`: 6 passed.
+- Ran `cargo check --workspace` after nested ByBlock changes: passed with existing warnings.
+- Ran `cargo test --workspace` after nested ByBlock changes: passed.
+- Ran `git diff --check`: no whitespace errors; Git emitted LF->CRLF warnings on many existing touched files.
+- Created `docs/plans/2026-05-06-dxf-fidelity-next-brainstorm-plan.md`.
+- Recommended next route: first converge current large diff into reviewable slices, then continue Hatch fidelity.
+- Ran read-only `git status --short` and `git diff --name-only` inventory.
+- Created `docs/plans/2026-05-06-dxf-fidelity-diff-inventory.md` with suggested review/commit slices and files to avoid staging automatically.
+- Started Hatch fidelity slice.
+- RED: `nativerender_nested_insert_hatch_byblock_uses_nearest_insert_color` failed because Hatch(ByBlock) did not inherit middle insert ACI 5.
+- GREEN: `native_insert_hatch_models` now receives inherited style and uses `render_style_native_inheriting`.
+- Ran `cargo test -p H7CAD nativerender_nested_insert_hatch_byblock_uses_nearest_insert_color`: passed.
+- Ran `cargo test -p H7CAD nativerender_insert`: 5 passed.
+- Checked lints for `src/scene/mod.rs` and `src/scene/render.rs`: no linter errors.

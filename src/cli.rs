@@ -99,7 +99,13 @@ pub fn parse_batch_args(args: &[String]) -> Option<BatchArgs> {
     let options_flag_idx = args.iter().position(|a| a == "--options");
     let options_value_idx = options_flag_idx
         .and_then(|i| args.get(i + 1).map(|v| (i, v)))
-        .and_then(|(i, v)| if !v.starts_with('-') { Some(i + 1) } else { None });
+        .and_then(|(i, v)| {
+            if !v.starts_with('-') {
+                Some(i + 1)
+            } else {
+                None
+            }
+        });
 
     let skip_indices: [Option<usize>; 4] = [
         Some(flag_idx),
@@ -281,18 +287,10 @@ fn load_pdf_options(
     match path {
         None => Ok(crate::io::pdf_export::PdfExportOptions::default()),
         Some(p) => {
-            let bytes = std::fs::read(p).map_err(|e| {
-                format!(
-                    "cannot open options file \"{}\": {e}",
-                    p.display()
-                )
-            })?;
-            serde_json::from_slice(&bytes).map_err(|e| {
-                format!(
-                    "invalid JSON in options file \"{}\": {e}",
-                    p.display()
-                )
-            })
+            let bytes = std::fs::read(p)
+                .map_err(|e| format!("cannot open options file \"{}\": {e}", p.display()))?;
+            serde_json::from_slice(&bytes)
+                .map_err(|e| format!("invalid JSON in options file \"{}\": {e}", p.display()))
         }
     }
 }
@@ -303,18 +301,10 @@ fn load_svg_options(
     match path {
         None => Ok(crate::io::svg_export::SvgExportOptions::default()),
         Some(p) => {
-            let bytes = std::fs::read(p).map_err(|e| {
-                format!(
-                    "cannot open options file \"{}\": {e}",
-                    p.display()
-                )
-            })?;
-            serde_json::from_slice(&bytes).map_err(|e| {
-                format!(
-                    "invalid JSON in options file \"{}\": {e}",
-                    p.display()
-                )
-            })
+            let bytes = std::fs::read(p)
+                .map_err(|e| format!("cannot open options file \"{}\": {e}", p.display()))?;
+            serde_json::from_slice(&bytes)
+                .map_err(|e| format!("invalid JSON in options file \"{}\": {e}", p.display()))
         }
     }
 }
@@ -348,7 +338,10 @@ fn export_one(
     options: &LoadedOptions,
 ) -> Result<(), String> {
     if !input.exists() {
-        return Err(format!("cannot open \"{}\": file not found", input.display()));
+        return Err(format!(
+            "cannot open \"{}\": file not found",
+            input.display()
+        ));
     }
 
     let (compat, native, _notices) = crate::io::load_file_with_native_blocking(input)
@@ -410,8 +403,7 @@ fn export_one(
         // The two mismatched arms are unreachable by construction
         // (LoadedOptions::load always matches format).  Keeping them
         // explicit future-proofs against someone adding a variant.
-        (ExportFormat::Pdf, LoadedOptions::Svg(_))
-        | (ExportFormat::Svg, LoadedOptions::Pdf(_)) => {
+        (ExportFormat::Pdf, LoadedOptions::Svg(_)) | (ExportFormat::Svg, LoadedOptions::Pdf(_)) => {
             return Err("internal: options type does not match export format".into());
         }
     }
@@ -434,12 +426,7 @@ fn resolve_paper_and_offset(scene: &crate::scene::Scene) -> (f64, f64, f32, f32)
         let h = ((mx.y - mn.y) as f64 * margin).max(1.0);
         let pad_x = (w - (mx.x - mn.x) as f64) * 0.5;
         let pad_y = (h - (mx.y - mn.y) as f64) * 0.5;
-        return (
-            w,
-            h,
-            -(mn.x) + pad_x as f32,
-            -(mn.y) + pad_y as f32,
-        );
+        return (w, h, -(mn.x) + pad_x as f32, -(mn.y) + pad_y as f32);
     }
     (297.0, 210.0, 0.0, 0.0)
 }
@@ -532,12 +519,7 @@ mod tests {
 
     #[test]
     fn parse_multi_input_with_dir_output_via_trailing_slash() {
-        let got = parse_batch_args(&s(&[
-            "a.dxf",
-            "b.dxf",
-            "--export-pdf",
-            "out/",
-        ]));
+        let got = parse_batch_args(&s(&["a.dxf", "b.dxf", "--export-pdf", "out/"]));
         assert_eq!(
             got,
             Some(export(
@@ -728,12 +710,14 @@ mod tests {
     #[test]
     fn load_pdf_options_json_override_partial_preserves_defaults() {
         use std::io::Write;
-        let tmp = std::env::temp_dir().join(format!(
-            "h7cad_r38_pdf_opts_{}.json",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("h7cad_r38_pdf_opts_{}.json", std::process::id()));
         let mut f = std::fs::File::create(&tmp).unwrap();
-        writeln!(f, r#"{{ "monochrome": false, "font_family": "TimesRoman" }}"#).unwrap();
+        writeln!(
+            f,
+            r#"{{ "monochrome": false, "font_family": "TimesRoman" }}"#
+        )
+        .unwrap();
         drop(f);
 
         let opts = load_pdf_options(Some(&tmp)).expect("partial json must parse");
@@ -752,10 +736,8 @@ mod tests {
     #[test]
     fn load_pdf_options_malformed_json_errs_with_path() {
         use std::io::Write;
-        let tmp = std::env::temp_dir().join(format!(
-            "h7cad_r38_malformed_{}.json",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("h7cad_r38_malformed_{}.json", std::process::id()));
         let mut f = std::fs::File::create(&tmp).unwrap();
         writeln!(f, "{{ not valid json").unwrap();
         drop(f);
@@ -771,10 +753,8 @@ mod tests {
     #[test]
     fn load_svg_options_json_override_partial_preserves_defaults() {
         use std::io::Write;
-        let tmp = std::env::temp_dir().join(format!(
-            "h7cad_r38_svg_opts_{}.json",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("h7cad_r38_svg_opts_{}.json", std::process::id()));
         let mut f = std::fs::File::create(&tmp).unwrap();
         writeln!(f, r#"{{ "monochrome": false, "font_family": "Arial" }}"#).unwrap();
         drop(f);

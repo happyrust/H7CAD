@@ -18,8 +18,7 @@ use acadrust::{EntityType, Handle};
 
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
-pub const ICON: IconKind =
-    IconKind::Svg(include_bytes!("../../../assets/icons/overkill.svg"));
+pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/overkill.svg"));
 
 pub fn tool() -> ToolDef {
     ToolDef {
@@ -36,8 +35,14 @@ pub fn tool() -> ToolDef {
 /// (see `quantise`), so the enum implements `Eq + Hash` via derive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GeomKey {
-    Line { a: QPoint, b: QPoint },
-    Circle { center: QPoint, radius: QScalar },
+    Line {
+        a: QPoint,
+        b: QPoint,
+    },
+    Circle {
+        center: QPoint,
+        radius: QScalar,
+    },
     Arc {
         center: QPoint,
         radius: QScalar,
@@ -123,7 +128,9 @@ pub fn find_duplicates(entries: &[(Handle, EntityType)]) -> Vec<Handle> {
     let mut seen: HashSet<GeomKey> = HashSet::with_capacity(entries.len());
     let mut dupes: Vec<Handle> = Vec::new();
     for (handle, entity) in entries {
-        let Some(key) = geom_key(entity) else { continue };
+        let Some(key) = geom_key(entity) else {
+            continue;
+        };
         if !seen.insert(key) {
             dupes.push(*handle);
         }
@@ -250,7 +257,11 @@ mod tests {
             (h(3), point((1.0, 2.0, 3.0001))),
         ];
         let dupes = find_duplicates(&entries);
-        assert_eq!(dupes, vec![h(2)], "only exact duplicates (within tolerance) collapse");
+        assert_eq!(
+            dupes,
+            vec![h(2)],
+            "only exact duplicates (within tolerance) collapse"
+        );
     }
 
     #[test]

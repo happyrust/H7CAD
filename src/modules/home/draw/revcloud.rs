@@ -4,8 +4,8 @@
 // Each segment of the polygon is subdivided into arc bumps (bulge = 0.5).
 // Minimum arc length = `arc_length` parameter.
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -39,13 +39,21 @@ impl RevCloudCommand {
 }
 
 impl CadCommand for RevCloudCommand {
-    fn name(&self) -> &'static str { "REVCLOUD" }
+    fn name(&self) -> &'static str {
+        "REVCLOUD"
+    }
 
     fn prompt(&self) -> String {
         if self.points.is_empty() {
-            format!("REVCLOUD  Specify start point (arc length = {:.2}):", self.arc_length)
+            format!(
+                "REVCLOUD  Specify start point (arc length = {:.2}):",
+                self.arc_length
+            )
         } else {
-            format!("REVCLOUD  Specify next point ({} pts, Enter to close):", self.points.len())
+            format!(
+                "REVCLOUD  Specify next point ({} pts, Enter to close):",
+                self.points.len()
+            )
         }
     }
 
@@ -63,9 +71,10 @@ impl CadCommand for RevCloudCommand {
     }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
-        if self.points.is_empty() { return None; }
-        let mut preview_pts: Vec<[f32; 3]> =
-            self.points.iter().map(|p| [p.x, p.y, p.z]).collect();
+        if self.points.is_empty() {
+            return None;
+        }
+        let mut preview_pts: Vec<[f32; 3]> = self.points.iter().map(|p| [p.x, p.y, p.z]).collect();
         preview_pts.push([pt.x, pt.y, pt.z]);
         preview_pts.push([self.points[0].x, self.points[0].y, self.points[0].z]);
         Some(WireModel {
@@ -81,6 +90,8 @@ impl CadCommand for RevCloudCommand {
             aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         })
     }
 }
@@ -95,7 +106,9 @@ fn make_revcloud_native(pts: &[Vec3], arc_len: f64) -> nm::Entity {
         let p0 = pts[i];
         let p1 = pts[(i + 1) % n];
         let seg_len = ((p1.x - p0.x).powi(2) + (p1.z - p0.z).powi(2)).sqrt() as f64;
-        if seg_len < 1e-6 { continue; }
+        if seg_len < 1e-6 {
+            continue;
+        }
 
         let num_arcs = ((seg_len / arc_len).round() as usize).max(1);
         let step_x = (p1.x - p0.x) as f64 / num_arcs as f64;

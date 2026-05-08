@@ -6,8 +6,8 @@
 //
 // Constructed from commands.rs after finding the last placed linear/aligned dimension.
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -57,7 +57,11 @@ impl DimContinueCommand {
     /// `rotation` — 0.0 = horizontal dim, PI/2 = vertical dim.
     pub fn from_base(p1: Vec3, p2: Vec3, definition_point: Vec3, rotation: f64) -> Self {
         // Axis unit vector along the measurement direction.
-        let axis = if rotation.abs() < 0.1 { Vec3::X } else { Vec3::Y };
+        let axis = if rotation.abs() < 0.1 {
+            Vec3::X
+        } else {
+            Vec3::Y
+        };
         // Perpendicular unit vector toward the dim line.
         let perp = Vec3::new(-axis.y, axis.x, 0.0);
         let dim_offset = (definition_point - p1).dot(perp);
@@ -72,7 +76,9 @@ impl DimContinueCommand {
 }
 
 impl CadCommand for DimContinueCommand {
-    fn name(&self) -> &'static str { "DIMCONTINUE" }
+    fn name(&self) -> &'static str {
+        "DIMCONTINUE"
+    }
 
     fn prompt(&self) -> String {
         if !self.ready {
@@ -98,7 +104,11 @@ impl CadCommand for DimContinueCommand {
             dim_type: 0,
             block_name: String::new(),
             style_name: String::new(),
-            definition_point: [dim_line_pt.x as f64, dim_line_pt.y as f64, dim_line_pt.z as f64],
+            definition_point: [
+                dim_line_pt.x as f64,
+                dim_line_pt.y as f64,
+                dim_line_pt.z as f64,
+            ],
             text_midpoint: [text_mid.x as f64, text_mid.y as f64, text_mid.z as f64],
             text_override: String::new(),
             attachment_point: 0,
@@ -135,9 +145,11 @@ impl CadCommand for DimContinueCommand {
         Some(WireModel {
             name: "dimcont_preview".into(),
             points: vec![
-                [p1.x, p1.y, p1.z], [dim_line_pt.x, dim_line_pt.y, dim_line_pt.z],
+                [p1.x, p1.y, p1.z],
+                [dim_line_pt.x, dim_line_pt.y, dim_line_pt.z],
                 [f32::NAN, 0.0, 0.0],
-                [pt.x, pt.y, pt.z], [dim_line_pt2.x, dim_line_pt2.y, dim_line_pt2.z],
+                [pt.x, pt.y, pt.z],
+                [dim_line_pt2.x, dim_line_pt2.y, dim_line_pt2.z],
                 [f32::NAN, 0.0, 0.0],
                 [dim_line_pt.x, dim_line_pt.y, dim_line_pt.z],
                 [dim_line_pt2.x, dim_line_pt2.y, dim_line_pt2.z],
@@ -152,6 +164,8 @@ impl CadCommand for DimContinueCommand {
             aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         })
     }
 }

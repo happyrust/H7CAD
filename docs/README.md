@@ -12,6 +12,6 @@
 
 图示文件：
 
-- `diagrams/h7cad-architecture.html` — 系统总览  
-- `diagrams/h7cad-startup-flow.html` — `main` 分流  
-- `diagrams/h7cad-crates-layers.html` — workspace crate 分层  
+- `diagrams/h7cad-architecture.html` — 系统总览
+- `diagrams/h7cad-startup-flow.html` — `main` 分流
+- `diagrams/h7cad-crates-layers.html` — workspace crate 分层

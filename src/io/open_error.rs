@@ -61,9 +61,9 @@ impl OpenError {
             Self::Corrupt { format, reason } => {
                 format!("{format} 文件内容已损坏或格式异常：{reason}")
             }
-            Self::UnsupportedExtension { ext } => format!(
-                "暂不支持的文件类型 .{ext}。当前可打开 .dwg / .dxf / .pid。"
-            ),
+            Self::UnsupportedExtension { ext } => {
+                format!("暂不支持的文件类型 .{ext}。当前可打开 .dwg / .dxf / .pid。")
+            }
             Self::Other(msg) => msg.clone(),
         }
     }
@@ -133,10 +133,7 @@ pub(crate) fn classify_acadrust(err: acadrust::error::DxfError, format: &'static
             path: None,
             message: e.to_string(),
         },
-        DxfError::UnsupportedVersion(v) => OpenError::UnsupportedVersion {
-            format,
-            version: v,
-        },
+        DxfError::UnsupportedVersion(v) => OpenError::UnsupportedVersion { format, version: v },
         DxfError::NotImplemented(msg) => OpenError::UnsupportedVersion {
             format,
             version: msg,
@@ -215,7 +212,10 @@ mod tests {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "no such file");
         let err: OpenError = io_err.into();
         match err {
-            OpenError::Io { message, path: None } => {
+            OpenError::Io {
+                message,
+                path: None,
+            } => {
                 assert!(message.contains("no such file"), "message was {message:?}");
             }
             other => panic!("expected Io variant, got {other:?}"),
@@ -224,10 +224,7 @@ mod tests {
 
     #[test]
     fn classify_acadrust_unsupported_version_routes_to_version_variant() {
-        let err = classify_acadrust(
-            DxfError::UnsupportedVersion("AC1032".into()),
-            "DWG",
-        );
+        let err = classify_acadrust(DxfError::UnsupportedVersion("AC1032".into()), "DWG");
         assert!(matches!(
             err,
             OpenError::UnsupportedVersion { format: "DWG", version } if version == "AC1032"
@@ -236,10 +233,7 @@ mod tests {
 
     #[test]
     fn classify_acadrust_invalid_header_routes_to_corrupt() {
-        let err = classify_acadrust(
-            DxfError::InvalidHeader("bad magic".into()),
-            "DWG",
-        );
+        let err = classify_acadrust(DxfError::InvalidHeader("bad magic".into()), "DWG");
         assert!(matches!(
             err,
             OpenError::Corrupt { format: "DWG", reason } if reason == "bad magic"
@@ -256,7 +250,10 @@ mod tests {
             "DWG",
         );
         match err {
-            OpenError::Corrupt { format: "DWG", reason } => {
+            OpenError::Corrupt {
+                format: "DWG",
+                reason,
+            } => {
                 assert!(reason.contains("0x1234"));
                 assert!(reason.contains("0xBEEF"));
             }
@@ -271,17 +268,17 @@ mod tests {
             "DWG",
         );
         match err {
-            OpenError::Io { message, path: None } => assert!(message.contains("denied")),
+            OpenError::Io {
+                message,
+                path: None,
+            } => assert!(message.contains("denied")),
             other => panic!("expected Io, got {other:?}"),
         }
     }
 
     #[test]
     fn classify_acadrust_not_implemented_surfaces_as_unsupported_version() {
-        let err = classify_acadrust(
-            DxfError::NotImplemented("encrypted metadata".into()),
-            "DWG",
-        );
+        let err = classify_acadrust(DxfError::NotImplemented("encrypted metadata".into()), "DWG");
         assert!(matches!(
             err,
             OpenError::UnsupportedVersion { format: "DWG", .. }
@@ -357,11 +354,12 @@ mod tests {
         let err = crate::io::open_document_blocking(path)
             .expect_err("missing file must surface as an Io variant");
         match err {
-            OpenError::Io { path: slot, message } => {
+            OpenError::Io {
+                path: slot,
+                message,
+            } => {
                 assert!(
-                    slot.as_ref()
-                        .map(|p| p.as_path() == path)
-                        .unwrap_or(false),
+                    slot.as_ref().map(|p| p.as_path() == path).unwrap_or(false),
                     "missing path slot should be populated with the attempted path"
                 );
                 assert!(!message.is_empty(), "io message must not be empty");

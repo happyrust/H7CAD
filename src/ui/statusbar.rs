@@ -4,8 +4,8 @@ use iced::widget::tooltip::Position as TipPos;
 use iced::widget::{button, container, mouse_area, row, text, text_input, tooltip, Row};
 use iced::{Background, Border, Color, Element, Length, Theme};
 
-use crate::snap::Snapper;
 use crate::app::Message;
+use crate::snap::Snapper;
 
 #[derive(Clone, Default)]
 pub struct StatusBar {
@@ -40,7 +40,7 @@ impl StatusBar {
         viewport_count: usize,
         // True when the user is editing inside a paper-space viewport (MSPACE).
         in_mspace: bool,
-        // Whether the layout tabs (Model/Paper) are visible (LAYOUTTAB).
+        // Whether to render the layout tab strip (LAYOUTTAB toggle).
         show_layout_tabs: bool,
     ) -> Element<'a, Message> {
         let menu_btn = button(text("≡").size(14).color(ICON_COLOR))
@@ -216,13 +216,11 @@ fn polar_pill(active: bool, increment_deg: f32) -> Element<'static, Message> {
         increment_deg as u32
     );
 
-    let bg_color = move |hovered: bool| {
-        match (active, hovered) {
-            (true, true) => SNAP_ON_HOVER,
-            (true, false) => SNAP_ON_BG,
-            (false, true) => SNAP_OFF_HOVER,
-            (false, false) => SNAP_OFF_BG,
-        }
+    let bg_color = move |hovered: bool| match (active, hovered) {
+        (true, true) => SNAP_ON_HOVER,
+        (true, false) => SNAP_ON_BG,
+        (false, true) => SNAP_OFF_HOVER,
+        (false, false) => SNAP_OFF_BG,
     };
 
     // Cycle to the next common angle on right-click.
@@ -233,9 +231,11 @@ fn polar_pill(active: bool, increment_deg: f32) -> Element<'static, Message> {
         _ => 15.0,
     };
 
-    let inner = container(
-        text(label).size(10).color(if active { OSNAP_ON_TEXT } else { OSNAP_OFF_TEXT })
-    )
+    let inner = container(text(label).size(10).color(if active {
+        OSNAP_ON_TEXT
+    } else {
+        OSNAP_OFF_TEXT
+    }))
     .style(move |_: &Theme| container::Style {
         background: Some(Background::Color(bg_color(false))),
         border: Border {
@@ -262,7 +262,12 @@ fn polar_pill(active: bool, increment_deg: f32) -> Element<'static, Message> {
                     a: 0.95,
                 })),
                 border: Border {
-                    color: Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 },
+                    color: Color {
+                        r: 0.35,
+                        g: 0.35,
+                        b: 0.35,
+                        a: 1.0,
+                    },
                     width: 1.0,
                     radius: 3.0.into(),
                 },
@@ -371,7 +376,11 @@ fn osnap_btn(active: bool, snap_enabled: bool, open: bool) -> Element<'static, M
 /// When `rename_edit` is `Some(value)` the tab shows an inline text input
 /// instead of the normal button.  The tab is not renameable when it is the
 /// "Model" tab (callers simply never pass `Some` for that name).
-fn space_tab<'a>(label: String, is_active: bool, rename_edit: Option<&'a str>) -> Element<'a, Message> {
+fn space_tab<'a>(
+    label: String,
+    is_active: bool,
+    rename_edit: Option<&'a str>,
+) -> Element<'a, Message> {
     let bg = move |is_active: bool, hovered: bool| {
         if is_active {
             TAB_ACTIVE
@@ -383,7 +392,11 @@ fn space_tab<'a>(label: String, is_active: bool, rename_edit: Option<&'a str>) -
     };
 
     let border = Border {
-        color: if is_active { ACCENT } else { Color::TRANSPARENT },
+        color: if is_active {
+            ACCENT
+        } else {
+            Color::TRANSPARENT
+        },
         width: if is_active { 1.0 } else { 0.0 },
         radius: 2.0.into(),
     };
@@ -391,7 +404,12 @@ fn space_tab<'a>(label: String, is_active: bool, rename_edit: Option<&'a str>) -
     let text_color = if is_active {
         Color::WHITE
     } else {
-        Color { r: 0.65, g: 0.65, b: 0.65, a: 1.0 }
+        Color {
+            r: 0.65,
+            g: 0.65,
+            b: 0.65,
+            a: 1.0,
+        }
     };
 
     if let Some(edit_val) = rename_edit {
@@ -408,16 +426,29 @@ fn space_tab<'a>(label: String, is_active: bool, rename_edit: Option<&'a str>) -
                     radius: 2.0.into(),
                 },
                 icon: Color::WHITE,
-                placeholder: Color { r: 0.5, g: 0.5, b: 0.5, a: 1.0 },
+                placeholder: Color {
+                    r: 0.5,
+                    g: 0.5,
+                    b: 0.5,
+                    a: 1.0,
+                },
                 value: Color::WHITE,
-                selection: Color { r: 0.20, g: 0.55, b: 0.90, a: 0.4 },
+                selection: Color {
+                    r: 0.20,
+                    g: 0.55,
+                    b: 0.90,
+                    a: 0.4,
+                },
             })
             .padding([2, 6])
             .width(Length::Fixed(90.0));
 
-        let cancel_btn = button(
-            text("✕").size(10).color(Color { r: 0.65, g: 0.65, b: 0.65, a: 1.0 }),
-        )
+        let cancel_btn = button(text("✕").size(10).color(Color {
+            r: 0.65,
+            g: 0.65,
+            b: 0.65,
+            a: 1.0,
+        }))
         .on_press(Message::LayoutRenameCancel)
         .style(|_: &Theme, _| button::Style {
             background: Some(Background::Color(Color::TRANSPARENT)),
@@ -428,18 +459,19 @@ fn space_tab<'a>(label: String, is_active: bool, rename_edit: Option<&'a str>) -
         })
         .padding([2, 4]);
 
-        row![input, cancel_btn].spacing(0).align_y(iced::Center).into()
+        row![input, cancel_btn]
+            .spacing(0)
+            .align_y(iced::Center)
+            .into()
     } else {
         // Normal clickable tab — left click switches, right click opens context menu.
-        let display = container(
-            text(label.clone()).size(11).color(text_color),
-        )
-        .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(bg(is_active, false))),
-            border,
-            ..Default::default()
-        })
-        .padding([3, 10]);
+        let display = container(text(label.clone()).size(11).color(text_color))
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(bg(is_active, false))),
+                border,
+                ..Default::default()
+            })
+            .padding([3, 10]);
 
         let switch_msg = Message::LayoutSwitch(label.clone());
         let ctx_msg = Message::LayoutContextMenu(label.clone());
@@ -466,14 +498,26 @@ fn space_mode_btn(current_layout: &str, in_mspace: bool) -> Element<'static, Mes
     let (label, active, on_press) = if is_model_tab {
         ("MODEL", false, None::<Message>)
     } else if in_mspace {
-        ("MODEL", true, Some(Message::LayoutSwitch("Model".to_string())))
+        (
+            "MODEL",
+            true,
+            Some(Message::LayoutSwitch("Model".to_string())),
+        )
     } else {
         ("PAPER", false, Some(Message::MspaceCommand))
     };
 
-    let text_color = if active { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT };
+    let text_color = if active {
+        SNAP_BORDER_ON
+    } else {
+        OSNAP_OFF_TEXT
+    };
     let bg_normal = if active { SNAP_ON_BG } else { SNAP_OFF_BG };
-    let bg_hover = if active { SNAP_ON_HOVER } else { SNAP_OFF_HOVER };
+    let bg_hover = if active {
+        SNAP_ON_HOVER
+    } else {
+        SNAP_OFF_HOVER
+    };
     let border_color = if active { SNAP_BORDER_ON } else { BORDER_COLOR };
 
     let clickable = on_press.is_some();
@@ -642,6 +686,8 @@ fn format_scale(scale: Option<f64>) -> String {
     }
 
     // Fall back to a decimal string.
-    format!("{:.4}", s).trim_end_matches('0').trim_end_matches('.').to_string()
+    format!("{:.4}", s)
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
-

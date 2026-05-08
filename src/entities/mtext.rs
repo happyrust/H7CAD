@@ -1,6 +1,6 @@
 use acadrust::entities::{AttachmentPoint, DrawingDirection, MText};
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip, triangle_grip};
@@ -147,16 +147,27 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
     } else {
         1.0
     };
-    let line_h = t.height as f32 * ls_factor * font.line_spacing;
-    let total_h = line_h * n_lines;
+    // AutoCAD DXF code 44 is a multiplier on the *default* baseline-to-baseline
+    // distance, which is 5/3 × text_height (≈ 1.667).  factor = 1.0 → single
+    // spacing, factor = 2.0 → double spacing, etc.
+    let line_h = t.height as f32 * ls_factor * (5.0 / 3.0) * font.line_spacing;
+    let h = t.height as f32;
+    // CXF glyphs sit on the baseline (y=0) and extend UP by `h` (cap height).
+    // Block top   = line-0 baseline + h
+    // Block bottom = last-line baseline = line-0 baseline − (n_lines−1)·line_h
+    //
+    // v_offset is the Y of line-0 baseline relative to the insertion point, so:
+    //   Top    attachment → block top    at insertion → v_offset = −h
+    //   Bottom attachment → block bottom at insertion → v_offset = (n_lines−1)·line_h
+    //   Middle attachment → block center at insertion → midpoint of the two above
     let v_offset = match t.attachment_point {
-        AttachmentPoint::TopLeft | AttachmentPoint::TopCenter | AttachmentPoint::TopRight => 0.0,
+        AttachmentPoint::TopLeft | AttachmentPoint::TopCenter | AttachmentPoint::TopRight => -h,
         AttachmentPoint::MiddleLeft
         | AttachmentPoint::MiddleCenter
-        | AttachmentPoint::MiddleRight => -total_h * 0.5,
+        | AttachmentPoint::MiddleRight => ((n_lines - 1.0) * line_h - h) * 0.5,
         AttachmentPoint::BottomLeft
         | AttachmentPoint::BottomCenter
-        | AttachmentPoint::BottomRight => -total_h,
+        | AttachmentPoint::BottomRight => (n_lines - 1.0) * line_h,
     };
     let h_anchor = match t.attachment_point {
         AttachmentPoint::TopCenter
@@ -253,7 +264,9 @@ pub fn to_truck_native(
         1.0
     };
     let line_h = height as f32 * ls_factor * font.line_spacing;
-    let total_h = rectangle_height.map(|v| v as f32).unwrap_or(line_h * lines.len().max(1) as f32);
+    let total_h = rectangle_height
+        .map(|v| v as f32)
+        .unwrap_or(line_h * lines.len().max(1) as f32);
     let v_offset = match attachment_point {
         4..=6 => -total_h * 0.5,
         7..=9 => -total_h,
@@ -267,7 +280,11 @@ pub fn to_truck_native(
     let vertical_text = drawing_direction == 3;
     let rot = rotation_deg.to_radians() as f32;
     let (cos_r, sin_r) = (rot.cos(), rot.sin());
-    let insertion_vec = Vec3::new(insertion[0] as f32, insertion[1] as f32, insertion[2] as f32);
+    let insertion_vec = Vec3::new(
+        insertion[0] as f32,
+        insertion[1] as f32,
+        insertion[2] as f32,
+    );
     let mut all_strokes = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let (ox, oy) = if vertical_text {
@@ -335,7 +352,11 @@ fn grips(t: &MText) -> Vec<GripDef> {
 }
 
 pub fn grips_native(insertion: &[f64; 3], width: f64, rotation_deg: f64) -> Vec<GripDef> {
-    let p = Vec3::new(insertion[0] as f32, insertion[1] as f32, insertion[2] as f32);
+    let p = Vec3::new(
+        insertion[0] as f32,
+        insertion[1] as f32,
+        insertion[2] as f32,
+    );
     let rot = rotation_deg.to_radians() as f32;
     let dir = Vec3::new(rot.cos(), rot.sin(), 0.0);
     let width_grip = p + dir * width.max(0.0) as f32;
@@ -453,7 +474,11 @@ pub fn properties_native(
                         .collect(),
                 },
             },
-            ro("Attachment", "attachment", native_attachment_str(attachment_point).to_string()),
+            ro(
+                "Attachment",
+                "attachment",
+                native_attachment_str(attachment_point).to_string(),
+            ),
             ro(
                 "Direction",
                 "direction",
@@ -551,11 +576,13 @@ pub fn apply_geom_prop_native(
             return;
         }
         "h_align" => {
-            *attachment_point = native_attachment_from_align(value, native_mtext_valign_str(*attachment_point));
+            *attachment_point =
+                native_attachment_from_align(value, native_mtext_valign_str(*attachment_point));
             return;
         }
         "v_align" => {
-            *attachment_point = native_attachment_from_align(native_mtext_halign_str(*attachment_point), value);
+            *attachment_point =
+                native_attachment_from_align(native_mtext_halign_str(*attachment_point), value);
             return;
         }
         _ => {}

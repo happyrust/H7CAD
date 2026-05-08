@@ -114,7 +114,10 @@ impl ImageGpu {
         });
 
         // ── Opacity uniform ───────────────────────────────────────────────
-        let params = ImageParams { opacity: model.opacity.clamp(0.0, 1.0), _pad: [0.0; 3] };
+        let params = ImageParams {
+            opacity: model.opacity.clamp(0.0, 1.0),
+            _pad: [0.0; 3],
+        };
         let _params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("image.params"),
             contents: bytemuck::bytes_of(&params),
@@ -146,12 +149,30 @@ impl ImageGpu {
         // UV: BL=(0,1), BR=(1,1), TR=(1,0), TL=(0,0)
         let [p0, p1, p2, p3] = model.corners;
         let verts = [
-            ImageVertex { pos: p0, uv: [0.0, 1.0] },
-            ImageVertex { pos: p1, uv: [1.0, 1.0] },
-            ImageVertex { pos: p2, uv: [1.0, 0.0] },
-            ImageVertex { pos: p0, uv: [0.0, 1.0] },
-            ImageVertex { pos: p2, uv: [1.0, 0.0] },
-            ImageVertex { pos: p3, uv: [0.0, 0.0] },
+            ImageVertex {
+                pos: p0,
+                uv: [0.0, 1.0],
+            },
+            ImageVertex {
+                pos: p1,
+                uv: [1.0, 1.0],
+            },
+            ImageVertex {
+                pos: p2,
+                uv: [1.0, 0.0],
+            },
+            ImageVertex {
+                pos: p0,
+                uv: [0.0, 1.0],
+            },
+            ImageVertex {
+                pos: p2,
+                uv: [1.0, 0.0],
+            },
+            ImageVertex {
+                pos: p3,
+                uv: [0.0, 0.0],
+            },
         ];
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("image.vbuf"),

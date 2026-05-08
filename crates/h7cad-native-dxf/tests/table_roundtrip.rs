@@ -17,8 +17,14 @@ fn table_row_heights_column_widths_survive_roundtrip() {
 
     let dxf_text = write_dxf(&doc).unwrap();
 
-    assert!(dxf_text.contains("141"), "must emit code 141 for row heights");
-    assert!(dxf_text.contains("142"), "must emit code 142 for column widths");
+    assert!(
+        dxf_text.contains("141"),
+        "must emit code 141 for row heights"
+    );
+    assert!(
+        dxf_text.contains("142"),
+        "must emit code 142 for column widths"
+    );
 
     let doc2 = read_dxf(&dxf_text).unwrap();
     assert_eq!(doc2.entities.len(), 1);
@@ -60,9 +66,17 @@ fn table_without_heights_widths_loads_with_empty_vecs() {
         "  0\nEOF\n",
     );
     let doc = read_dxf(dxf).unwrap();
-    let table = doc.entities.iter().find(|e| matches!(&e.data, EntityData::Table { .. }));
+    let table = doc
+        .entities
+        .iter()
+        .find(|e| matches!(&e.data, EntityData::Table { .. }));
     assert!(table.is_some());
-    if let EntityData::Table { row_heights, column_widths, .. } = &table.unwrap().data {
+    if let EntityData::Table {
+        row_heights,
+        column_widths,
+        ..
+    } = &table.unwrap().data
+    {
         assert!(row_heights.is_empty());
         assert!(column_widths.is_empty());
     }

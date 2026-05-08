@@ -93,9 +93,7 @@ fn compute_bounds(doc: &CadDocument) -> WorldBounds {
                 b.include(center[0] - radius, center[1] - radius);
                 b.include(center[0] + radius, center[1] + radius);
             }
-            EntityData::Arc {
-                center, radius, ..
-            } => {
+            EntityData::Arc { center, radius, .. } => {
                 b.include(center[0] - radius, center[1] - radius);
                 b.include(center[0] + radius, center[1] + radius);
             }
@@ -133,13 +131,7 @@ fn fit_transform(bounds: WorldBounds) -> (f64, f64, f64) {
     (scale, px_cx - scale * cx, px_cy + scale * cy)
 }
 
-fn world_to_pixel(
-    wx: f64,
-    wy: f64,
-    scale: f64,
-    ox: f64,
-    oy: f64,
-) -> Option<(i32, i32)> {
+fn world_to_pixel(wx: f64, wy: f64, scale: f64, ox: f64, oy: f64) -> Option<(i32, i32)> {
     let px = scale * wx + ox;
     let py = oy - scale * wy;
     if !(px.is_finite() && py.is_finite()) {
@@ -203,8 +195,14 @@ fn draw_circle(img: &mut RgbImage, cx: i32, cy: i32, r: i32, color: Rgb<u8>) {
     let mut err = 1 - r;
     while y <= x {
         for &(dx, dy) in &[
-            (x, y), (-x, y), (x, -y), (-x, -y),
-            (y, x), (-y, x), (y, -x), (-y, -x),
+            (x, y),
+            (-x, y),
+            (x, -y),
+            (-x, -y),
+            (y, x),
+            (-y, x),
+            (y, -x),
+            (-y, -x),
         ] {
             put(img, cx + dx, cy + dy, color);
         }
@@ -234,14 +232,11 @@ fn draw_cross(img: &mut RgbImage, cx: i32, cy: i32, half_size: i32, color: Rgb<u
 pub fn export_pid_preview_png(doc: &CadDocument, path: &Path) -> Result<(), String> {
     let bounds = compute_bounds(doc);
     if bounds.is_degenerate() {
-        return Err(
-            "cannot export PID screenshot: preview has no renderable bounding box".into(),
-        );
+        return Err("cannot export PID screenshot: preview has no renderable bounding box".into());
     }
 
     let (scale, ox, oy) = fit_transform(bounds);
-    let mut img: RgbImage =
-        ImageBuffer::from_pixel(SCREENSHOT_WIDTH, SCREENSHOT_HEIGHT, WHITE);
+    let mut img: RgbImage = ImageBuffer::from_pixel(SCREENSHOT_WIDTH, SCREENSHOT_HEIGHT, WHITE);
 
     for entity in &doc.entities {
         match &entity.data {
@@ -314,9 +309,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn target_sample_pid_path() -> Option<PathBuf> {
-        let path = PathBuf::from(
-            r"D:\work\plant-code\cad\pid-parse\test-file\工艺管道及仪表流程-1.pid",
-        );
+        let path =
+            PathBuf::from(r"D:\work\plant-code\cad\pid-parse\test-file\工艺管道及仪表流程-1.pid");
         path.exists().then_some(path)
     }
 
@@ -334,7 +328,10 @@ mod tests {
         export_pid_preview_png(&bundle.native_preview, &out).expect("export png");
         assert!(out.exists(), "PNG must be written");
         let size = std::fs::metadata(&out).expect("stat").len();
-        assert!(size > 1024, "PNG file must have non-trivial size, got {size} bytes");
+        assert!(
+            size > 1024,
+            "PNG file must have non-trivial size, got {size} bytes"
+        );
     }
 
     #[test]
@@ -371,9 +368,7 @@ mod tests {
         }
 
         let bundle = crate::io::pid_import::open_pid(&sample).unwrap_or_else(|e| {
-            panic!(
-                "approved PID sample failed to open before screenshot regression could run: {e}"
-            )
+            panic!("approved PID sample failed to open before screenshot regression could run: {e}")
         });
         assert!(
             bundle.summary.object_count >= 1,

@@ -25,7 +25,9 @@ fn read_header_rejects_unknown_magic() {
 fn sniff_version_rejects_short_header_before_magic_parse() {
     assert_eq!(
         sniff_version(b"AC10").unwrap_err(),
-        DwgReadError::TruncatedHeader { expected_at_least: 6 }
+        DwgReadError::TruncatedHeader {
+            expected_at_least: 6
+        }
     );
 }
 
@@ -49,7 +51,9 @@ fn read_dwg_returns_seeded_document_scaffold_for_supported_fixture() {
     assert_eq!(doc.paper_space_handle().value(), 2);
     assert!(doc.block_records.contains_key(&doc.model_space_handle()));
     assert!(doc.block_records.contains_key(&doc.paper_space_handle()));
-    let model_layout = doc.layout_by_name("Model").expect("model layout should exist");
+    let model_layout = doc
+        .layout_by_name("Model")
+        .expect("model layout should exist");
     let paper_layout = doc
         .layout_by_name("Layout1")
         .expect("paper layout should exist");
@@ -68,9 +72,7 @@ fn read_dwg_returns_seeded_document_scaffold_for_supported_fixture() {
         Some(paper_layout.handle)
     );
     assert_eq!(
-        doc.root_dictionary
-            .entries
-            .get("ACAD_LAYOUT"),
+        doc.root_dictionary.entries.get("ACAD_LAYOUT"),
         Some(&doc.root_dictionary.handle)
     );
     assert_eq!(
@@ -97,13 +99,18 @@ fn resolve_document_preserves_pending_layers_and_repairs_layout_links() {
 
     let doc = h7cad_native_dwg::resolve_document(&pending).unwrap();
 
-    let model_layout = doc.layout_by_name("Model").expect("model layout should exist");
+    let model_layout = doc
+        .layout_by_name("Model")
+        .expect("model layout should exist");
     let paper_layout = doc
         .layout_by_name("Layout1")
         .expect("paper layout should exist");
     assert!(doc.layers.contains_key("0"));
     assert!(doc.layers.contains_key("Visible"));
-    assert_eq!(doc.tables.layer.entries.get("Visible"), Some(&h7cad_native_model::Handle::new(0x40)));
+    assert_eq!(
+        doc.tables.layer.entries.get("Visible"),
+        Some(&h7cad_native_model::Handle::new(0x40))
+    );
     assert_eq!(model_layout.owner, doc.root_dictionary.handle);
     assert_eq!(paper_layout.owner, doc.root_dictionary.handle);
     assert_eq!(
@@ -136,7 +143,9 @@ fn resolve_document_preserves_pending_layers_and_repairs_layout_links() {
 fn resolve_document_materializes_layout_block_and_entity_semantics() {
     let doc = read_dwg(&semantic_record_fixture("ownership-graph")).unwrap();
 
-    let model_layout = doc.layout_by_name("Model").expect("model layout should exist");
+    let model_layout = doc
+        .layout_by_name("Model")
+        .expect("model layout should exist");
     let model_block = doc
         .block_record_by_handle(model_layout.block_record_handle)
         .expect("model block should exist");
@@ -155,14 +164,26 @@ fn resolve_document_materializes_layout_block_and_entity_semantics() {
     assert_eq!(door_block.handle, h7cad_native_model::Handle::new(0x90));
     assert_eq!(model_entity.owner_handle, model_block.handle);
     assert_eq!(block_owned_entity.owner_handle, door_block.handle);
-    assert!(doc.objects.iter().all(|object| object.handle != h7cad_native_model::Handle::new(0x81)));
-    assert!(doc.objects.iter().all(|object| object.handle != h7cad_native_model::Handle::new(0x82)));
-    assert!(doc.objects.iter().all(|object| object.handle != h7cad_native_model::Handle::new(0x83)));
+    assert!(doc
+        .objects
+        .iter()
+        .all(|object| object.handle != h7cad_native_model::Handle::new(0x81)));
+    assert!(doc
+        .objects
+        .iter()
+        .all(|object| object.handle != h7cad_native_model::Handle::new(0x82)));
+    assert!(doc
+        .objects
+        .iter()
+        .all(|object| object.handle != h7cad_native_model::Handle::new(0x83)));
 }
 
 #[test]
 fn resolve_document_places_paper_space_entities_in_paper_space_outputs() {
-    let doc = read_dwg(&resolver_ownership_fixture("space-classification-ownership")).unwrap();
+    let doc = read_dwg(&resolver_ownership_fixture(
+        "space-classification-ownership",
+    ))
+    .unwrap();
 
     let model_entity = doc
         .get_entity(h7cad_native_model::Handle::new(0xA0))
@@ -173,10 +194,9 @@ fn resolve_document_places_paper_space_entities_in_paper_space_outputs() {
 
     assert!(doc.is_model_space_entity(model_entity));
     assert!(!doc.is_model_space_entity(paper_entity));
-    assert!(
-        doc.model_space_entities()
-            .any(|entity| entity.handle == h7cad_native_model::Handle::new(0xA0))
-    );
+    assert!(doc
+        .model_space_entities()
+        .any(|entity| entity.handle == h7cad_native_model::Handle::new(0xA0)));
     let layout1 = doc
         .layouts
         .get(&h7cad_native_model::Handle::new(0x92))
@@ -199,9 +219,15 @@ fn resolve_document_keeps_block_owned_entities_on_their_parsed_block() {
         .block_record_by_name("DoorBlock")
         .expect("door block should exist");
 
-    assert!(doc.entities.iter().all(|entity| entity.handle != h7cad_native_model::Handle::new(0xA2)));
+    assert!(doc
+        .entities
+        .iter()
+        .all(|entity| entity.handle != h7cad_native_model::Handle::new(0xA2)));
     assert_eq!(door_block.entities.len(), 1);
-    assert_eq!(door_block.entities[0].handle, h7cad_native_model::Handle::new(0xA2));
+    assert_eq!(
+        door_block.entities[0].handle,
+        h7cad_native_model::Handle::new(0xA2)
+    );
     assert_eq!(door_block.entities[0].owner_handle, door_block.handle);
 }
 
@@ -251,9 +277,21 @@ fn resolver_preserves_handles_owners_order_and_advances_allocation_state() {
     assert_eq!(
         resolved_projection,
         vec![
-            (0x30, 0, "DWG_TABLE_SECTION_0_RECORD_0_SIZE_3_TABLE_".to_string()),
-            (0x41, 0x90, "DWG_ENTITY_SECTION_1_RECORD_1_SIZE_4_ENTITY_".to_string()),
-            (0x52, 0x91, "DWG_OBJECT_SECTION_2_RECORD_2_SIZE_5_OBJECT_".to_string()),
+            (
+                0x30,
+                0,
+                "DWG_TABLE_SECTION_0_RECORD_0_SIZE_3_TABLE_".to_string()
+            ),
+            (
+                0x41,
+                0x90,
+                "DWG_ENTITY_SECTION_1_RECORD_1_SIZE_4_ENTITY_".to_string()
+            ),
+            (
+                0x52,
+                0x91,
+                "DWG_OBJECT_SECTION_2_RECORD_2_SIZE_5_OBJECT_".to_string()
+            ),
         ]
     );
     assert_eq!(doc.next_handle(), 0x92);
@@ -360,7 +398,10 @@ fn read_dwg_produces_deterministic_resolved_object_summaries() {
     let second = read_dwg(&bytes).unwrap();
 
     assert_eq!(first.objects.len(), second.objects.len());
-    assert_eq!(resolved_object_projection(&first), resolved_object_projection(&second));
+    assert_eq!(
+        resolved_object_projection(&first),
+        resolved_object_projection(&second)
+    );
 }
 
 #[test]
@@ -388,7 +429,12 @@ fn read_header_extracts_ac1018_section_count() {
 fn read_header_reports_ac1015_boundary_truncation() {
     let err = DwgFileHeader::parse(&truncated_supported_header(DwgVersion::Ac1015)).unwrap_err();
 
-    assert_eq!(err, DwgReadError::TruncatedHeader { expected_at_least: 25 });
+    assert_eq!(
+        err,
+        DwgReadError::TruncatedHeader {
+            expected_at_least: 25
+        }
+    );
 }
 
 #[test]
@@ -409,7 +455,11 @@ fn read_header_reports_ac1018_is_unsupported_header_layout() {
 
 #[test]
 fn read_header_extracts_ac1018_section_descriptors() {
-    let bytes = fixture_ac1018(2, &[(0x40, 0x20), (0x80, 0x08)], &[&vec![0; 0x20], &vec![0; 0x08]]);
+    let bytes = fixture_ac1018(
+        2,
+        &[(0x40, 0x20), (0x80, 0x08)],
+        &[&vec![0; 0x20], &vec![0; 0x08]],
+    );
     let header = DwgFileHeader::parse(&bytes).unwrap();
     let sections = SectionMap::parse(&bytes, &header).unwrap();
 
@@ -505,7 +555,10 @@ fn payload_order_follows_directory_order_when_offsets_are_non_monotonic() {
             },
         ]
     );
-    assert_eq!(payloads, vec![b"top".to_vec(), b"lo".to_vec(), b"mid!".to_vec()]);
+    assert_eq!(
+        payloads,
+        vec![b"top".to_vec(), b"lo".to_vec(), b"mid!".to_vec()]
+    );
 }
 
 #[test]
@@ -550,7 +603,11 @@ fn out_of_bounds_descriptor_fixture_reports_failing_section_context() {
 
 #[test]
 fn pending_document_preserves_section_directory_entries() {
-    let bytes = fixture_ac1018(2, &[(0x40, 0x20), (0x80, 0x08)], &[&vec![1; 0x20], &vec![2; 0x08]]);
+    let bytes = fixture_ac1018(
+        2,
+        &[(0x40, 0x20), (0x80, 0x08)],
+        &[&vec![1; 0x20], &vec![2; 0x08]],
+    );
     let header = DwgFileHeader::parse(&bytes).unwrap();
     let sections = SectionMap::parse(&bytes, &header).unwrap();
     let payloads = sections.read_section_payloads(&bytes).unwrap();
@@ -573,7 +630,12 @@ fn pending_document_section_accounting_matches_emitted_objects() {
         pending
             .sections
             .iter()
-            .map(|section| (section.index, section.offset, section.size, section.record_count))
+            .map(|section| (
+                section.index,
+                section.offset,
+                section.size,
+                section.record_count
+            ))
             .collect::<Vec<_>>(),
         vec![
             (0, 0x80, 0, 0),
@@ -585,7 +647,11 @@ fn pending_document_section_accounting_matches_emitted_objects() {
         ]
     );
     assert_eq!(
-        pending.sections.iter().map(|section| section.record_count).sum::<u32>() as usize,
+        pending
+            .sections
+            .iter()
+            .map(|section| section.record_count)
+            .sum::<u32>() as usize,
         pending.objects.len()
     );
 
@@ -618,7 +684,11 @@ fn pending_document_uses_pending_graph_edge_case_fixtures() {
     assert_eq!(pending.sections[4].payload, payloads[4].to_vec());
     assert_eq!(pending.sections[5].payload, payloads[5].to_vec());
     assert_eq!(
-        pending.sections.iter().map(|section| section.record_count).collect::<Vec<_>>(),
+        pending
+            .sections
+            .iter()
+            .map(|section| section.record_count)
+            .collect::<Vec<_>>(),
         vec![0, 1, 1, 1, 3, 2]
     );
     assert_eq!(pending.objects.len(), 8);
@@ -628,10 +698,22 @@ fn pending_document_uses_pending_graph_edge_case_fixtures() {
 fn pending_graph_fixture_payloads_cover_edge_cases() {
     let payloads = pending_graph_payloads();
 
-    assert_eq!(classify_section_records(payloads[0]).unwrap(), Vec::<Vec<u8>>::new());
-    assert_eq!(classify_section_records(payloads[1]).unwrap(), vec![b"\0\0\0".to_vec()]);
-    assert_eq!(classify_section_records(payloads[2]).unwrap(), vec![b"solo".to_vec()]);
-    assert_eq!(classify_section_records(payloads[3]).unwrap(), vec![b"tail".to_vec()]);
+    assert_eq!(
+        classify_section_records(payloads[0]).unwrap(),
+        Vec::<Vec<u8>>::new()
+    );
+    assert_eq!(
+        classify_section_records(payloads[1]).unwrap(),
+        vec![b"\0\0\0".to_vec()]
+    );
+    assert_eq!(
+        classify_section_records(payloads[2]).unwrap(),
+        vec![b"solo".to_vec()]
+    );
+    assert_eq!(
+        classify_section_records(payloads[3]).unwrap(),
+        vec![b"tail".to_vec()]
+    );
     assert_eq!(
         classify_section_records(payloads[4]).unwrap(),
         vec![b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]
@@ -656,7 +738,11 @@ fn pending_object_section_mapping_covers_each_real_section() {
                 .iter()
                 .find(|section| section.index == object.section_index)
                 .expect("pending object should map to a real section");
-            (object.section_index, record_payload_size(object), section.record_count)
+            (
+                object.section_index,
+                record_payload_size(object),
+                section.record_count,
+            )
         })
         .collect::<Vec<_>>();
 
@@ -790,7 +876,10 @@ fn semantic_fixture_payloads_cover_reordered_embedded_zero_and_collision_cases()
         semantic_fixture_sections(mixed_type),
         vec![
             vec![b"TBL:LAYER:LayerMixed:H80".to_vec()],
-            vec![b"TBL:LTYPE:Dashed:H81".to_vec(), b"TBL:STYLE:Annotative:H82".to_vec()],
+            vec![
+                b"TBL:LTYPE:Dashed:H81".to_vec(),
+                b"TBL:STYLE:Annotative:H82".to_vec()
+            ],
             vec![
                 b"OBJ:BLOCK:MixedBlock:H90".to_vec(),
                 b"OBJ:LAYOUT:MixedLayout:H91:B90".to_vec(),
@@ -819,15 +908,27 @@ fn mixed_type_fixture_preserves_expanded_semantic_identity_and_accounting() {
     let resolved = read_dwg(&bytes).unwrap();
 
     assert_eq!(
-        pending.sections.iter().map(|section| section.record_count).collect::<Vec<_>>(),
+        pending
+            .sections
+            .iter()
+            .map(|section| section.record_count)
+            .collect::<Vec<_>>(),
         vec![1, 2, 2, 4]
     );
     assert_eq!(
-        pending.sections.iter().map(|section| section.record_count).sum::<u32>() as usize,
+        pending
+            .sections
+            .iter()
+            .map(|section| section.record_count)
+            .sum::<u32>() as usize,
         pending.objects.len()
     );
 
-    let mut summaries = pending.objects.iter().map(summarize_object).collect::<Vec<_>>();
+    let mut summaries = pending
+        .objects
+        .iter()
+        .map(summarize_object)
+        .collect::<Vec<_>>();
     summaries.sort_by(|left, right| {
         left.semantic_identity
             .cmp(&right.semantic_identity)
@@ -838,25 +939,44 @@ fn mixed_type_fixture_preserves_expanded_semantic_identity_and_accounting() {
     assert_eq!(
         summaries
             .iter()
-            .map(|summary| (summary.semantic_identity.clone(), summary.semantic_link.clone()))
+            .map(|summary| (
+                summary.semantic_identity.clone(),
+                summary.semantic_link.clone()
+            ))
             .collect::<Vec<_>>(),
         vec![
             ("block:MixedBlock".to_string(), String::new()),
-            ("entity:INSERT".to_string(), "layer:LayerMixed|owner:90".to_string()),
-            ("entity:MTXT".to_string(), "layer:LayerMixed|owner:90".to_string()),
-            ("entity:TEXT".to_string(), "layer:LayerMixed|owner:90".to_string()),
-            ("layout:MixedLayout".to_string(), "block_handle:90".to_string()),
+            (
+                "entity:INSERT".to_string(),
+                "layer:LayerMixed|owner:90".to_string()
+            ),
+            (
+                "entity:MTXT".to_string(),
+                "layer:LayerMixed|owner:90".to_string()
+            ),
+            (
+                "entity:TEXT".to_string(),
+                "layer:LayerMixed|owner:90".to_string()
+            ),
+            (
+                "layout:MixedLayout".to_string(),
+                "block_handle:90".to_string()
+            ),
             ("object:NOTE".to_string(), "object:NOTE".to_string()),
-            ("table:LAYER:LayerMixed".to_string(), "handle:80".to_string()),
+            (
+                "table:LAYER:LayerMixed".to_string(),
+                "handle:80".to_string()
+            ),
             ("table:LTYPE:Dashed".to_string(), "handle:81".to_string()),
-            ("table:STYLE:Annotative".to_string(), "handle:82".to_string()),
+            (
+                "table:STYLE:Annotative".to_string(),
+                "handle:82".to_string()
+            ),
         ]
     );
 
-    let mut resolved_projection = resolved_parser_emitted_object_projection(
-        &resolved,
-        &[0x80, 0x81, 0x82, 0x92],
-    );
+    let mut resolved_projection =
+        resolved_parser_emitted_object_projection(&resolved, &[0x80, 0x81, 0x82, 0x92]);
     resolved_projection.sort();
     assert_eq!(
         resolved_projection,
@@ -864,20 +984,17 @@ fn mixed_type_fixture_preserves_expanded_semantic_identity_and_accounting() {
             (
                 0x80,
                 0,
-                "DWG_TABLE_SECTION_0_RECORD_0_SIZE_24_TABLE_LAYER_LAYERMIXED_HANDLE_80"
-                    .to_string(),
+                "DWG_TABLE_SECTION_0_RECORD_0_SIZE_24_TABLE_LAYER_LAYERMIXED_HANDLE_80".to_string(),
             ),
             (
                 0x81,
                 0,
-                "DWG_TABLE_SECTION_1_RECORD_0_SIZE_20_TABLE_LTYPE_DASHED_HANDLE_81"
-                    .to_string(),
+                "DWG_TABLE_SECTION_1_RECORD_0_SIZE_20_TABLE_LTYPE_DASHED_HANDLE_81".to_string(),
             ),
             (
                 0x82,
                 0,
-                "DWG_TABLE_SECTION_1_RECORD_1_SIZE_24_TABLE_STYLE_ANNOTATIVE_HANDLE_82"
-                    .to_string(),
+                "DWG_TABLE_SECTION_1_RECORD_1_SIZE_24_TABLE_STYLE_ANNOTATIVE_HANDLE_82".to_string(),
             ),
             (
                 0x92,
@@ -967,8 +1084,10 @@ fn semantic_fixture_bytes_remain_stable_across_layout_variants() {
     first_projection.sort();
     second_projection.sort();
     assert_eq!(first_projection, second_projection);
-    let mut first_variant_projection = pending_provenance_projection(&parse_pending_fixture(&first));
-    let mut second_variant_projection = pending_provenance_projection(&parse_pending_fixture(&second));
+    let mut first_variant_projection =
+        pending_provenance_projection(&parse_pending_fixture(&first));
+    let mut second_variant_projection =
+        pending_provenance_projection(&parse_pending_fixture(&second));
     first_variant_projection.sort();
     second_variant_projection.sort();
     assert_eq!(first_variant_projection, second_variant_projection);
@@ -1045,7 +1164,10 @@ fn resolver_ownership_fixture_cases_cover_layer_layout_space_and_invalid_referen
             vec![b"OBJ:LAYOUT:Layout1:H92:B91".to_vec()],
         ]
     );
-    assert_eq!(layout_case.parser_emitted_handles, vec![0x81, 0x82, 0x91, 0x92]);
+    assert_eq!(
+        layout_case.parser_emitted_handles,
+        vec![0x81, 0x82, 0x91, 0x92]
+    );
 
     let space_case = cases
         .iter()
@@ -1062,12 +1184,8 @@ fn resolver_ownership_fixture_cases_cover_layer_layout_space_and_invalid_referen
                 b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model".to_vec(),
                 b"OBJ:LAYOUT:Model:H82:B81".to_vec(),
             ],
-            vec![
-                b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1".to_vec(),
-            ],
-            vec![
-                b"OBJ:LAYOUT:Layout1:H92:B91".to_vec(),
-            ],
+            vec![b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1".to_vec(),],
+            vec![b"OBJ:LAYOUT:Layout1:H92:B91".to_vec(),],
             vec![
                 b"ENT:LINE:EA0:O81:LLayerModel".to_vec(),
                 b"ENT:TEXT:EA1:O91:LLayerPaper".to_vec(),
@@ -1093,7 +1211,10 @@ fn resolver_ownership_fixture_cases_cover_layer_layout_space_and_invalid_referen
             vec![b"ENT:INSERT:EA2:O90:LLayerModel".to_vec()],
         ]
     );
-    assert_eq!(block_owned_case.parser_emitted_handles, vec![0x80, 0x90, 0xA2]);
+    assert_eq!(
+        block_owned_case.parser_emitted_handles,
+        vec![0x80, 0x90, 0xA2]
+    );
 
     let invalid_case = cases
         .iter()
@@ -1134,7 +1255,8 @@ fn semantic_decode_prefixed_payloads_route_through_semantic_decoder() {
     let pending = parse_pending_fixture(&semantic_record_fixture("prefixed-semantic-payload"));
 
     assert_eq!(
-        pending.objects
+        pending
+            .objects
             .iter()
             .map(|object| object.semantic_identity.clone())
             .collect::<Vec<_>>(),
@@ -1144,7 +1266,8 @@ fn semantic_decode_prefixed_payloads_route_through_semantic_decoder() {
         ]
     );
     assert_eq!(
-        pending.objects
+        pending
+            .objects
             .iter()
             .map(|object| format!("{:?}", object.kind))
             .collect::<Vec<_>>(),
@@ -1260,7 +1383,10 @@ fn semantic_provenance_projection_is_stable_across_repeated_parses() {
     let first = parse_pending_fixture(&bytes);
     let second = parse_pending_fixture(&bytes);
 
-    assert_eq!(pending_semantic_projection(&first), pending_semantic_projection(&second));
+    assert_eq!(
+        pending_semantic_projection(&first),
+        pending_semantic_projection(&second)
+    );
 }
 
 #[test]
@@ -1332,7 +1458,10 @@ fn outward_summaries_distinguish_same_size_semantic_records_by_identity_fields()
 
     assert_eq!(summaries.len(), 2);
     assert_eq!(summaries[0].payload_size, summaries[1].payload_size);
-    assert_ne!(summaries[0].semantic_identity, summaries[1].semantic_identity);
+    assert_ne!(
+        summaries[0].semantic_identity,
+        summaries[1].semantic_identity
+    );
     assert_ne!(summaries[0].semantic_link, summaries[1].semantic_link);
 }
 
@@ -1486,9 +1615,7 @@ fn pending_provenance_projection(
     projection
 }
 
-fn resolved_object_projection(
-    doc: &h7cad_native_model::CadDocument,
-) -> Vec<(u64, u64, String)> {
+fn resolved_object_projection(doc: &h7cad_native_model::CadDocument) -> Vec<(u64, u64, String)> {
     doc.objects
         .iter()
         .map(|object| {
@@ -1516,7 +1643,9 @@ fn resolved_parser_emitted_object_projection(
             handles.contains(&object.handle.value()).then(|| {
                 let summary = match &object.data {
                     h7cad_native_model::ObjectData::Unknown { object_type } => object_type.clone(),
-                    other => panic!("expected parser-emitted unknown object summary, got {other:?}"),
+                    other => {
+                        panic!("expected parser-emitted unknown object summary, got {other:?}")
+                    }
                 };
                 (object.handle.value(), object.owner_handle.value(), summary)
             })
@@ -1533,7 +1662,11 @@ fn resolved_entity_projection(
     let mut projection = doc
         .entities
         .iter()
-        .chain(doc.block_records.values().flat_map(|block| block.entities.iter()))
+        .chain(
+            doc.block_records
+                .values()
+                .flat_map(|block| block.entities.iter()),
+        )
         .filter_map(|entity| {
             handles.contains(&entity.handle.value()).then(|| {
                 (
@@ -1594,123 +1727,146 @@ fn semantic_record_fixture_cases() -> Vec<SemanticFixtureCase> {
     vec![
         SemanticFixtureCase::new(
             "reordered-equivalent-a",
-            semantic_entries(&[0x80, 0xC0, 0xF0], &[
-                semantic_join(&[
-                    b"TBL:LAYER:LayerAlpha:H10",
-                    b"ENT:LINE:E10:O30:LLayerAlpha",
-                ]),
-                semantic_join(&[b"OBJ:BLOCK:BlockAlpha:H30:LAYOUT=Model"]),
-                semantic_join(&[b"OBJ:LAYOUT:Model:H20:B30"]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xC0, 0xF0],
+                &[
+                    semantic_join(&[b"TBL:LAYER:LayerAlpha:H10", b"ENT:LINE:E10:O30:LLayerAlpha"]),
+                    semantic_join(&[b"OBJ:BLOCK:BlockAlpha:H30:LAYOUT=Model"]),
+                    semantic_join(&[b"OBJ:LAYOUT:Model:H20:B30"]),
+                ],
+            ),
         ),
         SemanticFixtureCase::new(
             "reordered-equivalent-b",
-            semantic_entries(&[0x80, 0xB0, 0xF0], &[
-                semantic_join(&[b"OBJ:LAYOUT:Model:H20:B30"]),
-                semantic_join(&[
-                    b"TBL:LAYER:LayerAlpha:H10",
-                    b"ENT:LINE:E10:O30:LLayerAlpha",
-                ]),
-                semantic_join(&[b"OBJ:BLOCK:BlockAlpha:H30:LAYOUT=Model"]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xB0, 0xF0],
+                &[
+                    semantic_join(&[b"OBJ:LAYOUT:Model:H20:B30"]),
+                    semantic_join(&[b"TBL:LAYER:LayerAlpha:H10", b"ENT:LINE:E10:O30:LLayerAlpha"]),
+                    semantic_join(&[b"OBJ:BLOCK:BlockAlpha:H30:LAYOUT=Model"]),
+                ],
+            ),
         ),
         SemanticFixtureCase::new(
             "prefixed-semantic-payload",
             semantic_entries(
                 &[0x80],
-                &[b"\xAA\xBBnoiseTBL:LAYER:LayerPrefixed:H98\0ENT:LINE:E99:O80:LLayerPrefixed"
-                    .to_vec()],
+                &[
+                    b"\xAA\xBBnoiseTBL:LAYER:LayerPrefixed:H98\0ENT:LINE:E99:O80:LLayerPrefixed"
+                        .to_vec(),
+                ],
             ),
         ),
         SemanticFixtureCase::new(
             "embedded-zero",
-            semantic_entries(&[0x80], &[semantic_join(&[
-                b"OBJ:TEXT:Zero\0Payload:H44:O22",
-                b"ENT:ARC:E44:O22:LLayerZero",
-            ])]),
+            semantic_entries(
+                &[0x80],
+                &[semantic_join(&[
+                    b"OBJ:TEXT:Zero\0Payload:H44:O22",
+                    b"ENT:ARC:E44:O22:LLayerZero",
+                ])],
+            ),
         ),
         SemanticFixtureCase::new(
             "same-size-collision",
-            semantic_entries(&[0x80], &[semantic_join(&[
-                b"TBL:LTYPE:Dash:H50",
-                b"TBL:STYLE:Wide:H51",
-            ])]),
+            semantic_entries(
+                &[0x80],
+                &[semantic_join(&[
+                    b"TBL:LTYPE:Dash:H50",
+                    b"TBL:STYLE:Wide:H51",
+                ])],
+            ),
         ),
         SemanticFixtureCase::new(
             "layout-variant-a",
-            semantic_entries(&[0x80, 0xC0, 0xF0], &[
-                semantic_join(&[b"TBL:LAYER:LayerPaper:H70"]),
-                semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA"]),
-                semantic_join(&[
-                    b"OBJ:LAYOUT:LayoutA:H62:B72",
-                    b"ENT:TEXT:E73:O72:LLayerPaper",
-                    b"ENT:MTXT:E74:O72:LLayerPaper",
-                    b"ENT:INSERT:E75:O72:LLayerPaper:TB72",
-                ]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xC0, 0xF0],
+                &[
+                    semantic_join(&[b"TBL:LAYER:LayerPaper:H70"]),
+                    semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA"]),
+                    semantic_join(&[
+                        b"OBJ:LAYOUT:LayoutA:H62:B72",
+                        b"ENT:TEXT:E73:O72:LLayerPaper",
+                        b"ENT:MTXT:E74:O72:LLayerPaper",
+                        b"ENT:INSERT:E75:O72:LLayerPaper:TB72",
+                    ]),
+                ],
+            ),
         ),
         SemanticFixtureCase::new(
             "layout-variant-b",
-            semantic_entries(&[0x80, 0xB0, 0xE0, 0x120, 0x150], &[
-                semantic_join(&[b"TBL:LAYER:LayerPaper:H70"]),
-                semantic_join(&[b"ENT:TEXT:E73:O72:LLayerPaper"]),
-                semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA"]),
-                semantic_join(&[b"OBJ:LAYOUT:LayoutA:H62:B72"]),
-                semantic_join(&[
-                    b"ENT:MTXT:E74:O72:LLayerPaper",
-                    b"ENT:INSERT:E75:O72:LLayerPaper:TB72",
-                ]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xB0, 0xE0, 0x120, 0x150],
+                &[
+                    semantic_join(&[b"TBL:LAYER:LayerPaper:H70"]),
+                    semantic_join(&[b"ENT:TEXT:E73:O72:LLayerPaper"]),
+                    semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H72:LAYOUT=LayoutA"]),
+                    semantic_join(&[b"OBJ:LAYOUT:LayoutA:H62:B72"]),
+                    semantic_join(&[
+                        b"ENT:MTXT:E74:O72:LLayerPaper",
+                        b"ENT:INSERT:E75:O72:LLayerPaper:TB72",
+                    ]),
+                ],
+            ),
         ),
         SemanticFixtureCase::new(
             "handle-layer-reference",
-            semantic_entries(&[0x80, 0xB0, 0xE0], &[
-                semantic_join(&[b"TBL:LAYER:LayerRef:H99"]),
-                semantic_join(&[b"OBJ:BLOCK:*Model_Space:HA0:LAYOUT=Model"]),
-                semantic_join(&[b"ENT:LINE:EA1:OA0:LR99"]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xB0, 0xE0],
+                &[
+                    semantic_join(&[b"TBL:LAYER:LayerRef:H99"]),
+                    semantic_join(&[b"OBJ:BLOCK:*Model_Space:HA0:LAYOUT=Model"]),
+                    semantic_join(&[b"ENT:LINE:EA1:OA0:LR99"]),
+                ],
+            ),
         ),
         SemanticFixtureCase::new(
             "ownership-graph",
-            semantic_entries(&[0x80, 0xB0, 0xF0, 0x130], &[
-                semantic_join(&[b"TBL:LAYER:LayerModel:H80"]),
-                semantic_join(&[
-                    b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
-                    b"OBJ:LAYOUT:Model:H82:B81",
-                ]),
-                semantic_join(&[
-                    b"ENT:LINE:E83:O81:LLayerModel",
-                    b"ENT:INSERT:E84:O90:LLayerModel",
-                ]),
-                semantic_join(&[b"OBJ:BLOCK:DoorBlock:H90"]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xB0, 0xF0, 0x130],
+                &[
+                    semantic_join(&[b"TBL:LAYER:LayerModel:H80"]),
+                    semantic_join(&[
+                        b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
+                        b"OBJ:LAYOUT:Model:H82:B81",
+                    ]),
+                    semantic_join(&[
+                        b"ENT:LINE:E83:O81:LLayerModel",
+                        b"ENT:INSERT:E84:O90:LLayerModel",
+                    ]),
+                    semantic_join(&[b"OBJ:BLOCK:DoorBlock:H90"]),
+                ],
+            ),
         ),
         SemanticFixtureCase::new(
             "mixed-type-accounting",
-            semantic_entries(&[0x80, 0xB0, 0xF0, 0x140], &[
-                semantic_join(&[b"TBL:LAYER:LayerMixed:H80"]),
-                semantic_join(&[
-                    b"TBL:LTYPE:Dashed:H81",
-                    b"TBL:STYLE:Annotative:H82",
-                ]),
-                semantic_join(&[
-                    b"OBJ:BLOCK:MixedBlock:H90",
-                    b"OBJ:LAYOUT:MixedLayout:H91:B90",
-                ]),
-                semantic_join(&[
-                    b"OBJ:NOTE:NoteBlock:O90:H92",
-                    b"ENT:TEXT:EA0:O90:LLayerMixed",
-                    b"ENT:MTXT:EA1:O90:LLayerMixed",
-                    b"ENT:INSERT:EA2:O90:LLayerMixed:TB90",
-                ]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xB0, 0xF0, 0x140],
+                &[
+                    semantic_join(&[b"TBL:LAYER:LayerMixed:H80"]),
+                    semantic_join(&[b"TBL:LTYPE:Dashed:H81", b"TBL:STYLE:Annotative:H82"]),
+                    semantic_join(&[
+                        b"OBJ:BLOCK:MixedBlock:H90",
+                        b"OBJ:LAYOUT:MixedLayout:H91:B90",
+                    ]),
+                    semantic_join(&[
+                        b"OBJ:NOTE:NoteBlock:O90:H92",
+                        b"ENT:TEXT:EA0:O90:LLayerMixed",
+                        b"ENT:MTXT:EA1:O90:LLayerMixed",
+                        b"ENT:INSERT:EA2:O90:LLayerMixed:TB90",
+                    ]),
+                ],
+            ),
         ),
         SemanticFixtureCase::new(
             "invalid-ownership-graph",
-            semantic_entries(&[0x80, 0xC0], &[
-                semantic_join(&[b"OBJ:LAYOUT:Broken:H95:BFF"]),
-                semantic_join(&[b"ENT:LINE:E96:OFF:LLayerBroken"]),
-            ]),
+            semantic_entries(
+                &[0x80, 0xC0],
+                &[
+                    semantic_join(&[b"OBJ:LAYOUT:Broken:H95:BFF"]),
+                    semantic_join(&[b"ENT:LINE:E96:OFF:LLayerBroken"]),
+                ],
+            ),
         ),
     ]
 }
@@ -1745,7 +1901,11 @@ fn semantic_fixture_graph_projection(bytes: &[u8]) -> Vec<String> {
             ));
         }
     }
-    for entity in doc.entities.iter().chain(doc.block_records.values().flat_map(|block| block.entities.iter())) {
+    for entity in doc.entities.iter().chain(
+        doc.block_records
+            .values()
+            .flat_map(|block| block.entities.iter()),
+    ) {
         if matches!(entity.handle.value(), 0x83 | 0x84) {
             projection.push(format!(
                 "entity:{}:{}:{}",
@@ -1843,7 +2003,11 @@ struct SemanticFixtureCase {
 impl SemanticFixtureCase {
     fn new(id: &'static str, fixture: (Vec<(u32, u32)>, Vec<Vec<u8>>)) -> Self {
         let (entries, payloads) = fixture;
-        Self { id, entries, payloads }
+        Self {
+            id,
+            entries,
+            payloads,
+        }
     }
 }
 
@@ -1859,10 +2023,13 @@ fn resolver_ownership_fixture_cases() -> Vec<ResolverOwnershipFixtureCase> {
             id: "layer-table-consistency",
             fixture: SemanticFixtureCase::new(
                 "layer-table-consistency",
-                semantic_entries(&[0x80], &[semantic_join(&[
-                    b"TBL:LAYER:LayerModel:H80",
-                    b"TBL:LAYER:LayerPaper:H88",
-                ])]),
+                semantic_entries(
+                    &[0x80],
+                    &[semantic_join(&[
+                        b"TBL:LAYER:LayerModel:H80",
+                        b"TBL:LAYER:LayerPaper:H88",
+                    ])],
+                ),
             ),
             parser_emitted_handles: vec![0x80, 0x88],
         },
@@ -1870,14 +2037,17 @@ fn resolver_ownership_fixture_cases() -> Vec<ResolverOwnershipFixtureCase> {
             id: "layout-block-pairing",
             fixture: SemanticFixtureCase::new(
                 "layout-block-pairing",
-                semantic_entries(&[0x80, 0xC0, 0xF0], &[
-                    semantic_join(&[
-                        b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
-                        b"OBJ:LAYOUT:Model:H82:B81",
-                    ]),
-                    semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1"]),
-                    semantic_join(&[b"OBJ:LAYOUT:Layout1:H92:B91"]),
-                ]),
+                semantic_entries(
+                    &[0x80, 0xC0, 0xF0],
+                    &[
+                        semantic_join(&[
+                            b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
+                            b"OBJ:LAYOUT:Model:H82:B81",
+                        ]),
+                        semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1"]),
+                        semantic_join(&[b"OBJ:LAYOUT:Layout1:H92:B91"]),
+                    ],
+                ),
             ),
             parser_emitted_handles: vec![0x81, 0x82, 0x91, 0x92],
         },
@@ -1885,22 +2055,22 @@ fn resolver_ownership_fixture_cases() -> Vec<ResolverOwnershipFixtureCase> {
             id: "space-classification-ownership",
             fixture: SemanticFixtureCase::new(
                 "space-classification-ownership",
-                semantic_entries(&[0x80, 0xC0, 0x100, 0x120, 0x140], &[
-                    semantic_join(&[
-                        b"TBL:LAYER:LayerModel:H80",
-                        b"TBL:LAYER:LayerPaper:H88",
-                    ]),
-                    semantic_join(&[
-                        b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
-                        b"OBJ:LAYOUT:Model:H82:B81",
-                    ]),
-                    semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1"]),
-                    semantic_join(&[b"OBJ:LAYOUT:Layout1:H92:B91"]),
-                    semantic_join(&[
-                        b"ENT:LINE:EA0:O81:LLayerModel",
-                        b"ENT:TEXT:EA1:O91:LLayerPaper",
-                    ]),
-                ]),
+                semantic_entries(
+                    &[0x80, 0xC0, 0x100, 0x120, 0x140],
+                    &[
+                        semantic_join(&[b"TBL:LAYER:LayerModel:H80", b"TBL:LAYER:LayerPaper:H88"]),
+                        semantic_join(&[
+                            b"OBJ:BLOCK:*Model_Space:H81:LAYOUT=Model",
+                            b"OBJ:LAYOUT:Model:H82:B81",
+                        ]),
+                        semantic_join(&[b"OBJ:BLOCK:*Paper_Space:H91:LAYOUT=Layout1"]),
+                        semantic_join(&[b"OBJ:LAYOUT:Layout1:H92:B91"]),
+                        semantic_join(&[
+                            b"ENT:LINE:EA0:O81:LLayerModel",
+                            b"ENT:TEXT:EA1:O91:LLayerPaper",
+                        ]),
+                    ],
+                ),
             ),
             parser_emitted_handles: vec![0x80, 0x88, 0x81, 0x82, 0x91, 0x92, 0xA0, 0xA1],
         },
@@ -1908,13 +2078,13 @@ fn resolver_ownership_fixture_cases() -> Vec<ResolverOwnershipFixtureCase> {
             id: "non-layout-block-ownership",
             fixture: SemanticFixtureCase::new(
                 "non-layout-block-ownership",
-                semantic_entries(&[0x80, 0xB0], &[
-                    semantic_join(&[
-                        b"TBL:LAYER:LayerModel:H80",
-                        b"OBJ:BLOCK:DoorBlock:H90",
-                    ]),
-                    semantic_join(&[b"ENT:INSERT:EA2:O90:LLayerModel"]),
-                ]),
+                semantic_entries(
+                    &[0x80, 0xB0],
+                    &[
+                        semantic_join(&[b"TBL:LAYER:LayerModel:H80", b"OBJ:BLOCK:DoorBlock:H90"]),
+                        semantic_join(&[b"ENT:INSERT:EA2:O90:LLayerModel"]),
+                    ],
+                ),
             ),
             parser_emitted_handles: vec![0x80, 0x90, 0xA2],
         },
@@ -1922,10 +2092,13 @@ fn resolver_ownership_fixture_cases() -> Vec<ResolverOwnershipFixtureCase> {
             id: "invalid-semantic-reference",
             fixture: SemanticFixtureCase::new(
                 "invalid-semantic-reference",
-                semantic_entries(&[0x80, 0xC0], &[
-                    semantic_join(&[b"OBJ:LAYOUT:Broken:H95:BFF"]),
-                    semantic_join(&[b"ENT:LINE:E96:OFF:LLayerBroken"]),
-                ]),
+                semantic_entries(
+                    &[0x80, 0xC0],
+                    &[
+                        semantic_join(&[b"OBJ:LAYOUT:Broken:H95:BFF"]),
+                        semantic_join(&[b"ENT:LINE:E96:OFF:LLayerBroken"]),
+                    ],
+                ),
             ),
             parser_emitted_handles: vec![0x95, 0x96],
         },
@@ -1943,7 +2116,11 @@ fn resolver_ownership_fixture(id: &str) -> Vec<u8> {
         .iter()
         .map(|payload| payload.as_slice())
         .collect::<Vec<_>>();
-    fixture_ac1018(case.fixture.entries.len() as u32, &case.fixture.entries, &payload_refs)
+    fixture_ac1018(
+        case.fixture.entries.len() as u32,
+        &case.fixture.entries,
+        &payload_refs,
+    )
 }
 
 // AC1015 is the only DWG version with a fully plumbed synthetic

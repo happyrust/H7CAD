@@ -1,5 +1,5 @@
-use acadrust::entities::{AttributeEntity, Insert};
 use crate::types::Vector3;
+use acadrust::entities::{AttributeEntity, Insert};
 use acadrust::EntityType;
 use glam::Vec3;
 
@@ -18,7 +18,9 @@ pub fn tool() -> ToolDef {
 
 enum Step {
     Name,
-    Point { name: String },
+    Point {
+        name: String,
+    },
     /// Attribute filling: prompt the user tag by tag.
     FillAttr {
         /// Attribute definitions: (tag, prompt_text, default_value).
@@ -70,7 +72,11 @@ impl CadCommand for InsertBlockCommand {
                     } else {
                         format!("  <{default}>")
                     };
-                    let prompt_text = if prompt.is_empty() { tag.as_str() } else { prompt.as_str() };
+                    let prompt_text = if prompt.is_empty() {
+                        tag.as_str()
+                    } else {
+                        prompt.as_str()
+                    };
                     format!("INSERT  {prompt_text}{default_hint}:")
                 } else {
                     "INSERT  Filling attributes...".into()
@@ -132,11 +138,17 @@ impl CadCommand for InsertBlockCommand {
     }
 
     fn attreq_set_attdefs(&mut self, attdefs: Vec<(String, String, String)>) {
-        self.step = Step::FillAttr { attdefs, idx: 0, values: vec![] };
+        self.step = Step::FillAttr {
+            attdefs,
+            idx: 0,
+            values: vec![],
+        };
     }
 
     fn attreq_take_insert(&mut self) -> Option<acadrust::EntityType> {
-        self.pending_insert.take().map(|ins| EntityType::Insert(ins))
+        self.pending_insert
+            .take()
+            .map(|ins| EntityType::Insert(ins))
     }
 }
 
@@ -152,9 +164,18 @@ impl InsertBlockCommand {
             _ => return CmdResult::Cancel,
         };
 
-        let value = if text.trim().is_empty() { default } else { text.trim().to_string() };
+        let value = if text.trim().is_empty() {
+            default
+        } else {
+            text.trim().to_string()
+        };
 
-        if let Step::FillAttr { ref mut values, ref mut idx, .. } = self.step {
+        if let Step::FillAttr {
+            ref mut values,
+            ref mut idx,
+            ..
+        } = self.step
+        {
             values.push((tag, value));
             *idx = next_idx;
         }

@@ -249,7 +249,10 @@ impl CadCommand for CircleCDCommand {
             let d: f32 = text.trim().replace(',', ".").parse().ok()?;
             if d > 0.0 {
                 defaults::set_circle_diam(d);
-                return Some(CmdResult::CommitAndExitNative(make_circle(*c, (d / 2.0) as f64)));
+                return Some(CmdResult::CommitAndExitNative(make_circle(
+                    *c,
+                    (d / 2.0) as f64,
+                )));
             }
         }
         None
@@ -336,7 +339,9 @@ impl CadCommand for Circle3PCommand {
         }
         let (a, b, c) = (self.pts[0], self.pts[1], self.pts[2]);
         match circumcircle(a, b, c) {
-            Some((center, radius)) => CmdResult::CommitAndExitNative(make_circle(center, radius as f64)),
+            Some((center, radius)) => {
+                CmdResult::CommitAndExitNative(make_circle(center, radius as f64))
+            }
             None => {
                 self.pts.pop();
                 CmdResult::NeedPoint
@@ -823,7 +828,9 @@ impl CadCommand for CircleTTRCommand {
             let hint = (*hit1 + *hit2) * 0.5;
             let candidates = ttr_candidates(*obj1, *obj2, r);
             if let Some(center) = best_of(&candidates, hint) {
-                Some(CmdResult::CommitAndExitNative(make_circle(center, r as f64)))
+                Some(CmdResult::CommitAndExitNative(make_circle(
+                    center, r as f64,
+                )))
             } else {
                 Some(CmdResult::Cancel)
             }

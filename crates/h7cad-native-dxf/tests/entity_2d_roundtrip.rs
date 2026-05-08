@@ -7,10 +7,7 @@ fn roundtrip(doc: &CadDocument) -> CadDocument {
 }
 
 fn assert_f64_eq(a: f64, b: f64, label: &str) {
-    assert!(
-        (a - b).abs() < 1e-9,
-        "{label}: {a} != {b}"
-    );
+    assert!((a - b).abs() < 1e-9, "{label}: {a} != {b}");
 }
 
 fn assert_point_eq(a: &[f64; 3], b: &[f64; 3], label: &str) {
@@ -66,16 +63,38 @@ fn roundtrip_lwpolyline_with_bulge() {
     let mut doc = CadDocument::new();
     doc.entities.push(Entity::new(EntityData::LwPolyline {
         vertices: vec![
-            LwVertex { x: 0.0, y: 0.0, bulge: 0.5, start_width: 0.0, end_width: 0.0 },
-            LwVertex { x: 10.0, y: 0.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
-            LwVertex { x: 10.0, y: 10.0, bulge: -0.3, start_width: 0.0, end_width: 0.0 },
+            LwVertex {
+                x: 0.0,
+                y: 0.0,
+                bulge: 0.5,
+                start_width: 0.0,
+                end_width: 0.0,
+            },
+            LwVertex {
+                x: 10.0,
+                y: 0.0,
+                bulge: 0.0,
+                start_width: 0.0,
+                end_width: 0.0,
+            },
+            LwVertex {
+                x: 10.0,
+                y: 10.0,
+                bulge: -0.3,
+                start_width: 0.0,
+                end_width: 0.0,
+            },
         ],
         closed: true,
         constant_width: 0.25,
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::LwPolyline { vertices, closed, constant_width } => {
+        EntityData::LwPolyline {
+            vertices,
+            closed,
+            constant_width,
+        } => {
             assert_eq!(vertices.len(), 3);
             assert_f64_eq(vertices[0].bulge, 0.5, "v0.bulge");
             assert_f64_eq(vertices[2].bulge, -0.3, "v2.bulge");
@@ -106,7 +125,13 @@ fn roundtrip_spline() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Spline { degree, closed, knots, control_points, .. } => {
+        EntityData::Spline {
+            degree,
+            closed,
+            knots,
+            control_points,
+            ..
+        } => {
             assert_eq!(*degree, 3);
             assert!(!*closed);
             assert_eq!(knots.len(), 8);
@@ -298,7 +323,11 @@ fn roundtrip_solid_2d() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Solid { corners, normal, thickness } => {
+        EntityData::Solid {
+            corners,
+            normal,
+            thickness,
+        } => {
             assert_point_eq(&corners[0], &[0.0, 0.0, 0.0], "corner0");
             assert_point_eq(&corners[1], &[10.0, 0.0, 0.0], "corner1");
             assert_point_eq(&corners[2], &[10.0, 5.0, 0.0], "corner2");
@@ -342,7 +371,10 @@ fn roundtrip_leader() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Leader { vertices, has_arrowhead } => {
+        EntityData::Leader {
+            vertices,
+            has_arrowhead,
+        } => {
             assert_eq!(vertices.len(), 3);
             assert_point_eq(&vertices[0], &[0.0, 0.0, 0.0], "v0");
             assert_point_eq(&vertices[2], &[10.0, 5.0, 0.0], "v2");
@@ -355,10 +387,8 @@ fn roundtrip_leader() {
 #[test]
 fn roundtrip_entity_common_fields() {
     let mut doc = CadDocument::new();
-    doc.layers.insert(
-        "TestLayer".into(),
-        LayerProperties::new("TestLayer"),
-    );
+    doc.layers
+        .insert("TestLayer".into(), LayerProperties::new("TestLayer"));
     let mut entity = Entity::new(EntityData::Line {
         start: [0.0, 0.0, 0.0],
         end: [1.0, 1.0, 0.0],
@@ -388,7 +418,11 @@ fn roundtrip_viewport() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Viewport { center, width, height } => {
+        EntityData::Viewport {
+            center,
+            width,
+            height,
+        } => {
             assert_point_eq(center, &[150.0, 100.0, 0.0], "center");
             assert_f64_eq(*width, 297.0, "width");
             assert_f64_eq(*height, 210.0, "height");
@@ -446,7 +480,12 @@ fn roundtrip_arc() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Arc { center, radius, start_angle, end_angle } => {
+        EntityData::Arc {
+            center,
+            radius,
+            start_angle,
+            end_angle,
+        } => {
             assert_point_eq(center, &[0.0, 0.0, 0.0], "center");
             assert_f64_eq(*radius, 5.0, "radius");
             assert_f64_eq(*start_angle, 30.0, "start_angle");
@@ -484,7 +523,11 @@ fn roundtrip_polyline_2d_closed_with_bulge() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Polyline { polyline_type, vertices, closed } => {
+        EntityData::Polyline {
+            polyline_type,
+            vertices,
+            closed,
+        } => {
             assert_eq!(*polyline_type, PolylineType::Polyline2D);
             assert_eq!(vertices.len(), 4);
             assert!(*closed, "closed flag must survive");
@@ -510,7 +553,11 @@ fn roundtrip_polyline_3d_open() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Polyline { polyline_type, vertices, closed } => {
+        EntityData::Polyline {
+            polyline_type,
+            vertices,
+            closed,
+        } => {
             assert_eq!(*polyline_type, PolylineType::Polyline3D);
             assert_eq!(vertices.len(), 3);
             assert!(!*closed);
@@ -535,7 +582,11 @@ fn roundtrip_polyline_polygon_mesh() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Polyline { polyline_type, vertices, .. } => {
+        EntityData::Polyline {
+            polyline_type,
+            vertices,
+            ..
+        } => {
             assert_eq!(*polyline_type, PolylineType::PolygonMesh);
             assert_eq!(vertices.len(), 4);
         }
@@ -557,7 +608,11 @@ fn roundtrip_polyline_polyface_mesh() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Polyline { polyline_type, vertices, .. } => {
+        EntityData::Polyline {
+            polyline_type,
+            vertices,
+            ..
+        } => {
             assert_eq!(*polyline_type, PolylineType::PolyfaceMesh);
             assert_eq!(vertices.len(), 3);
         }
@@ -842,9 +897,7 @@ fn roundtrip_hatch_with_island_topology() {
     }));
     let doc2 = roundtrip(&doc);
     match &doc2.entities[0].data {
-        EntityData::Hatch {
-            boundary_paths, ..
-        } => {
+        EntityData::Hatch { boundary_paths, .. } => {
             assert_eq!(
                 boundary_paths.len(),
                 2,
@@ -911,7 +964,9 @@ fn roundtrip_hatch_with_arc_edges() {
                         has_carc = true;
                     }
                     HatchEdge::EllipticArc {
-                        minor_ratio, is_ccw, ..
+                        minor_ratio,
+                        is_ccw,
+                        ..
                     } => {
                         assert_f64_eq(*minor_ratio, 0.5, "earc.ratio");
                         assert!(!*is_ccw, "earc.is_ccw");
@@ -920,7 +975,10 @@ fn roundtrip_hatch_with_arc_edges() {
                     _ => {}
                 }
             }
-            assert!(has_line && has_carc && has_earc, "all edge kinds must survive");
+            assert!(
+                has_line && has_carc && has_earc,
+                "all edge kinds must survive"
+            );
         }
         other => panic!("expected Hatch, got {other:?}"),
     }
@@ -934,12 +992,7 @@ fn roundtrip_hatch_with_arc_edges() {
 fn roundtrip_wipeout_with_elevation() {
     let mut doc = CadDocument::new();
     doc.entities.push(Entity::new(EntityData::Wipeout {
-        clip_vertices: vec![
-            [0.0, 0.0],
-            [10.0, 0.0],
-            [10.0, 10.0],
-            [0.0, 10.0],
-        ],
+        clip_vertices: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
         elevation: 2.75,
     }));
     let doc2 = roundtrip(&doc);
@@ -1019,11 +1072,7 @@ fn roundtrip_multileader_text_with_leader_line() {
         text_bottom_attachment_type: 9,
         text_top_attachment_type: 9,
         text_location: Some([50.0, 50.0, 0.0]),
-        leader_vertices: vec![
-            [0.0, 0.0, 0.0],
-            [25.0, 25.0, 0.0],
-            [50.0, 50.0, 0.0],
-        ],
+        leader_vertices: vec![[0.0, 0.0, 0.0], [25.0, 25.0, 0.0], [50.0, 50.0, 0.0]],
         leader_root_lengths: vec![3],
     }));
     let doc2 = roundtrip(&doc);
@@ -1116,14 +1165,13 @@ fn double_roundtrip_basic_geometry_is_structurally_stable() {
     }
 
     // Per-entity key-field check for the three entities we added.
-    let circle_stable = doc3
-        .entities
-        .iter()
-        .any(|e| matches!(&e.data,
+    let circle_stable = doc3.entities.iter().any(|e| {
+        matches!(&e.data,
             EntityData::Circle { center, radius }
                 if (center[0] - 5.0).abs() < 1e-9
                     && (center[1] - 5.0).abs() < 1e-9
-                    && (*radius - 3.0).abs() < 1e-9));
+                    && (*radius - 3.0).abs() < 1e-9)
+    });
     assert!(circle_stable, "circle geometry must survive two roundtrips");
 
     let text_stable = doc3
@@ -1196,10 +1244,7 @@ fn roundtrip_entity_xdata_preserves_multiple_app_blocks() {
                 (1040, "3.14".into()),
             ],
         ),
-        (
-            "OTHER_PLUGIN".into(),
-            vec![(1000, "payload".into())],
-        ),
+        ("OTHER_PLUGIN".into(), vec![(1000, "payload".into())]),
     ];
     let mut doc = CadDocument::new();
     doc.entities.push(entity);
@@ -1217,11 +1262,7 @@ fn roundtrip_entity_xdata_preserves_multiple_app_blocks() {
         .iter()
         .find(|(a, _)| a == "ACAD_MY_APP")
         .expect("ACAD_MY_APP app block");
-    let codes: Vec<(i16, &str)> = acad_block
-        .1
-        .iter()
-        .map(|(c, v)| (*c, v.as_str()))
-        .collect();
+    let codes: Vec<(i16, &str)> = acad_block.1.iter().map(|(c, v)| (*c, v.as_str())).collect();
     assert!(codes.contains(&(1000, "MARKER")));
     assert!(codes.contains(&(1070, "42")));
     assert!(codes.contains(&(1040, "3.14")));
@@ -1268,6 +1309,7 @@ fn roundtrip_dimstyle_table_preserves_render_relevant_fields() {
     ds.dimscale = 2.5;
     ds.dimasz = 3.0;
     ds.dimexo = 0.75;
+    ds.dimexe = 0.9;
     ds.dimgap = 1.5;
     ds.dimtxt = 4.0;
     ds.dimdec = 2;
@@ -1284,6 +1326,7 @@ fn roundtrip_dimstyle_table_preserves_render_relevant_fields() {
     assert_f64_eq(back.dimscale, 2.5, "dimscale");
     assert_f64_eq(back.dimasz, 3.0, "dimasz");
     assert_f64_eq(back.dimexo, 0.75, "dimexo");
+    assert_f64_eq(back.dimexe, 0.9, "dimexe");
     assert_f64_eq(back.dimgap, 1.5, "dimgap");
     assert_f64_eq(back.dimtxt, 4.0, "dimtxt");
     assert_eq!(back.dimdec, 2);
@@ -1415,8 +1458,7 @@ fn roundtrip_proxy_entity_preserves_class_ids_and_raw_payload() {
             assert_eq!(*class_id, 498);
             assert_eq!(*application_class_id, 499);
             // All non-common raw codes must come back in order.
-            let pairs: Vec<(i16, &str)> =
-                raw_codes.iter().map(|(c, v)| (*c, v.as_str())).collect();
+            let pairs: Vec<(i16, &str)> = raw_codes.iter().map(|(c, v)| (*c, v.as_str())).collect();
             assert!(
                 pairs.contains(&(70, "1")),
                 "raw code 70 must survive; got {pairs:?}"

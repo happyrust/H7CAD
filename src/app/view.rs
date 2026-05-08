@@ -1,13 +1,15 @@
-use super::{H7CAD, Message};
 use super::document::DocumentTab;
-use super::history::history_dropdown_labels;
 use super::helpers::grid_plane_from_camera;
-use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
+use super::history::history_dropdown_labels;
+use super::{Message, H7CAD};
 use crate::scene::grip::grips_to_screen;
 use crate::scene::paper_canvas::PaperCanvas;
 use crate::scene::viewport_pane::{PaperViewportPane, ViewportPane};
+use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
 use crate::ui::overlay;
-use iced::widget::{button, canvas, column, container, mouse_area, row, shader, stack, text, Row, Space};
+use iced::widget::{
+    button, canvas, column, container, mouse_area, row, shader, stack, text, Row, Space,
+};
 use iced::window;
 use iced::{keyboard, Background, Border, Color, Element, Fill, Subscription, Task, Theme};
 
@@ -22,10 +24,14 @@ impl H7CAD {
         }
         if Some(window_id) == self.page_setup_window {
             return crate::ui::page_setup::view_window(
-                &self.page_setup_w, &self.page_setup_h,
-                &self.page_setup_plot_area, self.page_setup_center,
-                &self.page_setup_offset_x, &self.page_setup_offset_y,
-                &self.page_setup_rotation, &self.page_setup_scale,
+                &self.page_setup_w,
+                &self.page_setup_h,
+                &self.page_setup_plot_area,
+                self.page_setup_center,
+                &self.page_setup_offset_x,
+                &self.page_setup_offset_y,
+                &self.page_setup_rotation,
+                &self.page_setup_scale,
             );
         }
         if Some(window_id) == self.svg_export_window {
@@ -44,68 +50,150 @@ impl H7CAD {
         }
         if Some(window_id) == self.textstyle_window {
             let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.text_styles
-                .iter().map(|s| s.name.clone()).collect();
-            return crate::ui::textstyle::view_window(styles, &self.textstyle_selected,
-                &self.textstyle_font, &self.textstyle_width, &self.textstyle_oblique);
+            let styles: Vec<String> = tab
+                .scene
+                .document
+                .text_styles
+                .iter()
+                .map(|s| s.name.clone())
+                .collect();
+            return crate::ui::textstyle::view_window(
+                styles,
+                &self.textstyle_selected,
+                &self.textstyle_font,
+                &self.textstyle_width,
+                &self.textstyle_oblique,
+            );
         }
         if Some(window_id) == self.tablestyle_window {
             use acadrust::objects::ObjectType;
             let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.objects.values()
-                .filter_map(|o| if let ObjectType::TableStyle(s) = o { Some(s.name.clone()) } else { None })
+            let styles: Vec<String> = tab
+                .scene
+                .document
+                .objects
+                .values()
+                .filter_map(|o| {
+                    if let ObjectType::TableStyle(s) = o {
+                        Some(s.name.clone())
+                    } else {
+                        None
+                    }
+                })
                 .collect();
-            let selected_style = tab.scene.document.objects.values()
-                .find_map(|o| if let ObjectType::TableStyle(s) = o {
-                    if s.name == self.tablestyle_selected { Some(s) } else { None }
-                } else { None });
-            return crate::ui::tablestyle::view_window(styles, &self.tablestyle_selected, selected_style);
+            let selected_style = tab.scene.document.objects.values().find_map(|o| {
+                if let ObjectType::TableStyle(s) = o {
+                    if s.name == self.tablestyle_selected {
+                        Some(s)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+            return crate::ui::tablestyle::view_window(
+                styles,
+                &self.tablestyle_selected,
+                selected_style,
+            );
         }
         if Some(window_id) == self.mlstyle_window {
             use acadrust::objects::ObjectType;
             let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.objects.values()
-                .filter_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s.name.clone()) } else { None })
+            let styles: Vec<String> = tab
+                .scene
+                .document
+                .objects
+                .values()
+                .filter_map(|o| {
+                    if let ObjectType::MLineStyle(s) = o {
+                        Some(s.name.clone())
+                    } else {
+                        None
+                    }
+                })
                 .collect();
-            let selected_style = tab.scene.document.objects.values()
-                .find_map(|o| if let ObjectType::MLineStyle(s) = o {
-                    if s.name == self.mlstyle_selected { Some(s) } else { None }
-                } else { None });
-            return crate::ui::mlstyle::view_window(styles, &self.mlstyle_selected, selected_style,
-                tab.scene.document.header.multiline_style.clone());
+            let selected_style = tab.scene.document.objects.values().find_map(|o| {
+                if let ObjectType::MLineStyle(s) = o {
+                    if s.name == self.mlstyle_selected {
+                        Some(s)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+            return crate::ui::mlstyle::view_window(
+                styles,
+                &self.mlstyle_selected,
+                selected_style,
+                tab.scene.document.header.multiline_style.clone(),
+            );
         }
         if Some(window_id) == self.layout_manager_window {
             let i = self.active_tab;
             let layouts = self.tabs[i].scene.layout_names();
             let current = self.tabs[i].scene.current_layout.clone();
-            return crate::ui::layout_manager::view_window(layouts, &self.layout_manager_selected,
-                &self.layout_manager_rename_buf, current);
+            return crate::ui::layout_manager::view_window(
+                layouts,
+                &self.layout_manager_selected,
+                &self.layout_manager_rename_buf,
+                current,
+            );
         }
         if Some(window_id) == self.plotstyle_window {
             return crate::ui::plotstyle::view_window(
-                self.active_plot_style.as_ref(), self.plotstyle_panel_aci,
-                &self.ps_color_buf, &self.ps_lineweight_buf, &self.ps_screening_buf,
+                self.active_plot_style.as_ref(),
+                self.plotstyle_panel_aci,
+                &self.ps_color_buf,
+                &self.ps_lineweight_buf,
+                &self.ps_screening_buf,
             );
         }
         if Some(window_id) == self.dimstyle_window {
             let tab = &self.tabs[self.active_tab];
-            let styles: Vec<String> = tab.scene.document.dim_styles
-                .iter().map(|s| s.name.clone()).collect();
+            let styles: Vec<String> = tab
+                .scene
+                .document
+                .dim_styles
+                .iter()
+                .map(|s| s.name.clone())
+                .collect();
             return crate::ui::dimstyle::view_window(
-                styles, &self.dimstyle_selected, self.dimstyle_tab,
+                styles,
+                &self.dimstyle_selected,
+                self.dimstyle_tab,
                 crate::ui::dimstyle::DimStyleValues {
-                    dimdle: &self.ds_dimdle,   dimdli: &self.ds_dimdli,  dimgap: &self.ds_dimgap,
-                    dimexe: &self.ds_dimexe,   dimexo: &self.ds_dimexo,
-                    dimsd1: self.ds_dimsd1,    dimsd2: self.ds_dimsd2,
-                    dimse1: self.ds_dimse1,    dimse2: self.ds_dimse2,
-                    dimasz: &self.ds_dimasz,   dimcen: &self.ds_dimcen,  dimtsz: &self.ds_dimtsz,
-                    dimtxt: &self.ds_dimtxt,   dimtxsty: &self.ds_dimtxsty, dimtad: &self.ds_dimtad,
-                    dimtih: self.ds_dimtih,    dimtoh: self.ds_dimtoh,
-                    dimscale: &self.ds_dimscale, dimlfac: &self.ds_dimlfac,
-                    dimlunit: &self.ds_dimlunit, dimdec: &self.ds_dimdec, dimpost: &self.ds_dimpost,
-                    dimtol: self.ds_dimtol,    dimlim: self.ds_dimlim,
-                    dimtp: &self.ds_dimtp,     dimtm: &self.ds_dimtm,
-                    dimtdec: &self.ds_dimtdec, dimtfac: &self.ds_dimtfac,
+                    dimdle: &self.ds_dimdle,
+                    dimdli: &self.ds_dimdli,
+                    dimgap: &self.ds_dimgap,
+                    dimexe: &self.ds_dimexe,
+                    dimexo: &self.ds_dimexo,
+                    dimsd1: self.ds_dimsd1,
+                    dimsd2: self.ds_dimsd2,
+                    dimse1: self.ds_dimse1,
+                    dimse2: self.ds_dimse2,
+                    dimasz: &self.ds_dimasz,
+                    dimcen: &self.ds_dimcen,
+                    dimtsz: &self.ds_dimtsz,
+                    dimtxt: &self.ds_dimtxt,
+                    dimtxsty: &self.ds_dimtxsty,
+                    dimtad: &self.ds_dimtad,
+                    dimtih: self.ds_dimtih,
+                    dimtoh: self.ds_dimtoh,
+                    dimscale: &self.ds_dimscale,
+                    dimlfac: &self.ds_dimlfac,
+                    dimlunit: &self.ds_dimlunit,
+                    dimdec: &self.ds_dimdec,
+                    dimpost: &self.ds_dimpost,
+                    dimtol: self.ds_dimtol,
+                    dimlim: self.ds_dimlim,
+                    dimtp: &self.ds_dimtp,
+                    dimtm: &self.ds_dimtm,
+                    dimtdec: &self.ds_dimtdec,
+                    dimtfac: &self.ds_dimtfac,
                 },
             );
         }
@@ -136,7 +224,10 @@ impl H7CAD {
                 if tab.active_cmd.is_none() && !tab.selected_grips.is_empty() {
                     let (vw, vh) = tab.scene.selection.borrow().vp_size;
                     let bounds = iced::Rectangle {
-                        x: 0.0, y: 0.0, width: vw, height: vh,
+                        x: 0.0,
+                        y: 0.0,
+                        width: vw,
+                        height: vh,
                     };
                     let vp_mat = tab.scene.camera.borrow().view_proj(bounds);
                     let sel_h = tab.selected_handle;
@@ -155,7 +246,11 @@ impl H7CAD {
                                 .active_grip
                                 .as_ref()
                                 .map_or(false, |g| Some(g.handle) == sel_h && g.grip_id == grip_id);
-                            overlay::GripMarker { pos: screen, shape, is_hot }
+                            overlay::GripMarker {
+                                pos: screen,
+                                shape,
+                                is_hot,
+                            }
                         })
                         .collect()
                 } else {
@@ -163,7 +258,12 @@ impl H7CAD {
                 };
 
             let (vw, vh) = tab.scene.selection.borrow().vp_size;
-            let vp_bounds = iced::Rectangle { x: 0.0, y: 0.0, width: vw, height: vh };
+            let vp_bounds = iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: vw,
+                height: vh,
+            };
 
             let grid = if self.show_grid {
                 let cam = tab.scene.camera.borrow();
@@ -190,24 +290,41 @@ impl H7CAD {
             // OST tracking points → screen positions.
             let ost_points: Vec<overlay::OstTrackPoint> = if self.snapper.otrack_enabled {
                 let vp_mat = tab.scene.camera.borrow().view_proj(vp_bounds);
-                self.snapper.tracking_points.iter().map(|&wp| {
-                    let ndc = vp_mat.project_point3(wp);
-                    overlay::OstTrackPoint {
-                        screen: iced::Point::new(
-                            (ndc.x + 1.0) * 0.5 * vp_bounds.width,
-                            (1.0 - ndc.y) * 0.5 * vp_bounds.height,
-                        ),
-                    }
-                }).collect()
+                self.snapper
+                    .tracking_points
+                    .iter()
+                    .map(|&wp| {
+                        let ndc = vp_mat.project_point3(wp);
+                        overlay::OstTrackPoint {
+                            screen: iced::Point::new(
+                                (ndc.x + 1.0) * 0.5 * vp_bounds.width,
+                                (1.0 - ndc.y) * 0.5 * vp_bounds.height,
+                            ),
+                        }
+                    })
+                    .collect()
             } else {
                 vec![]
             };
 
-            overlay::selection_overlay(sel, snap_info, grips, grid, ucs_icon, ost_points, tab.last_cursor_screen, !is_paper && self.show_viewcube)
+            overlay::selection_overlay(
+                sel,
+                snap_info,
+                grips,
+                grid,
+                ucs_icon,
+                ost_points,
+                tab.last_cursor_screen,
+                !is_paper && self.show_viewcube,
+            )
         };
 
         let info = container(overlay::info_bar(
-            if is_paper { &tab.scene.current_layout } else { "Custom View" },
+            if is_paper {
+                &tab.scene.current_layout
+            } else {
+                "Custom View"
+            },
             &tab.visual_style,
         ))
         .padding([4, 6]);
@@ -227,11 +344,21 @@ impl H7CAD {
 
         let bg_color = if is_paper {
             // Desk color — matches the DESK constant in paper_canvas.rs.
-            Color { r: 0.22, g: 0.24, b: 0.28, a: 1.0 }
+            Color {
+                r: 0.22,
+                g: 0.24,
+                b: 0.28,
+                a: 1.0,
+            }
         } else {
             tab.bg_color
                 .map(|[r, g, b, a]| Color { r, g, b, a })
-                .unwrap_or(Color { r: 0.11, g: 0.11, b: 0.11, a: 1.0 })
+                .unwrap_or(Color {
+                    r: 0.11,
+                    g: 0.11,
+                    b: 0.11,
+                    a: 1.0,
+                })
         };
 
         // Dynamic input overlay — shown when a command is active and DYN is on.
@@ -248,7 +375,10 @@ impl H7CAD {
                 } else {
                     format!("X:{:.3}  Y:{:.3}", w.x, w.z)
                 };
-                Some(overlay::dynamic_input_overlay(tab.last_cursor_screen, label))
+                Some(overlay::dynamic_input_overlay(
+                    tab.last_cursor_screen,
+                    label,
+                ))
             } else {
                 None
             };
@@ -272,7 +402,12 @@ impl H7CAD {
             let nav = container(overlay::nav_toolbar())
                 .align_right(Fill)
                 .align_top(Fill)
-                .padding(iced::Padding { top: 148.0, right: 8.0, bottom: 0.0, left: 0.0 });
+                .padding(iced::Padding {
+                    top: 148.0,
+                    right: 8.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                });
             viewport_stack = viewport_stack.push(nav);
         }
 
@@ -288,7 +423,12 @@ impl H7CAD {
             )
             .align_right(Fill)
             .align_top(Fill)
-            .padding(iced::Padding { top: VIEWCUBE_PAD, right: VIEWCUBE_PAD, bottom: 0.0, left: 0.0 })
+            .padding(iced::Padding {
+                top: VIEWCUBE_PAD,
+                right: VIEWCUBE_PAD,
+                bottom: 0.0,
+                left: 0.0,
+            })
             .width(Fill)
             .height(Fill)
             .into();
@@ -315,7 +455,10 @@ impl H7CAD {
         };
 
         let center_row: Element<'_, Message> = if tab.is_pid() {
-            let pid_state = tab.pid_state.as_ref().expect("pid tab should carry pid_state");
+            let pid_state = tab
+                .pid_state
+                .as_ref()
+                .expect("pid tab should carry pid_state");
             let browser = crate::ui::pid_browser::view_panel(
                 pid_state.active_section,
                 &pid_state.search_text,
@@ -328,16 +471,21 @@ impl H7CAD {
                 row![
                     button(text("Fit All").size(11)).on_press(Message::PidFitAll),
                     button(text("Locate Selection").size(11)).on_press(Message::PidLocateSelection),
-                    button(text(if pid_state.hide_meta { "Show Meta" } else { "Hide Meta" }).size(11))
-                        .on_press(Message::PidToggleHideMeta),
                     button(
-                        text(
-                            if pid_state.hide_unresolved {
-                                "Show Unresolved"
-                            } else {
-                                "Hide Unresolved"
-                            }
-                        )
+                        text(if pid_state.hide_meta {
+                            "Show Meta"
+                        } else {
+                            "Hide Meta"
+                        })
+                        .size(11)
+                    )
+                    .on_press(Message::PidToggleHideMeta),
+                    button(
+                        text(if pid_state.hide_unresolved {
+                            "Show Unresolved"
+                        } else {
+                            "Hide Unresolved"
+                        })
                         .size(11)
                     )
                     .on_press(Message::PidToggleHideUnresolved),
@@ -346,8 +494,15 @@ impl H7CAD {
             )
             .padding([6, 8]);
 
-            let graph_column: Element<'_, Message> =
-                column![toolbar, viewport_stack].width(Fill).height(Fill).into();
+            let graph_column: Element<'_, Message> = column![toolbar, viewport_stack]
+                .width(Fill)
+                .height(Fill)
+                .into();
+            let properties_el: Element<'_, Message> = if self.show_properties {
+                tab.properties.view()
+            } else {
+                Space::new().into()
+            };
 
             if let Some(wp) = ws_panel {
                 row![wp, browser, graph_column, properties_el]
@@ -372,9 +527,8 @@ impl H7CAD {
                 .into()
         };
 
-        let center_stack = iced::widget::stack![center_row]
-            .width(Fill)
-            .height(Fill);
+        let center_stack = iced::widget::stack![center_row].width(Fill).height(Fill);
+
 
         let main_ui = container({
             let mut col = column![self.ribbon.view(
@@ -386,8 +540,8 @@ impl H7CAD {
                 col = col.push(doc_tab_bar(&self.tabs, self.active_tab));
             }
             col.push(center_stack)
-               .push(self.command_line.view())
-               .push(self.status_bar.view(
+                .push(self.command_line.view())
+                .push(self.status_bar.view(
                     &self.snapper,
                     self.snap_popup_open,
                     self.ortho_mode,
@@ -403,12 +557,17 @@ impl H7CAD {
                     tab.scene.viewport_count(),
                     tab.scene.active_viewport.is_some(),
                     self.show_layout_tabs,
-               ))
-               .width(Fill)
-               .height(Fill)
+                ))
+                .width(Fill)
+                .height(Fill)
         })
         .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(Color { r: 0.11, g: 0.11, b: 0.11, a: 1.0 })),
+            background: Some(Background::Color(Color {
+                r: 0.11,
+                g: 0.11,
+                b: 0.11,
+                a: 1.0,
+            })),
             ..Default::default()
         })
         .width(Fill)
@@ -428,12 +587,11 @@ impl H7CAD {
             )
             .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
-        let layout_ctx_layer: Element<'_, Message> =
-            if let Some(name) = &self.layout_context_menu {
-                layout_context_menu_overlay(name)
-            } else {
-                iced::widget::Space::new().width(0).height(0).into()
-            };
+        let layout_ctx_layer: Element<'_, Message> = if let Some(name) = &self.layout_context_menu {
+            layout_context_menu_overlay(name)
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
 
         // ── Viewport right-click context menu ─────────────────────────────
         let viewport_ctx_layer: Element<'_, Message> = {
@@ -441,15 +599,29 @@ impl H7CAD {
             if let Some(p) = ctx_pos {
                 let has_cmd = tab.active_cmd.is_some();
                 let has_selection = !tab.scene.selected.is_empty();
-                let last_cmds: Vec<String> = self.command_line.cmd_recall
-                    .iter().rev().take(3).cloned().collect();
+                let last_cmds: Vec<String> = self
+                    .command_line
+                    .cmd_recall
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .cloned()
+                    .collect();
                 viewport_context_menu_overlay(p, has_cmd, has_selection, last_cmds)
             } else {
                 iced::widget::Space::new().width(0).height(0).into()
             }
         };
 
-        stack![main_ui, self.app_menu.view(), snap_layer, dropdown_layer, layout_ctx_layer, viewport_ctx_layer].into()
+        stack![
+            main_ui,
+            self.app_menu.view(),
+            snap_layer,
+            dropdown_layer,
+            layout_ctx_layer,
+            viewport_ctx_layer
+        ]
+        .into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -561,9 +733,7 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
     // 2-D canvas for the paper sheet — paper entities, viewport borders, and
     // inactive viewport projections are rendered as vector paths.  This lets
     // users select/edit paper-space entities directly without entering MSPACE.
-    let paper_sheet = canvas(PaperCanvas::new(scene))
-        .width(Fill)
-        .height(Fill);
+    let paper_sheet = canvas(PaperCanvas::new(scene)).width(Fill).height(Fill);
 
     if let Some(vp_handle) = scene.active_viewport {
         let (canvas_w, canvas_h) = scene.selection.borrow().vp_size;
@@ -580,17 +750,19 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
 
             let positioned = column![
                 Space::new().height(iced::Length::Fixed(y)),
-                row![
-                    Space::new().width(iced::Length::Fixed(x)),
-                    vp_widget,
-                ],
+                row![Space::new().width(iced::Length::Fixed(x)), vp_widget,],
             ]
             .width(Fill)
             .height(Fill);
 
             // Blue border drawn on top of the 3-D overlay so the viewport
             // boundary is always visible even when the shader fills the area.
-            const VP_BORDER: Color = Color { r: 0.18, g: 0.52, b: 0.95, a: 1.0 };
+            const VP_BORDER: Color = Color {
+                r: 0.18,
+                g: 0.52,
+                b: 0.95,
+                a: 1.0,
+            };
             let border_frame = container(
                 Space::new()
                     .width(iced::Length::Fixed(w))
@@ -607,10 +779,7 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
 
             let border_layer = column![
                 Space::new().height(iced::Length::Fixed(y)),
-                row![
-                    Space::new().width(iced::Length::Fixed(x)),
-                    border_frame,
-                ],
+                row![Space::new().width(iced::Length::Fixed(x)), border_frame,],
             ]
             .width(Fill)
             .height(Fill);
@@ -628,22 +797,66 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
 // ── Document tab bar ───────────────────────────────────────────────────────
 
 pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Element<'a, Message> {
-    const BAR_BG: Color = Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 };
-    const TAB_ACTIVE: Color = Color { r: 0.22, g: 0.22, b: 0.22, a: 1.0 };
-    const TAB_HOVER: Color = Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 };
-    const TAB_INACTIVE: Color = Color { r: 0.13, g: 0.13, b: 0.13, a: 1.0 };
-    const ACCENT: Color = Color { r: 0.20, g: 0.55, b: 0.90, a: 1.0 };
+    const BAR_BG: Color = Color {
+        r: 0.13,
+        g: 0.13,
+        b: 0.13,
+        a: 1.0,
+    };
+    const TAB_ACTIVE: Color = Color {
+        r: 0.22,
+        g: 0.22,
+        b: 0.22,
+        a: 1.0,
+    };
+    const TAB_HOVER: Color = Color {
+        r: 0.18,
+        g: 0.18,
+        b: 0.18,
+        a: 1.0,
+    };
+    const TAB_INACTIVE: Color = Color {
+        r: 0.13,
+        g: 0.13,
+        b: 0.13,
+        a: 1.0,
+    };
+    const ACCENT: Color = Color {
+        r: 0.20,
+        g: 0.55,
+        b: 0.90,
+        a: 1.0,
+    };
     const TEXT_ACTIVE: Color = Color::WHITE;
-    const TEXT_INACTIVE: Color = Color { r: 0.60, g: 0.60, b: 0.60, a: 1.0 };
-    const CLOSE_HOVER: Color = Color { r: 0.70, g: 0.22, b: 0.22, a: 1.0 };
-    const BORDER_COLOR: Color = Color { r: 0.25, g: 0.25, b: 0.25, a: 1.0 };
+    const TEXT_INACTIVE: Color = Color {
+        r: 0.60,
+        g: 0.60,
+        b: 0.60,
+        a: 1.0,
+    };
+    const CLOSE_HOVER: Color = Color {
+        r: 0.70,
+        g: 0.22,
+        b: 0.22,
+        a: 1.0,
+    };
+    const BORDER_COLOR: Color = Color {
+        r: 0.25,
+        g: 0.25,
+        b: 0.25,
+        a: 1.0,
+    };
 
     let mut bar = Row::new().spacing(0).align_y(iced::Center);
 
     for (idx, tab) in tabs.iter().enumerate() {
         let is_active = idx == active_tab;
         let name = tab.tab_display_name();
-        let label = if tab.dirty { format!("● {}", name) } else { name };
+        let label = if tab.dirty {
+            format!("● {}", name)
+        } else {
+            name
+        };
 
         let title_btn = button(text(label).size(12))
             .on_press(Message::TabSwitch(idx))
@@ -654,9 +867,17 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
                     (false, button::Status::Hovered) => TAB_HOVER,
                     _ => TAB_INACTIVE,
                 })),
-                text_color: if is_active { TEXT_ACTIVE } else { TEXT_INACTIVE },
+                text_color: if is_active {
+                    TEXT_ACTIVE
+                } else {
+                    TEXT_INACTIVE
+                },
                 border: Border {
-                    color: if is_active { ACCENT } else { Color::TRANSPARENT },
+                    color: if is_active {
+                        ACCENT
+                    } else {
+                        Color::TRANSPARENT
+                    },
                     width: if is_active { 1.0 } else { 0.0 },
                     radius: 0.0.into(),
                 },
@@ -664,42 +885,69 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
                 snap: false,
             });
 
-        let close_btn = button(text("×").size(11).color(Color { r: 0.55, g: 0.55, b: 0.55, a: 1.0 }))
-            .on_press(Message::TabClose(idx))
-            .padding([3, 5])
-            .style(move |_: &Theme, status| button::Style {
-                background: Some(Background::Color(match status {
-                    button::Status::Hovered => CLOSE_HOVER,
-                    _ => if is_active { TAB_ACTIVE } else { TAB_INACTIVE },
-                })),
-                border: Border { radius: 3.0.into(), ..Default::default() },
+        let close_btn = button(text("×").size(11).color(Color {
+            r: 0.55,
+            g: 0.55,
+            b: 0.55,
+            a: 1.0,
+        }))
+        .on_press(Message::TabClose(idx))
+        .padding([3, 5])
+        .style(move |_: &Theme, status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered => CLOSE_HOVER,
+                _ => {
+                    if is_active {
+                        TAB_ACTIVE
+                    } else {
+                        TAB_INACTIVE
+                    }
+                }
+            })),
+            border: Border {
+                radius: 3.0.into(),
                 ..Default::default()
-            });
+            },
+            ..Default::default()
+        });
 
         bar = bar.push(
-            container(row![title_btn, close_btn].spacing(0).align_y(iced::Center))
-                .style(move |_: &Theme| container::Style {
+            container(row![title_btn, close_btn].spacing(0).align_y(iced::Center)).style(
+                move |_: &Theme| container::Style {
                     border: Border {
-                        color: if is_active { BORDER_COLOR } else { Color::TRANSPARENT },
+                        color: if is_active {
+                            BORDER_COLOR
+                        } else {
+                            Color::TRANSPARENT
+                        },
                         width: if is_active { 1.0 } else { 0.0 },
                         radius: 0.0.into(),
                     },
                     ..Default::default()
-                }),
+                },
+            ),
         );
     }
 
-    let new_btn = button(text("+").size(14).color(Color { r: 0.65, g: 0.65, b: 0.65, a: 1.0 }))
-        .on_press(Message::TabNew)
-        .padding([4, 10])
-        .style(|_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => TAB_HOVER,
-                _ => Color::TRANSPARENT,
-            })),
-            border: Border { radius: 0.0.into(), ..Default::default() },
+    let new_btn = button(text("+").size(14).color(Color {
+        r: 0.65,
+        g: 0.65,
+        b: 0.65,
+        a: 1.0,
+    }))
+    .on_press(Message::TabNew)
+    .padding([4, 10])
+    .style(|_: &Theme, status| button::Style {
+        background: Some(Background::Color(match status {
+            button::Status::Hovered => TAB_HOVER,
+            _ => Color::TRANSPARENT,
+        })),
+        border: Border {
+            radius: 0.0.into(),
             ..Default::default()
-        });
+        },
+        ..Default::default()
+    });
 
     bar = bar.push(new_btn);
     bar = bar.push(iced::widget::Space::new().width(Fill));
@@ -730,11 +978,36 @@ fn viewport_context_menu_overlay(
     has_selection: bool,
     last_cmds: Vec<String>,
 ) -> Element<'static, Message> {
-    const MENU_BG: Color = Color { r: 0.17, g: 0.17, b: 0.17, a: 1.0 };
-    const MENU_BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-    const ITEM_HOVER: Color = Color { r: 0.25, g: 0.45, b: 0.70, a: 1.0 };
-    const TEXT_COL: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
-    const SEP_COL: Color = Color { r: 0.30, g: 0.30, b: 0.30, a: 1.0 };
+    const MENU_BG: Color = Color {
+        r: 0.17,
+        g: 0.17,
+        b: 0.17,
+        a: 1.0,
+    };
+    const MENU_BORDER: Color = Color {
+        r: 0.35,
+        g: 0.35,
+        b: 0.35,
+        a: 1.0,
+    };
+    const ITEM_HOVER: Color = Color {
+        r: 0.25,
+        g: 0.45,
+        b: 0.70,
+        a: 1.0,
+    };
+    const TEXT_COL: Color = Color {
+        r: 0.88,
+        g: 0.88,
+        b: 0.88,
+        a: 1.0,
+    };
+    const SEP_COL: Color = Color {
+        r: 0.30,
+        g: 0.30,
+        b: 0.30,
+        a: 1.0,
+    };
 
     let item = |label: String, msg: Message| -> Element<'static, Message> {
         button(text(label).size(12).color(TEXT_COL))
@@ -788,12 +1061,24 @@ fn viewport_context_menu_overlay(
         }
         if has_selection {
             items.push(item("Delete".to_string(), Message::DeleteSelected));
-            items.push(item("Move".to_string(), Message::Command("MOVE".to_string())));
-            items.push(item("Copy".to_string(), Message::Command("COPY".to_string())));
+            items.push(item(
+                "Move".to_string(),
+                Message::Command("MOVE".to_string()),
+            ));
+            items.push(item(
+                "Copy".to_string(),
+                Message::Command("COPY".to_string()),
+            ));
             items.push(sep());
         }
-        items.push(item("Select All".to_string(), Message::Command("SELECTALL".to_string())));
-        items.push(item("Zoom Extents".to_string(), Message::Command("ZOOM".to_string())));
+        items.push(item(
+            "Select All".to_string(),
+            Message::Command("SELECTALL".to_string()),
+        ));
+        items.push(item(
+            "Zoom Extents".to_string(),
+            Message::Command("ZOOM".to_string()),
+        ));
     }
 
     let menu_col = column(items).spacing(0).width(180);
@@ -801,17 +1086,19 @@ fn viewport_context_menu_overlay(
     let menu = container(menu_col)
         .style(move |_: &Theme| container::Style {
             background: Some(Background::Color(MENU_BG)),
-            border: Border { color: MENU_BORDER, width: 1.0, radius: 4.0.into() },
+            border: Border {
+                color: MENU_BORDER,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
             ..Default::default()
         })
         .padding([4, 0]);
 
     // Click-catcher to close the menu when clicking outside.
-    let catcher = mouse_area(
-        container(Space::new()).width(Fill).height(Fill),
-    )
-    .on_press(Message::ViewportContextMenuClose)
-    .on_right_press(Message::ViewportContextMenuClose);
+    let catcher = mouse_area(container(Space::new()).width(Fill).height(Fill))
+        .on_press(Message::ViewportContextMenuClose)
+        .on_right_press(Message::ViewportContextMenuClose);
 
     // Position using top/left spacing.
     let positioned = column![
@@ -827,10 +1114,30 @@ fn viewport_context_menu_overlay(
 /// A small right-click context menu rendered above the status bar.
 /// The `name` is the layout tab that was right-clicked.
 fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
-    const MENU_BG: Color = Color { r: 0.17, g: 0.17, b: 0.17, a: 1.0 };
-    const MENU_BORDER: Color = Color { r: 0.35, g: 0.35, b: 0.35, a: 1.0 };
-    const ITEM_HOVER: Color = Color { r: 0.25, g: 0.45, b: 0.70, a: 1.0 };
-    const TEXT_COLOR: Color = Color { r: 0.88, g: 0.88, b: 0.88, a: 1.0 };
+    const MENU_BG: Color = Color {
+        r: 0.17,
+        g: 0.17,
+        b: 0.17,
+        a: 1.0,
+    };
+    const MENU_BORDER: Color = Color {
+        r: 0.35,
+        g: 0.35,
+        b: 0.35,
+        a: 1.0,
+    };
+    const ITEM_HOVER: Color = Color {
+        r: 0.25,
+        g: 0.45,
+        b: 0.70,
+        a: 1.0,
+    };
+    const TEXT_COLOR: Color = Color {
+        r: 0.88,
+        g: 0.88,
+        b: 0.88,
+        a: 1.0,
+    };
 
     let item = |label: &'static str, msg: Message| {
         button(text(label).size(12).color(TEXT_COLOR))
@@ -884,8 +1191,12 @@ fn layout_context_menu_overlay(name: &str) -> Element<'_, Message> {
     let positioned = container(menu)
         .align_bottom(Fill)
         .align_left(Fill)
-        .padding(iced::Padding { top: 0.0, right: 0.0, bottom: 30.0, left: 8.0 });
+        .padding(iced::Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 30.0,
+            left: 8.0,
+        });
 
     stack![catcher, positioned].into()
 }
-

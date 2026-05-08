@@ -16,12 +16,12 @@
 
 use std::f64::consts::TAU;
 
+use crate::types::Vector3;
 use acadrust::entities::EntityCommon;
 use acadrust::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Dimension, Line as LineEnt, LwPolyline, MLine,
 };
 use acadrust::entities::{Polyline, Polyline2D};
-use crate::types::Vector3;
 use acadrust::{CadDocument, EntityType, Handle};
 
 use crate::command::{CadCommand, CmdResult};
@@ -273,10 +273,10 @@ fn bulge_to_arc(
 
     // acadrust arcs are always CCW: positive bulge → CCW from p0 to p1
     // Negative bulge → CW from p0 to p1 = CCW from p1 to p0
-    let (start_deg, end_deg) = if b > 0.0 {
-        (norm_deg(a0_rad.to_degrees()), norm_deg(a1_rad.to_degrees()))
+    let (start_angle, end_angle) = if b > 0.0 {
+        (norm_angle(a0_rad), norm_angle(a1_rad))
     } else {
-        (norm_deg(a1_rad.to_degrees()), norm_deg(a0_rad.to_degrees()))
+        (norm_angle(a1_rad), norm_angle(a0_rad))
     };
 
     let mut common = common_src.clone();
@@ -286,16 +286,15 @@ fn bulge_to_arc(
         common,
         center: Vector3::new(cx, cy, elevation),
         radius: r,
-        start_angle: start_deg,
-        end_angle: end_deg,
+        start_angle,
+        end_angle,
         ..ArcEnt::new()
     };
     Some(EntityType::Arc(arc))
 }
 
-fn norm_deg(a: f64) -> f64 {
-    let t = TAU.to_degrees();
-    ((a % t) + t) % t
+fn norm_angle(a: f64) -> f64 {
+    ((a % TAU) + TAU) % TAU
 }
 
 fn explode_mline(ml: &MLine) -> Vec<EntityType> {
@@ -311,10 +310,16 @@ fn explode_mline(ml: &MLine) -> Vec<EntityType> {
     // Helper: build a Line from two Vector3 positions.
     let make_line = |common: &acadrust::entities::EntityCommon,
                      s: &crate::types::Vector3,
-                     e: &crate::types::Vector3| -> EntityType {
+                     e: &crate::types::Vector3|
+     -> EntityType {
         let mut c = common.clone();
         c.handle = Handle::NULL;
-        EntityType::Line(LineEnt { common: c, start: s.clone(), end: e.clone(), ..LineEnt::new() })
+        EntityType::Line(LineEnt {
+            common: c,
+            start: s.clone(),
+            end: e.clone(),
+            ..LineEnt::new()
+        })
     };
 
     // For each segment, emit the center-spine line and the two ±scale/2 offset lines.
@@ -362,20 +367,30 @@ fn explode_dimension(dim: &Dimension) -> Vec<EntityType> {
     let make_seg = |a: &Vector3, b: &Vector3, common: &EntityCommon| -> EntityType {
         let mut c = common.clone();
         c.handle = Handle::NULL;
-        EntityType::Line(LineEnt { common: c, start: a.clone(), end: b.clone(), ..LineEnt::new() })
+        EntityType::Line(LineEnt {
+            common: c,
+            start: a.clone(),
+            end: b.clone(),
+            ..LineEnt::new()
+        })
     };
 
     let v3 = |x: f64, y: f64, z: f64| Vector3::new(x, y, z);
 
     match dim {
         Dimension::Aligned(d) => {
-            let fx = d.first_point.x;  let fy = d.first_point.y;
-            let sx = d.second_point.x; let sy = d.second_point.y;
-            let dx_s = sx - fx; let dy_s = sy - fy;
-            let len = (dx_s*dx_s + dy_s*dy_s).sqrt().max(1e-12);
+            let fx = d.first_point.x;
+            let fy = d.first_point.y;
+            let sx = d.second_point.x;
+            let sy = d.second_point.y;
+            let dx_s = sx - fx;
+            let dy_s = sy - fy;
+            let len = (dx_s * dx_s + dy_s * dy_s).sqrt().max(1e-12);
             let axis_angle = dy_s.atan2(dx_s);
-            let perp_x = -(axis_angle.sin()); let perp_y = axis_angle.cos();
-            let offset = (d.definition_point.x - fx) * perp_x + (d.definition_point.y - fy) * perp_y;
+            let perp_x = -(axis_angle.sin());
+            let perp_y = axis_angle.cos();
+            let offset =
+                (d.definition_point.x - fx) * perp_x + (d.definition_point.y - fy) * perp_y;
             let d1 = v3(fx + perp_x * offset, fy + perp_y * offset, d.first_point.z);
             let d2 = v3(sx + perp_x * offset, sy + perp_y * offset, d.second_point.z);
             result.push(make_seg(&d.first_point, &d1, &common));
@@ -385,10 +400,14 @@ fn explode_dimension(dim: &Dimension) -> Vec<EntityType> {
         }
         Dimension::Linear(d) => {
             let angle = d.rotation.to_radians();
-            let perp_x = -(angle.sin()); let perp_y = angle.cos();
-            let fx = d.first_point.x; let fy = d.first_point.y;
-            let sx = d.second_point.x; let sy = d.second_point.y;
-            let offset = (d.definition_point.x - fx) * perp_x + (d.definition_point.y - fy) * perp_y;
+            let perp_x = -(angle.sin());
+            let perp_y = angle.cos();
+            let fx = d.first_point.x;
+            let fy = d.first_point.y;
+            let sx = d.second_point.x;
+            let sy = d.second_point.y;
+            let offset =
+                (d.definition_point.x - fx) * perp_x + (d.definition_point.y - fy) * perp_y;
             let d1 = v3(fx + perp_x * offset, fy + perp_y * offset, d.first_point.z);
             let d2 = v3(sx + perp_x * offset, sy + perp_y * offset, d.second_point.z);
             result.push(make_seg(&d.first_point, &d1, &common));
@@ -417,15 +436,20 @@ fn explode_dimension(dim: &Dimension) -> Vec<EntityType> {
 
     // Text entity for the dimension label
     let text_val = if let Some(u) = &base.user_text {
-        if !u.trim().is_empty() { u.clone() } else { format!("{:.4}", dim.measurement()) }
+        if !u.trim().is_empty() {
+            u.clone()
+        } else {
+            format!("{:.4}", dim.measurement())
+        }
     } else if !base.text.trim().is_empty() {
         base.text.clone()
     } else {
         match dim {
-            Dimension::Radius(_)   => format!("R{:.4}", dim.measurement()),
+            Dimension::Radius(_) => format!("R{:.4}", dim.measurement()),
             Dimension::Diameter(_) => format!("Ø{:.4}", dim.measurement()),
-            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) =>
-                format!("{:.2}°", dim.measurement()),
+            Dimension::Angular2Ln(_) | Dimension::Angular3Pt(_) => {
+                format!("{:.2}°", dim.measurement())
+            }
             _ => format!("{:.4}", dim.measurement()),
         }
     };

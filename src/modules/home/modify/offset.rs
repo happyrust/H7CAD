@@ -11,9 +11,12 @@
 
 use std::f64::consts::TAU;
 
+use crate::modules::home::modify::spline_ops::{spline_pts_wire, spline_sample_xy};
 use acadrust::entities::LwVertex;
-use acadrust::entities::{Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt};
-use crate::modules::home::modify::spline_ops::{spline_sample_xy, spline_pts_wire};
+use acadrust::entities::{
+    Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline,
+    Spline as SplineEnt,
+};
 use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
@@ -265,21 +268,25 @@ fn offset_lwpolyline(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Option<EntityT
 
 fn offset_ellipse(e: &EllipseEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
     let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
-    if a < 1e-9 { return None; }
+    if a < 1e-9 {
+        return None;
+    }
     let b = a * e.minor_axis_ratio;
     let nx = e.major_axis.x / a;
     let ny = e.major_axis.y / a;
     // Project side_pt onto ellipse local frame and test inside/outside.
     let rx = side_pt.x as f64 - e.center.x;
     let ry = side_pt.y as f64 - e.center.y;
-    let xl =  rx * nx + ry * ny;
+    let xl = rx * nx + ry * ny;
     let yl = -rx * ny + ry * nx;
     let inside = (xl / a).powi(2) + (yl / b).powi(2) < 1.0;
     let sign = if inside { -1.0 } else { 1.0 };
 
     let new_a = a + sign * dist;
     let new_b = b + sign * dist;
-    if new_a <= 1e-9 || new_b <= 1e-9 { return None; }
+    if new_a <= 1e-9 || new_b <= 1e-9 {
+        return None;
+    }
 
     let mut new_e = e.clone();
     new_e.common.handle = Handle::NULL;
@@ -301,14 +308,18 @@ fn offset_ellipse(e: &EllipseEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
 fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType> {
     let (ts_knot, pts) = spline_sample_xy(spl, 64);
     let n = pts.len();
-    if n < 2 { return None; }
+    if n < 2 {
+        return None;
+    }
 
     // Determine offset sign from the first non-degenerate tangent.
     let sign: f64 = (0..n - 1).find_map(|i| {
         let dx = pts[i + 1][0] - pts[i][0];
         let dy = pts[i + 1][1] - pts[i][1];
         let len = (dx * dx + dy * dy).sqrt();
-        if len < 1e-12 { return None; }
+        if len < 1e-12 {
+            return None;
+        }
         let vx = side_pt.x as f64 - pts[i][0];
         let vy = side_pt.y as f64 - pts[i][1];
         let cross = dx * vy - dy * vx;
@@ -328,18 +339,16 @@ fn offset_spline(spl: &SplineEnt, dist: f64, side_pt: Vec3) -> Option<EntityType
                 let d = [pts[n - 1][0] - pts[n - 2][0], pts[n - 1][1] - pts[n - 2][1]];
                 (d[0], d[1])
             } else {
-                ((pts[i + 1][0] - pts[i - 1][0]) * 0.5,
-                 (pts[i + 1][1] - pts[i - 1][1]) * 0.5)
+                (
+                    (pts[i + 1][0] - pts[i - 1][0]) * 0.5,
+                    (pts[i + 1][1] - pts[i - 1][1]) * 0.5,
+                )
             };
             let len = (dx * dx + dy * dy).sqrt().max(1e-12);
-            let nx = -dy / len;  // left perpendicular
-            let ny =  dx / len;
+            let nx = -dy / len; // left perpendicular
+            let ny = dx / len;
             let z = spl.control_points.first().map(|v| v.z).unwrap_or(0.0);
-            crate::types::Vector3::new(
-                p[0] + sign * nx * dist,
-                p[1] + sign * ny * dist,
-                z,
-            )
+            crate::types::Vector3::new(p[0] + sign * nx * dist, p[1] + sign * ny * dist, z)
         })
         .collect();
 
@@ -394,8 +403,8 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
                 .collect()
         }
         EntityType::Arc(a) => {
-            let a0 = norm_rad(a.start_angle.to_radians());
-            let a1 = norm_rad(a.end_angle.to_radians());
+            let a0 = norm_rad(a.start_angle);
+            let a1 = norm_rad(a.end_angle);
             let span = {
                 let s = a1 - a0;
                 if s <= 0.0 {
@@ -419,23 +428,31 @@ fn entity_wire_pts(e: &EntityType) -> Vec<[f32; 3]> {
         EntityType::LwPolyline(p) => lwpolyline_pts(p),
         EntityType::Ellipse(e) => {
             let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
-            if a < 1e-9 { return vec![]; }
+            if a < 1e-9 {
+                return vec![];
+            }
             let b = a * e.minor_axis_ratio;
             let nx = e.major_axis.x / a;
             let ny = e.major_axis.y / a;
             let t0 = e.start_parameter;
             let mut t1 = e.end_parameter;
-            if t1 <= t0 { t1 += TAU; }
+            if t1 <= t0 {
+                t1 += TAU;
+            }
             let span = t1 - t0;
             let steps = ((span.abs() * 20.0).ceil() as usize).max(4);
-            (0..=steps).map(|i| {
-                let t = t0 + span * (i as f64 / steps as f64);
-                let lx = a * t.cos();
-                let ly = b * t.sin();
-                [(e.center.x + lx * nx - ly * ny) as f32,
-                 (e.center.y + lx * ny + ly * nx) as f32,
-                 e.center.z as f32]
-            }).collect()
+            (0..=steps)
+                .map(|i| {
+                    let t = t0 + span * (i as f64 / steps as f64);
+                    let lx = a * t.cos();
+                    let ly = b * t.sin();
+                    [
+                        (e.center.x + lx * nx - ly * ny) as f32,
+                        (e.center.y + lx * ny + ly * nx) as f32,
+                        e.center.z as f32,
+                    ]
+                })
+                .collect()
         }
         EntityType::Spline(s) => spline_pts_wire(s),
         _ => vec![],

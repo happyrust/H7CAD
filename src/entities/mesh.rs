@@ -6,6 +6,7 @@ use crate::entities::common::{ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
+use crate::scene::wire_model::SnapHint;
 
 // ── Face3D ────────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,12 @@ impl TruckConvertible for Face3D {
 
         Some(TruckEntity {
             object: TruckObject::Lines(pts),
-            snap_pts: vec![],
+            snap_pts: vec![
+                (Vec3::from(p0), SnapHint::Node),
+                (Vec3::from(p1), SnapHint::Node),
+                (Vec3::from(p2), SnapHint::Node),
+                (Vec3::from(p3), SnapHint::Node),
+            ],
             tangent_geoms: vec![],
             key_vertices: vec![p0, p1, p2, p3],
         })
@@ -118,7 +124,9 @@ impl PropertyEditable for Face3D {
     }
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         match field {
             "f3_p1x" => self.first_corner.x = v,
             "f3_p1y" => self.first_corner.y = v,
@@ -146,12 +154,7 @@ impl Transformable for Face3D {
                 &mut entity.third_corner,
                 &mut entity.fourth_corner,
             ] {
-                crate::scene::transform::reflect_xy_point(
-                    &mut corner.x,
-                    &mut corner.y,
-                    p1,
-                    p2,
-                );
+                crate::scene::transform::reflect_xy_point(&mut corner.x, &mut corner.y, p1, p2);
             }
         });
     }
@@ -167,12 +170,20 @@ impl TruckConvertible for PolygonMesh {
             return None;
         }
 
-        let closed_m = self.flags.contains(acadrust::entities::PolygonMeshFlags::CLOSED_M);
-        let closed_n = self.flags.contains(acadrust::entities::PolygonMeshFlags::CLOSED_N);
+        let closed_m = self
+            .flags
+            .contains(acadrust::entities::PolygonMeshFlags::CLOSED_M);
+        let closed_n = self
+            .flags
+            .contains(acadrust::entities::PolygonMeshFlags::CLOSED_N);
 
         let pt = |i: usize, j: usize| -> [f32; 3] {
             let v = &self.vertices[i * n + j];
-            [v.location.x as f32, v.location.y as f32, v.location.z as f32]
+            [
+                v.location.x as f32,
+                v.location.y as f32,
+                v.location.z as f32,
+            ]
         };
 
         let mut pts: Vec<[f32; 3]> = Vec::new();
@@ -219,7 +230,11 @@ impl Grippable for PolygonMesh {
             .map(|(i, v)| {
                 square_grip(
                     i,
-                    Vec3::new(v.location.x as f32, v.location.y as f32, v.location.z as f32),
+                    Vec3::new(
+                        v.location.x as f32,
+                        v.location.y as f32,
+                        v.location.z as f32,
+                    ),
                 )
             })
             .collect()
@@ -284,7 +299,11 @@ impl TruckConvertible for PolyfaceMesh {
         let get_v = |idx: i16| -> Option<[f32; 3]> {
             let i = (idx.abs() as usize).checked_sub(1)?;
             let v = self.vertices.get(i)?;
-            Some([v.location.x as f32, v.location.y as f32, v.location.z as f32])
+            Some([
+                v.location.x as f32,
+                v.location.y as f32,
+                v.location.z as f32,
+            ])
         };
 
         let mut pts: Vec<[f32; 3]> = Vec::new();
@@ -326,7 +345,11 @@ impl Grippable for PolyfaceMesh {
             .map(|(i, v)| {
                 square_grip(
                     i,
-                    Vec3::new(v.location.x as f32, v.location.y as f32, v.location.z as f32),
+                    Vec3::new(
+                        v.location.x as f32,
+                        v.location.y as f32,
+                        v.location.z as f32,
+                    ),
                 )
             })
             .collect()

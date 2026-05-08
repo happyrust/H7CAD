@@ -55,7 +55,9 @@ pub fn click_hit<'a>(
 /// - **Window mode** (`crossing = false`, left→right drag):
 ///   ALL projected points must lie inside the box.
 /// - **Crossing mode** (`crossing = true`, right→left drag):
-///   ANY projected point inside the box is sufficient.
+///   ANY projected point inside the box, OR any wire segment crosses the box
+///   boundary (so large entities like viewport frames are caught even when
+///   no corner falls inside the selection rectangle).
 pub fn box_hit<'a>(
     corner_a: Point,
     corner_b: Point,
@@ -76,6 +78,12 @@ pub fn box_hit<'a>(
 
     let inside = |sp: Point| sp.x >= min_x && sp.x <= max_x && sp.y >= min_y && sp.y <= max_y;
 
+    // Box corners for segment-intersection tests (crossing mode only).
+    let box_tl = Point { x: min_x, y: min_y };
+    let box_tr = Point { x: max_x, y: min_y };
+    let box_bl = Point { x: min_x, y: max_y };
+    let box_br = Point { x: max_x, y: max_y };
+
     wires
         .iter()
         .filter_map(|wire| {
@@ -90,7 +98,16 @@ pub fn box_hit<'a>(
                 .collect();
 
             let hit = if crossing {
+                // A wire is hit when any vertex is inside the box OR any of its
+                // segments crosses one of the four box edges.
                 screen.iter().any(|&sp| inside(sp))
+                    || screen.windows(2).any(|seg| {
+                        let (a, b) = (seg[0], seg[1]);
+                        segments_intersect(a, b, box_tl, box_tr)
+                            || segments_intersect(a, b, box_tr, box_br)
+                            || segments_intersect(a, b, box_br, box_bl)
+                            || segments_intersect(a, b, box_bl, box_tl)
+                    })
             } else {
                 screen.iter().all(|&sp| inside(sp))
             };

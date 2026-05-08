@@ -31,8 +31,14 @@ fn dxf_write_error_display_roundtrip() {
     assert_eq!(err.to_string(), "io: write failed");
 
     let from_str: DxfWriteError = "auto wrap".into();
-    assert_eq!(from_str, DxfWriteError::InvalidDocument("auto wrap".to_string()));
+    assert_eq!(
+        from_str,
+        DxfWriteError::InvalidDocument("auto wrap".to_string())
+    );
 
     let from_string: DxfWriteError = String::from("string wrap").into();
-    assert_eq!(from_string, DxfWriteError::InvalidDocument("string wrap".to_string()));
+    assert_eq!(
+        from_string,
+        DxfWriteError::InvalidDocument("string wrap".to_string())
+    );
 }

@@ -8,7 +8,7 @@ fn dxf_with_misc_vars() -> String {
     concat!(
         "  0\nSECTION\n  2\nHEADER\n",
         "  9\n$ACADVER\n  1\nAC1015\n",
-        "  9\n$INSUNITS\n 70\n     4\n",        // mm
+        "  9\n$INSUNITS\n 70\n     4\n",          // mm
         "  9\n$INSUNITSDEFSOURCE\n 70\n     1\n", // in
         "  9\n$INSUNITSDEFTARGET\n 70\n     6\n", // m
         "  9\n$LWDISPLAY\n290\n     1\n",
@@ -57,8 +57,14 @@ fn header_roundtrip_preserves_all_5_misc_vars() {
     let doc2 = read_dxf(&text).expect("second read");
 
     assert_eq!(doc1.header.insunits, doc2.header.insunits);
-    assert_eq!(doc1.header.insunits_def_source, doc2.header.insunits_def_source);
-    assert_eq!(doc1.header.insunits_def_target, doc2.header.insunits_def_target);
+    assert_eq!(
+        doc1.header.insunits_def_source,
+        doc2.header.insunits_def_source
+    );
+    assert_eq!(
+        doc1.header.insunits_def_target,
+        doc2.header.insunits_def_target
+    );
     assert_eq!(doc1.header.lwdisplay, doc2.header.lwdisplay);
     assert_eq!(doc1.header.xedit, doc2.header.xedit);
 }

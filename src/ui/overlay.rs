@@ -7,9 +7,9 @@ use iced::mouse;
 use iced::widget::{button, canvas, column, container, row, text};
 use iced::{Background, Border, Color, Element, Length, Point, Size, Theme};
 
+use crate::app::Message;
 use crate::scene::object::GripShape;
 use crate::scene::SelectionState;
-use crate::app::Message;
 
 /// Half-size of the crosshair center square in screen pixels (square = SQ*2 × SQ*2).
 pub const CROSSHAIR_SQ: f32 = 7.5;
@@ -106,9 +106,9 @@ pub fn nav_toolbar<'a>() -> Element<'a, Message> {
             icon_btn("⊖", "ZOOMOUT"),
             icon_btn("⊡", "ZOOMEXTENTS"),
             separator,
-            label_btn("SVG",  "SVGEXPORT"),
+            label_btn("SVG", "SVGEXPORT"),
             label_btn("SVG+", "SVGEXPORT COLOR"),
-            label_btn("PDF",  "PLOT"),
+            label_btn("PDF", "PLOT"),
             label_btn("STEP", "STEPOUT"),
         ]
         .spacing(2),
@@ -277,8 +277,10 @@ impl canvas::Program<Message> for SelectionCanvas {
                 use crate::scene::{VIEWCUBE_DRAW_PX, VIEWCUBE_PAD};
                 let vc_x = bounds.width - VIEWCUBE_DRAW_PX - VIEWCUBE_PAD;
                 let vc_y = VIEWCUBE_PAD;
-                if pos.x >= vc_x && pos.x <= vc_x + VIEWCUBE_DRAW_PX
-                    && pos.y >= vc_y && pos.y <= vc_y + VIEWCUBE_DRAW_PX
+                if pos.x >= vc_x
+                    && pos.x <= vc_x + VIEWCUBE_DRAW_PX
+                    && pos.y >= vc_y
+                    && pos.y <= vc_y + VIEWCUBE_DRAW_PX
                 {
                     return mouse::Interaction::None;
                 }
@@ -557,56 +559,58 @@ impl canvas::Program<Message> for SelectionCanvas {
             cursor.position_in(bounds).map_or(false, |pos| {
                 let vc_x = bounds.width - VIEWCUBE_DRAW_PX - VIEWCUBE_PAD;
                 let vc_y = VIEWCUBE_PAD;
-                pos.x >= vc_x && pos.x <= vc_x + VIEWCUBE_DRAW_PX
-                    && pos.y >= vc_y && pos.y <= vc_y + VIEWCUBE_DRAW_PX
+                pos.x >= vc_x
+                    && pos.x <= vc_x + VIEWCUBE_DRAW_PX
+                    && pos.y >= vc_y
+                    && pos.y <= vc_y + VIEWCUBE_DRAW_PX
             })
         };
         if !over_viewcube {
-        if let Some(cp) = self.selection.last_move_pos {
-            let color = Color {
-                r: 0.85,
-                g: 0.85,
-                b: 0.85,
-                a: 0.90,
-            };
-            let stroke = canvas::Stroke {
-                width: 1.0,
-                style: canvas::Style::Solid(color),
-                ..Default::default()
-            };
-            let sq = CROSSHAIR_SQ; // square half-size → 15×15
-            let arm = CROSSHAIR_ARM; // crosshair arm length from center
+            if let Some(cp) = self.selection.last_move_pos {
+                let color = Color {
+                    r: 0.85,
+                    g: 0.85,
+                    b: 0.85,
+                    a: 0.90,
+                };
+                let stroke = canvas::Stroke {
+                    width: 1.0,
+                    style: canvas::Style::Solid(color),
+                    ..Default::default()
+                };
+                let sq = CROSSHAIR_SQ; // square half-size → 15×15
+                let arm = CROSSHAIR_ARM; // crosshair arm length from center
 
-            // Horizontal arms (start at square edge, end at arm length)
-            let h_left = canvas::Path::new(|b| {
-                b.move_to(Point::new(cp.x - sq, cp.y));
-                b.line_to(Point::new(cp.x - arm, cp.y));
-            });
-            let h_right = canvas::Path::new(|b| {
-                b.move_to(Point::new(cp.x + sq, cp.y));
-                b.line_to(Point::new(cp.x + arm, cp.y));
-            });
-            // Vertical arms
-            let v_top = canvas::Path::new(|b| {
-                b.move_to(Point::new(cp.x, cp.y - sq));
-                b.line_to(Point::new(cp.x, cp.y - arm));
-            });
-            let v_bot = canvas::Path::new(|b| {
-                b.move_to(Point::new(cp.x, cp.y + sq));
-                b.line_to(Point::new(cp.x, cp.y + arm));
-            });
-            // Center square
-            let square = canvas::Path::rectangle(
-                Point::new(cp.x - sq, cp.y - sq),
-                Size::new(sq * 2.0, sq * 2.0),
-            );
+                // Horizontal arms (start at square edge, end at arm length)
+                let h_left = canvas::Path::new(|b| {
+                    b.move_to(Point::new(cp.x - sq, cp.y));
+                    b.line_to(Point::new(cp.x - arm, cp.y));
+                });
+                let h_right = canvas::Path::new(|b| {
+                    b.move_to(Point::new(cp.x + sq, cp.y));
+                    b.line_to(Point::new(cp.x + arm, cp.y));
+                });
+                // Vertical arms
+                let v_top = canvas::Path::new(|b| {
+                    b.move_to(Point::new(cp.x, cp.y - sq));
+                    b.line_to(Point::new(cp.x, cp.y - arm));
+                });
+                let v_bot = canvas::Path::new(|b| {
+                    b.move_to(Point::new(cp.x, cp.y + sq));
+                    b.line_to(Point::new(cp.x, cp.y + arm));
+                });
+                // Center square
+                let square = canvas::Path::rectangle(
+                    Point::new(cp.x - sq, cp.y - sq),
+                    Size::new(sq * 2.0, sq * 2.0),
+                );
 
-            frame.stroke(&h_left, stroke.clone());
-            frame.stroke(&h_right, stroke.clone());
-            frame.stroke(&v_top, stroke.clone());
-            frame.stroke(&v_bot, stroke.clone());
-            frame.stroke(&square, stroke);
-        }
+                frame.stroke(&h_left, stroke.clone());
+                frame.stroke(&h_right, stroke.clone());
+                frame.stroke(&v_top, stroke.clone());
+                frame.stroke(&v_bot, stroke.clone());
+                frame.stroke(&square, stroke);
+            }
         } // end !over_viewcube
 
         // ── UCS icon ──────────────────────────────────────────────────────
@@ -619,7 +623,12 @@ impl canvas::Program<Message> for SelectionCanvas {
             let tp = ost.screen;
             let cx = self.cursor_screen.x;
             let cy = self.cursor_screen.y;
-            let track_color = Color { r: 0.15, g: 0.85, b: 0.95, a: 0.7 };
+            let track_color = Color {
+                r: 0.15,
+                g: 0.85,
+                b: 0.95,
+                a: 0.7,
+            };
             let dash_stroke = canvas::Stroke::default()
                 .with_color(track_color)
                 .with_width(1.0);
@@ -637,12 +646,24 @@ impl canvas::Program<Message> for SelectionCanvas {
             // Small cross at the tracking point.
             let sz = 5.0_f32;
             let h = canvas::Path::line(
-                Point { x: tp.x - sz, y: tp.y },
-                Point { x: tp.x + sz, y: tp.y },
+                Point {
+                    x: tp.x - sz,
+                    y: tp.y,
+                },
+                Point {
+                    x: tp.x + sz,
+                    y: tp.y,
+                },
             );
             let v = canvas::Path::line(
-                Point { x: tp.x, y: tp.y - sz },
-                Point { x: tp.x, y: tp.y + sz },
+                Point {
+                    x: tp.x,
+                    y: tp.y - sz,
+                },
+                Point {
+                    x: tp.x,
+                    y: tp.y + sz,
+                },
             );
             frame.stroke(&h, dash_stroke.clone());
             frame.stroke(&v, dash_stroke);
@@ -820,8 +841,8 @@ fn draw_axes(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle, exten
 // drawn as outlined circles with reduced opacity.
 
 const UCS_ICON_MARGIN: f32 = 50.0;
-const UCS_ICON_LEN: f32 = 38.0;  // longest axis arm in screen pixels
-const UCS_ICON_TIP: f32 = 7.0;   // arrowhead size in pixels
+const UCS_ICON_LEN: f32 = 38.0; // longest axis arm in screen pixels
+const UCS_ICON_TIP: f32 = 7.0; // arrowhead size in pixels
 
 fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
     if bounds.width < 10.0 || bounds.height < 10.0 {
@@ -844,9 +865,9 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
     };
 
     let Some(org) = w2ndc(Vec3::ZERO) else { return };
-    let Some(xn)  = w2ndc(Vec3::X)    else { return };
-    let Some(yn)  = w2ndc(Vec3::Y)    else { return };
-    let Some(zn)  = w2ndc(Vec3::Z)    else { return };
+    let Some(xn) = w2ndc(Vec3::X) else { return };
+    let Some(yn) = w2ndc(Vec3::Y) else { return };
+    let Some(zn) = w2ndc(Vec3::Z) else { return };
 
     let org_s = ndc2s(org);
     let icon_origin = Point::new(
@@ -874,19 +895,61 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
     // depth > 0 → tip is farther from viewer than origin (axis going into screen).
     // depth < 0 → tip is closer (axis coming toward viewer).
     struct AxisInfo {
-        dx: f32, dy: f32, sc_len: f32, depth: f32,
-        r: f32, g: f32, b: f32, label: &'static str,
+        dx: f32,
+        dy: f32,
+        sc_len: f32,
+        depth: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+        label: &'static str,
     }
     let mut axes = [
-        AxisInfo { dx: xdx*sc, dy: xdy*sc, sc_len: xlen*sc, depth: xn.z - org.z, r: 0.90, g: 0.22, b: 0.22, label: "X" },
-        AxisInfo { dx: ydx*sc, dy: ydy*sc, sc_len: ylen*sc, depth: yn.z - org.z, r: 0.22, g: 0.85, b: 0.22, label: "Y" },
-        AxisInfo { dx: zdx*sc, dy: zdy*sc, sc_len: zlen*sc, depth: zn.z - org.z, r: 0.22, g: 0.45, b: 0.90, label: "Z" },
+        AxisInfo {
+            dx: xdx * sc,
+            dy: xdy * sc,
+            sc_len: xlen * sc,
+            depth: xn.z - org.z,
+            r: 0.90,
+            g: 0.22,
+            b: 0.22,
+            label: "X",
+        },
+        AxisInfo {
+            dx: ydx * sc,
+            dy: ydy * sc,
+            sc_len: ylen * sc,
+            depth: yn.z - org.z,
+            r: 0.22,
+            g: 0.85,
+            b: 0.22,
+            label: "Y",
+        },
+        AxisInfo {
+            dx: zdx * sc,
+            dy: zdy * sc,
+            sc_len: zlen * sc,
+            depth: zn.z - org.z,
+            r: 0.22,
+            g: 0.45,
+            b: 0.90,
+            label: "Z",
+        },
     ];
     // Back-to-front: draw axis farthest from viewer first.
-    axes.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+    axes.sort_by(|a, b| {
+        b.depth
+            .partial_cmp(&a.depth)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     for ax in &axes {
-        let col = Color { r: ax.r, g: ax.g, b: ax.b, a: 1.0 };
+        let col = Color {
+            r: ax.r,
+            g: ax.g,
+            b: ax.b,
+            a: 1.0,
+        };
         let tip = Point::new(icon_origin.x + ax.dx, icon_origin.y + ax.dy);
 
         // Shaft
@@ -953,7 +1016,15 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
 
     // Origin dot.
     let circle = canvas::Path::circle(icon_origin, 3.5);
-    frame.fill(&circle, Color { r: 0.9, g: 0.9, b: 0.9, a: 0.95 });
+    frame.fill(
+        &circle,
+        Color {
+            r: 0.9,
+            g: 0.9,
+            b: 0.9,
+            a: 0.95,
+        },
+    );
 }
 
 // ── Dynamic Input overlay ─────────────────────────────────────────────────
@@ -962,14 +1033,14 @@ fn draw_ucs_icon(frame: &mut canvas::Frame, vp: Mat4, bounds: iced::Rectangle) {
 ///
 /// `cursor_screen` — cursor position in viewport pixels.
 /// `label` — text to display (e.g. "X: 12.34  Y: 56.78").
-pub fn dynamic_input_overlay<'a>(
-    cursor_screen: Point,
-    label: String,
-) -> Element<'a, Message> {
-    canvas(DynInputCanvas { cursor_screen, label })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+pub fn dynamic_input_overlay<'a>(cursor_screen: Point, label: String) -> Element<'a, Message> {
+    canvas(DynInputCanvas {
+        cursor_screen,
+        label,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 struct DynInputCanvas {
@@ -1011,27 +1082,52 @@ impl canvas::Program<Message> for DynInputCanvas {
         let mut by = self.cursor_screen.y + OFFSET_Y;
 
         // Keep box inside viewport.
-        if bx + BOX_W > bounds.width { bx = self.cursor_screen.x - BOX_W - 4.0; }
-        if by + BOX_H > bounds.height { by = self.cursor_screen.y - BOX_H - 4.0; }
+        if bx + BOX_W > bounds.width {
+            bx = self.cursor_screen.x - BOX_W - 4.0;
+        }
+        if by + BOX_H > bounds.height {
+            by = self.cursor_screen.y - BOX_H - 4.0;
+        }
 
         let bg = canvas::Path::rectangle(
             Point { x: bx, y: by },
-            Size { width: BOX_W, height: BOX_H },
+            Size {
+                width: BOX_W,
+                height: BOX_H,
+            },
         );
         frame.fill(
             &bg,
-            Color { r: 0.05, g: 0.05, b: 0.12, a: 0.85 },
+            Color {
+                r: 0.05,
+                g: 0.05,
+                b: 0.12,
+                a: 0.85,
+            },
         );
         frame.stroke(
             &bg,
             canvas::Stroke::default()
-                .with_color(Color { r: 0.35, g: 0.55, b: 0.90, a: 0.9 })
+                .with_color(Color {
+                    r: 0.35,
+                    g: 0.55,
+                    b: 0.90,
+                    a: 0.9,
+                })
                 .with_width(1.0),
         );
         frame.fill_text(canvas::Text {
             content: self.label.clone(),
-            position: Point { x: bx + PAD, y: by + PAD },
-            color: Color { r: 0.90, g: 0.90, b: 0.90, a: 1.0 },
+            position: Point {
+                x: bx + PAD,
+                y: by + PAD,
+            },
+            color: Color {
+                r: 0.90,
+                g: 0.90,
+                b: 0.90,
+                a: 1.0,
+            },
             size: iced::Pixels(FONT_SIZE),
             ..Default::default()
         });

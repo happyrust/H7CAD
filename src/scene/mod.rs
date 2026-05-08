@@ -29,30 +29,30 @@ pub use image_model::ImageModel;
 pub use mesh_model::MeshModel;
 pub use object::GripDef;
 pub use pipeline::uniforms::Uniforms;
-pub use pipeline::viewcube::{
-    hit_test, CubeRegion, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
-};
+pub use pipeline::viewcube::{hit_test, CubeRegion, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX};
 pub use selection::SelectionState;
-pub use wire_model::WireModel;
 use wire_model::TangentGeom;
+pub use wire_model::WireModel;
 
 use crate::command::EntityTransform;
 use crate::store::NativeStore;
-use acadrust::entities::{BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid};
+use crate::types::Vector2;
+use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
+use acadrust::entities::{
+    BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid,
+};
+use acadrust::objects::ObjectType;
+use acadrust::{CadDocument, EntityType, Handle, TableEntry};
+use glam;
+use h7cad_native_model as nm;
 use truck_modeling::{
     base::{BoundedCurve, ParametricCurve},
     BSplineCurve as TruckBSpline, KnotVec, Point3,
 };
-use acadrust::entities::{Block, BlockEnd, Insert as DxfInsert};
-use acadrust::objects::ObjectType;
-use crate::types::Vector2;
-use acadrust::{CadDocument, EntityType, Handle, TableEntry};
-use h7cad_native_model as nm;
-use glam;
 
 use iced::time::Duration;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -180,6 +180,18 @@ impl Scene {
         }
     }
 
+    pub fn native_doc(&self) -> Option<&nm::CadDocument> {
+        self.native_store.as_ref().map(|s| s.inner())
+    }
+
+    pub fn native_doc_mut(&mut self) -> Option<&mut nm::CadDocument> {
+        self.native_store.as_mut().map(|s| s.inner_mut())
+    }
+
+    pub fn set_native_doc(&mut self, doc: Option<nm::CadDocument>) {
+        self.native_store = doc.map(NativeStore::new);
+    }
+
     pub fn bump_geometry(&mut self) {
         self.geometry_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
@@ -205,18 +217,6 @@ impl Scene {
         }
     }
 
-    pub fn native_doc(&self) -> Option<&nm::CadDocument> {
-        self.native_store.as_ref().map(|s| s.inner())
-    }
-
-    pub fn native_doc_mut(&mut self) -> Option<&mut nm::CadDocument> {
-        self.native_store.as_mut().map(|s| s.inner_mut())
-    }
-
-    pub fn set_native_doc(&mut self, doc: Option<nm::CadDocument>) {
-        self.native_store = doc.map(NativeStore::new);
-    }
-
     /// Public accessor for the block-record handle of the current layout.
     /// Used by external callers (e.g. `commit_entity`) that need the handle
     /// without going through private API.
@@ -240,7 +240,11 @@ impl Scene {
         // Locate the Layout object for the active layout name.
         let layout = self.document.objects.values().find_map(|obj| {
             if let ObjectType::Layout(l) = obj {
-                if l.name == self.current_layout { Some(l) } else { None }
+                if l.name == self.current_layout {
+                    Some(l)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -286,8 +290,11 @@ impl Scene {
                     .values()
                     .filter_map(|obj| {
                         if let ObjectType::Layout(l) = obj {
-                            if l.name != "Model" { Some((l.tab_order, l.name.as_str())) }
-                            else { None }
+                            if l.name != "Model" {
+                                Some((l.tab_order, l.name.as_str()))
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -295,7 +302,10 @@ impl Scene {
                     .collect();
                 paper_layouts.sort_by_key(|(o, n)| (*o, *n));
 
-                if let Some(pos) = paper_layouts.iter().position(|(_, n)| *n == self.current_layout) {
+                if let Some(pos) = paper_layouts
+                    .iter()
+                    .position(|(_, n)| *n == self.current_layout)
+                {
                     if let Some(br) = ps_brs.get(pos) {
                         return br.handle;
                     }
@@ -315,22 +325,25 @@ impl Scene {
         if self.current_layout == "Model" {
             return None;
         }
-        self.document.objects.values().find_map(|obj| {
-            if let ObjectType::Layout(l) = obj {
-                if l.name == self.current_layout {
-                    let (min, max) = (l.min_limits, l.max_limits);
-                    let w = (max.0 - min.0).abs();
-                    let h = (max.1 - min.1).abs();
-                    if w < 1e-6 || h < 1e-6 {
-                        return Some(((0.0, 0.0), (297.0, 210.0)));
+        self.document
+            .objects
+            .values()
+            .find_map(|obj| {
+                if let ObjectType::Layout(l) = obj {
+                    if l.name == self.current_layout {
+                        let (min, max) = (l.min_limits, l.max_limits);
+                        let w = (max.0 - min.0).abs();
+                        let h = (max.1 - min.1).abs();
+                        if w < 1e-6 || h < 1e-6 {
+                            return Some(((0.0, 0.0), (297.0, 210.0)));
+                        }
+                        return Some((min, max));
                     }
-                    return Some((min, max));
                 }
-            }
-            None
-        })
-        // No Layout object found for the current layout — default to A4 landscape.
-        .or(Some(((0.0, 0.0), (297.0, 210.0))))
+                None
+            })
+            // No Layout object found for the current layout — default to A4 landscape.
+            .or(Some(((0.0, 0.0), (297.0, 210.0))))
     }
 
     /// Scale of the first user viewport (id > 1) in the current paper layout,
@@ -401,13 +414,16 @@ impl Scene {
         if layout_block.is_null() {
             return 0;
         }
-        self.document.entities().filter(|e| {
-            if let EntityType::Viewport(vp) = e {
-                vp.id > 1 && vp.common.owner_handle == layout_block
-            } else {
-                false
-            }
-        }).count()
+        self.document
+            .entities()
+            .filter(|e| {
+                if let EntityType::Viewport(vp) = e {
+                    vp.id > 1 && vp.common.owner_handle == layout_block
+                } else {
+                    false
+                }
+            })
+            .count()
     }
 
     /// Sorted list of layout names: "Model" first, then paper layouts by tab order.
@@ -416,8 +432,7 @@ impl Scene {
         // Deduplicate by name: prefer the entry with a non-null block_record (the
         // real layout from the file) over the default placeholder created by
         // CadDocument::new().
-        let mut by_name: std::collections::HashMap<String, (i16, Handle)> =
-            Default::default();
+        let mut by_name: std::collections::HashMap<String, (i16, Handle)> = Default::default();
         for obj in self.document.objects.values() {
             if let ObjectType::Layout(l) = obj {
                 if l.name == "Model" || l.name.is_empty() {
@@ -592,7 +607,9 @@ impl Scene {
         // Replaces the old O(objects) find_map with one rebuild per epoch,
         // after which every wires_for_block call is an O(1) HashMap lookup.
         {
-            let needs_rebuild = self.sort_cache.borrow()
+            let needs_rebuild = self
+                .sort_cache
+                .borrow()
                 .as_ref()
                 .map(|(e, _)| *e != self.geometry_epoch)
                 .unwrap_or(true);
@@ -602,7 +619,8 @@ impl Scene {
                 for obj in self.document.objects.values() {
                     if let ObjectType::SortEntitiesTable(t) = obj {
                         if !t.is_empty() {
-                            let map = t.entries()
+                            let map = t
+                                .entries()
                                 .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
                                 .collect();
                             idx.insert(t.block_owner_handle, map);
@@ -613,14 +631,16 @@ impl Scene {
             }
         }
 
-        let (mut native_wires, native_handles) = if self.native_render_active_for_block(block_handle)
-        {
-            self.native_wires_for_model_space()
-        } else {
-            (Vec::new(), HashSet::new())
-        };
+        let (mut native_wires, native_handles) =
+            if self.native_render_active_for_block(block_handle) {
+                self.native_wires_for_model_space()
+            } else {
+                (Vec::new(), HashSet::new())
+            };
 
-        let visible: Vec<&EntityType> = self.document
+        // Collect visible entities sequentially (filter needs &self).
+        let visible: Vec<&EntityType> = self
+            .document
             .entities()
             .filter(|e| {
                 let c = e.common();
@@ -640,8 +660,7 @@ impl Scene {
                     return false;
                 }
                 // FRAMES0: hide all Underlay frames/boundaries.
-                if self.underlay_frames_mode == 0
-                    && matches!(e, acadrust::EntityType::Underlay(_))
+                if self.underlay_frames_mode == 0 && matches!(e, acadrust::EntityType::Underlay(_))
                 {
                     return false;
                 }
@@ -649,20 +668,18 @@ impl Scene {
             })
             .collect();
 
+        // Tessellate in parallel across all available CPU cores.
         use rayon::prelude::*;
         let doc = &self.document;
         let sel = &self.selected;
         let avp = self.active_viewport;
-        let woff = if self.current_layout == "Model" { self.world_offset } else { [0.0; 3] };
-        let bg = if self.current_layout == "Model" { self.bg_color } else { self.paper_bg_color };
-        let underlay_snap = self.underlay_snap_enabled;
+        let underlay_snap_enabled = self.underlay_snap_enabled;
+        let woff = self.world_offset;
         let mut wires: Vec<WireModel> = visible
             .into_par_iter()
             .flat_map(|e| {
-                let mut tessellated = tessellate_entity(doc, sel, avp, woff, bg, e);
-                if !underlay_snap
-                    && matches!(e, acadrust::EntityType::Underlay(_))
-                {
+                let mut tessellated = tessellate_entity(doc, sel, avp, woff, e);
+                if !underlay_snap_enabled && matches!(e, acadrust::EntityType::Underlay(_)) {
                     for w in &mut tessellated {
                         w.snap_pts.clear();
                     }
@@ -674,6 +691,7 @@ impl Scene {
         native_wires.append(&mut wires);
         let mut wires = native_wires;
 
+        // Apply draw order via the cached index (O(1) block lookup).
         {
             let cache = self.sort_cache.borrow();
             if let Some((_, ref idx)) = *cache {
@@ -711,7 +729,12 @@ impl Scene {
         // Use the current layout's entity_handles as the authoritative list when
         // available — this prevents block-definition geometry from leaking into
         // the viewport even when owner handles are missing.
-        if let Some(br) = self.document.block_records.iter().find(|br| br.handle == block_handle) {
+        if let Some(br) = self
+            .document
+            .block_records
+            .iter()
+            .find(|br| br.handle == block_handle)
+        {
             if !br.entity_handles.is_empty() {
                 return br.entity_handles.contains(&entity_handle);
             }
@@ -740,6 +763,8 @@ impl Scene {
                 | nm::EntityData::Line { .. }
                 | nm::EntityData::Circle { .. }
                 | nm::EntityData::Arc { .. }
+                | nm::EntityData::Ellipse { .. }
+                | nm::EntityData::Spline { .. }
                 | nm::EntityData::LwPolyline { .. }
                 | nm::EntityData::Text { .. }
                 | nm::EntityData::MText { .. }
@@ -747,6 +772,40 @@ impl Scene {
                 | nm::EntityData::Dimension { .. }
                 | nm::EntityData::MultiLeader { .. }
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn native_render_stats(&self) -> NativeRenderStats {
+        let Some(document) = self.native_doc() else {
+            return NativeRenderStats::default();
+        };
+
+        let mut stats = NativeRenderStats::default();
+        let bump = |map: &mut BTreeMap<String, usize>, type_name: String| {
+            *map.entry(type_name).or_default() += 1;
+        };
+
+        for entity in document.model_space_entities() {
+            if !Self::native_entity_visible(document, entity) {
+                continue;
+            }
+
+            let type_name = entity.data.type_name();
+            if Self::native_render_supported_entity(entity) {
+                bump(&mut stats.native_rendered, type_name);
+            } else if matches!(
+                entity.data,
+                nm::EntityData::Unknown { .. } | nm::EntityData::ProxyEntity { .. }
+            ) {
+                bump(&mut stats.preserved_only, type_name);
+            } else if crate::io::native_bridge::native_entity_to_acadrust(entity).is_some() {
+                bump(&mut stats.compat_fallback, type_name);
+            } else {
+                bump(&mut stats.preserved_only, type_name);
+            }
+        }
+
+        stats
     }
 
     fn native_entity_visible(document: &nm::CadDocument, entity: &nm::Entity) -> bool {
@@ -779,6 +838,7 @@ impl Scene {
                 entity,
                 entity.handle,
                 selected_handles.contains(&entity.handle.value()),
+                None,
                 &mut visited_blocks,
             ) else {
                 continue;
@@ -796,6 +856,7 @@ impl Scene {
         entity: &nm::Entity,
         display_handle: nm::Handle,
         selected: bool,
+        inherited_style: Option<render::NativeRenderStyle>,
         visited_blocks: &mut HashSet<u64>,
     ) -> Option<Vec<WireModel>> {
         if !Self::native_entity_visible(document, entity) {
@@ -803,12 +864,17 @@ impl Scene {
         }
 
         match &entity.data {
-            nm::EntityData::Insert { .. } => {
-                self.native_insert_wires(document, entity, display_handle, selected, visited_blocks)
-            }
+            nm::EntityData::Insert { .. } => self.native_insert_wires(
+                document,
+                entity,
+                display_handle,
+                selected,
+                inherited_style,
+                visited_blocks,
+            ),
             nm::EntityData::Dimension { .. } => {
                 let (entity_color, _, _, line_weight_px, _) =
-                    render::render_style_native(document, entity);
+                    render::render_style_native_inheriting(document, entity, inherited_style);
                 tessellate::tessellate_native_dimension(
                     document,
                     display_handle,
@@ -820,7 +886,7 @@ impl Scene {
             }
             nm::EntityData::MultiLeader { .. } => {
                 let (entity_color, _, _, line_weight_px, _) =
-                    render::render_style_native(document, entity);
+                    render::render_style_native_inheriting(document, entity, inherited_style);
                 tessellate::tessellate_native_multileader(
                     document,
                     display_handle,
@@ -832,7 +898,7 @@ impl Scene {
             }
             _ => {
                 let (entity_color, pattern_length, pattern, line_weight_px, aci) =
-                    render::render_style_native(document, entity);
+                    render::render_style_native_inheriting(document, entity, inherited_style);
                 let mut wire = tessellate::tessellate_native(
                     document,
                     display_handle,
@@ -855,6 +921,7 @@ impl Scene {
         entity: &nm::Entity,
         display_handle: nm::Handle,
         selected: bool,
+        inherited_style: Option<render::NativeRenderStyle>,
         visited_blocks: &mut HashSet<u64>,
     ) -> Option<Vec<WireModel>> {
         let nm::EntityData::Insert {
@@ -864,7 +931,8 @@ impl Scene {
             has_attribs,
             attribs,
             ..
-        } = &entity.data else {
+        } = &entity.data
+        else {
             return None;
         };
 
@@ -876,6 +944,8 @@ impl Scene {
         if !visited_blocks.insert(block_record.handle.value()) {
             return None;
         }
+        let insert_style =
+            render::render_style_native_inheriting(document, entity, inherited_style);
 
         let mut wires = Vec::new();
         for child in &block_record.entities {
@@ -890,9 +960,14 @@ impl Scene {
                 return None;
             }
 
-            let Some(child_wires) =
-                self.native_render_entity_wires(document, child, display_handle, selected, visited_blocks)
-            else {
+            let Some(child_wires) = self.native_render_entity_wires(
+                document,
+                child,
+                display_handle,
+                selected,
+                Some(insert_style),
+                visited_blocks,
+            ) else {
                 visited_blocks.remove(&block_record.handle.value());
                 return None;
             };
@@ -918,6 +993,7 @@ impl Scene {
         document: &nm::CadDocument,
         entity: &nm::Entity,
         selected: bool,
+        inherited_style: Option<render::NativeRenderStyle>,
         visited_blocks: &mut HashSet<u64>,
     ) -> Option<Vec<HatchModel>> {
         let nm::EntityData::Insert {
@@ -927,7 +1003,8 @@ impl Scene {
             has_attribs,
             attribs,
             ..
-        } = &entity.data else {
+        } = &entity.data
+        else {
             return None;
         };
 
@@ -939,6 +1016,8 @@ impl Scene {
         if !visited_blocks.insert(block_record.handle.value()) {
             return None;
         }
+        let insert_style =
+            render::render_style_native_inheriting(document, entity, inherited_style);
 
         let mut models = Vec::new();
         for child in &block_record.entities {
@@ -948,7 +1027,9 @@ impl Scene {
 
             match &child.data {
                 nm::EntityData::Hatch { .. } => {
-                    let color = render::render_style_native(document, child).0;
+                    let color =
+                        render::render_style_native_inheriting(document, child, Some(insert_style))
+                            .0;
                     let mut model = Self::hatch_model_from_native(child, color)?;
                     Self::apply_insert_transform_to_hatch_model(
                         &mut model,
@@ -963,8 +1044,13 @@ impl Scene {
                     models.push(model);
                 }
                 nm::EntityData::Insert { .. } => {
-                    let nested =
-                        self.native_insert_hatch_models(document, child, selected, visited_blocks)?;
+                    let nested = self.native_insert_hatch_models(
+                        document,
+                        child,
+                        selected,
+                        Some(insert_style),
+                        visited_blocks,
+                    )?;
                     for mut model in nested {
                         Self::apply_insert_transform_to_hatch_model(
                             &mut model,
@@ -1084,7 +1170,10 @@ impl Scene {
         }
     }
 
-    fn native_model_hatch_entries(&self, native_doc: &nm::CadDocument) -> Vec<(Handle, HatchModel)> {
+    fn native_model_hatch_entries(
+        &self,
+        native_doc: &nm::CadDocument,
+    ) -> Vec<(Handle, HatchModel)> {
         let mut models = Vec::new();
         for entity in native_doc.model_space_entities() {
             match &entity.data {
@@ -1110,6 +1199,7 @@ impl Scene {
                         native_doc,
                         entity,
                         self.selected.contains(&handle),
+                        None,
                         &mut HashSet::new(),
                     ) {
                         models.extend(insert_models.into_iter().map(|model| (handle, model)));
@@ -1246,8 +1336,13 @@ impl Scene {
 
     /// Full tessellation pipeline for one entity.
     fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
-        let bg = if self.current_layout == "Model" { self.bg_color } else { self.paper_bg_color };
-        tessellate_entity(&self.document, &self.selected, self.active_viewport, self.world_offset, bg, e)
+        tessellate_entity(
+            &self.document,
+            &self.selected,
+            self.active_viewport,
+            self.world_offset,
+            e,
+        )
     }
 
     fn model_space_block_handle(&self) -> Handle {
@@ -1299,7 +1394,11 @@ impl Scene {
                 }
             }
         }
-        if any { Some((min, max)) } else { None }
+        if any {
+            Some((min, max))
+        } else {
+            None
+        }
     }
 
     /// Set a newly created viewport's `view_target` and `view_height` so that
@@ -1347,7 +1446,11 @@ impl Scene {
             .document
             .entities()
             .filter_map(|e| {
-                if let EntityType::Viewport(vp) = e { Some(vp) } else { None }
+                if let EntityType::Viewport(vp) = e {
+                    Some(vp)
+                } else {
+                    None
+                }
             })
             .filter(|vp| {
                 vp.id > 1
@@ -1386,7 +1489,7 @@ impl Scene {
                 None => continue,
             };
             let view_right = cam_frame.rotation * glam::Vec3::X;
-            let view_up    = cam_frame.rotation * glam::Vec3::Y;
+            let view_up = cam_frame.rotation * glam::Vec3::Y;
 
             // ── Scale & viewport parameters ───────────────────────────────
             let scale = if vp.custom_scale.abs() > 1e-9 {
@@ -1408,6 +1511,9 @@ impl Scene {
             let hw = (vp.width / 2.0) as f32;
             let hh = (vp.height / 2.0) as f32;
 
+            // ── Use cached tessellation (model_wires_for_viewport_arc) ────
+            // This eliminates the per-frame tessellate_one() loop that was here
+            // previously; tessellation is now O(1) on navigation frames.
             let model_wires = self.model_wires_for_viewport_arc(vp_handle);
 
             // ── Project and clip wires into viewport ──────────────────────
@@ -1428,55 +1534,64 @@ impl Scene {
 
             for wire in model_wires.iter() {
                 // Project 3-D model points onto view plane → paper space.
-                let projected_pts: Vec<[f32; 3]> = wire.points.iter().map(|&[mx, my, mz]| {
-                    if mx.is_nan() || my.is_nan() || mz.is_nan() {
-                        return [f32::NAN; 3];
-                    }
-                    let mp = glam::Vec3::new(mx, my, mz) - target;
-                    let u = mp.dot(view_right);
-                    let v = mp.dot(view_up);
-                    if use_perspective {
-                        let d_vd = mp.dot(cam_frame.rotation * glam::Vec3::Z);
-                        let fwd = camera_dist - d_vd;
-                        if fwd <= 0.001 {
+                let projected_pts: Vec<[f32; 3]> = wire
+                    .points
+                    .iter()
+                    .map(|&[mx, my, mz]| {
+                        if mx.is_nan() || my.is_nan() || mz.is_nan() {
                             return [f32::NAN; 3];
                         }
-                        let factor = camera_dist / fwd;
-                        [pcx + u * factor * scale, pcy + v * factor * scale, pcz]
-                    } else {
-                        [pcx + u * scale, pcy + v * scale, pcz]
-                    }
-                }).collect();
+                        let mp = glam::Vec3::new(mx, my, mz) - target;
+                        let u = mp.dot(view_right);
+                        let v = mp.dot(view_up);
+                        if use_perspective {
+                            let d_vd = mp.dot(cam_frame.rotation * glam::Vec3::Z);
+                            let fwd = camera_dist - d_vd;
+                            if fwd <= 0.001 {
+                                return [f32::NAN; 3];
+                            }
+                            let factor = camera_dist / fwd;
+                            [pcx + u * factor * scale, pcy + v * factor * scale, pcz]
+                        } else {
+                            [pcx + u * scale, pcy + v * scale, pcz]
+                        }
+                    })
+                    .collect();
 
                 // Fast AABB pre-reject.
                 let any_near = projected_pts.iter().any(|&[x, y, _]| {
-                    x.is_finite() && y.is_finite()
-                        && x >= vp_x0 - 1.0 && x <= vp_x1 + 1.0
-                        && y >= vp_y0 - 1.0 && y <= vp_y1 + 1.0
+                    x.is_finite()
+                        && y.is_finite()
+                        && x >= vp_x0 - 1.0
+                        && x <= vp_x1 + 1.0
+                        && y >= vp_y0 - 1.0
+                        && y <= vp_y1 + 1.0
                 });
-                let (min_x, max_x, min_y, max_y) = projected_pts.iter()
-                    .filter(|p| p[0].is_finite())
-                    .fold(
-                        (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY),
+                let (min_x, max_x, min_y, max_y) =
+                    projected_pts.iter().filter(|p| p[0].is_finite()).fold(
+                        (
+                            f32::INFINITY,
+                            f32::NEG_INFINITY,
+                            f32::INFINITY,
+                            f32::NEG_INFINITY,
+                        ),
                         |(mnx, mxx, mny, mxy), &[x, y, _]| {
                             (mnx.min(x), mxx.max(x), mny.min(y), mxy.max(y))
                         },
                     );
-                let aabb_hits = max_x >= vp_x0 && min_x <= vp_x1
-                             && max_y >= vp_y0 && min_y <= vp_y1;
+                let aabb_hits =
+                    max_x >= vp_x0 && min_x <= vp_x1 && max_y >= vp_y0 && min_y <= vp_y1;
                 if !any_near && !aabb_hits {
                     continue;
                 }
 
-                let clipped = clip_polyline_to_rect(
-                    &projected_pts, vp_x0, vp_y0, vp_x1, vp_y1, pcz,
-                );
+                let clipped =
+                    clip_polyline_to_rect(&projected_pts, vp_x0, vp_y0, vp_x1, vp_y1, pcz);
                 if clipped.is_empty() {
                     continue;
                 }
 
-                let adapted = render::adapt_to_bg(wire.color, self.paper_bg_color);
-                let [r, g, b, a] = adapted;
+                let [r, g, b, a] = wire.color;
                 let mut out = wire.clone();
                 out.points = clipped;
                 out.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
@@ -1485,7 +1600,8 @@ impl Scene {
             }
 
             // Store in cache, then extend result.
-            self.paper_projected_cache.borrow_mut()
+            self.paper_projected_cache
+                .borrow_mut()
                 .insert(vp_handle, (self.geometry_epoch, projected.clone()));
             result.extend(projected);
         }
@@ -1546,10 +1662,10 @@ impl Scene {
         };
         let model_delta = vp_cam.screen_delta_to_world(screen_dx, screen_dy, bounds);
 
-        if let Some(acadrust::EntityType::Viewport(vp)) =
-            self.document.get_entity_mut(vp_handle)
-        {
-            if vp.status.locked { return; }
+        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+            if vp.status.locked {
+                return;
+            }
             vp.view_target.x += model_delta.x as f64;
             vp.view_target.y += model_delta.y as f64;
             vp.view_target.z += model_delta.z as f64;
@@ -1566,10 +1682,10 @@ impl Scene {
             Some(h) => h,
             None => return,
         };
-        if let Some(acadrust::EntityType::Viewport(vp)) =
-            self.document.get_entity_mut(vp_handle)
-        {
-            if vp.status.locked { return; }
+        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+            if vp.status.locked {
+                return;
+            }
             // Zoom in = shrink view_height → higher scale → objects appear larger.
             let factor = (1.0_f64 - 0.15 * steps as f64).clamp(0.1, 10.0);
 
@@ -1627,9 +1743,7 @@ impl Scene {
         //   (cos(p)*sin(y), +cos(p)*cos(y), sin(p))  ← Y has opposite sign.
         // Negate Y when writing back so camera_for_viewport round-trips correctly.
         let eye = cam.rotation * glam::Vec3::Z;
-        if let Some(acadrust::EntityType::Viewport(vp)) =
-            self.document.get_entity_mut(vp_handle)
-        {
+        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -1648,9 +1762,7 @@ impl Scene {
         };
         let cos_p = pitch.cos();
         let eye = glam::Vec3::new(cos_p * yaw.sin(), cos_p * yaw.cos(), pitch.sin());
-        if let Some(acadrust::EntityType::Viewport(vp)) =
-            self.document.get_entity_mut(vp_handle)
-        {
+        if let Some(acadrust::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -1683,23 +1795,23 @@ impl Scene {
     /// the given paper-space point, or `None` if no viewport matches.
     pub fn viewport_at_paper_point(&self, px: f32, py: f32) -> Option<Handle> {
         let layout_block = self.current_layout_block_handle();
-        self.document
-            .entities()
-            .find_map(|e| {
-                let EntityType::Viewport(vp) = e else { return None; };
-                if vp.id <= 1 || vp.common.owner_handle != layout_block || !vp.status.is_on {
-                    return None;
-                }
-                let hw = (vp.width / 2.0) as f32;
-                let hh = (vp.height / 2.0) as f32;
-                let cx = vp.center.x as f32;
-                let cy = vp.center.y as f32;
-                if px >= cx - hw && px <= cx + hw && py >= cy - hh && py <= cy + hh {
-                    Some(vp.common.handle)
-                } else {
-                    None
-                }
-            })
+        self.document.entities().find_map(|e| {
+            let EntityType::Viewport(vp) = e else {
+                return None;
+            };
+            if vp.id <= 1 || vp.common.owner_handle != layout_block || !vp.status.is_on {
+                return None;
+            }
+            let hw = (vp.width / 2.0) as f32;
+            let hh = (vp.height / 2.0) as f32;
+            let cx = vp.center.x as f32;
+            let cy = vp.center.y as f32;
+            if px >= cx - hw && px <= cx + hw && py >= cy - hh && py <= cy + hh {
+                Some(vp.common.handle)
+            } else {
+                None
+            }
+        })
     }
 
     /// Return the handle of the first active user viewport in the current layout,
@@ -1707,7 +1819,9 @@ impl Scene {
     pub fn first_user_viewport(&self) -> Option<Handle> {
         let layout_block = self.current_layout_block_handle();
         self.document.entities().find_map(|e| {
-            let EntityType::Viewport(vp) = e else { return None; };
+            let EntityType::Viewport(vp) = e else {
+                return None;
+            };
             if vp.id > 1 && vp.common.owner_handle == layout_block && vp.status.is_on {
                 Some(vp.common.handle)
             } else {
@@ -1782,15 +1896,22 @@ impl Scene {
         let mut order_b: Option<i16> = None;
         for obj in self.document.objects.values() {
             if let ObjectType::Layout(l) = obj {
-                if l.name == name_a { order_a = Some(l.tab_order); }
-                if l.name == name_b { order_b = Some(l.tab_order); }
+                if l.name == name_a {
+                    order_a = Some(l.tab_order);
+                }
+                if l.name == name_b {
+                    order_b = Some(l.tab_order);
+                }
             }
         }
         if let (Some(oa), Some(ob)) = (order_a, order_b) {
             for obj in self.document.objects.values_mut() {
                 if let ObjectType::Layout(l) = obj {
-                    if l.name == name_a { l.tab_order = ob; }
-                    else if l.name == name_b { l.tab_order = oa; }
+                    if l.name == name_a {
+                        l.tab_order = ob;
+                    } else if l.name == name_b {
+                        l.tab_order = oa;
+                    }
                 }
             }
         }
@@ -1799,13 +1920,12 @@ impl Scene {
     // ── Entity management ─────────────────────────────────────────────────
 
     pub fn add_entity(&mut self, mut entity: EntityType) -> Handle {
-        let hatch_offset = if self.current_layout == "Model" { self.world_offset } else { [0.0; 3] };
         let hatch_seed = if let EntityType::Hatch(dxf) = &entity {
             let color = self.render_style(&entity).0;
-            Self::hatch_model_from_dxf(dxf, color, hatch_offset)
+            Self::hatch_model_from_dxf(dxf, color, self.world_offset)
         } else if let EntityType::Solid(solid) = &entity {
             let color = self.render_style(&entity).0;
-            Some(Self::solid_hatch_model(solid, color, hatch_offset))
+            Some(Self::solid_hatch_model(solid, color, self.world_offset))
         } else {
             None
         };
@@ -1866,15 +1986,18 @@ impl Scene {
             if let Some(store) = self.native_store.as_mut() {
                 let native_doc = store.inner_mut();
                 if let Some(entity) = self.document.get_entity(handle).cloned() {
-                    if let Some(mut native_entity) = crate::io::native_bridge::acadrust_entity_to_native(&entity) {
-                        let owner_handle = if self.current_layout != "Model" && self.active_viewport.is_none() {
-                            native_doc
-                                .layout_by_name(&self.current_layout)
-                                .map(|layout| layout.block_record_handle)
-                                .unwrap_or_else(|| native_doc.model_space_handle())
-                        } else {
-                            native_doc.model_space_handle()
-                        };
+                    if let Some(mut native_entity) =
+                        crate::io::native_bridge::acadrust_entity_to_native(&entity)
+                    {
+                        let owner_handle =
+                            if self.current_layout != "Model" && self.active_viewport.is_none() {
+                                native_doc
+                                    .layout_by_name(&self.current_layout)
+                                    .map(|layout| layout.block_record_handle)
+                                    .unwrap_or_else(|| native_doc.model_space_handle())
+                            } else {
+                                native_doc.model_space_handle()
+                            };
                         native_entity.owner_handle = owner_handle;
                         let _ = native_doc.add_entity(native_entity);
                     }
@@ -1897,7 +2020,9 @@ impl Scene {
     /// Returns the RGBA color for the given layer name.
     pub fn layer_color(&self, layer: &str) -> [f32; 4] {
         let layer_entry = self.document.layers.get(layer);
-        let color = layer_entry.map(|l| &l.color).unwrap_or(&crate::types::Color::WHITE);
+        let color = layer_entry
+            .map(|l| &l.color)
+            .unwrap_or(&crate::types::Color::WHITE);
         let [r, g, b, _] = crate::scene::tessellate::aci_to_rgba(color);
         [r, g, b, 1.0]
     }
@@ -1945,12 +2070,12 @@ impl Scene {
         block_record.handle = br_handle;
         block_record.block_entity_handle = block_handle;
         block_record.block_end_handle = end_handle;
-        self.document.block_records.add(block_record).map_err(|e| e.to_string())?;
+        self.document
+            .block_records
+            .add(block_record)
+            .map_err(|e| e.to_string())?;
 
-        let mut block = Block::new(
-            name,
-            crate::types::Vector3::ZERO,
-        );
+        let mut block = Block::new(name, crate::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = br_handle;
         self.document
@@ -1985,7 +2110,6 @@ impl Scene {
 
     pub(crate) fn synced_hatch_entries(&self) -> Vec<(Handle, HatchModel)> {
         let layout_block = self.current_layout_block_handle();
-        let hatch_offset = if self.current_layout == "Model" { self.world_offset } else { [0.0; 3] };
 
         let layer_hidden = |layer: &str| {
             self.document
@@ -2046,7 +2170,9 @@ impl Scene {
                                     continue;
                                 }
                                 let color = render::render_style_native(native_doc, entity).0;
-                                if let Some(mut model) = Self::hatch_model_from_native(entity, color) {
+                                if let Some(mut model) =
+                                    Self::hatch_model_from_native(entity, color)
+                                {
                                     if self.selected.contains(&handle) {
                                         model.color = [0.15, 0.55, 1.00, model.color[3]];
                                     }
@@ -2059,13 +2185,16 @@ impl Scene {
                                     native_doc,
                                     entity,
                                     self.selected.contains(&handle),
+                                    None,
                                     &mut HashSet::new(),
                                 ) else {
                                     continue;
                                 };
                                 if !insert_models.is_empty() {
                                     native_insert_hatch_handles.insert(handle);
-                                    models.extend(insert_models.into_iter().map(|model| (handle, model)));
+                                    models.extend(
+                                        insert_models.into_iter().map(|model| (handle, model)),
+                                    );
                                 }
                             }
                             _ => {}
@@ -2111,7 +2240,8 @@ impl Scene {
                     continue;
                 }
                 let color = self.render_style(&EntityType::Hatch(dxf.clone())).0;
-                if let Some(mut model) = Self::hatch_model_from_dxf(&dxf, color, hatch_offset) {
+                if let Some(mut model) = Self::hatch_model_from_dxf(&dxf, color, self.world_offset)
+                {
                     if selected {
                         model.color = [0.15, 0.55, 1.00, model.color[3]];
                     }
@@ -2123,31 +2253,38 @@ impl Scene {
         // Wide LWPolyline and Polyline2D fills
         for entity in self.document.entities() {
             let (common, fills) = match entity {
-                EntityType::LwPolyline(pl) => {
-                    (&pl.common, wide_lwpolyline_fills(pl))
-                }
-                EntityType::Polyline2D(pl) => {
-                    (&pl.common, wide_polyline2d_fills(pl))
-                }
+                EntityType::LwPolyline(pl) => (&pl.common, wide_lwpolyline_fills(pl)),
+                EntityType::Polyline2D(pl) => (&pl.common, wide_polyline2d_fills(pl)),
                 _ => continue,
             };
-            if fills.is_empty() { continue; }
-            if common.invisible || layer_hidden(&common.layer) { continue; }
+            if fills.is_empty() {
+                continue;
+            }
+            if common.invisible || layer_hidden(&common.layer) {
+                continue;
+            }
             if !self.belongs_to_visible_block(common.handle, common.owner_handle, layout_block) {
                 continue;
             }
             let base_color = self.render_style(entity).0;
             let selected = self.selected.contains(&common.handle);
-            let color = if selected { [0.15, 0.55, 1.00, 1.0] } else { base_color };
+            let color = if selected {
+                [0.15, 0.55, 1.00, 1.0]
+            } else {
+                base_color
+            };
             for boundary in fills {
-                models.push((common.handle, HatchModel {
-                    boundary,
-                    pattern: hatch_model::HatchPattern::Solid,
-                    name: "SOLID".into(),
-                    color,
-                    angle_offset: 0.0,
-                    scale: 1.0,
-                }));
+                models.push((
+                    common.handle,
+                    HatchModel {
+                        boundary,
+                        pattern: hatch_model::HatchPattern::Solid,
+                        name: "SOLID".into(),
+                        color,
+                        angle_offset: 0.0,
+                        scale: 1.0,
+                    },
+                ));
             }
         }
 
@@ -2173,28 +2310,29 @@ impl Scene {
     /// Wipeout fill models — rendered in a separate pass AFTER wires so that
     /// wipeouts correctly mask everything below them in the draw order.
     pub(super) fn wipeout_models(&self) -> Vec<HatchModel> {
-        let is_paper = self.current_layout != "Model";
-        let bg_color: [f32; 4] = if is_paper {
-            self.paper_bg_color
-        } else {
+        let bg_color: [f32; 4] = if self.current_layout == "Model" {
             self.bg_color
+        } else {
+            self.paper_bg_color
         };
-        // Paper-space entities are already in small coordinates — don't shift them.
-        let world_offset = if is_paper { [0.0; 3] } else { self.world_offset };
         let mut models = Vec::new();
         for entity in self.document.entities() {
-            let EntityType::Wipeout(wo) = entity else { continue };
+            let EntityType::Wipeout(wo) = entity else {
+                continue;
+            };
             if entity.common().invisible {
                 continue;
             }
-            if self.document.layers
+            if self
+                .document
+                .layers
                 .get(&entity.common().layer)
                 .map(|l| l.flags.off || l.flags.frozen)
                 .unwrap_or(false)
             {
                 continue;
             }
-            let boundary = Self::wipeout_boundary_2d(wo, world_offset);
+            let boundary = Self::wipeout_boundary_2d(wo, self.world_offset);
             if boundary.len() >= 3 {
                 let mut fill_color = bg_color;
                 if self.selected.contains(&wo.common.handle) {
@@ -2214,7 +2352,10 @@ impl Scene {
     }
 
     /// Compute the 2D (XY) boundary polygon for a Wipeout entity.
-    fn wipeout_boundary_2d(wo: &acadrust::entities::Wipeout, world_offset: [f64; 3]) -> Vec<[f32; 2]> {
+    fn wipeout_boundary_2d(
+        wo: &acadrust::entities::Wipeout,
+        world_offset: [f64; 3],
+    ) -> Vec<[f32; 2]> {
         use acadrust::entities::WipeoutClipType;
 
         let [wox, woy, _woz] = world_offset;
@@ -2225,11 +2366,16 @@ impl Scene {
         if is_polygon {
             let ox = (wo.insertion_point.x - wox) as f32;
             let oy = (wo.insertion_point.y - woy) as f32;
-            wo.clip_boundary_vertices.iter().map(|v| {
-                let wx = (wo.u_vector.x * v.x * wo.size.x + wo.v_vector.x * v.y * wo.size.y) as f32;
-                let wy = (wo.u_vector.y * v.x * wo.size.x + wo.v_vector.y * v.y * wo.size.y) as f32;
-                [ox + wx, oy + wy]
-            }).collect()
+            wo.clip_boundary_vertices
+                .iter()
+                .map(|v| {
+                    let wx =
+                        (wo.u_vector.x * v.x * wo.size.x + wo.v_vector.x * v.y * wo.size.y) as f32;
+                    let wy =
+                        (wo.u_vector.y * v.x * wo.size.x + wo.v_vector.y * v.y * wo.size.y) as f32;
+                    [ox + wx, oy + wy]
+                })
+                .collect()
         } else {
             // Rectangular boundary from 4 corners.
             let ox = (wo.insertion_point.x - wox) as f32;
@@ -2249,7 +2395,11 @@ impl Scene {
         }
     }
 
-    fn hatch_model_from_dxf(dxf: &DxfHatch, color: [f32; 4], world_offset: [f64; 3]) -> Option<HatchModel> {
+    fn hatch_model_from_dxf(
+        dxf: &DxfHatch,
+        color: [f32; 4],
+        world_offset: [f64; 3],
+    ) -> Option<HatchModel> {
         let [ox, oy, _oz] = world_offset;
         let path = dxf
             .paths
@@ -2371,7 +2521,8 @@ impl Scene {
                     // Evaluate the B-spline curve into smooth boundary points.
                     // Fall back to control-point polyline for degenerate inputs.
                     let degree = spline.degree as usize;
-                    let cps: Vec<Point3> = spline.control_points
+                    let cps: Vec<Point3> = spline
+                        .control_points
                         .iter()
                         .map(|p| Point3::new(p.x, p.y, 0.0))
                         .collect();
@@ -2382,9 +2533,8 @@ impl Scene {
                     } else {
                         KnotVec::from(vec![])
                     };
-                    let ok = cps.len() >= 2
-                        && degree >= 1
-                        && knot_vec.len() == cps.len() + degree + 1;
+                    let ok =
+                        cps.len() >= 2 && degree >= 1 && knot_vec.len() == cps.len() + degree + 1;
                     if ok {
                         let bspl = TruckBSpline::new(knot_vec, cps);
                         let (t0, t1) = bspl.range_tuple();
@@ -2458,7 +2608,8 @@ impl Scene {
             pattern_name,
             solid_fill,
             boundary_paths,
-        } = &hatch.data else {
+        } = &hatch.data
+        else {
             return None;
         };
 
@@ -2648,8 +2799,6 @@ impl Scene {
     pub fn populate_hatches_from_document(&mut self) {
         self.hatches.clear();
 
-        let model_block = self.model_space_block_handle();
-
         let entries: Vec<(Handle, EntityType)> = self
             .document
             .entities()
@@ -2661,18 +2810,14 @@ impl Scene {
             .collect();
 
         for (handle, kind) in entries {
-            // Paper-space entities live in sheet coordinates — world_offset must not
-            // be applied to them.  Only model-space entities need the shift.
-            let owner = kind.common().owner_handle;
-            let offset = if owner == model_block { self.world_offset } else { [0.0; 3] };
             let model = match &kind {
                 EntityType::Hatch(dxf) => {
                     let color = tessellate::aci_to_rgba(&dxf.common.color);
-                    Self::hatch_model_from_dxf(dxf, color, offset)
+                    Self::hatch_model_from_dxf(dxf, color, self.world_offset)
                 }
                 EntityType::Solid(solid) => {
                     let color = tessellate::aci_to_rgba(&solid.common.color);
-                    Some(Self::solid_hatch_model(solid, color, offset))
+                    Some(Self::solid_hatch_model(solid, color, self.world_offset))
                 }
                 _ => None,
             };
@@ -2695,8 +2840,9 @@ impl Scene {
             .document
             .entities()
             .filter_map(|e| match e {
-                EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) =>
-                    Some((e.common().handle, e.clone())),
+                EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Body(_) => {
+                    Some((e.common().handle, e.clone()))
+                }
                 _ => None,
             })
             .collect();
@@ -2708,8 +2854,8 @@ impl Scene {
             };
             let model = match &entity {
                 EntityType::Solid3D(s) => solid3d_tess::tessellate_solid3d(s, color),
-                EntityType::Region(r)  => solid3d_tess::tessellate_region(r, color),
-                EntityType::Body(b)    => solid3d_tess::tessellate_body(b, color),
+                EntityType::Region(r) => solid3d_tess::tessellate_region(r, color),
+                EntityType::Body(b) => solid3d_tess::tessellate_body(b, color),
                 _ => None,
             };
             if let Some(m) = model {
@@ -2733,10 +2879,22 @@ impl Scene {
     fn solid_hatch_model(solid: &DxfSolid, color: [f32; 4], world_offset: [f64; 3]) -> HatchModel {
         let [ox, oy, _oz] = world_offset;
         let boundary = vec![
-            [(solid.first_corner.x - ox) as f32,  (solid.first_corner.y - oy) as f32],
-            [(solid.second_corner.x - ox) as f32, (solid.second_corner.y - oy) as f32],
-            [(solid.fourth_corner.x - ox) as f32, (solid.fourth_corner.y - oy) as f32],
-            [(solid.third_corner.x - ox) as f32,  (solid.third_corner.y - oy) as f32],
+            [
+                (solid.first_corner.x - ox) as f32,
+                (solid.first_corner.y - oy) as f32,
+            ],
+            [
+                (solid.second_corner.x - ox) as f32,
+                (solid.second_corner.y - oy) as f32,
+            ],
+            [
+                (solid.fourth_corner.x - ox) as f32,
+                (solid.fourth_corner.y - oy) as f32,
+            ],
+            [
+                (solid.third_corner.x - ox) as f32,
+                (solid.third_corner.y - oy) as f32,
+            ],
         ];
         HatchModel {
             boundary,
@@ -2886,7 +3044,11 @@ impl Scene {
             .filter_map(|obj| match obj {
                 ObjectType::Group(g) => {
                     g.entities.retain(|h| !handles.contains(h));
-                    if g.entities.is_empty() { Some(g.handle) } else { None }
+                    if g.entities.is_empty() {
+                        Some(g.handle)
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             })
@@ -2945,9 +3107,7 @@ impl Scene {
             .objects
             .values()
             .filter_map(|obj| match obj {
-                ObjectType::Group(g) if handles.iter().any(|h| g.contains(*h)) => {
-                    Some(g.handle)
-                }
+                ObjectType::Group(g) if handles.iter().any(|h| g.contains(*h)) => Some(g.handle),
                 _ => None,
             })
             .collect();
@@ -2970,9 +3130,7 @@ impl Scene {
             .objects
             .values()
             .filter_map(|obj| match obj {
-                ObjectType::Group(g)
-                    if g.selectable && handles.iter().any(|h| g.contains(*h)) =>
-                {
+                ObjectType::Group(g) if g.selectable && handles.iter().any(|h| g.contains(*h)) => {
                     Some(g.entities.clone())
                 }
                 _ => None,
@@ -3003,7 +3161,6 @@ impl Scene {
     // ── Modify (transform / copy) ─────────────────────────────────────────
 
     pub fn transform_entities(&mut self, handles: &[Handle], t: &EntityTransform) {
-        let hatch_offset = if self.current_layout == "Model" { self.world_offset } else { [0.0; 3] };
         for &h in handles {
             let nh = nm::Handle::new(h.value());
             let native_applied = if let Some(store) = self.native_store.as_mut() {
@@ -3018,10 +3175,10 @@ impl Scene {
             };
 
             if native_applied {
-                if let Some(native_entity) = self.native_doc()
-                    .and_then(|doc| doc.get_entity(nh))
-                {
-                    if let Some(compat) = crate::io::native_bridge::native_entity_to_acadrust(native_entity) {
+                if let Some(native_entity) = self.native_doc().and_then(|doc| doc.get_entity(nh)) {
+                    if let Some(compat) =
+                        crate::io::native_bridge::native_entity_to_acadrust(native_entity)
+                    {
                         if let Some(existing) = self.document.get_entity_mut(h) {
                             *existing = compat;
                         }
@@ -3034,7 +3191,7 @@ impl Scene {
             if self.hatches.contains_key(&h) {
                 let existing_color = self.hatches[&h].color;
                 let new_model = if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(h) {
-                    Self::hatch_model_from_dxf(dxf, existing_color, hatch_offset)
+                    Self::hatch_model_from_dxf(dxf, existing_color, self.world_offset)
                 } else {
                     None
                 };
@@ -3047,7 +3204,6 @@ impl Scene {
     }
 
     pub fn copy_entities(&mut self, handles: &[Handle], t: &EntityTransform) -> Vec<Handle> {
-        let hatch_offset = if self.current_layout == "Model" { self.world_offset } else { [0.0; 3] };
         let clones: Vec<EntityType> = handles
             .iter()
             .filter_map(|&h| self.document.get_entity(h).cloned())
@@ -3077,7 +3233,7 @@ impl Scene {
                 }
                 let new_model = if let Some(EntityType::Hatch(dxf)) = self.document.get_entity(h) {
                     let color = tessellate::aci_to_rgba(&dxf.common.color);
-                    Self::hatch_model_from_dxf(dxf, color, hatch_offset)
+                    Self::hatch_model_from_dxf(dxf, color, self.world_offset)
                 } else {
                     None
                 };
@@ -3093,19 +3249,24 @@ impl Scene {
 
     // ── Grip editing ──────────────────────────────────────────────────────
 
-    pub fn apply_grip(&mut self, handle: Handle, grip_id: usize, apply: crate::scene::object::GripApply) {
+    pub fn apply_grip(
+        &mut self,
+        handle: Handle,
+        grip_id: usize,
+        apply: crate::scene::object::GripApply,
+    ) {
         if let Some(entity) = self.document.get_entity_mut(handle) {
             dispatch::apply_grip(entity, grip_id, apply);
         }
         self.rebuild_gpu_model_after_grip(handle);
     }
 
+    /// Rebuild GPU hatch/solid model after a grip edit changed geometry.
     pub fn rebuild_gpu_model_after_grip(&mut self, handle: Handle) {
-        let hatch_offset = if self.current_layout == "Model" { self.world_offset } else { [0.0; 3] };
         match self.document.get_entity(handle) {
             Some(EntityType::Hatch(dxf)) => {
                 let color = tessellate::aci_to_rgba(&dxf.common.color);
-                if let Some(model) = Self::hatch_model_from_dxf(dxf, color, hatch_offset) {
+                if let Some(model) = Self::hatch_model_from_dxf(dxf, color, self.world_offset) {
                     self.hatches.insert(handle, model);
                 } else {
                     self.hatches.remove(&handle);
@@ -3113,7 +3274,10 @@ impl Scene {
             }
             Some(EntityType::Solid(solid)) => {
                 let color = tessellate::aci_to_rgba(&solid.common.color);
-                self.hatches.insert(handle, Self::solid_hatch_model(solid, color, hatch_offset));
+                self.hatches.insert(
+                    handle,
+                    Self::solid_hatch_model(solid, color, self.world_offset),
+                );
             }
             _ => {}
         }
@@ -3137,7 +3301,11 @@ impl Scene {
         use glam::Vec3;
         let cam = &mut *self.camera.borrow_mut();
         // view.target is the look-at point; view.direction is eye→target direction.
-        cam.target = Vec3::new(view.target.x as f32, view.target.y as f32, view.target.z as f32);
+        cam.target = Vec3::new(
+            view.target.x as f32,
+            view.target.y as f32,
+            view.target.z as f32,
+        );
         // direction in acadrust = from-target-to-eye (same as AutoCAD convention).
         let eye_dir = Vec3::new(
             view.direction.x as f32,
@@ -3291,11 +3459,7 @@ impl Scene {
                 continue;
             }
             for point in entity_bbox_points(entity) {
-                let v = glam::Vec3::new(
-                    point[0] as f32,
-                    point[1] as f32,
-                    point[2] as f32,
-                );
+                let v = glam::Vec3::new(point[0] as f32, point[1] as f32, point[2] as f32);
                 min = min.min(v);
                 max = max.max(v);
                 found = true;
@@ -3364,7 +3528,12 @@ impl Scene {
         let w = (x1 - x0).max(1.0);
         let h = (y1 - y0).max(1.0);
 
-        Some(iced::Rectangle { x: x0, y: y0, width: w, height: h })
+        Some(iced::Rectangle {
+            x: x0,
+            y: y0,
+            width: w,
+            height: h,
+        })
     }
 
     // ── ViewportPane helpers ──────────────────────────────────────────────
@@ -3409,7 +3578,6 @@ impl Scene {
     pub(super) fn paper_sheet_wires(&self) -> Vec<WireModel> {
         (*self.paper_sheet_wires_arc()).clone()
     }
-
 
     /// Build a Camera oriented and scaled to match a paper-space Viewport entity.
     /// Used by `ViewportPane::Paper` to render model-space content through the
@@ -3468,6 +3636,40 @@ impl Scene {
 
         let model_block = self.model_space_block_handle();
 
+        if self.native_render_enabled && self.native_store.is_some() {
+            let native_doc = self.native_doc().expect("checked");
+            let frozen_layer_names: HSet<String> = frozen
+                .iter()
+                .filter_map(|&handle| {
+                    self.document
+                        .layers
+                        .iter()
+                        .find(|layer| layer.handle == handle)
+                        .map(|layer| layer.name.clone())
+                })
+                .collect();
+            let selected_handles: HSet<u64> = self.selected.iter().map(|h| h.value()).collect();
+
+            return native_doc
+                .model_space_entities()
+                .filter(|entity| {
+                    Self::native_entity_visible(native_doc, entity)
+                        && !frozen_layer_names.contains(&entity.layer_name)
+                })
+                .flat_map(|entity| {
+                    self.native_render_entity_wires(
+                        native_doc,
+                        entity,
+                        entity.handle,
+                        selected_handles.contains(&entity.handle.value()),
+                        None,
+                        &mut HashSet::new(),
+                    )
+                    .unwrap_or_default()
+                })
+                .collect();
+        }
+
         self.document
             .entities()
             .filter(|e| {
@@ -3496,14 +3698,7 @@ impl Scene {
                 }
                 true
             })
-            .flat_map(|e| tessellate_entity(
-                &self.document,
-                &self.selected,
-                self.active_viewport,
-                self.world_offset,
-                self.bg_color,
-                e,
-            ))
+            .flat_map(|e| self.tessellate_one(e))
             .collect()
     }
 
@@ -3537,17 +3732,14 @@ fn entity_bbox_points(entity: &nm::Entity) -> Vec<[f64; 3]> {
             [center[0] - radius, center[1] - radius, center[2]],
             [center[0] + radius, center[1] + radius, center[2]],
         ],
-        EntityData::Arc {
-            center, radius, ..
-        } => vec![
+        EntityData::Arc { center, radius, .. } => vec![
             [center[0] - radius, center[1] - radius, center[2]],
             [center[0] + radius, center[1] + radius, center[2]],
         ],
         EntityData::Ellipse {
             center, major_axis, ..
         } => {
-            let r = (major_axis[0].powi(2) + major_axis[1].powi(2) + major_axis[2].powi(2))
-                .sqrt();
+            let r = (major_axis[0].powi(2) + major_axis[1].powi(2) + major_axis[2].powi(2)).sqrt();
             vec![
                 [center[0] - r, center[1] - r, center[2]],
                 [center[0] + r, center[1] + r, center[2]],
@@ -3560,9 +3752,7 @@ fn entity_bbox_points(entity: &nm::Entity) -> Vec<[f64; 3]> {
         EntityData::LwPolyline { vertices, .. } => {
             vertices.iter().map(|v| [v.x, v.y, 0.0]).collect()
         }
-        EntityData::Polyline { vertices, .. } => {
-            vertices.iter().map(|v| v.position).collect()
-        }
+        EntityData::Polyline { vertices, .. } => vertices.iter().map(|v| v.position).collect(),
         EntityData::Insert { insertion, .. } => vec![*insertion],
         _ => Vec::new(),
     }
@@ -3571,9 +3761,9 @@ fn entity_bbox_points(entity: &nm::Entity) -> Vec<[f64; 3]> {
 #[cfg(test)]
 mod tests {
     use super::Scene;
-    use acadrust::EntityType;
-    use acadrust::entities::Viewport;
     use crate::io::native_bridge;
+    use acadrust::entities::Viewport;
+    use acadrust::EntityType;
     use h7cad_native_model as nm;
     use std::collections::HashSet;
 
@@ -3652,7 +3842,10 @@ mod tests {
         let before = scene.camera_generation;
         let fitted = scene.fit_layers_matching(&["PID_OBJECTS_"]);
 
-        assert!(!fitted, "fit_layers_matching must no-op on a scene without a native doc");
+        assert!(
+            !fitted,
+            "fit_layers_matching must no-op on a scene without a native doc"
+        );
         assert_eq!(scene.camera_generation, before);
     }
 
@@ -3670,8 +3863,7 @@ mod tests {
         let mut scene = scene_with_native(native);
         // First prefix doesn't match; second prefix does. The OR-of-
         // prefixes semantics should let the second one fit.
-        let fitted = scene
-            .fit_layers_matching(&["PID_OBJECTS_", "PID_LAYOUT_TEXT"]);
+        let fitted = scene.fit_layers_matching(&["PID_OBJECTS_", "PID_LAYOUT_TEXT"]);
         assert!(
             fitted,
             "OR-of-prefixes: second prefix must still trigger a successful fit"
@@ -3723,12 +3915,54 @@ mod tests {
             .count();
         let line_matches = wires
             .iter()
-            .filter(|wire| !wire.name.is_empty() && wire.name != viewport_handle.value().to_string())
+            .filter(|wire| {
+                !wire.name.is_empty() && wire.name != viewport_handle.value().to_string()
+            })
             .count();
 
-        assert_eq!(viewport_matches, 1, "unsupported compat viewport should remain visible");
-        assert_eq!(line_matches, 1, "supported native entity should not be double-rendered");
-        assert_eq!(wires.len(), 2, "expected one native wire and one compat fallback wire");
+        assert_eq!(
+            viewport_matches, 1,
+            "unsupported compat viewport should remain visible"
+        );
+        assert_eq!(
+            line_matches, 1,
+            "supported native entity should not be double-rendered"
+        );
+        assert_eq!(
+            wires.len(),
+            2,
+            "expected one native wire and one compat fallback wire"
+        );
+    }
+
+    #[test]
+    fn native_render_stats_classify_native_fallback_and_preserved_entities() {
+        let mut native = nm::CadDocument::new();
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Line {
+                start: [0.0, 0.0, 0.0],
+                end: [10.0, 0.0, 0.0],
+            }))
+            .expect("native line");
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![],
+            }))
+            .expect("native hatch");
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Unknown {
+                entity_type: "FAKE_ENTITY_XYZ".into(),
+            }))
+            .expect("unknown entity");
+
+        let scene = scene_with_native(native);
+        let stats = scene.native_render_stats();
+
+        assert_eq!(stats.native_rendered.get("LINE"), Some(&1));
+        assert_eq!(stats.compat_fallback.get("HATCH"), Some(&1));
+        assert_eq!(stats.preserved_only.get("FAKE_ENTITY_XYZ"), Some(&1));
     }
 
     #[test]
@@ -3755,7 +3989,54 @@ mod tests {
 
         let scene = scene_with_native(native);
         let wires = scene.entity_wires();
-        assert!(wires.iter().any(|wire| wire.name == insert_handle.value().to_string()));
+        assert!(wires
+            .iter()
+            .any(|wire| wire.name == insert_handle.value().to_string()));
+    }
+
+    #[test]
+    fn nativerender_nested_insert_byblock_uses_nearest_insert_color() {
+        let mut native = nm::CadDocument::new();
+        let mut line = nm::Entity::new(nm::EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [2.0, 0.0, 0.0],
+        });
+        line.color_index = 0; // ByBlock
+        block_with_entities(&mut native, "BLOCK_C", vec![line]);
+
+        let mut middle_insert = nm::Entity::new(nm::EntityData::Insert {
+            block_name: "BLOCK_C".into(),
+            insertion: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+            rotation: 0.0,
+            has_attribs: false,
+            attribs: vec![],
+        });
+        middle_insert.color_index = 5;
+        block_with_entities(&mut native, "BLOCK_B", vec![middle_insert]);
+
+        let mut top_insert = nm::Entity::new(nm::EntityData::Insert {
+            block_name: "BLOCK_B".into(),
+            insertion: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+            rotation: 0.0,
+            has_attribs: false,
+            attribs: vec![],
+        });
+        top_insert.color_index = 1;
+        let insert_handle = native.add_entity(top_insert).expect("top insert");
+
+        let scene = scene_with_native(native);
+        let wires = scene.entity_wires();
+        let wire = wires
+            .iter()
+            .find(|wire| wire.name == insert_handle.value().to_string())
+            .expect("nested insert should render as native wire");
+
+        assert_eq!(
+            wire.aci, 5,
+            "ByBlock line should inherit the nearest explicit INSERT color"
+        );
     }
 
     #[test]
@@ -3788,6 +4069,7 @@ mod tests {
             entity,
             insert_handle,
             false,
+            None,
             &mut HashSet::new(),
         );
         assert!(rendered.is_none());
@@ -3837,9 +4119,132 @@ mod tests {
         let wires = scene.entity_wires();
         let hatches = scene.synced_hatch_models();
 
-        assert!(wires.iter().any(|wire| wire.name == insert_handle.value().to_string()));
-        assert_eq!(hatches.len(), 1, "insert-contained hatch should produce one native hatch model");
+        assert!(wires
+            .iter()
+            .any(|wire| wire.name == insert_handle.value().to_string()));
+        assert_eq!(
+            hatches.len(),
+            1,
+            "insert-contained hatch should produce one native hatch model"
+        );
         assert_eq!(hatches[0].name, "SOLID");
+        assert!(
+            hatches[0]
+                .boundary
+                .iter()
+                .any(|point| (point[0] - 10.0).abs() < 1.0e-4 && (point[1] - 5.0).abs() < 1.0e-4),
+            "insert translation should move hatch boundary into model space"
+        );
+    }
+
+    #[test]
+    fn nativerender_nested_insert_hatch_byblock_uses_nearest_insert_color() {
+        let mut native = nm::CadDocument::new();
+        let mut hatch = nm::Entity::new(nm::EntityData::Hatch {
+            pattern_name: "SOLID".into(),
+            solid_fill: true,
+            boundary_paths: vec![nm::HatchBoundaryPath {
+                flags: 2,
+                edges: vec![nm::HatchEdge::Polyline {
+                    closed: true,
+                    vertices: vec![
+                        [0.0, 0.0, 0.0],
+                        [2.0, 0.0, 0.0],
+                        [2.0, 2.0, 0.0],
+                        [0.0, 2.0, 0.0],
+                    ],
+                }],
+            }],
+        });
+        hatch.color_index = 0; // ByBlock
+        block_with_entities(&mut native, "HATCH_CHILD", vec![hatch]);
+
+        let mut middle_insert = nm::Entity::new(nm::EntityData::Insert {
+            block_name: "HATCH_CHILD".into(),
+            insertion: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+            rotation: 0.0,
+            has_attribs: false,
+            attribs: vec![],
+        });
+        middle_insert.color_index = 5;
+        block_with_entities(&mut native, "HATCH_PARENT", vec![middle_insert]);
+
+        let mut top_insert = nm::Entity::new(nm::EntityData::Insert {
+            block_name: "HATCH_PARENT".into(),
+            insertion: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+            rotation: 0.0,
+            has_attribs: false,
+            attribs: vec![],
+        });
+        top_insert.color_index = 1;
+        native.add_entity(top_insert).expect("top insert");
+
+        let scene = scene_with_native(native);
+        let _wires = scene.entity_wires();
+        let hatches = scene.synced_hatch_models();
+
+        assert_eq!(hatches.len(), 1);
+        assert!(
+            hatches[0].color[2] > 0.9 && hatches[0].color[0] < 0.1,
+            "ByBlock hatch should inherit nearest insert ACI 5 blue"
+        );
+    }
+
+    #[test]
+    fn nativerender_insert_hatch_boundary_applies_scale_and_rotation() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "HATCH_XFORM",
+            vec![nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 2,
+                    edges: vec![nm::HatchEdge::Polyline {
+                        closed: true,
+                        vertices: vec![
+                            [0.0, 0.0, 0.0],
+                            [2.0, 0.0, 0.0],
+                            [2.0, 2.0, 0.0],
+                            [0.0, 2.0, 0.0],
+                        ],
+                    }],
+                }],
+            })],
+        );
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "HATCH_XFORM".into(),
+                insertion: [10.0, 5.0, 0.0],
+                scale: [2.0, 1.0, 1.0],
+                rotation: 90.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = scene_with_native(native);
+        let _wires = scene.entity_wires();
+        let hatches = scene.synced_hatch_models();
+
+        assert_eq!(hatches.len(), 1);
+        assert!(
+            hatches[0]
+                .boundary
+                .iter()
+                .any(|point| (point[0] - 10.0).abs() < 1.0e-4 && (point[1] - 9.0).abs() < 1.0e-4),
+            "scaled x-axis point should rotate to positive y"
+        );
+        assert!(
+            hatches[0]
+                .boundary
+                .iter()
+                .any(|point| (point[0] - 8.0).abs() < 1.0e-4 && (point[1] - 5.0).abs() < 1.0e-4),
+            "scaled y-axis point should rotate to negative x"
+        );
     }
 
     #[test]
@@ -3853,22 +4258,24 @@ mod tests {
                 solid_fill: true,
                 boundary_paths: vec![nm::HatchBoundaryPath {
                     flags: 2,
-                    edges: vec![nm::HatchEdge::Line {
-                        start: [0.0, 0.0],
-                        end: [1.0, 0.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [1.0, 0.0],
-                        end: [1.0, 1.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [1.0, 1.0],
-                        end: [0.0, 1.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [0.0, 1.0],
-                        end: [0.0, 0.0],
-                    }],
+                    edges: vec![
+                        nm::HatchEdge::Line {
+                            start: [0.0, 0.0],
+                            end: [1.0, 0.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [1.0, 0.0],
+                            end: [1.0, 1.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [1.0, 1.0],
+                            end: [0.0, 1.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [0.0, 1.0],
+                            end: [0.0, 0.0],
+                        },
+                    ],
                 }],
             })],
         );
@@ -3884,7 +4291,9 @@ mod tests {
             .expect("insert");
 
         let mut scene = scene_with_native(native);
-        scene.selected.insert(acadrust::Handle::new(insert_handle.value()));
+        scene
+            .selected
+            .insert(acadrust::Handle::new(insert_handle.value()));
         let hatches = scene.synced_hatch_models();
 
         assert_eq!(hatches.len(), 1);
@@ -3918,9 +4327,13 @@ mod tests {
         let viewport_handle = scene.add_entity(EntityType::Viewport(viewport));
 
         let wires = scene.entity_wires();
-        assert!(wires.iter().any(|wire| wire.name == viewport_handle.value().to_string()));
+        assert!(wires
+            .iter()
+            .any(|wire| wire.name == viewport_handle.value().to_string()));
         assert!(
-            wires.iter().any(|wire| wire.name == line_handle.value().to_string()),
+            wires
+                .iter()
+                .any(|wire| wire.name == line_handle.value().to_string()),
             "paper viewport should project native model wires",
         );
     }
@@ -3953,7 +4366,11 @@ mod tests {
 
         scene.active_viewport = Some(viewport_handle);
         let wires = scene.hit_test_wires();
-        assert_eq!(wires.len(), 1, "MSPACE hit-test should only expose viewport content");
+        assert_eq!(
+            wires.len(),
+            1,
+            "MSPACE hit-test should only expose viewport content"
+        );
         assert_eq!(wires[0].name, line_handle.value().to_string());
     }
 
@@ -3998,7 +4415,10 @@ mod tests {
         let hatches = scene.synced_hatch_models();
         assert_eq!(hatches.len(), 1);
         assert_eq!(hatches[0].name, "SOLID");
-        assert!(hatches[0].boundary.iter().all(|[x, y]| *x >= 0.0 && *y >= 0.0));
+        assert!(hatches[0]
+            .boundary
+            .iter()
+            .all(|[x, y]| *x >= 0.0 && *y >= 0.0));
     }
 
     #[test]
@@ -4061,7 +4481,11 @@ mod tests {
 
         scene.active_viewport = Some(vp1_handle);
         let hatches = scene.synced_hatch_models();
-        assert_eq!(hatches.len(), 1, "MSPACE should only project hatch content for the active viewport");
+        assert_eq!(
+            hatches.len(),
+            1,
+            "MSPACE should only project hatch content for the active viewport"
+        );
     }
 
     #[test]
@@ -4116,29 +4540,34 @@ mod tests {
                 solid_fill: true,
                 boundary_paths: vec![nm::HatchBoundaryPath {
                     flags: 2,
-                    edges: vec![nm::HatchEdge::Line {
-                        start: [0.0, 0.0],
-                        end: [1.0, 0.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [1.0, 0.0],
-                        end: [1.0, 1.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [1.0, 1.0],
-                        end: [0.0, 1.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [0.0, 1.0],
-                        end: [0.0, 0.0],
-                    }],
+                    edges: vec![
+                        nm::HatchEdge::Line {
+                            start: [0.0, 0.0],
+                            end: [1.0, 0.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [1.0, 0.0],
+                            end: [1.0, 1.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [1.0, 1.0],
+                            end: [0.0, 1.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [0.0, 1.0],
+                            end: [0.0, 0.0],
+                        },
+                    ],
                 }],
             }))
             .expect("native hatch");
 
         let scene = scene_with_native(native);
         let model = scene.hatch_model_for_handle(acadrust::Handle::new(hatch_handle.value()));
-        assert!(model.is_some(), "native hatch should be retrievable by handle");
+        assert!(
+            model.is_some(),
+            "native hatch should be retrievable by handle"
+        );
         assert_eq!(model.unwrap().name, "SOLID");
     }
 
@@ -4170,6 +4599,7 @@ mod tests {
             entity,
             insert_handle,
             false,
+            None,
             &mut HashSet::new(),
         );
         assert!(rendered.is_none());
@@ -4209,6 +4639,7 @@ mod tests {
             entity,
             insert_handle,
             false,
+            None,
             &mut visited,
         );
         assert!(rendered.is_none());
@@ -4247,7 +4678,10 @@ mod tests {
             .iter()
             .filter(|wire| wire.name == dim_handle.value().to_string())
             .count();
-        assert!(matches >= 1, "dimension should render through native adapter");
+        assert!(
+            matches >= 1,
+            "dimension should render through native adapter"
+        );
     }
 
     #[test]
@@ -4288,9 +4722,14 @@ mod tests {
         let wires = scene.entity_wires();
         let matches = wires
             .iter()
-            .filter(|wire| wire.name == mleader_handle.value().to_string() && !wire.points.is_empty())
+            .filter(|wire| {
+                wire.name == mleader_handle.value().to_string() && !wire.points.is_empty()
+            })
             .count();
-        assert!(matches >= 1, "multileader should render through native adapter");
+        assert!(
+            matches >= 1,
+            "multileader should render through native adapter"
+        );
     }
 
     #[test]
@@ -4326,7 +4765,10 @@ mod tests {
             .iter()
             .filter(|wire| wire.name == dim_handle.value().to_string())
             .count();
-        assert!(matches >= 1, "Angular2Ln should render through native adapter");
+        assert!(
+            matches >= 1,
+            "Angular2Ln should render through native adapter"
+        );
     }
 
     #[test]
@@ -4363,6 +4805,7 @@ mod tests {
             entity,
             dim_handle,
             false,
+            None,
             &mut HashSet::new(),
         );
         assert!(rendered.is_none());
@@ -4420,8 +4863,12 @@ mod tests {
             .filter_map(|wire| Scene::handle_from_wire_name(&wire.name))
             .collect();
 
-        assert!(wires.iter().any(|wire| wire.name == insert_handle.value().to_string()));
-        assert!(wires.iter().any(|wire| wire.name == dim_handle.value().to_string()));
+        assert!(wires
+            .iter()
+            .any(|wire| wire.name == insert_handle.value().to_string()));
+        assert!(wires
+            .iter()
+            .any(|wire| wire.name == dim_handle.value().to_string()));
         // insert and dimension should each own one parent handle namespace —
         // even after the Phase 8 dim-text-wire tag, both text and geometry
         // wires resolve to the SAME dimension handle via
@@ -4452,7 +4899,10 @@ mod tests {
             .expect("hatch");
 
         let scene = scene_with_native(native);
-        assert!(scene.hatches.is_empty(), "compat bridge should not have a native hatch cache entry");
+        assert!(
+            scene.hatches.is_empty(),
+            "compat bridge should not have a native hatch cache entry"
+        );
         let models = scene.synced_hatch_models();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].name, "SOLID");
@@ -4470,28 +4920,32 @@ mod tests {
                 solid_fill: true,
                 boundary_paths: vec![nm::HatchBoundaryPath {
                     flags: 2,
-                    edges: vec![nm::HatchEdge::Line {
-                        start: [0.0, 0.0],
-                        end: [2.0, 0.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [2.0, 0.0],
-                        end: [2.0, 2.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [2.0, 2.0],
-                        end: [0.0, 2.0],
-                    },
-                    nm::HatchEdge::Line {
-                        start: [0.0, 2.0],
-                        end: [0.0, 0.0],
-                    }],
+                    edges: vec![
+                        nm::HatchEdge::Line {
+                            start: [0.0, 0.0],
+                            end: [2.0, 0.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [2.0, 0.0],
+                            end: [2.0, 2.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [2.0, 2.0],
+                            end: [0.0, 2.0],
+                        },
+                        nm::HatchEdge::Line {
+                            start: [0.0, 2.0],
+                            end: [0.0, 0.0],
+                        },
+                    ],
                 }],
             }))
             .expect("hatch");
 
         let mut scene = scene_with_native(native);
-        scene.selected.insert(acadrust::Handle::new(hatch_handle.value()));
+        scene
+            .selected
+            .insert(acadrust::Handle::new(hatch_handle.value()));
         let models = scene.synced_hatch_models();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].color, [0.15, 0.55, 1.00, models[0].color[3]]);
@@ -4509,7 +4963,10 @@ mod tests {
         let native_entity = scene
             .native_doc()
             .and_then(|doc| doc.get_entity(nm::Handle::new(handle.value())));
-        assert!(native_entity.is_some(), "supported compat add should mirror into native document");
+        assert!(
+            native_entity.is_some(),
+            "supported compat add should mirror into native document"
+        );
     }
 
     #[test]
@@ -4604,9 +5061,27 @@ mod tests {
         let lwpoly_h = native
             .add_entity(nm::Entity::new(nm::EntityData::LwPolyline {
                 vertices: vec![
-                    nm::LwVertex { x: 0.0, y: 0.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
-                    nm::LwVertex { x: 10.0, y: 0.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
-                    nm::LwVertex { x: 10.0, y: 10.0, bulge: 0.0, start_width: 0.0, end_width: 0.0 },
+                    nm::LwVertex {
+                        x: 0.0,
+                        y: 0.0,
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    },
+                    nm::LwVertex {
+                        x: 10.0,
+                        y: 0.0,
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    },
+                    nm::LwVertex {
+                        x: 10.0,
+                        y: 10.0,
+                        bulge: 0.0,
+                        start_width: 0.0,
+                        end_width: 0.0,
+                    },
                 ],
                 closed: false,
                 constant_width: 0.0,
@@ -4901,16 +5376,15 @@ mod tests {
             "populate_hatches_from_document must seed at least the SOLID entry"
         );
         assert!(
-            scene.hatches.contains_key(&acadrust::Handle::new(solid_h.value())),
+            scene
+                .hatches
+                .contains_key(&acadrust::Handle::new(solid_h.value())),
             "SOLID entity must have a compat hatch cache entry"
         );
 
         // Native-side path: synced_hatch_models folds native HATCH into the output.
         let models = scene.synced_hatch_models();
-        assert!(
-            !models.is_empty(),
-            "synced_hatch_models must be non-empty"
-        );
+        assert!(!models.is_empty(), "synced_hatch_models must be non-empty");
         assert!(
             models.iter().any(|m| m.name == "SOLID"),
             "expected at least one SOLID hatch model; got {:?}",
@@ -4939,12 +5413,7 @@ mod tests {
             .expect("image");
         let wipeout_h = native
             .add_entity(nm::Entity::new(nm::EntityData::Wipeout {
-                clip_vertices: vec![
-                    [0.0, 0.0],
-                    [10.0, 0.0],
-                    [10.0, 10.0],
-                    [0.0, 10.0],
-                ],
+                clip_vertices: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
                 elevation: 0.25,
             }))
             .expect("wipeout");
@@ -5029,7 +5498,10 @@ mod tests {
         scene.transform_entities(&[acadrust::Handle::new(line_h.value())], &xform);
 
         // Compat must reflect the translated endpoints.
-        let compat_start = match scene.document.get_entity(acadrust::Handle::new(line_h.value())) {
+        let compat_start = match scene
+            .document
+            .get_entity(acadrust::Handle::new(line_h.value()))
+        {
             Some(EntityType::Line(l)) => [l.start.x, l.start.y, l.start.z],
             _ => panic!("compat line missing after transform"),
         };
@@ -5218,11 +5690,7 @@ mod tests {
         scene.populate_hatches_from_document();
         let wires = scene.entity_wires();
 
-        for (label, h) in [
-            ("LINE", line_h),
-            ("CIRCLE", circle_h),
-            ("TEXT", text_h),
-        ] {
+        for (label, h) in [("LINE", line_h), ("CIRCLE", circle_h), ("TEXT", text_h)] {
             assert!(
                 wires.iter().any(|w| w.name == h.value().to_string()),
                 "{label} wire missing after full read-write-display cycle"
@@ -5324,23 +5792,13 @@ mod tests {
         // deliberately used a nonexistent path to check the no-panic
         // contract; this test locks in the happy path.
         let dir = std::env::temp_dir();
-        let path = dir.join(format!(
-            "h7cad_image_fixture_{}.png",
-            std::process::id()
-        ));
+        let path = dir.join(format!("h7cad_image_fixture_{}.png", std::process::id()));
         // 4×4 RGBA, all red.
         let mut pixels = Vec::with_capacity(4 * 4 * 4);
         for _ in 0..(4 * 4) {
             pixels.extend_from_slice(&[0xFFu8, 0x00, 0x00, 0xFF]);
         }
-        image::save_buffer(
-            &path,
-            &pixels,
-            4,
-            4,
-            image::ColorType::Rgba8,
-        )
-        .expect("write test PNG");
+        image::save_buffer(&path, &pixels, 4, 4, image::ColorType::Rgba8).expect("write test PNG");
 
         let mut native = nm::CadDocument::new();
         let img_h = native
@@ -5408,7 +5866,9 @@ mod tests {
         // still surface a model (possibly with an empty Pattern arm).
         let models = scene.synced_hatch_models();
         assert!(
-            models.iter().any(|m| m.name == "CUSTOM_PROPRIETARY_PATTERN_XYZ"),
+            models
+                .iter()
+                .any(|m| m.name == "CUSTOM_PROPRIETARY_PATTERN_XYZ"),
             "unknown-pattern hatch must still produce a HatchModel (for boundary display)"
         );
         let _ = hatch_h;
@@ -5501,6 +5961,84 @@ mod tests {
         for n in ["DOT", "SYMBOL", "SHEET"] {
             assert!(names.contains(n), "block {n} missing in compat doc");
         }
+    }
+
+    #[test]
+    fn fixture_nested_byblock_color_inherits_nearest_insert_override() {
+        let mut native = nm::CadDocument::new();
+
+        let leaf_h = native.allocate_handle();
+        let mut leaf = nm::BlockRecord::new(leaf_h, "LEAF");
+        let mut byblock_line = nm::Entity::new(nm::EntityData::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [10.0, 0.0, 0.0],
+        });
+        byblock_line.color_index = 0;
+        leaf.entities = vec![byblock_line];
+        native.insert_block_record(leaf);
+
+        let middle_h = native.allocate_handle();
+        let mut middle = nm::BlockRecord::new(middle_h, "MIDDLE");
+        let mut leaf_insert = nm::Entity::new(nm::EntityData::Insert {
+            block_name: "LEAF".into(),
+            insertion: [0.0, 0.0, 0.0],
+            scale: [1.0, 1.0, 1.0],
+            rotation: 0.0,
+            has_attribs: false,
+            attribs: vec![],
+        });
+        leaf_insert.color_index = 5;
+        middle.entities = vec![leaf_insert];
+        native.insert_block_record(middle);
+
+        let outer_h = native
+            .add_entity({
+                let mut e = nm::Entity::new(nm::EntityData::Insert {
+                    block_name: "MIDDLE".into(),
+                    insertion: [0.0, 0.0, 0.0],
+                    scale: [1.0, 1.0, 1.0],
+                    rotation: 0.0,
+                    has_attribs: false,
+                    attribs: vec![],
+                });
+                e.color_index = 1;
+                e
+            })
+            .expect("outer insert");
+
+        let scene = display_scene(native);
+        let wires = scene.entity_wires();
+        let expected_blue = crate::scene::tessellate::aci_to_rgba(&crate::types::Color::BLUE);
+        let compat_entity_colors = scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                EntityType::Insert(ins) => {
+                    Some((format!("INSERT {}", ins.block_name), ins.common.color))
+                }
+                EntityType::Line(line) => Some(("LINE".to_string(), line.common.color)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            wires.iter().any(|w| {
+                w.name == outer_h.value().to_string()
+                    && w.color == expected_blue
+                    && w.key_vertices
+                        .iter()
+                        .any(|p| (p[0] - 10.0).abs() < 1e-4 && p[1].abs() < 1e-4)
+            }),
+            "nested ByBlock LINE endpoint should inherit nearest INSERT blue; got {:?}",
+            (
+                compat_entity_colors,
+                wires
+                    .iter()
+                    .filter(|w| w.name == outer_h.value().to_string())
+                    .map(|w| (w.color, w.aci, w.key_vertices.clone()))
+                    .collect::<Vec<_>>()
+            )
+        );
     }
 
     #[test]
@@ -5659,9 +6197,7 @@ mod tests {
         let wires = scene.entity_wires();
 
         assert!(
-            !wires
-                .iter()
-                .any(|w| w.name == hidden.value().to_string()),
+            !wires.iter().any(|w| w.name == hidden.value().to_string()),
             "off-layer entity must NOT render; wires: {:?}",
             wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
         );
@@ -5751,9 +6287,7 @@ mod tests {
         // ACI 1 = red (255,0,0) in AutoCAD palette.
         assert_eq!(aci, 1, "resolved ACI must be the layer's color index");
         assert!(
-            (color[0] - 1.0).abs() < 1e-6
-                && color[1].abs() < 1e-6
-                && color[2].abs() < 1e-6,
+            (color[0] - 1.0).abs() < 1e-6 && color[1].abs() < 1e-6 && color[2].abs() < 1e-6,
             "BYLAYER red should resolve to (1,0,0,*): got {color:?}"
         );
     }
@@ -5803,7 +6337,9 @@ mod tests {
         // The model-space line must project THROUGH the viewport into
         // Layout1. Its wire name carries the model entity handle.
         assert!(
-            wires.iter().any(|w| w.name == model_line_h.value().to_string()),
+            wires
+                .iter()
+                .any(|w| w.name == model_line_h.value().to_string()),
             "model-space line must be visible through paper-space viewport; got {:?}",
             wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
         );
@@ -5837,7 +6373,9 @@ mod tests {
         let wires = scene.entity_wires();
 
         assert!(
-            wires.iter().any(|w| w.name == paper_line_h.value().to_string()),
+            wires
+                .iter()
+                .any(|w| w.name == paper_line_h.value().to_string()),
             "paper-space line must render when Layout1 is active; got {:?}",
             wires.iter().map(|w| w.name.as_str()).collect::<Vec<_>>()
         );
@@ -5964,7 +6502,10 @@ mod tests {
             .block_records
             .values()
             .any(|br| br.name == "PART_STAMP" && br.entities.len() == 2);
-        assert!(block_survived, "custom block PART_STAMP must survive roundtrip");
+        assert!(
+            block_survived,
+            "custom block PART_STAMP must survive roundtrip"
+        );
         assert!(
             reloaded.get_entity(insert_h).is_some(),
             "INSERT entity must survive roundtrip"
@@ -6013,7 +6554,9 @@ mod tests {
         let wires = scene.entity_wires();
 
         assert!(
-            wires.iter().any(|w| w.name == model_line.value().to_string()),
+            wires
+                .iter()
+                .any(|w| w.name == model_line.value().to_string()),
             "model-space line should show in Model layout"
         );
         // Paper-space entity may or may not appear depending on layout
@@ -6039,6 +6582,14 @@ mod tests {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct NativeRenderStats {
+    pub native_rendered: BTreeMap<String, usize>,
+    pub compat_fallback: BTreeMap<String, usize>,
+    pub preserved_only: BTreeMap<String, usize>,
+}
+
 impl Default for Scene {
     fn default() -> Self {
         Self::new()
@@ -6053,9 +6604,14 @@ impl Default for Scene {
 /// [xmin,xmax]×[ymin,ymax].  Returns the clipped endpoints or `None` if the
 /// segment is entirely outside.
 fn cs_clip(
-    mut x0: f32, mut y0: f32,
-    mut x1: f32, mut y1: f32,
-    xmin: f32, ymin: f32, xmax: f32, ymax: f32,
+    mut x0: f32,
+    mut y0: f32,
+    mut x1: f32,
+    mut y1: f32,
+    xmin: f32,
+    ymin: f32,
+    xmax: f32,
+    ymax: f32,
 ) -> Option<(f32, f32, f32, f32)> {
     const LEFT: u8 = 1;
     const RIGHT: u8 = 2;
@@ -6064,10 +6620,16 @@ fn cs_clip(
 
     let code = |x: f32, y: f32| -> u8 {
         let mut c = 0u8;
-        if x < xmin { c |= LEFT; }
-        else if x > xmax { c |= RIGHT; }
-        if y < ymin { c |= BOTTOM; }
-        else if y > ymax { c |= TOP; }
+        if x < xmin {
+            c |= LEFT;
+        } else if x > xmax {
+            c |= RIGHT;
+        }
+        if y < ymin {
+            c |= BOTTOM;
+        } else if y > ymax {
+            c |= TOP;
+        }
         c
     };
 
@@ -6075,8 +6637,12 @@ fn cs_clip(
     let mut c1 = code(x1, y1);
 
     loop {
-        if c0 | c1 == 0 { return Some((x0, y0, x1, y1)); }
-        if c0 & c1 != 0 { return None; }
+        if c0 | c1 == 0 {
+            return Some((x0, y0, x1, y1));
+        }
+        if c0 & c1 != 0 {
+            return None;
+        }
         let cout = if c0 != 0 { c0 } else { c1 };
         let (x, y);
         if cout & TOP != 0 {
@@ -6092,8 +6658,15 @@ fn cs_clip(
             y = y0 + (y1 - y0) * (xmin - x0) / (x1 - x0);
             x = xmin;
         }
-        if cout == c0 { x0 = x; y0 = y; c0 = code(x0, y0); }
-        else           { x1 = x; y1 = y; c1 = code(x1, y1); }
+        if cout == c0 {
+            x0 = x;
+            y0 = y;
+            c0 = code(x0, y0);
+        } else {
+            x1 = x;
+            y1 = y;
+            c1 = code(x1, y1);
+        }
     }
 }
 
@@ -6101,7 +6674,10 @@ fn cs_clip(
 /// Returns a new points vec with proper NaN separators at clip boundaries.
 fn clip_polyline_to_rect(
     pts: &[[f32; 3]],
-    xmin: f32, ymin: f32, xmax: f32, ymax: f32,
+    xmin: f32,
+    ymin: f32,
+    xmax: f32,
+    ymax: f32,
     z: f32,
 ) -> Vec<[f32; 3]> {
     const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
@@ -6130,10 +6706,14 @@ fn clip_polyline_to_rect(
             let [x0, y0, _] = seg[j];
             let [x1, y1, _] = seg[j + 1];
             match cs_clip(x0, y0, x1, y1, xmin, ymin, xmax, ymax) {
-                None => { pen_down = false; }
+                None => {
+                    pen_down = false;
+                }
                 Some((cx0, cy0, cx1, cy1)) => {
                     if !pen_down {
-                        if !result.is_empty() { result.push(NAN3); }
+                        if !result.is_empty() {
+                            result.push(NAN3);
+                        }
                         result.push([cx0, cy0, z]);
                         pen_down = true;
                     } else if let Some(&[lx, ly, _]) = result.last() {
@@ -6152,7 +6732,11 @@ fn clip_polyline_to_rect(
         }
     }
     // Remove trailing NaN.
-    while result.last().map(|p: &[f32; 3]| p[0].is_nan()).unwrap_or(false) {
+    while result
+        .last()
+        .map(|p: &[f32; 3]| p[0].is_nan())
+        .unwrap_or(false)
+    {
         result.pop();
     }
     result
@@ -6196,49 +6780,38 @@ fn clip_polygon_to_rect(
         output
     }
 
-    let left = clip_against_edge(poly, |p| p[0] >= xmin, |a, b| {
-        let t = (xmin - a[0]) / (b[0] - a[0]);
-        [xmin, a[1] + (b[1] - a[1]) * t]
-    });
-    let right = clip_against_edge(&left, |p| p[0] <= xmax, |a, b| {
-        let t = (xmax - a[0]) / (b[0] - a[0]);
-        [xmax, a[1] + (b[1] - a[1]) * t]
-    });
-    let bottom = clip_against_edge(&right, |p| p[1] >= ymin, |a, b| {
-        let t = (ymin - a[1]) / (b[1] - a[1]);
-        [a[0] + (b[0] - a[0]) * t, ymin]
-    });
-    clip_against_edge(&bottom, |p| p[1] <= ymax, |a, b| {
-        let t = (ymax - a[1]) / (b[1] - a[1]);
-        [a[0] + (b[0] - a[0]) * t, ymax]
-    })
-}
-
-/// A thin white rectangle wire that represents the printable-area boundary
-/// of the active paper layout.  Rendered beneath all other paper-space
-/// geometry so it acts as a visual "page" backdrop.
-fn paper_boundary_wire(x0: f32, y0: f32, x1: f32, y1: f32) -> WireModel {
-    WireModel {
-        name: "__paper_boundary__".to_string(),
-        points: vec![
-            [x0, y0, 0.0],
-            [x1, y0, 0.0],
-            [x1, y1, 0.0],
-            [x0, y1, 0.0],
-            [x0, y0, 0.0],
-        ],
-        // Near-white so it stands out against the dark paper-space background.
-        color: [0.95, 0.95, 0.95, 1.0],
-        selected: false,
-        pattern_length: 0.0,
-        pattern: [0.0; 8],
-        line_weight_px: 1.5,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        aci: 0,
-        key_vertices: vec![],
-        aabb: WireModel::UNBOUNDED_AABB,
-    }
+    let left = clip_against_edge(
+        poly,
+        |p| p[0] >= xmin,
+        |a, b| {
+            let t = (xmin - a[0]) / (b[0] - a[0]);
+            [xmin, a[1] + (b[1] - a[1]) * t]
+        },
+    );
+    let right = clip_against_edge(
+        &left,
+        |p| p[0] <= xmax,
+        |a, b| {
+            let t = (xmax - a[0]) / (b[0] - a[0]);
+            [xmax, a[1] + (b[1] - a[1]) * t]
+        },
+    );
+    let bottom = clip_against_edge(
+        &right,
+        |p| p[1] >= ymin,
+        |a, b| {
+            let t = (ymin - a[1]) / (b[1] - a[1]);
+            [a[0] + (b[0] - a[0]) * t, ymin]
+        },
+    );
+    clip_against_edge(
+        &bottom,
+        |p| p[1] <= ymax,
+        |a, b| {
+            let t = (ymax - a[1]) / (b[1] - a[1]);
+            [a[0] + (b[0] - a[0]) * t, ymax]
+        },
+    )
 }
 
 // ── Parallel tessellation free function ──────────────────────────────────────
@@ -6248,7 +6821,6 @@ fn tessellate_entity(
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
     world_offset: [f64; 3],
-    bg_color: [f32; 4],
     e: &EntityType,
 ) -> Vec<WireModel> {
     let h = e.common().handle;
@@ -6274,7 +6846,15 @@ fn tessellate_entity(
             (0.0_f32, [0.0f32; 8])
         };
         let mut wire = tessellate::tessellate(
-            document, h, e, sel, color, pattern_length, pattern, 1.5, world_offset,
+            document,
+            h,
+            e,
+            sel,
+            color,
+            pattern_length,
+            pattern,
+            1.5,
+            world_offset,
         );
         wire.aabb = entity_aabb(e, world_offset);
         return vec![wire];
@@ -6282,14 +6862,19 @@ fn tessellate_entity(
 
     let (entity_color, pattern_length, pattern, line_weight_px, aci) =
         render::render_style_for(document, e);
-    let entity_color = render::adapt_to_bg(entity_color, bg_color);
     let lt_scale = e.common().linetype_scale as f32;
     let lt_name = render::linetype_name_for(document, e);
 
     if let EntityType::Dimension(dim) = e {
         let aabb = entity_aabb(e, world_offset);
         let mut wires = tessellate::tessellate_dimension(
-            document, h, dim, sel, entity_color, line_weight_px, world_offset,
+            document,
+            h,
+            dim,
+            sel,
+            entity_color,
+            line_weight_px,
+            world_offset,
         );
         for w in &mut wires {
             w.aci = aci;
@@ -6299,47 +6884,30 @@ fn tessellate_entity(
     }
 
     if let EntityType::Insert(ins) = e {
-        let is_mirrored = ins.x_scale() * ins.y_scale() < 0.0;
-        // Resolve the INSERT's own style so ByBlock sub-entities can inherit it.
-        let (ins_color, ins_pat_len, ins_pat, ins_lw_px, _) =
-            render::render_style_for(document, e);
-        let ins_color = render::adapt_to_bg(ins_color, bg_color);
-        return ins
-            .explode_from_document(document)
-            .iter()
-            .cloned()
-            .map(crate::modules::home::modify::explode::normalize_insert_entity)
-            .map(|sub| crate::modules::home::modify::explode::fix_mirrored_arc(sub, is_mirrored))
-            .flat_map(|sub| {
-                let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
-                    render::render_style_for_block_sub(
-                        document, &sub,
-                        ins_color, ins_pat_len, ins_pat, ins_lw_px,
-                    );
-                let sub_color = render::adapt_to_bg(sub_color, bg_color);
-                let sub_aabb = entity_aabb(&sub, world_offset);
-                let mut wire = tessellate::tessellate(
-                    document,
-                    h,
-                    &sub,
-                    sel,
-                    sub_color,
-                    sub_pattern_length,
-                    sub_pattern,
-                    sub_line_weight_px,
-                    world_offset,
-                );
-                wire.name = h.value().to_string();
-                wire.aci = sub_aci;
-                wire.aabb = sub_aabb;
-                vec![wire]
-            })
-            .collect();
+        let mut visited_blocks = HashSet::new();
+        let (ins_color, ins_pat_len, ins_pat, ins_lw_px, _) = render::render_style_for(document, e);
+        return tessellate_insert_contents(
+            document,
+            h,
+            sel,
+            world_offset,
+            ins,
+            (ins_color, ins_pat_len, ins_pat, ins_lw_px),
+            &mut visited_blocks,
+        );
     }
 
     let aabb = entity_aabb(e, world_offset);
     let mut base = tessellate::tessellate(
-        document, h, e, sel, entity_color, pattern_length, pattern, line_weight_px, world_offset,
+        document,
+        h,
+        e,
+        sel,
+        entity_color,
+        pattern_length,
+        pattern,
+        line_weight_px,
+        world_offset,
     );
     base.aci = aci;
     base.aabb = aabb;
@@ -6355,12 +6923,112 @@ fn tessellate_entity(
             base.line_weight_px,
         );
         if !wires.is_empty() {
-            for w in &mut wires { w.aabb = aabb; }
+            for w in &mut wires {
+                w.aabb = aabb;
+            }
             return wires;
         }
     }
 
     vec![base]
+}
+
+fn tessellate_insert_contents(
+    document: &acadrust::CadDocument,
+    outer_handle: Handle,
+    selected: bool,
+    world_offset: [f64; 3],
+    ins: &DxfInsert,
+    insert_style: ([f32; 4], f32, [f32; 8], f32),
+    visited_blocks: &mut HashSet<String>,
+) -> Vec<WireModel> {
+    if !visited_blocks.insert(ins.block_name.clone()) {
+        return Vec::new();
+    }
+
+    let is_mirrored = ins.x_scale() * ins.y_scale() < 0.0;
+    let raw_entities = block_entities_for_insert(document, ins);
+    let style_entities: Vec<EntityType> = raw_entities
+        .iter()
+        .filter(|entity| {
+            !matches!(
+                entity,
+                EntityType::Block(_) | EntityType::BlockEnd(_) | EntityType::AttributeDefinition(_)
+            )
+        })
+        .cloned()
+        .collect();
+    let mut wires = Vec::new();
+    for (idx, sub) in ins
+        .explode(&raw_entities)
+        .into_iter()
+        .map(crate::modules::home::modify::explode::normalize_insert_entity)
+        .map(|sub| crate::modules::home::modify::explode::fix_mirrored_arc(sub, is_mirrored))
+        .enumerate()
+    {
+        let style_source = style_entities
+            .get(idx % style_entities.len())
+            .unwrap_or(&sub);
+        let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
+            render::render_style_for_block_sub(
+                document,
+                style_source,
+                insert_style.0,
+                insert_style.1,
+                insert_style.2,
+                insert_style.3,
+            );
+        if let EntityType::Insert(child) = &sub {
+            wires.extend(tessellate_insert_contents(
+                document,
+                outer_handle,
+                selected,
+                world_offset,
+                child,
+                (
+                    sub_color,
+                    sub_pattern_length,
+                    sub_pattern,
+                    sub_line_weight_px,
+                ),
+                visited_blocks,
+            ));
+            continue;
+        }
+
+        let sub_aabb = entity_aabb(&sub, world_offset);
+        let mut wire = tessellate::tessellate(
+            document,
+            outer_handle,
+            &sub,
+            selected,
+            sub_color,
+            sub_pattern_length,
+            sub_pattern,
+            sub_line_weight_px,
+            world_offset,
+        );
+        wire.name = outer_handle.value().to_string();
+        wire.aci = sub_aci;
+        wire.aabb = sub_aabb;
+        wires.push(wire);
+    }
+
+    visited_blocks.remove(&ins.block_name);
+    wires
+}
+
+fn block_entities_for_insert(document: &acadrust::CadDocument, ins: &DxfInsert) -> Vec<EntityType> {
+    document
+        .block_records
+        .get(&ins.block_name)
+        .map(|br| {
+            br.entity_handles
+                .iter()
+                .filter_map(|h| document.get_entity(*h).cloned())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn entity_aabb(e: &acadrust::EntityType, world_offset: [f64; 3]) -> [f32; 4] {
@@ -6381,9 +7049,7 @@ fn entity_aabb(e: &acadrust::EntityType, world_offset: [f64; 3]) -> [f32; 4] {
 /// Generate solid-fill boundary polygons for each wide segment of an LWPolyline.
 /// Returns one polygon per segment that has non-zero width; empty if the polyline
 /// has zero `constant_width` and all vertex widths are zero.
-fn wide_lwpolyline_fills(
-    pl: &acadrust::entities::LwPolyline,
-) -> Vec<Vec<[f32; 2]>> {
+fn wide_lwpolyline_fills(pl: &acadrust::entities::LwPolyline) -> Vec<Vec<[f32; 2]>> {
     let hw_const = (pl.constant_width / 2.0) as f32;
     let verts = &pl.vertices;
     let n = verts.len();
@@ -6395,8 +7061,16 @@ fn wide_lwpolyline_fills(
     for i in 0..seg_count {
         let v0 = &verts[i];
         let v1 = &verts[(i + 1) % n];
-        let hw0 = if v0.start_width > 1e-9 { v0.start_width as f32 / 2.0 } else { hw_const };
-        let hw1 = if v0.end_width > 1e-9 { v0.end_width as f32 / 2.0 } else { hw_const };
+        let hw0 = if v0.start_width > 1e-9 {
+            v0.start_width as f32 / 2.0
+        } else {
+            hw_const
+        };
+        let hw1 = if v0.end_width > 1e-9 {
+            v0.end_width as f32 / 2.0
+        } else {
+            hw_const
+        };
         if hw0 < 1e-6 && hw1 < 1e-6 {
             continue;
         }
@@ -6410,9 +7084,7 @@ fn wide_lwpolyline_fills(
 }
 
 /// Generate solid-fill boundary polygons for each wide segment of a Polyline2D.
-fn wide_polyline2d_fills(
-    pl: &acadrust::entities::Polyline2D,
-) -> Vec<Vec<[f32; 2]>> {
+fn wide_polyline2d_fills(pl: &acadrust::entities::Polyline2D) -> Vec<Vec<[f32; 2]>> {
     let hw_default = (pl.start_width.max(pl.end_width) / 2.0) as f32;
     let verts = &pl.vertices;
     let n = verts.len();
@@ -6424,8 +7096,16 @@ fn wide_polyline2d_fills(
     for i in 0..seg_count {
         let v0 = &verts[i];
         let v1 = &verts[(i + 1) % n];
-        let hw0 = if v0.start_width > 1e-9 { v0.start_width as f32 / 2.0 } else { hw_default };
-        let hw1 = if v0.end_width > 1e-9 { v0.end_width as f32 / 2.0 } else { hw_default };
+        let hw0 = if v0.start_width > 1e-9 {
+            v0.start_width as f32 / 2.0
+        } else {
+            hw_default
+        };
+        let hw1 = if v0.end_width > 1e-9 {
+            v0.end_width as f32 / 2.0
+        } else {
+            hw_default
+        };
         if hw0 < 1e-6 && hw1 < 1e-6 {
             continue;
         }
@@ -6510,4 +7190,3 @@ fn polyline_segment_fill(
         Some(boundary)
     }
 }
-

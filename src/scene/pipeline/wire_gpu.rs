@@ -111,11 +111,16 @@ impl WireVertex {
 pub struct WireGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub vertex_count: u32,
+    /// Paper-space bbox [x0, y0, x1, y1] for GPU scissor clipping.
+    /// Set only for viewport-projected wires; None for regular wires.
+    pub vp_scissor: Option<[f32; 4]>,
 }
 
 impl WireGpu {
     pub fn new(device: &wgpu::Device, wire: &WireModel) -> Self {
-        Self::build(device, wire, wire.color)
+        let mut g = Self::build(device, wire, wire.color);
+        g.vp_scissor = wire.vp_scissor;
+        g
     }
 
     /// Creates a ghost copy with `alpha` applied on top of the wire's own alpha.
@@ -137,8 +142,18 @@ impl WireGpu {
 
         for wire in wires {
             let color = wire.color;
-            let pat0 = [wire.pattern[0], wire.pattern[1], wire.pattern[2], wire.pattern[3]];
-            let pat1 = [wire.pattern[4], wire.pattern[5], wire.pattern[6], wire.pattern[7]];
+            let pat0 = [
+                wire.pattern[0],
+                wire.pattern[1],
+                wire.pattern[2],
+                wire.pattern[3],
+            ];
+            let pat1 = [
+                wire.pattern[4],
+                wire.pattern[5],
+                wire.pattern[6],
+                wire.pattern[7],
+            ];
             let half_width = wire.line_weight_px * 0.5;
             let n = wire.points.len();
 
@@ -148,7 +163,12 @@ impl WireGpu {
                 let p = wire.points[i - 1];
                 let q = wire.points[i];
                 if !p[0].is_finite() || !q[0].is_finite() {
-                    dists[i] = dists[i - 1];
+                    // plinegen=false: reset to 0 at the first real point after a NaN separator.
+                    dists[i] = if !wire.plinegen && !p[0].is_finite() && q[0].is_finite() {
+                        0.0
+                    } else {
+                        dists[i - 1]
+                    };
                 } else {
                     let dx = q[0] - p[0];
                     let dy = q[1] - p[1];
@@ -160,8 +180,12 @@ impl WireGpu {
             for i in 0..n.saturating_sub(1) {
                 let a = wire.points[i];
                 let b = wire.points[i + 1];
-                if !a[0].is_finite() || !a[1].is_finite() || !a[2].is_finite()
-                    || !b[0].is_finite() || !b[1].is_finite() || !b[2].is_finite()
+                if !a[0].is_finite()
+                    || !a[1].is_finite()
+                    || !a[2].is_finite()
+                    || !b[0].is_finite()
+                    || !b[1].is_finite()
+                    || !b[2].is_finite()
                 {
                     continue;
                 }
@@ -170,18 +194,25 @@ impl WireGpu {
                 let make = |which_end: f32, side: f32| -> WireVertex {
                     let dist = if which_end < 0.5 { dist_a } else { dist_b };
                     WireVertex {
-                        pos_a: a, pos_b: b, which_end, side, color,
-                        distance: dist, half_width,
+                        pos_a: a,
+                        pos_b: b,
+                        which_end,
+                        side,
+                        color,
+                        distance: dist,
+                        half_width,
                         pattern_length: wire.pattern_length,
-                        _pad: 0.0, pat0, pat1,
+                        _pad: 0.0,
+                        pat0,
+                        pat1,
                     }
                 };
                 vertices.push(make(0.0, -1.0));
                 vertices.push(make(1.0, -1.0));
-                vertices.push(make(1.0,  1.0));
+                vertices.push(make(1.0, 1.0));
                 vertices.push(make(0.0, -1.0));
-                vertices.push(make(1.0,  1.0));
-                vertices.push(make(0.0,  1.0));
+                vertices.push(make(1.0, 1.0));
+                vertices.push(make(0.0, 1.0));
             }
         }
 
@@ -204,6 +235,7 @@ impl WireGpu {
                 Self {
                     vertex_buffer,
                     vertex_count: chunk.len() as u32,
+                    vp_scissor: None,
                 }
             })
             .collect()
@@ -234,10 +266,13 @@ impl WireGpu {
         for i in 1..n {
             let p = wire.points[i - 1];
             let q = wire.points[i];
-            // If either point is non-finite (NaN sentinel or ±inf from overflow),
-            // keep the same distance — the segment will be skipped anyway.
             if !p[0].is_finite() || !q[0].is_finite() {
-                dists[i] = dists[i - 1];
+                // plinegen=false: reset to 0 at the first real point after a NaN separator.
+                dists[i] = if !wire.plinegen && !p[0].is_finite() && q[0].is_finite() {
+                    0.0
+                } else {
+                    dists[i - 1]
+                };
             } else {
                 let dx = q[0] - p[0];
                 let dy = q[1] - p[1];
@@ -302,6 +337,7 @@ impl WireGpu {
         Self {
             vertex_buffer,
             vertex_count: vertices.len() as u32,
+            vp_scissor: None,
         }
     }
 }

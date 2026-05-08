@@ -1,18 +1,18 @@
-use crate::scene::Scene;
-use crate::io::pid_import::{PidImportSummary, PidNodeKey, PidPreviewIndex};
-use crate::ui::{LayerPanel, PidBrowserListItem, PidBrowserSection, PropertiesPanel};
 use crate::command::CadCommand;
-use crate::snap::SnapResult;
+use crate::io::pid_import::{PidImportSummary, PidNodeKey, PidPreviewIndex};
+use crate::linetypes;
+use crate::modules::home::modify::refedit::RefEditSession;
 use crate::scene::grip::GripEdit;
 use crate::scene::GripDef;
-use crate::modules::home::modify::refedit::RefEditSession;
-use acadrust::{CadDocument, Handle};
+use crate::scene::Scene;
+use crate::snap::SnapResult;
+use crate::ui::{LayerPanel, PidBrowserListItem, PidBrowserSection, PropertiesPanel};
 use acadrust::tables::Ucs;
+use acadrust::{CadDocument, Handle};
 use h7cad_native_model as nm;
-use crate::linetypes;
+use iced;
 use pid_parse::{PidDocument, PidImportView};
 use std::path::PathBuf;
-use iced;
 
 // ── Per-document tab state ─────────────────────────────────────────────────
 
@@ -311,6 +311,8 @@ pub(super) struct DocumentTab {
     pub(super) refedit_session: Option<RefEditSession>,
     /// Currently active MLeader style name.
     pub(super) active_mleader_style: String,
+    /// Last camera_generation value written back to the document.
+    pub(super) last_synced_camera_gen: u64,
 }
 
 impl DocumentTab {
@@ -355,6 +357,7 @@ impl DocumentTab {
             paper_bg_color: None,
             refedit_session: None,
             active_mleader_style: "Standard".to_string(),
+            last_synced_camera_gen: 0,
         }
     }
 

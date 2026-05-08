@@ -60,6 +60,12 @@ pub struct WireModel {
     /// Preview / interim wires use `UNBOUNDED_AABB` so they are never pre-rejected
     /// by the snap world-space filter.
     pub aabb: [f32; 4],
+    /// When false the linetype pattern restarts at each NaN-separated segment
+    /// (DXF PLINEGEN=0).  When true the pattern runs continuously (PLINEGEN=1).
+    pub plinegen: bool,
+    /// Paper-space bounding box [x0, y0, x1, y1] for GPU scissor clipping.
+    /// Set only for viewport-projected wires in paper-space layouts.
+    pub vp_scissor: Option<[f32; 4]>,
 }
 
 impl WireModel {
@@ -67,8 +73,12 @@ impl WireModel {
     pub const CYAN: [f32; 4] = [0.25, 0.85, 1.00, 1.0];
     pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
     /// Sentinel AABB that never rejects any snap query.
-    pub const UNBOUNDED_AABB: [f32; 4] =
-        [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY];
+    pub const UNBOUNDED_AABB: [f32; 4] = [
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        f32::INFINITY,
+    ];
 
     /// Create a solid wire (no dash pattern, 1px weight).
     pub fn solid(name: String, points: Vec<[f32; 3]>, color: [f32; 4], selected: bool) -> Self {
@@ -85,6 +95,8 @@ impl WireModel {
             tangent_geoms: vec![],
             key_vertices: vec![],
             aabb: Self::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         }
     }
 
@@ -184,6 +196,8 @@ impl Default for WireModel {
             tangent_geoms: Vec::new(),
             key_vertices: Vec::new(),
             aabb: Self::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         }
     }
 }

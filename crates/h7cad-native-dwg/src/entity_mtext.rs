@@ -126,7 +126,7 @@ mod tests {
         emit_bits(&mut bytes, &mut cursor, 0b01, 2); // 1.0
         emit_bits(&mut bytes, &mut cursor, 0b10, 2); // 0.0
         emit_bits(&mut bytes, &mut cursor, 0b10, 2); // 0.0
-        // rect_width = 1.0
+                                                     // rect_width = 1.0
         emit_bits(&mut bytes, &mut cursor, 0b01, 2);
         // rect_height = 0.0
         emit_bits(&mut bytes, &mut cursor, 0b10, 2);

@@ -7,8 +7,8 @@
 //
 // The function is async so the UI remains responsive while the job is queued.
 
-use crate::io::plot_style::PlotStyleTable;
 use crate::io::pdf_export;
+use crate::io::plot_style::PlotStyleTable;
 use crate::scene::WireModel;
 
 /// Render `wires` to a temp PDF and dispatch it to the default system printer.

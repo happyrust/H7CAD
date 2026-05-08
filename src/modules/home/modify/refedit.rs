@@ -71,10 +71,7 @@ impl CadCommand for RefEditPickCommand {
         }
         // Signal the host to enter the editing session for this handle.
         // We reuse Relaunch("REFEDIT_BEGIN:<handle>") as a convention.
-        CmdResult::Relaunch(
-            format!("REFEDIT_BEGIN:{}", handle.value()),
-            vec![handle],
-        )
+        CmdResult::Relaunch(format!("REFEDIT_BEGIN:{}", handle.value()), vec![handle])
     }
 
     fn on_point(&mut self, _pt: Vec3) -> CmdResult {
@@ -142,7 +139,10 @@ pub fn apply_insert_transform(entity: &mut EntityType, session: &RefEditSession)
     if (session.scale - 1.0).abs() > 1e-10 {
         dispatch::apply_transform(
             entity,
-            &EntityTransform::Scale { center: origin, factor: session.scale as f32 },
+            &EntityTransform::Scale {
+                center: origin,
+                factor: session.scale as f32,
+            },
         );
     }
 

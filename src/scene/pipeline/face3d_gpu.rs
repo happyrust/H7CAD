@@ -20,7 +20,7 @@ use iced::wgpu::util::DeviceExt;
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Face3DVertex {
     pub position: [f32; 3],
-    pub color:    [f32; 4],
+    pub color: [f32; 4],
 }
 
 impl Face3DVertex {
@@ -68,7 +68,10 @@ impl Face3DGpu {
             let [r, g, b, a] = wire.color;
             let fill_color = [r * 0.45, g * 0.45, b * 0.45, a];
             let p = &wire.key_vertices;
-            let v = |i: usize| Face3DVertex { position: p[i], color: fill_color };
+            let v = |i: usize| Face3DVertex {
+                position: p[i],
+                color: fill_color,
+            };
 
             // Triangle 1: p0, p1, p2
             vertices.push(v(0));

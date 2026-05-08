@@ -27,10 +27,10 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
 
     let mut tris: Vec<Tri> = Vec::new();
     for mesh in meshes {
-        let verts  = &mesh.verts;
+        let verts = &mesh.verts;
         let normals = &mesh.normals;
-        let idx    = &mesh.indices;
-        let n_tri  = idx.len() / 3;
+        let idx = &mesh.indices;
+        let n_tri = idx.len() / 3;
         for t in 0..n_tri {
             let i0 = idx[t * 3] as usize;
             let i1 = idx[t * 3 + 1] as usize;
@@ -44,13 +44,13 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
             let n = if !normals.is_empty() && i0 < normals.len() {
                 normals[i0]
             } else {
-                let ab = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
-                let ac = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
-                let nx = ab[1]*ac[2] - ab[2]*ac[1];
-                let ny = ab[2]*ac[0] - ab[0]*ac[2];
-                let nz = ab[0]*ac[1] - ab[1]*ac[0];
-                let len = (nx*nx + ny*ny + nz*nz).sqrt().max(f32::EPSILON);
-                [nx/len, ny/len, nz/len]
+                let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let nx = ab[1] * ac[2] - ab[2] * ac[1];
+                let ny = ab[2] * ac[0] - ab[0] * ac[2];
+                let nz = ab[0] * ac[1] - ab[1] * ac[0];
+                let len = (nx * nx + ny * ny + nz * nz).sqrt().max(f32::EPSILON);
+                [nx / len, ny / len, nz / len]
             };
             tris.push(Tri { v: [a, b, c], n });
         }
@@ -95,18 +95,22 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
         // Edge loop.
         let el = alloc();
         // Plane normal direction and axis placement.
-        let norm_dir   = alloc();
-        let plane_ax   = alloc();
-        let plane      = alloc();
+        let norm_dir = alloc();
+        let plane_ax = alloc();
+        let plane = alloc();
         // Advanced face.
-        let face_id    = alloc();
+        let face_id = alloc();
         face_ids.push(face_id);
 
         // Emit cartesian points.
         for k in 0..3 {
             let [x, y, z] = tri.v[k];
-            writeln!(data, "#{} = CARTESIAN_POINT('',({:.6},{:.6},{:.6}));",
-                cp[k], x, y, z).ok();
+            writeln!(
+                data,
+                "#{} = CARTESIAN_POINT('',({:.6},{:.6},{:.6}));",
+                cp[k], x, y, z
+            )
+            .ok();
             writeln!(data, "#{} = VERTEX_POINT('',#{});", vpref[k], cp[k]).ok();
         }
         // Emit vertex points (binding).
@@ -124,52 +128,99 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
                 tri.v[k1][1] - tri.v[k][1],
                 tri.v[k1][2] - tri.v[k][2],
             ];
-            let len = (dx*dx + dy*dy + dz*dz).sqrt().max(f32::EPSILON);
-            writeln!(data, "#{} = DIRECTION('',({:.6},{:.6},{:.6}));",
-                dir[k], dx/len, dy/len, dz/len).ok();
-            writeln!(data, "#{} = LINE('',#{},VECTOR('',#{},1.));",
-                lc[k], cp[k], dir[k]).ok();
-            writeln!(data, "#{} = EDGE_CURVE('',#{},#{},#{},.T.);",
-                ec[k], vpref[k], vpref[k1], lc[k]).ok();
-            writeln!(data, "#{} = ORIENTED_EDGE('',*,*,#{},.T.);",
-                oe[k], ec[k]).ok();
+            let len = (dx * dx + dy * dy + dz * dz).sqrt().max(f32::EPSILON);
+            writeln!(
+                data,
+                "#{} = DIRECTION('',({:.6},{:.6},{:.6}));",
+                dir[k],
+                dx / len,
+                dy / len,
+                dz / len
+            )
+            .ok();
+            writeln!(
+                data,
+                "#{} = LINE('',#{},VECTOR('',#{},1.));",
+                lc[k], cp[k], dir[k]
+            )
+            .ok();
+            writeln!(
+                data,
+                "#{} = EDGE_CURVE('',#{},#{},#{},.T.);",
+                ec[k], vpref[k], vpref[k1], lc[k]
+            )
+            .ok();
+            writeln!(data, "#{} = ORIENTED_EDGE('',*,*,#{},.T.);", oe[k], ec[k]).ok();
         }
 
         // Edge loop and face normal.
-        writeln!(data, "#{} = EDGE_LOOP('',({},{},{}));",
+        writeln!(
+            data,
+            "#{} = EDGE_LOOP('',({},{},{}));",
             el,
             format!("#{}", oe[0]),
             format!("#{}", oe[1]),
-            format!("#{}", oe[2])).ok();
+            format!("#{}", oe[2])
+        )
+        .ok();
 
         let [nx, ny, nz] = tri.n;
-        writeln!(data, "#{} = DIRECTION('',({:.6},{:.6},{:.6}));",
-            norm_dir, nx, ny, nz).ok();
-        writeln!(data, "#{} = AXIS2_PLACEMENT_3D('',#{},#{},#{});",
-            plane_ax, cp[0], norm_dir, dir[0]).ok();
+        writeln!(
+            data,
+            "#{} = DIRECTION('',({:.6},{:.6},{:.6}));",
+            norm_dir, nx, ny, nz
+        )
+        .ok();
+        writeln!(
+            data,
+            "#{} = AXIS2_PLACEMENT_3D('',#{},#{},#{});",
+            plane_ax, cp[0], norm_dir, dir[0]
+        )
+        .ok();
         writeln!(data, "#{} = PLANE('',#{});", plane, plane_ax).ok();
-        writeln!(data, "#{} = ADVANCED_FACE('',(FACE_BOUND('',#{},.T.)),#{},.T.);",
-            face_id, el, plane).ok();
+        writeln!(
+            data,
+            "#{} = ADVANCED_FACE('',(FACE_BOUND('',#{},.T.)),#{},.T.);",
+            face_id, el, plane
+        )
+        .ok();
     }
 
     // Closed shell wrapping all faces.
     let shell_id = alloc();
-    let face_list: String = face_ids.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(",");
+    let face_list: String = face_ids
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(",");
     writeln!(data, "#{} = CLOSED_SHELL('',({face_list}));", shell_id).ok();
 
     // Manifold solid B-rep.
     let msb_id = alloc();
-    writeln!(data, "#{} = MANIFOLD_SOLID_BREP('H7CAD_Solid',#{});", msb_id, shell_id).ok();
+    writeln!(
+        data,
+        "#{} = MANIFOLD_SOLID_BREP('H7CAD_Solid',#{});",
+        msb_id, shell_id
+    )
+    .ok();
 
     // Shape representation.
     let sr_id = alloc();
     let pu_id = alloc();
     let gc_id = alloc();
-    writeln!(data, "#{} = (LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));", pu_id).ok();
+    writeln!(
+        data,
+        "#{} = (LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));",
+        pu_id
+    )
+    .ok();
     writeln!(data, "#{} = GEOMETRIC_REPRESENTATION_CONTEXT(3);", gc_id).ok();
-    writeln!(data,
+    writeln!(
+        data,
         "#{sr_id} = SHAPE_REPRESENTATION('H7CAD_Shape',(#{}),#{gc_id});",
-        msb_id).ok();
+        msb_id
+    )
+    .ok();
 
     // ── Assemble file ─────────────────────────────────────────────────────
     let ts = chrono_timestamp();
@@ -199,16 +250,16 @@ fn chrono_timestamp() -> String {
         .unwrap_or(0);
     // Format: YYYY-MM-DDTHH:MM:SS (approximate UTC from epoch seconds).
     let s = secs;
-    let mins  = s / 60;
+    let mins = s / 60;
     let hours = mins / 60;
-    let days  = hours / 24;
+    let days = hours / 24;
     let hh = hours % 24;
     let mm = mins % 60;
     let ss = s % 60;
     // Days since epoch → year/month/day (approximate, ignoring leap years).
-    let year  = 1970 + days / 365;
-    let doy   = days % 365;
+    let year = 1970 + days / 365;
+    let doy = days % 365;
     let month = doy / 30 + 1;
-    let day   = doy % 30 + 1;
+    let day = doy % 30 + 1;
     format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}")
 }

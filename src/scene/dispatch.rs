@@ -2,12 +2,12 @@
 
 use crate::types::{Color as AcadColor, LineWeight, Transparency};
 use acadrust::{EntityType, Handle};
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::EntityTransform;
-use crate::entities::{arc, circle, line, lwpolyline, mtext, point, text};
 use crate::entities::traits::EntityTypeOps;
+use crate::entities::{arc, circle, line, lwpolyline, mtext, point, text};
 use crate::io::native_bridge;
 use crate::scene::object::{GripDef, GripShape, PropSection};
 use crate::scene::properties;
@@ -91,10 +91,7 @@ fn preserve_native_nonbridge_common(updated: &mut nm::Entity, original: &nm::Ent
     updated.xdata = original.xdata.clone();
 }
 
-fn edit_native_via_compat(
-    entity: &mut nm::Entity,
-    edit: impl FnOnce(&mut EntityType),
-) -> bool {
+fn edit_native_via_compat(entity: &mut nm::Entity, edit: impl FnOnce(&mut EntityType)) -> bool {
     let Some(mut compat) = bridged_native_entity(entity) else {
         return false;
     };
@@ -158,15 +155,22 @@ fn measure_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 fn measure_angle(vertex: [f64; 3], first: [f64; 3], second: [f64; 3]) -> f64 {
-    let v1 = [first[0] - vertex[0], first[1] - vertex[1], first[2] - vertex[2]];
-    let v2 = [second[0] - vertex[0], second[1] - vertex[1], second[2] - vertex[2]];
+    let v1 = [
+        first[0] - vertex[0],
+        first[1] - vertex[1],
+        first[2] - vertex[2],
+    ];
+    let v2 = [
+        second[0] - vertex[0],
+        second[1] - vertex[1],
+        second[2] - vertex[2],
+    ];
     let len1 = (v1[0] * v1[0] + v1[1] * v1[1] + v1[2] * v1[2]).sqrt();
     let len2 = (v2[0] * v2[0] + v2[1] * v2[1] + v2[2] * v2[2]).sqrt();
     if len1 <= 1e-9 || len2 <= 1e-9 {
         return 0.0;
     }
-    let cos = ((v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]) / (len1 * len2))
-        .clamp(-1.0, 1.0);
+    let cos = ((v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]) / (len1 * len2)).clamp(-1.0, 1.0);
     cos.acos().to_degrees()
 }
 
@@ -462,7 +466,9 @@ pub fn grips_native(entity: &nm::Entity) -> Vec<GripDef> {
             ..
         } => mtext::grips_native(insertion, *width, *rotation),
         nm::EntityData::Dimension { .. } => grips_dimension_native(entity),
-        _ => bridged_native_entity(entity).map(|compat| grips(&compat)).unwrap_or_default(),
+        _ => bridged_native_entity(entity)
+            .map(|compat| grips(&compat))
+            .unwrap_or_default(),
     }
 }
 
@@ -599,7 +605,11 @@ pub fn apply_geom_prop_native(entity: &mut nm::Entity, field: &str, value: &str)
     }
 }
 
-pub fn apply_grip_native(entity: &mut nm::Entity, grip_id: usize, apply: crate::scene::object::GripApply) {
+pub fn apply_grip_native(
+    entity: &mut nm::Entity,
+    grip_id: usize,
+    apply: crate::scene::object::GripApply,
+) {
     match &mut entity.data {
         nm::EntityData::Point { position } => point::apply_grip(position, grip_id, apply),
         nm::EntityData::Line { start, end } => line::apply_grip(start, end, grip_id, apply),
@@ -612,8 +622,12 @@ pub fn apply_grip_native(entity: &mut nm::Entity, grip_id: usize, apply: crate::
             start_angle,
             end_angle,
         } => arc::apply_grip(center, radius, start_angle, end_angle, grip_id, apply),
-        nm::EntityData::LwPolyline { vertices, .. } => lwpolyline::apply_grip(vertices, grip_id, apply),
-        nm::EntityData::Text { insertion, .. } => text::apply_grip_native(insertion, grip_id, apply),
+        nm::EntityData::LwPolyline { vertices, .. } => {
+            lwpolyline::apply_grip(vertices, grip_id, apply)
+        }
+        nm::EntityData::Text { insertion, .. } => {
+            text::apply_grip_native(insertion, grip_id, apply)
+        }
         nm::EntityData::MText {
             insertion,
             width,
@@ -656,7 +670,10 @@ pub fn apply_transform_native(entity: &mut nm::Entity, t: &EntityTransform) {
     }
 }
 
-fn geometry_properties_native(entity: &nm::Entity, text_style_names: &[String]) -> Option<PropSection> {
+fn geometry_properties_native(
+    entity: &nm::Entity,
+    text_style_names: &[String],
+) -> Option<PropSection> {
     match &entity.data {
         nm::EntityData::Point { position } => Some(point::properties(position)),
         nm::EntityData::Line { start, end } => Some(line::properties(start, end)),
@@ -667,9 +684,9 @@ fn geometry_properties_native(entity: &nm::Entity, text_style_names: &[String]) 
             start_angle,
             end_angle,
         } => Some(arc::properties(center, *radius, *start_angle, *end_angle)),
-        nm::EntityData::LwPolyline { vertices, closed, .. } => {
-            Some(lwpolyline::properties(vertices, *closed, 0.0))
-        }
+        nm::EntityData::LwPolyline {
+            vertices, closed, ..
+        } => Some(lwpolyline::properties(vertices, *closed, 0.0)),
         nm::EntityData::Text {
             insertion,
             height,

@@ -26,7 +26,10 @@ fn to_truck(leader: &Leader) -> TruckEntity {
         key_verts.push(p3(v));
     }
     for i in 0..verts.len().saturating_sub(1) {
-        tangents.push(TangentGeom::Line { p1: p3(&verts[i]), p2: p3(&verts[i + 1]) });
+        tangents.push(TangentGeom::Line {
+            p1: p3(&verts[i]),
+            p2: p3(&verts[i + 1]),
+        });
     }
 
     // Arrowhead at vertex[0]
@@ -42,16 +45,28 @@ fn to_truck(leader: &Leader) -> TruckEntity {
         let (s, c) = a.sin_cos();
         let tip_f = p3(tip);
         points.push(nan);
-        points.push([tip_f[0] + (dx*c - dy*s)*sz, tip_f[1] + (dx*s + dy*c)*sz, tip_f[2]]);
+        points.push([
+            tip_f[0] + (dx * c - dy * s) * sz,
+            tip_f[1] + (dx * s + dy * c) * sz,
+            tip_f[2],
+        ]);
         points.push(tip_f);
-        points.push([tip_f[0] + (dx*c + dy*s)*sz, tip_f[1] + (-dx*s + dy*c)*sz, tip_f[2]]);
+        points.push([
+            tip_f[0] + (dx * c + dy * s) * sz,
+            tip_f[1] + (-dx * s + dy * c) * sz,
+            tip_f[2],
+        ]);
     }
 
     // Landing line at last vertex
     if leader.hookline_enabled && verts.len() >= 2 {
         let last = verts.last().unwrap();
         let prev = &verts[verts.len() - 2];
-        let sign = if (last.x - prev.x) >= 0.0 { 1.0_f32 } else { -1.0_f32 };
+        let sign = if (last.x - prev.x) >= 0.0 {
+            1.0_f32
+        } else {
+            -1.0_f32
+        };
         let len = leader.text_height as f32 * 1.5;
         let last_f = p3(last);
         points.push(nan);
@@ -107,9 +122,7 @@ fn apply_grip(leader: &mut Leader, grip_id: usize, apply: GripApply) {
         }
     } else if let GripApply::Translate(d) = apply {
         leader.translate(crate::types::Vector3::new(
-            d.x as f64,
-            d.y as f64,
-            d.z as f64,
+            d.x as f64, d.y as f64, d.z as f64,
         ));
     }
 }
@@ -256,8 +269,20 @@ fn apply_geom_prop(leader: &mut Leader, field: &str, value: &str) {
                 _ => LeaderCreationType::WithText,
             };
         }
-        "arrow_enabled" => leader.arrow_enabled = if value == "toggle" { !leader.arrow_enabled } else { value == "true" },
-        "hookline_enabled" => leader.hookline_enabled = if value == "toggle" { !leader.hookline_enabled } else { value == "true" },
+        "arrow_enabled" => {
+            leader.arrow_enabled = if value == "toggle" {
+                !leader.arrow_enabled
+            } else {
+                value == "true"
+            }
+        }
+        "hookline_enabled" => {
+            leader.hookline_enabled = if value == "toggle" {
+                !leader.hookline_enabled
+            } else {
+                value == "true"
+            }
+        }
         "hookline_direction" => {
             leader.hookline_direction = match value {
                 "Same" => HooklineDirection::Same,
@@ -403,7 +428,9 @@ fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
 
 impl TruckConvertible for Leader {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        if self.vertices.is_empty() { return None; }
+        if self.vertices.is_empty() {
+            return None;
+        }
         Some(to_truck(self))
     }
 }

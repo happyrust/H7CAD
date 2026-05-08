@@ -96,7 +96,7 @@ impl Default for Snapper {
         enabled.insert(SnapType::Intersection);
         enabled.insert(SnapType::Nearest);
         Self {
-            snap_enabled: true,
+            snap_enabled: false,
             enabled,
             grid_spacing: 1.0,
             snap_radius_px: CROSSHAIR_ARM,
@@ -149,7 +149,12 @@ impl Snapper {
     /// Update dwell tracking and possibly acquire a new OST point.
     /// Should be called on every ViewportMove when snap is active.
     /// `snap_world` is the current snap result world point (if any).
-    pub fn update_otrack_dwell(&mut self, snap_world: Option<Vec3>, view_proj: glam::Mat4, bounds: iced::Rectangle) {
+    pub fn update_otrack_dwell(
+        &mut self,
+        snap_world: Option<Vec3>,
+        view_proj: glam::Mat4,
+        bounds: iced::Rectangle,
+    ) {
         if !self.otrack_enabled {
             self.dwell_count = 0;
             self.last_snap_world = None;
@@ -288,7 +293,11 @@ impl Snapper {
         // so scale_x * (width/2) = pixels per world unit.
         let world_snap_r = {
             let s = view_proj.col(0).x.abs() * bounds.width * 0.5;
-            if s > 1e-6 { self.snap_radius_px / s } else { f32::MAX }
+            if s > 1e-6 {
+                self.snap_radius_px / s
+            } else {
+                f32::MAX
+            }
         };
 
         // Returns false when the wire's AABB does not overlap the snap circle —
@@ -335,7 +344,9 @@ impl Snapper {
         // ── Endpoint ───────────────────────────────────────────────────────
         if self.is_on(SnapType::Endpoint) {
             for wire in wires {
-                if !wire_in_range(wire) { continue; }
+                if !wire_in_range(wire) {
+                    continue;
+                }
                 if !wire.key_vertices.is_empty() {
                     // Use explicit vertices (Line, LwPolyline): every vertex is an endpoint.
                     for &p in &wire.key_vertices {
@@ -358,7 +369,9 @@ impl Snapper {
         // ── Midpoint ───────────────────────────────────────────────────────
         if self.is_on(SnapType::Midpoint) {
             for wire in wires {
-                if !wire_in_range(wire) { continue; }
+                if !wire_in_range(wire) {
+                    continue;
+                }
                 if !wire.key_vertices.is_empty() {
                     // Use explicit vertices for accurate per-segment midpoints.
                     for seg in wire.key_vertices.windows(2) {
@@ -385,7 +398,9 @@ impl Snapper {
         // ── Nearest — closest point on any segment (clamped) ──────────────
         if self.is_on(SnapType::Nearest) {
             for wire in wires {
-                if !wire_in_range(wire) { continue; }
+                if !wire_in_range(wire) {
+                    continue;
+                }
                 for seg in wire.points.windows(2) {
                     let p =
                         nearest_on_segment(cursor_world, Vec3::from(seg[0]), Vec3::from(seg[1]));
@@ -397,7 +412,9 @@ impl Snapper {
         // ── Perpendicular — foot of perpendicular from cursor (unclamped) ──
         if self.is_on(SnapType::Perpendicular) {
             for wire in wires {
-                if !wire_in_range(wire) { continue; }
+                if !wire_in_range(wire) {
+                    continue;
+                }
                 for seg in wire.points.windows(2) {
                     if let Some(foot) =
                         perp_foot(cursor_world, Vec3::from(seg[0]), Vec3::from(seg[1]))
@@ -412,9 +429,13 @@ impl Snapper {
         if self.is_on(SnapType::Intersection) {
             let r_world = self.snap_radius_px * 0.5; // rough world-space cull
             for i in 0..wires.len() {
-                if !wire_in_range(&wires[i]) { continue; }
+                if !wire_in_range(&wires[i]) {
+                    continue;
+                }
                 for j in (i + 1)..wires.len() {
-                    if !wire_in_range(&wires[j]) { continue; }
+                    if !wire_in_range(&wires[j]) {
+                        continue;
+                    }
                     for seg_a in wires[i].points.windows(2) {
                         for seg_b in wires[j].points.windows(2) {
                             let a0 = Vec3::from(seg_a[0]);
@@ -483,9 +504,13 @@ impl Snapper {
         // ── Apparent Intersection — screen-space intersections ─────────────
         if self.is_on(SnapType::ApparentIntersection) {
             for i in 0..wires.len() {
-                if !wire_in_range(&wires[i]) { continue; }
+                if !wire_in_range(&wires[i]) {
+                    continue;
+                }
                 for j in (i + 1)..wires.len() {
-                    if !wire_in_range(&wires[j]) { continue; }
+                    if !wire_in_range(&wires[j]) {
+                        continue;
+                    }
                     for seg_a in wires[i].points.windows(2) {
                         for seg_b in wires[j].points.windows(2) {
                             let sa0 = world_to_screen(Vec3::from(seg_a[0]), view_proj, bounds);

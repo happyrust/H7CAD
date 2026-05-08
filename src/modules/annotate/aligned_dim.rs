@@ -1,7 +1,7 @@
 // DIMALIGNED command — aligned dimension (measures true distance between two points).
 
-use h7cad_native_model as nm;
 use glam::Vec3;
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -35,13 +35,15 @@ impl AlignedDimensionCommand {
 }
 
 impl CadCommand for AlignedDimensionCommand {
-    fn name(&self) -> &'static str { "DIMALIGNED" }
+    fn name(&self) -> &'static str {
+        "DIMALIGNED"
+    }
 
     fn prompt(&self) -> String {
         match self.step {
-            Step::First           => "DIMALIGNED  Specify first extension line origin:".into(),
-            Step::Second(_)       => "DIMALIGNED  Specify second extension line origin:".into(),
-            Step::DimLine { .. }  => "DIMALIGNED  Specify dimension line location:".into(),
+            Step::First => "DIMALIGNED  Specify first extension line origin:".into(),
+            Step::Second(_) => "DIMALIGNED  Specify second extension line origin:".into(),
+            Step::DimLine { .. } => "DIMALIGNED  Specify dimension line location:".into(),
         }
     }
 
@@ -56,7 +58,11 @@ impl CadCommand for AlignedDimensionCommand {
                 CmdResult::NeedPoint
             }
             Step::DimLine { p1, p2 } => {
-                let mid = Vec3::new((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5, (p1.z + p2.z) * 0.5);
+                let mid = Vec3::new(
+                    (p1.x + p2.x) * 0.5,
+                    (p1.y + p2.y) * 0.5,
+                    (p1.z + p2.z) * 0.5,
+                );
                 let measurement = (p2 - p1).length() as f64;
                 let entity = nm::Entity::new(nm::EntityData::Dimension {
                     dim_type: 1,
@@ -84,7 +90,9 @@ impl CadCommand for AlignedDimensionCommand {
         }
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         let (p1, p2) = match self.step {
@@ -107,6 +115,8 @@ impl CadCommand for AlignedDimensionCommand {
             aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         })
     }
 }
@@ -121,11 +131,14 @@ fn preview_aligned(p1: Vec3, p2: Vec3, dim_pt: Vec3) -> WireModel {
     WireModel {
         name: "dimaligned_preview".into(),
         points: vec![
-            [p1.x, p1.y, p1.z], [d1.x, d1.y, d1.z],
+            [p1.x, p1.y, p1.z],
+            [d1.x, d1.y, d1.z],
             [f32::NAN, 0.0, 0.0],
-            [p2.x, p2.y, p2.z], [d2.x, d2.y, d2.z],
+            [p2.x, p2.y, p2.z],
+            [d2.x, d2.y, d2.z],
             [f32::NAN, 0.0, 0.0],
-            [d1.x, d1.y, d1.z], [d2.x, d2.y, d2.z],
+            [d1.x, d1.y, d1.z],
+            [d2.x, d2.y, d2.z],
         ],
         color: WireModel::CYAN,
         selected: false,
@@ -135,7 +148,9 @@ fn preview_aligned(p1: Vec3, p2: Vec3, dim_pt: Vec3) -> WireModel {
         snap_pts: vec![],
         tangent_geoms: vec![],
         aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
+        key_vertices: vec![],
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        vp_scissor: None,
     }
 }

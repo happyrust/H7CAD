@@ -7,11 +7,11 @@
 //   - spline_nearest_t    : find the spline parameter t closest to a DXF-XY click
 //   - spline_pts_wire     : world-space wire points for WireModel preview
 
-use acadrust::entities::Spline;
 use crate::types::Vector3;
+use acadrust::entities::Spline;
 use acadrust::Handle;
-use truck_modeling::{BSplineCurve, KnotVec, Point3};
 use truck_modeling::base::{BoundedCurve, ParametricCurve};
+use truck_modeling::{BSplineCurve, KnotVec, Point3};
 
 // ── Conversion ─────────────────────────────────────────────────────────────
 
@@ -39,11 +39,7 @@ pub fn spline_to_bspline(spl: &Spline) -> Option<BSplineCurve<Point3>> {
 /// Rebuild an acadrust `Spline` from a trimmed `BSplineCurve<Point3>`.
 /// The `template` spline provides the entity common data, degree, and Z-elevation.
 pub fn bspline_to_spline(bs: &BSplineCurve<Point3>, template: &Spline) -> Spline {
-    let z = template
-        .control_points
-        .first()
-        .map(|v| v.z)
-        .unwrap_or(0.0);
+    let z = template.control_points.first().map(|v| v.z).unwrap_or(0.0);
     let mut spl = template.clone();
     spl.common.handle = Handle::NULL;
     spl.degree = bs.degree() as i32;
@@ -53,7 +49,7 @@ pub fn bspline_to_spline(bs: &BSplineCurve<Point3>, template: &Spline) -> Spline
         .iter()
         .map(|p| Vector3::new(p.x, p.y, z))
         .collect();
-    spl.weights.clear();   // not rational after split
+    spl.weights.clear(); // not rational after split
     spl.fit_points.clear(); // fit points are no longer valid
     spl
 }
@@ -71,10 +67,13 @@ pub fn spline_sample_xy(spl: &Spline, n: usize) -> (Vec<f64>, Vec<[f64; 2]>) {
     let ts: Vec<f64> = (0..=n)
         .map(|i| t0 + (t1 - t0) * (i as f64 / n as f64))
         .collect();
-    let pts: Vec<[f64; 2]> = ts.iter().map(|&t| {
-        let p = bs.subs(t);
-        [p.x, p.y]
-    }).collect();
+    let pts: Vec<[f64; 2]> = ts
+        .iter()
+        .map(|&t| {
+            let p = bs.subs(t);
+            [p.x, p.y]
+        })
+        .collect();
     (ts, pts)
 }
 
@@ -112,7 +111,11 @@ pub fn spline_nearest_t(spl: &Spline, x: f64, y: f64) -> Option<f64> {
         let p2 = bs.subs(m2);
         let d1 = (p1.x - x).powi(2) + (p1.y - y).powi(2);
         let d2 = (p2.x - x).powi(2) + (p2.y - y).powi(2);
-        if d1 < d2 { b = m2; } else { a = m1; }
+        if d1 < d2 {
+            b = m2;
+        } else {
+            a = m1;
+        }
     }
     Some((a + b) * 0.5)
 }
@@ -120,7 +123,9 @@ pub fn spline_nearest_t(spl: &Spline, x: f64, y: f64) -> Option<f64> {
 /// Returns the normalised parameter in [0, 1] given an actual B-spline
 /// parameter `t_actual` and the range `[t0, t1]`.
 pub fn t_to_rel(t_actual: f64, t0: f64, t1: f64) -> f64 {
-    if (t1 - t0).abs() < 1e-12 { return 0.0; }
+    if (t1 - t0).abs() < 1e-12 {
+        return 0.0;
+    }
     ((t_actual - t0) / (t1 - t0)).clamp(0.0, 1.0)
 }
 
@@ -130,8 +135,14 @@ pub fn t_to_rel(t_actual: f64, t0: f64, t1: f64) -> f64 {
 /// Y-up convention: world (x, 0, y) for DXF (x, y).
 pub fn spline_pts_wire(spl: &Spline) -> Vec<[f32; 3]> {
     let (_, pts) = spline_sample_xy(spl, 64);
-    if pts.is_empty() { return vec![]; }
-    let elev = spl.control_points.first().map(|v| v.z as f32).unwrap_or(0.0);
+    if pts.is_empty() {
+        return vec![];
+    }
+    let elev = spl
+        .control_points
+        .first()
+        .map(|v| v.z as f32)
+        .unwrap_or(0.0);
     pts.iter()
         .map(|p| [p[0] as f32, elev, p[1] as f32])
         .collect()

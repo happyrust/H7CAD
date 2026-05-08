@@ -43,7 +43,11 @@ enum Step {
     /// Crossing window defined; waiting for base point.
     Base { win_min: Vec3, win_max: Vec3 },
     /// Waiting for target point.
-    Target { win_min: Vec3, win_max: Vec3, base: Vec3 },
+    Target {
+        win_min: Vec3,
+        win_max: Vec3,
+        base: Vec3,
+    },
 }
 
 pub struct StretchCommand {
@@ -53,12 +57,17 @@ pub struct StretchCommand {
 
 impl StretchCommand {
     pub fn new(handles: Vec<Handle>) -> Self {
-        Self { handles, step: Step::WindowCorner1 }
+        Self {
+            handles,
+            step: Step::WindowCorner1,
+        }
     }
 }
 
 impl CadCommand for StretchCommand {
-    fn name(&self) -> &'static str { "STRETCH" }
+    fn name(&self) -> &'static str {
+        "STRETCH"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
@@ -69,7 +78,8 @@ impl CadCommand for StretchCommand {
             Step::WindowCorner2(_) => "STRETCH  Specify opposite corner:".into(),
             Step::Base { .. } => "STRETCH  Specify base point:".into(),
             Step::Target { base, .. } => format!(
-                "STRETCH  Specify new point  [base {:.3},{:.3}]:", base.x, base.z
+                "STRETCH  Specify new point  [base {:.3},{:.3}]:",
+                base.x, base.z
             ),
         }
     }
@@ -88,10 +98,18 @@ impl CadCommand for StretchCommand {
             }
             Step::Base { win_min, win_max } => {
                 let (wmin, wmax) = (*win_min, *win_max);
-                self.step = Step::Target { win_min: wmin, win_max: wmax, base: pt };
+                self.step = Step::Target {
+                    win_min: wmin,
+                    win_max: wmax,
+                    base: pt,
+                };
                 CmdResult::NeedPoint
             }
-            Step::Target { win_min, win_max, base } => {
+            Step::Target {
+                win_min,
+                win_max,
+                base,
+            } => {
                 let delta = pt - *base;
                 CmdResult::StretchEntities {
                     handles: self.handles.clone(),
@@ -103,8 +121,12 @@ impl CadCommand for StretchCommand {
         }
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
-    fn on_escape(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         match &self.step {
@@ -113,29 +135,34 @@ impl CadCommand for StretchCommand {
                 let c1 = *c1;
                 let pts = vec![
                     [c1.x, c1.y, c1.z],
-                    [pt.x,  c1.y, c1.z],
-                    [pt.x,  pt.y,  pt.z],
-                    [c1.x, pt.y,  pt.z],
+                    [pt.x, c1.y, c1.z],
+                    [pt.x, pt.y, pt.z],
+                    [c1.x, pt.y, pt.z],
                     [c1.x, c1.y, c1.z],
                 ];
-                Some(WireModel::solid("stretch_window".into(), pts, [0.3, 1.0, 0.3, 0.7], false))
+                Some(WireModel::solid(
+                    "stretch_window".into(),
+                    pts,
+                    [0.3, 1.0, 0.3, 0.7],
+                    false,
+                ))
             }
-            Step::Target { base, .. } => {
-                Some(WireModel {
-                    name: "rubber_band".into(),
-                    points: vec![[base.x, base.y, base.z], [pt.x, pt.y, pt.z]],
-                    color: WireModel::CYAN,
-                    selected: false,
-                    pattern_length: 0.0,
-                    pattern: [0.0; 8],
-                    line_weight_px: 1.0,
-                    snap_pts: vec![],
-                    tangent_geoms: vec![],
-                    aci: 0,
-                    key_vertices: vec![],
-                    aabb: WireModel::UNBOUNDED_AABB,
-                })
-            }
+            Step::Target { base, .. } => Some(WireModel {
+                name: "rubber_band".into(),
+                points: vec![[base.x, base.y, base.z], [pt.x, pt.y, pt.z]],
+                color: WireModel::CYAN,
+                selected: false,
+                pattern_length: 0.0,
+                pattern: [0.0; 8],
+                line_weight_px: 1.0,
+                snap_pts: vec![],
+                tangent_geoms: vec![],
+                aci: 0,
+                key_vertices: vec![],
+                aabb: WireModel::UNBOUNDED_AABB,
+                plinegen: true,
+                vp_scissor: None,
+            }),
             _ => None,
         }
     }

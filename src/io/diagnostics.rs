@@ -17,10 +17,10 @@
 //!
 //! Conversion helpers exist on a per-source basis so each backend owns
 //! its mapping: [`from_acadrust_notifications`] for the acadrust DWG
-//! path, and additional helpers can be added alongside future
-//! diagnostic producers.
+//! path, and [`from_native_dxf_document`] for native DXF advisories.
 
 use acadrust::notification::{Notification, NotificationCollection, NotificationType};
+use std::collections::BTreeMap;
 
 /// Severity classification for an [`OpenNotice`].
 ///
@@ -166,9 +166,96 @@ pub fn from_acadrust_notifications(src: &NotificationCollection) -> Vec<OpenNoti
     src.iter().map(OpenNotice::from).collect()
 }
 
+/// Produce DXF-specific advisories from a successfully parsed native
+/// document. These are not parse errors; they flag content preserved for
+/// round-trip but not yet fully understood or editable by H7CAD.
+pub fn from_native_dxf_document(doc: &h7cad_native_model::CadDocument) -> Vec<OpenNotice> {
+    use h7cad_native_model::{Entity, EntityData, ObjectData};
+
+    fn scan_entities(
+        entities: &[Entity],
+        unknown_entities: &mut BTreeMap<String, usize>,
+        proxy_entities: &mut usize,
+    ) {
+        for entity in entities {
+            match &entity.data {
+                EntityData::Unknown { entity_type } => {
+                    *unknown_entities.entry(entity_type.clone()).or_default() += 1;
+                }
+                EntityData::ProxyEntity { .. } => *proxy_entities += 1,
+                _ => {}
+            }
+        }
+    }
+
+    fn summarize_counts(counts: &BTreeMap<String, usize>) -> String {
+        counts
+            .iter()
+            .map(|(name, count)| format!("{name} x{count}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    let mut unknown_entities = BTreeMap::new();
+    let mut proxy_entities = 0usize;
+    scan_entities(&doc.entities, &mut unknown_entities, &mut proxy_entities);
+    for block in doc.block_records.values() {
+        scan_entities(&block.entities, &mut unknown_entities, &mut proxy_entities);
+    }
+
+    let mut unknown_objects = BTreeMap::new();
+    let mut proxy_objects = 0usize;
+    for object in &doc.objects {
+        match &object.data {
+            ObjectData::Unknown { object_type } => {
+                *unknown_objects.entry(object_type.clone()).or_default() += 1;
+            }
+            ObjectData::ProxyObject { .. } => proxy_objects += 1,
+            _ => {}
+        }
+    }
+
+    let mut notices = Vec::new();
+    if !unknown_entities.is_empty() {
+        notices.push(OpenNotice::new(
+            NoticeSeverity::Warning,
+            format!(
+                "DXF contains unsupported entity records preserved as placeholders: {}",
+                summarize_counts(&unknown_entities)
+            ),
+        ));
+    }
+    if proxy_entities > 0 {
+        notices.push(OpenNotice::new(
+            NoticeSeverity::Warning,
+            format!(
+                "DXF contains {proxy_entities} proxy entity records preserved for round-trip; display/edit support is limited"
+            ),
+        ));
+    }
+    if !unknown_objects.is_empty() {
+        notices.push(OpenNotice::new(
+            NoticeSeverity::Warning,
+            format!(
+                "DXF contains unsupported object records preserved as placeholders: {}",
+                summarize_counts(&unknown_objects)
+            ),
+        ));
+    }
+    if proxy_objects > 0 {
+        notices.push(OpenNotice::new(
+            NoticeSeverity::Warning,
+            format!("DXF contains {proxy_objects} proxy object records preserved for round-trip"),
+        ));
+    }
+
+    notices
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use h7cad_native_model::{CadDocument, CadObject, Entity, EntityData, Handle, ObjectData};
 
     #[test]
     fn severity_from_acadrust_covers_every_variant() {
@@ -271,5 +358,55 @@ mod tests {
         assert!(summary.contains("2 条未实现"));
         assert!(!summary.contains("不支持"));
         assert!(summary.contains(" / "));
+    }
+
+    #[test]
+    fn native_dxf_diagnostics_report_unknown_and_proxy_records() {
+        let mut doc = CadDocument::new();
+        doc.entities.push(Entity::new(EntityData::Unknown {
+            entity_type: "CUSTOM_ENTITY".into(),
+        }));
+        doc.entities.push(Entity::new(EntityData::ProxyEntity {
+            class_id: 1,
+            application_class_id: 2,
+            raw_codes: vec![(90, "1".into())],
+        }));
+        doc.objects.push(CadObject {
+            handle: Handle::new(0x80),
+            owner_handle: Handle::NULL,
+            data: ObjectData::Unknown {
+                object_type: "CUSTOM_OBJECT".into(),
+            },
+        });
+        doc.objects.push(CadObject {
+            handle: Handle::new(0x81),
+            owner_handle: Handle::NULL,
+            data: ObjectData::ProxyObject {
+                class_id: 3,
+                application_class_id: 4,
+                raw_codes: vec![(90, "3".into())],
+            },
+        });
+
+        let notices = from_native_dxf_document(&doc);
+
+        assert_eq!(notices.len(), 4);
+        assert!(notices
+            .iter()
+            .all(|n| n.severity == NoticeSeverity::Warning));
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("CUSTOM_ENTITY x1")));
+        assert!(notices.iter().any(|n| n.message.contains("proxy entity")));
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("CUSTOM_OBJECT x1")));
+        assert!(notices.iter().any(|n| n.message.contains("proxy object")));
+    }
+
+    #[test]
+    fn native_dxf_diagnostics_empty_for_fully_supported_document() {
+        let doc = CadDocument::new();
+        assert!(from_native_dxf_document(&doc).is_empty());
     }
 }

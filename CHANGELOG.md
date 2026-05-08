@@ -2,6 +2,112 @@
 
 ## [未发布]
 
+### 2026-04-30（四十）：DXF OCS→WCS 任意轴变换（P0.1 系统级显示偏差修复）
+
+> `INTEGRATION_GAPS.md` 列出的"systemic gap：17 种实体的 `normal` 字段被忽略，
+> OCS→WCS 任意轴变换缺失"长期是 H7CAD 打开 3D 工程图时 *肉眼可见* 的偏差源——
+> normal 不是 (0,0,1) 的实体被错误地铺平到 XY 平面。本轮按
+> `docs/plans/2026-04-30-dxf-runtime-display-fidelity-plan.md` Phase 0.1
+> 启动收口：先落地 DXF 任意轴算法工具函数，再把 6 个最常见实体的 tessellator
+> 接入到 OCS→WCS。
+
+**新增工具 crate：`h7cad_native_model::geom_ocs`**
+
+```rust
+pub fn arbitrary_axis(n: [f64; 3]) -> ([f64; 3], [f64; 3], [f64; 3])
+pub fn ocs_to_wcs(p_ocs: [f64; 3], origin: [f64; 3], normal: [f64; 3]) -> [f64; 3]
+pub fn ocs2d_to_wcs(x: f64, y: f64, elevation: f64, origin: [f64; 3], normal: [f64; 3]) -> [f64; 3]
+pub fn is_world_normal(normal: [f64; 3]) -> bool
+```
+
+`arbitrary_axis` 严格按 AutoCAD R12 spec 的 1/64 阈值：
+
+```
+if |Nx| < 1/64 and |Ny| < 1/64:
+    Ax = WorldY × N
+else:
+    Ax = WorldZ × N
+Ax = normalize(Ax)
+Ay = N × Ax
+```
+
+`(Ax, Ay, N)` 是右手正交 OCS 基底；`OCS_p → WCS = origin + x·Ax + y·Ay + z·N`。
+当 `N == (0, 0, 1)` 时退化为单位映射，dominant 2D-plan 路径零额外开销。
+退化输入 (`N == (0,0,0)`) 返回世界基保护，避免 NaN。
+
+**实体接入清单（6 / 17）**
+
+| 实体 | 改造点 | 单元测试 |
+|---|---|---|
+| `Circle` | 新增 `circle::to_truck_with_normal`；旧 `to_truck` 保留为 thin wrapper（向后兼容）；象限 snap 点用 OCS Ax/Ay 而非世界 X/Y | 4 |
+| `Arc` | 同上；用 OCS basis 同时吸收原 ad-hoc `normal.z < 0` 反 sweep mitigation | 4 |
+| `LwPolyline` | bulge arc 几何在 OCS 平面内计算（保留原数学），最终 vertex / center / midpoint 经 `ocs2d_to_wcs` lift 到 WCS | 4 |
+| `Polyline2D` | `tessellate_polyline2d` 全切到 OCS（依赖 `pl.normal`） | 复用现有 fixture |
+| `Spline` | 控制点经 `ocs_to_wcs` lift 后再构造 B-spline；下游求值在 WCS 内进行 | — |
+| `Shape` | 标记 marker 在 OCS 平面内绘制（diamond 沿 Ax/Ay 而非世界 X/Y） | — |
+
+**dispatcher 接入面**
+
+| 路径 | 文件 | 接入数 |
+|---|---|---:|
+| Native dispatch (`nm::Entity` → `TruckEntity`) | `src/scene/acad_to_truck.rs::convert_native` | 3（Circle / Arc / LwPolyline）|
+| acadrust adapter (`ar::EntityType` → `TruckEntity`) | `src/entities/traits.rs::EntityTypeOps::to_truck_entity` | 5（Circle / Arc / LwPolyline / Spline / Shape） |
+
+native dispatch 使用 `entity.extrusion`（`nm::Entity` 已带的 `[f64;3]` 公共字段，
+默认 `(0,0,1)`，reader 在 read_dxf 时按 DXF code 210/220/230 写入）；
+acadrust adapter 使用 `c.normal` / `a.normal` / `pline.normal` / `sp.normal` /
+`shp.normal`。两条路径都不需要新存储，零数据迁移成本。
+
+**测试覆盖**
+
+| 文件 | 新增测试 |
+|---|---:|
+| `crates/h7cad-native-model/src/geom_ocs.rs` | 13 单元 + 2 doctest |
+| `src/entities/circle.rs` | 4 |
+| `src/entities/arc.rs` | 4 |
+| `src/entities/lwpolyline.rs` | 4 |
+| **总计** | **25 单元 + 2 doctest** |
+
+关键回归锁：
+
+- `arbitrary_axis_basis_orthonormal_random_grid` — 9 组随机 normal 全部满足
+  Ax⊥Ay⊥N 且 Ax×Ay = N（右手系）
+- `ocs_to_wcs_preserves_distances_under_rotation` — 等距性 (基底正交隐式约束)
+- `arbitrary_axis_degenerate_normal_returns_world_basis` — N=(0,0,0) 不返回 NaN
+- `to_truck_default_normal_matches_legacy_2d` × 3（circle / arc / lwpolyline）—
+  锁定 `N==(0,0,1)` 路径与旧 fn bit-by-bit 一致，杜绝 dominant 2D-plan 回归
+- `to_truck_with_x_normal_emits_quadrants_in_yz_plane` (circle) /
+  `to_truck_with_x_normal_lifts_vertices_into_yz_plane` (lwpolyline) — 锁定
+  N=+x 时 OCS x→WCS +y、OCS y→WCS +z 的基底翻转
+- `to_truck_quadrants_remain_orthogonal_under_arbitrary_normal` — 任意 normal
+  下圆四象限仍正交且 |q|=r
+
+**验收**
+
+- `cargo build --workspace --all-targets --locked` ✓
+- `cargo test -p h7cad-native-model --quiet` 32 + 2 doctest ✓
+- `cargo test --bin H7CAD --quiet` **438 / 438** ✓（baseline 426 + 12 新单元）
+- `cargo clippy -p h7cad-native-model --all-targets -- -D warnings` 0 warning
+- H7CAD bin 编译 0 warning
+
+**不在本轮**
+
+- Hatch / Dimension / Insert / Ellipse / MLine / Leader / AttDef / AttRib /
+  Text / MText / Point 的 OCS 接入（按 plan §10 时间表分批落地，每批独立 PR）
+- INSERT 的 OCS basis 需在 explode 后施加于每个 sub-entity，与现有 acadrust
+  explode 路径耦合，单独排期
+- Ellipse 的 minor axis 推导从 `Z.cross(major)` 改为 `n × major`，几何重构
+  面较大，单独 PR
+- ByBlock 嵌套链递归继承（P0.2，下轮）
+- 字段宽度族 / Dimension dimstyle / RasterImage clip 等（P1，按 plan §5）
+
+**新增 plan 文档**
+
+- `docs/plans/2026-04-30-dxf-runtime-display-fidelity-plan.md` —
+  DXF 运行时显示保真收口总图，4 Phase / 6 周 / 27 PR
+
+---
+
 ### 2026-04-28（四十五）：文档中枢与架构图示基线
 
 本轮补齐面向用户、产品和开发者的文档入口，让仓库不再只依赖 README

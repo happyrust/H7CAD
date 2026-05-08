@@ -70,11 +70,12 @@ pub fn resolve_document(pending: &PendingDocument) -> Result<CadDocument, DwgRea
 
     for entity in &pending.entities {
         let resolved = semantic_entity(entity);
-        doc.add_entity(resolved).map_err(|reason| DwgReadError::SemanticDecode {
-            section_index: section_index_for_handle(pending, entity.handle),
-            record_index: record_index_for_handle(pending, entity.handle),
-            reason,
-        })?;
+        doc.add_entity(resolved)
+            .map_err(|reason| DwgReadError::SemanticDecode {
+                section_index: section_index_for_handle(pending, entity.handle),
+                record_index: record_index_for_handle(pending, entity.handle),
+                reason,
+            })?;
         doc.set_next_handle(entity.handle.value() + 1);
         if entity.owner_handle != Handle::NULL {
             doc.set_next_handle(entity.owner_handle.value() + 1);
@@ -97,7 +98,10 @@ pub fn resolve_document(pending: &PendingDocument) -> Result<CadDocument, DwgRea
                 summary.section_index,
                 summary.record_index,
                 summary.payload_size,
-                summary.semantic_identity.to_ascii_uppercase().replace(':', "_"),
+                summary
+                    .semantic_identity
+                    .to_ascii_uppercase()
+                    .replace(':', "_"),
                 summary.semantic_link.to_ascii_uppercase().replace(':', "_")
             ),
         };

@@ -95,7 +95,6 @@ pub fn transform_pt(pt: &mut [f64; 3], t: &EntityTransform) {
     }
 }
 
-
 #[inline]
 pub fn distance_3d(a: &[f64; 3], b: &[f64; 3]) -> f64 {
     let dx = a[0] - b[0];

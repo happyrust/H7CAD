@@ -57,8 +57,15 @@ fn header_writes_dim_visual_family() {
     let doc = read_dxf(&dxf).unwrap();
     let output = write_dxf(&doc).unwrap();
     for var in &[
-        "$DIMJUST", "$DIMSD1", "$DIMSD2", "$DIMSE1", "$DIMSE2",
-        "$DIMSOXD", "$DIMATFIT", "$DIMAZIN", "$DIMTIX",
+        "$DIMJUST",
+        "$DIMSD1",
+        "$DIMSD2",
+        "$DIMSE1",
+        "$DIMSE2",
+        "$DIMSOXD",
+        "$DIMATFIT",
+        "$DIMAZIN",
+        "$DIMTIX",
     ] {
         assert!(output.contains(var), "output must contain {var}");
     }

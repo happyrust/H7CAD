@@ -9,8 +9,8 @@
 // Arc mode: arcs are tangent-continuous with the preceding segment.
 // Bulge is stored per vertex (segment i→i+1); positive = CCW, negative = CW.
 
-use h7cad_native_model as nm;
 use glam::{Vec2, Vec3};
+use h7cad_native_model as nm;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
@@ -129,7 +129,8 @@ fn update_tangent_after_arc(tangent: &mut Option<Vec2>, bulge: f64) {
     // the entry tangent rotated by that angle.
     let theta = 4.0 * (bulge as f32).atan();
     let (sin_t, cos_t) = theta.sin_cos();
-    *tangent = Some(Vec2::new(t.x * cos_t - t.y * sin_t, t.x * sin_t + t.y * cos_t).normalize_or_zero());
+    *tangent =
+        Some(Vec2::new(t.x * cos_t - t.y * sin_t, t.x * sin_t + t.y * cos_t).normalize_or_zero());
 }
 
 /// Sample a circular arc defined by bulge into `n` line-segment points.
@@ -168,7 +169,11 @@ fn arc_sample_points(a: Vec3, bulge: f64, b: Vec3, n: usize) -> Vec<[f32; 3]> {
     for i in 0..=n {
         let t = i as f64 / n as f64;
         let angle = start_angle + t * theta;
-        pts.push([(cx + r * angle.cos()) as f32, (cy + r * angle.sin()) as f32, a.z]);
+        pts.push([
+            (cx + r * angle.cos()) as f32,
+            (cy + r * angle.sin()) as f32,
+            a.z,
+        ]);
     }
     pts
 }
@@ -307,6 +312,11 @@ impl CadCommand for PlineCommand {
             }
         }
 
-        Some(WireModel::solid("rubber_band".into(), pts, WireModel::CYAN, false))
+        Some(WireModel::solid(
+            "rubber_band".into(),
+            pts,
+            WireModel::CYAN,
+            false,
+        ))
     }
 }

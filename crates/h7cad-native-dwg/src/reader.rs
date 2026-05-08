@@ -44,7 +44,11 @@ impl<'a> DwgReaderCursor<'a> {
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
-    pub fn read_exact(&mut self, len: usize, context: &'static str) -> Result<&'a [u8], DwgReadError> {
+    pub fn read_exact(
+        &mut self,
+        len: usize,
+        context: &'static str,
+    ) -> Result<&'a [u8], DwgReadError> {
         if self.remaining() < len {
             return Err(DwgReadError::UnexpectedEof { context });
         }

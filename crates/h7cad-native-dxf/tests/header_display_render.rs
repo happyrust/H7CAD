@@ -65,13 +65,25 @@ fn header_writes_display_render_family() {
 
     let text = write_dxf(&doc).expect("write");
 
-    for name in ["$DISPSILH", "$DRAGMODE", "$REGENMODE", "$SHADEDGE", "$SHADEDIF"] {
+    for name in [
+        "$DISPSILH",
+        "$DRAGMODE",
+        "$REGENMODE",
+        "$SHADEDGE",
+        "$SHADEDIF",
+    ] {
         assert!(text.contains(name), "writer must emit {name}");
     }
 
     // Emission order must match reader arm order for deterministic
     // HEADER layout + roundtrip stability.
-    let order = ["$DISPSILH", "$DRAGMODE", "$REGENMODE", "$SHADEDGE", "$SHADEDIF"];
+    let order = [
+        "$DISPSILH",
+        "$DRAGMODE",
+        "$REGENMODE",
+        "$SHADEDGE",
+        "$SHADEDIF",
+    ];
     let mut cursor = 0usize;
     for name in order {
         let hit = text[cursor..]

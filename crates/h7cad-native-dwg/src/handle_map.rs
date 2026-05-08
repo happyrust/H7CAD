@@ -99,10 +99,11 @@ pub fn parse_handle_map(payload: &[u8]) -> Result<Vec<HandleMapEntry>, DwgReadEr
                 read_modular_char(payload, &mut cursor).ok_or(DwgReadError::UnexpectedEof {
                     context: "AcDb:Handles modular char (handle delta) truncated",
                 })?;
-            let delta_loc =
-                read_signed_modular_char(payload, &mut cursor).ok_or(DwgReadError::UnexpectedEof {
+            let delta_loc = read_signed_modular_char(payload, &mut cursor).ok_or(
+                DwgReadError::UnexpectedEof {
                     context: "AcDb:Handles signed modular char (offset delta) truncated",
-                })?;
+                },
+            )?;
             last_handle = last_handle.wrapping_add(delta_handle);
             last_loc = last_loc.saturating_add(delta_loc);
             if delta_handle > 0 {

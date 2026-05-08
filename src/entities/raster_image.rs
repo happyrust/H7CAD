@@ -57,13 +57,7 @@ fn image_wire(corners: [[f32; 3]; 4], with_x: bool) -> Vec<[f32; 3]> {
     pts
 }
 
-fn reflect_vec3(
-    vx: &mut f64,
-    vy: &mut f64,
-    ax: f64,
-    ay: f64,
-    len2: f64,
-) {
+fn reflect_vec3(vx: &mut f64, vy: &mut f64, ax: f64, ay: f64, len2: f64) {
     let dot = *vx * ax + *vy * ay;
     *vx = 2.0 * dot * ax / len2 - *vx;
     *vy = 2.0 * dot * ay / len2 - *vy;
@@ -80,8 +74,49 @@ impl TruckConvertible for RasterImage {
             self.size.x,
             self.size.y,
         );
+
+        // Helper: pixel-space → world-space point.
+        let ox = self.insertion_point.x as f32;
+        let oy = self.insertion_point.y as f32;
+        let oz = self.insertion_point.z as f32;
+        let px_to_world = |px: f64, py: f64| -> [f32; 3] {
+            [
+                ox + (self.u_vector.x * px + self.v_vector.x * py) as f32,
+                oy + (self.u_vector.y * px + self.v_vector.y * py) as f32,
+                oz + (self.u_vector.z * px + self.v_vector.z * py) as f32,
+            ]
+        };
+
+        let pts = if self.clipping_enabled {
+            let cb = &self.clip_boundary;
+            match cb.clip_type {
+                acadrust::entities::ClipType::Polygonal if cb.vertices.len() >= 3 => {
+                    let mut poly: Vec<[f32; 3]> =
+                        cb.vertices.iter().map(|v| px_to_world(v.x, v.y)).collect();
+                    if let Some(&first) = poly.first() {
+                        poly.push(first);
+                    }
+                    poly
+                }
+                acadrust::entities::ClipType::Rectangular if cb.vertices.len() >= 2 => {
+                    let v0 = &cb.vertices[0];
+                    let v1 = &cb.vertices[1];
+                    let (xa, xb) = (v0.x.min(v1.x), v0.x.max(v1.x));
+                    let (ya, yb) = (v0.y.min(v1.y), v0.y.max(v1.y));
+                    let c0 = px_to_world(xa, ya);
+                    let c1 = px_to_world(xb, ya);
+                    let c2 = px_to_world(xb, yb);
+                    let c3 = px_to_world(xa, yb);
+                    vec![c0, c1, c2, c3, c0]
+                }
+                _ => image_wire(corners, true),
+            }
+        } else {
+            image_wire(corners, true)
+        };
+
         Some(TruckEntity {
-            object: TruckObject::Lines(image_wire(corners, true)),
+            object: TruckObject::Lines(pts),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: corners.to_vec(),
@@ -153,13 +188,18 @@ impl PropertyEditable for RasterImage {
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         match field {
             "ri_clip" => {
-                self.clipping_enabled =
-                    if value == "toggle" { !self.clipping_enabled } else { value == "true" };
+                self.clipping_enabled = if value == "toggle" {
+                    !self.clipping_enabled
+                } else {
+                    value == "true"
+                };
                 return;
             }
             _ => {}
         }
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         match field {
             "ri_ox" => self.insertion_point.x = v,
             "ri_oy" => self.insertion_point.y = v,
@@ -210,8 +250,7 @@ impl TruckConvertible for Wipeout {
             && matches!(
                 self.clip_type,
                 acadrust::entities::WipeoutClipType::Polygonal
-            )
-        {
+            ) {
             // Convert pixel-space boundary vertices to world space:
             // world = insertion_point + u_vector * v.x * size.x + v_vector * v.y * size.y
             let ox = self.insertion_point.x as f32;
@@ -312,13 +351,18 @@ impl Grippable for Wipeout {
                 let ox = self.insertion_point.x;
                 let oy = self.insertion_point.y;
                 let oz = self.insertion_point.z;
-                let cur_wx = ox + self.u_vector.x * v.x * self.size.x + self.v_vector.x * v.y * self.size.y;
-                let cur_wy = oy + self.u_vector.y * v.x * self.size.x + self.v_vector.y * v.y * self.size.y;
-                let cur_wz = oz + self.u_vector.z * v.x * self.size.x + self.v_vector.z * v.y * self.size.y;
+                let cur_wx =
+                    ox + self.u_vector.x * v.x * self.size.x + self.v_vector.x * v.y * self.size.y;
+                let cur_wy =
+                    oy + self.u_vector.y * v.x * self.size.x + self.v_vector.y * v.y * self.size.y;
+                let cur_wz =
+                    oz + self.u_vector.z * v.x * self.size.x + self.v_vector.z * v.y * self.size.y;
                 let new_w = match apply {
-                    GripApply::Translate(d) => {
-                        [cur_wx + d.x as f64, cur_wy + d.y as f64, cur_wz + d.z as f64]
-                    }
+                    GripApply::Translate(d) => [
+                        cur_wx + d.x as f64,
+                        cur_wy + d.y as f64,
+                        cur_wz + d.z as f64,
+                    ],
                     GripApply::Absolute(p) => [p.x as f64, p.y as f64, p.z as f64],
                 };
                 // Back-project: solve for pixel coords using u_vector and v_vector.
@@ -378,13 +422,18 @@ impl PropertyEditable for Wipeout {
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         match field {
             "wo_clip" => {
-                self.clipping_enabled =
-                    if value == "toggle" { !self.clipping_enabled } else { value == "true" };
+                self.clipping_enabled = if value == "toggle" {
+                    !self.clipping_enabled
+                } else {
+                    value == "true"
+                };
                 return;
             }
             _ => {}
         }
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         match field {
             "wo_ox" => self.insertion_point.x = v,
             "wo_oy" => self.insertion_point.y = v,

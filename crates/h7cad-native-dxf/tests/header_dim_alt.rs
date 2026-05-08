@@ -20,8 +20,8 @@ const DIM_ALTF: f64 = 2.54;
 const DIM_ALTRND: f64 = 0.5;
 const DIM_ALTTD: i16 = 4;
 const DIM_ALTTZ: i16 = 12; // bit 4 + bit 8 (suppress 0-feet + 0-inches)
-const DIM_ALTU: i16 = 6;   // architectural units
-const DIM_ALTZ: i16 = 5;   // bit 1 + bit 4 (suppress leading zero + 0-feet)
+const DIM_ALTU: i16 = 6; // architectural units
+const DIM_ALTZ: i16 = 5; // bit 1 + bit 4 (suppress leading zero + 0-feet)
 const DIM_APOST: &str = "<> mm";
 
 fn dxf_with_dim_alt_family() -> String {

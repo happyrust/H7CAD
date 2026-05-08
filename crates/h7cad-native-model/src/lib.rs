@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod geom_ocs;
 pub mod julian;
+pub use geom_ocs::{arbitrary_axis, is_world_normal, ocs2d_to_wcs, ocs_to_wcs};
 pub use julian::{
     format_iso8601, julian_date_to_utc, parse_iso8601, utc_to_julian_date, DateTimeUtc,
 };
@@ -160,6 +162,8 @@ pub struct DimStyleProperties {
     pub dimasz: f64,
     /// Extension line offset (DIMEXO)
     pub dimexo: f64,
+    /// Extension line extension beyond dimension line (DIMEXE)
+    pub dimexe: f64,
     /// Dimension line gap (DIMGAP)
     pub dimgap: f64,
     /// Text height (DIMTXT)
@@ -182,6 +186,7 @@ impl DimStyleProperties {
             dimscale: 1.0,
             dimasz: 2.5,
             dimexo: 0.625,
+            dimexe: 0.18,
             dimgap: 0.625,
             dimtxt: 2.5,
             dimdec: 4,
@@ -250,14 +255,10 @@ pub struct CadDocument {
 impl CadDocument {
     pub fn new() -> Self {
         let mut next_handle = 1;
-        let model_space = BlockRecord::new_reserved(
-            allocate_reserved_handle(&mut next_handle),
-            "*Model_Space",
-        );
-        let paper_space = BlockRecord::new_reserved(
-            allocate_reserved_handle(&mut next_handle),
-            "*Paper_Space",
-        );
+        let model_space =
+            BlockRecord::new_reserved(allocate_reserved_handle(&mut next_handle), "*Model_Space");
+        let paper_space =
+            BlockRecord::new_reserved(allocate_reserved_handle(&mut next_handle), "*Paper_Space");
         let model_layout = Layout::new_reserved(
             allocate_reserved_handle(&mut next_handle),
             "Model",
@@ -396,9 +397,11 @@ impl CadDocument {
             return Some(entity);
         }
 
-        self.block_records
-            .values_mut()
-            .find_map(|br| br.entities.iter_mut().find(|entity| entity.handle == handle))
+        self.block_records.values_mut().find_map(|br| {
+            br.entities
+                .iter_mut()
+                .find(|entity| entity.handle == handle)
+        })
     }
 
     pub fn add_entity(&mut self, mut entity: Entity) -> Result<Handle, String> {
@@ -432,12 +435,20 @@ impl CadDocument {
     }
 
     pub fn remove_entity(&mut self, handle: Handle) -> Option<Entity> {
-        if let Some(index) = self.entities.iter().position(|entity| entity.handle == handle) {
+        if let Some(index) = self
+            .entities
+            .iter()
+            .position(|entity| entity.handle == handle)
+        {
             return Some(self.entities.remove(index));
         }
 
         for br in self.block_records.values_mut() {
-            if let Some(index) = br.entities.iter().position(|entity| entity.handle == handle) {
+            if let Some(index) = br
+                .entities
+                .iter()
+                .position(|entity| entity.handle == handle)
+            {
                 return Some(br.entities.remove(index));
             }
         }
@@ -464,19 +475,37 @@ impl CadDocument {
         }
     }
 
-    fn store_entity(&mut self, entity: Entity) -> Result<(), String> {
+    fn store_entity(&mut self, mut entity: Entity) -> Result<(), String> {
         let owner_handle = entity.owner_handle;
         if owner_handle == Handle::NULL {
             self.entities.push(entity);
             return Ok(());
         }
 
-        let owner_br_handle = self.block_record_by_any_handle(owner_handle).map(|br| br.handle);
-        let Some(owner_br_handle) = owner_br_handle else {
-            return Err(format!(
-                "owner handle {:X} does not resolve to a block record",
-                owner_handle.value()
-            ));
+        let owner_br_handle = self
+            .block_record_by_any_handle(owner_handle)
+            .map(|br| br.handle);
+        let owner_br_handle = match owner_br_handle {
+            Some(handle) => handle,
+            None => {
+                // R50-LINE-HANDLE-RECOVERY (2026-04-28): native DWG recovery
+                // can surface entities whose decoded `owner_handle` does not
+                // resolve to any known block record (e.g. when the AC1015
+                // recovery pipeline finds 82 LINE entities in
+                // `pending.handle_offsets` but only 26 have owner handles
+                // pointing at the resolved block-record table). Hard-erroring
+                // here used to drop those 56 entities silently, leaving the
+                // user with `read_dwg recovered 26 LINE` instead of 82.
+                //
+                // Graceful fallback: route the orphan into model space so the
+                // entity is still rendered/exported. The original
+                // `owner_handle` would otherwise alias an invalid block-record
+                // handle, so we rewrite it to the model-space handle so later
+                // ownership repair / round-trip writes stay consistent.
+                entity.owner_handle = self.model_space_handle();
+                self.entities.push(entity);
+                return Ok(());
+            }
         };
 
         let is_layout_block = self
@@ -530,7 +559,8 @@ impl CadDocument {
         }
 
         for layout_handle in seen_layouts {
-            self.root_dictionary.insert(layout_entry_name(layout_handle), layout_handle);
+            self.root_dictionary
+                .insert(layout_entry_name(layout_handle), layout_handle);
         }
     }
 
@@ -562,12 +592,11 @@ impl CadDocument {
     /// Resolve lineweight in 1/100mm (handles -1=ByLayer, -2=ByBlock, -3=Default)
     pub fn resolve_lineweight(&self, entity: &Entity) -> i16 {
         match entity.lineweight {
-            -1 => {
-                self.layers
-                    .get(&entity.layer_name)
-                    .map(|l| if l.lineweight < 0 { 25 } else { l.lineweight })
-                    .unwrap_or(25)
-            }
+            -1 => self
+                .layers
+                .get(&entity.layer_name)
+                .map(|l| if l.lineweight < 0 { 25 } else { l.lineweight })
+                .unwrap_or(25),
             -3 => 25,
             w => w,
         }
@@ -625,14 +654,16 @@ impl CadDocument {
 
     /// Iterate over model-space entities only
     pub fn model_space_entities(&self) -> impl Iterator<Item = &Entity> {
-        self.entities.iter().filter(|e| self.is_model_space_entity(e))
+        self.entities
+            .iter()
+            .filter(|e| self.is_model_space_entity(e))
     }
 
     /// Iterate over paper-space entities only
     pub fn paper_space_entities(&self) -> impl Iterator<Item = &Entity> {
-        self.entities.iter().filter(|e| {
-            e.owner_handle != Handle::NULL && !self.is_model_space_entity(e)
-        })
+        self.entities
+            .iter()
+            .filter(|e| e.owner_handle != Handle::NULL && !self.is_model_space_entity(e))
     }
 
     /// Compute drawing extents from entity geometry (useful when header EXTMIN/EXTMAX is stale)
@@ -655,8 +686,7 @@ impl CadDocument {
                     update(start);
                     update(end);
                 }
-                EntityData::Circle { center, .. }
-                | EntityData::Arc { center, .. } => {
+                EntityData::Circle { center, .. } | EntityData::Arc { center, .. } => {
                     update(center);
                 }
                 EntityData::Point { position } => {
@@ -1474,8 +1504,16 @@ impl Default for DocumentHeader {
             spltknots: 0,
             blipmode: 0,
 
-            useri1: 0, useri2: 0, useri3: 0, useri4: 0, useri5: 0,
-            userr1: 0.0, userr2: 0.0, userr3: 0.0, userr4: 0.0, userr5: 0.0,
+            useri1: 0,
+            useri2: 0,
+            useri3: 0,
+            useri4: 0,
+            useri5: 0,
+            userr1: 0.0,
+            userr2: 0.0,
+            userr3: 0.0,
+            userr4: 0.0,
+            userr5: 0.0,
 
             latitude: 37.795,
             longitude: -122.394,
@@ -2543,7 +2581,10 @@ mod tests {
 
         let snapshot = doc.clone();
         assert_eq!(snapshot.next_handle(), doc.next_handle());
-        assert_eq!(snapshot.get_entity(line_handle), doc.get_entity(line_handle));
+        assert_eq!(
+            snapshot.get_entity(line_handle),
+            doc.get_entity(line_handle)
+        );
     }
 
     #[test]
@@ -2600,7 +2641,9 @@ mod tests {
         });
         entity.owner_handle = block_handle;
 
-        let handle = doc.add_entity(entity).expect("block-owned entity should be added");
+        let handle = doc
+            .add_entity(entity)
+            .expect("block-owned entity should be added");
 
         assert!(doc.entities.iter().all(|entity| entity.handle != handle));
         let block = doc
@@ -2608,7 +2651,12 @@ mod tests {
             .expect("block record should exist");
         assert_eq!(block.entities.len(), 1);
         assert_eq!(block.entities[0].handle, handle);
-        assert_eq!(doc.get_entity(handle).expect("entity should be queryable").owner_handle, block_handle);
+        assert_eq!(
+            doc.get_entity(handle)
+                .expect("entity should be queryable")
+                .owner_handle,
+            block_handle
+        );
     }
 
     #[test]

@@ -120,7 +120,7 @@ impl Camera {
         let (ray_origin, ray_dir) = match self.projection {
             Projection::Perspective => {
                 let near_pt = inv.project_point3(Vec3::new(ndc_x, ndc_y, 0.0));
-                let far_pt  = inv.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
+                let far_pt = inv.project_point3(Vec3::new(ndc_x, ndc_y, 1.0));
                 let dir = (far_pt - near_pt).normalize();
                 (near_pt, dir)
             }
@@ -242,14 +242,20 @@ impl Camera {
         self.target += cam_up * delta_y * speed;
     }
 
-    /// Returns the world-space translation that `pan(delta_x, delta_y)` would
-    /// apply to the camera target — without actually moving the camera.
-    /// Used by MSPACE to pan the viewport's model-space view independently.
-    pub fn screen_delta_to_world(&self, delta_x: f32, delta_y: f32, _bounds: Rectangle) -> Vec3 {
-        let speed = self.distance * 0.001;
+    pub fn screen_delta_to_world(&self, delta_x: f32, delta_y: f32, bounds: Rectangle) -> Vec3 {
+        if bounds.width <= 0.0 || bounds.height <= 0.0 {
+            return Vec3::ZERO;
+        }
+        let world_per_pixel = match self.projection {
+            Projection::Orthographic => (self.ortho_size() * 2.0) / bounds.height,
+            Projection::Perspective => {
+                let view_height = 2.0 * self.distance * (self.fov_y * 0.5).tan();
+                view_height / bounds.height
+            }
+        };
         let cam_right = self.rotation * Vec3::X;
         let cam_up = self.rotation * Vec3::Y;
-        -(cam_right * delta_x * speed) + (cam_up * delta_y * speed)
+        -cam_right * delta_x * world_per_pixel + cam_up * delta_y * world_per_pixel
     }
 
     pub fn fit_to_bounds(&mut self, min: Vec3, max: Vec3) {

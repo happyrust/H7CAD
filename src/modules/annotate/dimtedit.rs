@@ -24,7 +24,10 @@ pub fn tool() -> ToolDef {
 
 enum Step {
     PickDim,
-    PickTextPos { handle: Handle, entity: Option<EntityType> },
+    PickTextPos {
+        handle: Handle,
+        entity: Option<EntityType>,
+    },
 }
 
 pub struct DimTeditCommand {
@@ -33,13 +36,16 @@ pub struct DimTeditCommand {
 
 impl DimTeditCommand {
     pub fn new() -> Self {
-        Self { step: Step::PickDim }
+        Self {
+            step: Step::PickDim,
+        }
     }
-
 }
 
 impl CadCommand for DimTeditCommand {
-    fn name(&self) -> &'static str { "DIMTEDIT" }
+    fn name(&self) -> &'static str {
+        "DIMTEDIT"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
@@ -53,8 +59,13 @@ impl CadCommand for DimTeditCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
-        self.step = Step::PickTextPos { handle, entity: None };
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
+        self.step = Step::PickTextPos {
+            handle,
+            entity: None,
+        };
         CmdResult::NeedPoint
     }
 
@@ -76,7 +87,9 @@ impl CadCommand for DimTeditCommand {
         }
     }
 
-    fn on_enter(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 
     fn on_mouse_move(&mut self, pt: Vec3) -> Option<WireModel> {
         if !matches!(self.step, Step::PickTextPos { .. }) {
@@ -102,6 +115,8 @@ impl CadCommand for DimTeditCommand {
             aci: 0,
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
+            plinegen: true,
+            vp_scissor: None,
         })
     }
 

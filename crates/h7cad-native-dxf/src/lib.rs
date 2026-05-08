@@ -1,12 +1,12 @@
+mod entity_parsers;
 pub mod tokenizer;
 pub mod writer;
-mod entity_parsers;
 
 use std::fmt;
 
-pub use tokenizer::*;
-pub use writer::{write_dxf_string, write_dxf_strict, DxfWriteError};
 use h7cad_native_model::CadDocument;
+pub use tokenizer::*;
+pub use writer::{write_dxf_strict, write_dxf_string, DxfWriteError};
 
 // ---------------------------------------------------------------------------
 // DXF Read Error
@@ -41,10 +41,7 @@ impl fmt::Display for DxfReadError {
                 expected,
                 got_code,
                 got_value,
-            } => write!(
-                f,
-                "expected {expected}, got ({got_code}, `{got_value}`)"
-            ),
+            } => write!(f, "expected {expected}, got ({got_code}, `{got_value}`)"),
             Self::UnexpectedEof { context } => write!(f, "unexpected EOF: {context}"),
             Self::UnknownSection(name) => write!(f, "unknown section `{name}` (skipped)"),
             Self::UnsupportedFormat(msg) => write!(f, "unsupported format: {msg}"),
@@ -566,16 +563,12 @@ fn read_classes_section(
                             2 => cls.cpp_class_name = stream.current_value_trimmed().to_string(),
                             3 => cls.application_name = stream.current_value_trimmed().to_string(),
                             90 => {
-                                cls.proxy_flags = stream
-                                    .current_value_trimmed()
-                                    .parse()
-                                    .unwrap_or(0);
+                                cls.proxy_flags =
+                                    stream.current_value_trimmed().parse().unwrap_or(0);
                             }
                             91 => {
-                                cls.instance_count = stream
-                                    .current_value_trimmed()
-                                    .parse()
-                                    .unwrap_or(0);
+                                cls.instance_count =
+                                    stream.current_value_trimmed().parse().unwrap_or(0);
                             }
                             280 => cls.was_a_proxy = stream.current_value_trimmed() == "1",
                             281 => cls.is_an_entity = stream.current_value_trimmed() == "1",
@@ -656,9 +649,7 @@ fn read_single_table(
             let val = stream.current_value_trimmed().to_string();
             match code {
                 5 | 105 => {
-                    entry_handle = Handle::new(
-                        u64::from_str_radix(&val, 16).unwrap_or(0),
-                    );
+                    entry_handle = Handle::new(u64::from_str_radix(&val, 16).unwrap_or(0));
                 }
                 2 => entry_name = val.clone(),
                 _ => {}
@@ -731,8 +722,9 @@ fn read_single_table(
                             40 => ds.dimscale = val.parse().unwrap_or(1.0),
                             41 => ds.dimasz = val.parse().unwrap_or(2.5),
                             42 => ds.dimexo = val.parse().unwrap_or(0.625),
-                            44 => ds.dimgap = val.parse().unwrap_or(0.625),
+                            44 => ds.dimexe = val.parse().unwrap_or(0.18),
                             140 => ds.dimtxt = val.parse().unwrap_or(2.5),
+                            147 => ds.dimgap = val.parse().unwrap_or(0.625),
                             271 => ds.dimdec = val.parse().unwrap_or(4),
                             277 => ds.dimlunit = val.parse().unwrap_or(2),
                             275 => ds.dimaunit = val.parse().unwrap_or(0),
@@ -944,8 +936,8 @@ fn read_entity(
     stream: &mut DxfStreamReader<'_>,
     type_name: &str,
 ) -> Result<Option<h7cad_native_model::Entity>, DxfReadError> {
-    use h7cad_native_model::{Entity, EntityData, Handle};
     use entity_parsers::*;
+    use h7cad_native_model::{Entity, EntityData, Handle};
 
     let mut entity = Entity::new(EntityData::Unknown {
         entity_type: type_name.to_string(),
@@ -979,12 +971,10 @@ fn read_entity(
         }
         match code {
             5 => {
-                entity.handle =
-                    Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
+                entity.handle = Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
             }
             330 => {
-                entity.owner_handle =
-                    Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
+                entity.owner_handle = Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
             }
             8 => entity.layer_name = val.clone(),
             6 => entity.linetype_name = val.clone(),
@@ -1156,8 +1146,8 @@ fn read_insert_attrib_sequence(
     stream: &mut DxfStreamReader<'_>,
     mut entity: h7cad_native_model::Entity,
 ) -> Result<Option<h7cad_native_model::Entity>, DxfReadError> {
-    use h7cad_native_model::{Entity, EntityData, Handle};
     use entity_parsers::*;
+    use h7cad_native_model::{Entity, EntityData, Handle};
 
     let mut attribs = Vec::new();
 
@@ -1212,7 +1202,11 @@ fn read_insert_attrib_sequence(
         }
     }
 
-    if let EntityData::Insert { attribs: ref mut existing, .. } = entity.data {
+    if let EntityData::Insert {
+        attribs: ref mut existing,
+        ..
+    } = entity.data
+    {
         *existing = attribs;
     }
     Ok(Some(entity))
@@ -1253,12 +1247,10 @@ fn read_objects_section(
             let val = stream.current_value_trimmed().to_string();
             match code {
                 5 => {
-                    handle =
-                        Handle::new(u64::from_str_radix(&val, 16).unwrap_or(0));
+                    handle = Handle::new(u64::from_str_radix(&val, 16).unwrap_or(0));
                 }
                 330 => {
-                    owner_handle =
-                        Handle::new(u64::from_str_radix(&val, 16).unwrap_or(0));
+                    owner_handle = Handle::new(u64::from_str_radix(&val, 16).unwrap_or(0));
                 }
                 _ => {}
             }
@@ -1273,9 +1265,7 @@ fn read_objects_section(
                     match code {
                         3 => current_key = val.clone(),
                         350 | 360 => {
-                            let h = Handle::new(
-                                u64::from_str_radix(val, 16).unwrap_or(0),
-                            );
+                            let h = Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
                             entries.push((std::mem::take(&mut current_key), h));
                         }
                         _ => {}
@@ -1298,9 +1288,8 @@ fn read_objects_section(
                     match code {
                         300 => description = val.clone(),
                         340 => {
-                            entity_handles.push(Handle::new(
-                                u64::from_str_radix(val, 16).unwrap_or(0),
-                            ));
+                            entity_handles
+                                .push(Handle::new(u64::from_str_radix(val, 16).unwrap_or(0)));
                         }
                         _ => {}
                     }
@@ -1322,9 +1311,8 @@ fn read_objects_section(
                         71 => tab_order = val.parse().unwrap_or(0),
                         330 => {} // already parsed as owner
                         340 => {
-                            block_record_handle = Handle::new(
-                                u64::from_str_radix(val, 16).unwrap_or(0),
-                            );
+                            block_record_handle =
+                                Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
                         }
                         44 => pw = val.parse().unwrap_or(0.0),
                         45 => ph = val.parse().unwrap_or(0.0),
@@ -1455,9 +1443,7 @@ fn read_objects_section(
                 let mut image_handle = Handle::NULL;
                 for &(code, ref val) in &codes {
                     if code == 330 {
-                        image_handle = Handle::new(
-                            u64::from_str_radix(val, 16).unwrap_or(0),
-                        );
+                        image_handle = Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
                     }
                 }
                 ObjectData::ImageDefReactor { image_handle }
@@ -1490,9 +1476,8 @@ fn read_objects_section(
                         3 => name = val.clone(),
                         170 => content_type = val.parse().unwrap_or(0),
                         341 => {
-                            text_style_handle = Handle::new(
-                                u64::from_str_radix(val, 16).unwrap_or(0),
-                            );
+                            text_style_handle =
+                                Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
                         }
                         _ => {}
                     }
@@ -1521,9 +1506,8 @@ fn read_objects_section(
                 for &(code, ref val) in &codes {
                     match code {
                         331 => {
-                            entity_handles.push(Handle::new(
-                                u64::from_str_radix(val, 16).unwrap_or(0),
-                            ));
+                            entity_handles
+                                .push(Handle::new(u64::from_str_radix(val, 16).unwrap_or(0)));
                         }
                         5 => {} // already parsed
                         _ => {
@@ -1545,9 +1529,8 @@ fn read_objects_section(
                     match code {
                         1 => associativity = val.parse().unwrap_or(0),
                         330 => {
-                            dimension_handle = Handle::new(
-                                u64::from_str_radix(val, 16).unwrap_or(0),
-                            );
+                            dimension_handle =
+                                Handle::new(u64::from_str_radix(val, 16).unwrap_or(0));
                         }
                         _ => {}
                     }
@@ -1576,9 +1559,7 @@ fn read_objects_section(
                 let mut entity_handles = Vec::new();
                 for &(code, ref val) in &codes {
                     if code == 330 {
-                        entity_handles.push(Handle::new(
-                            u64::from_str_radix(val, 16).unwrap_or(0),
-                        ));
+                        entity_handles.push(Handle::new(u64::from_str_radix(val, 16).unwrap_or(0)));
                     }
                 }
                 // First 330 was consumed as owner; keep remainder
@@ -1594,9 +1575,8 @@ fn read_objects_section(
                     match code {
                         1 => name = val.clone(),
                         8 => {
-                            layer_handles.push(Handle::new(
-                                u64::from_str_radix(val, 16).unwrap_or(0),
-                            ));
+                            layer_handles
+                                .push(Handle::new(u64::from_str_radix(val, 16).unwrap_or(0)));
                         }
                         _ => {}
                     }
@@ -1775,7 +1755,11 @@ pub fn read_dxf_bytes(input: &[u8]) -> Result<CadDocument, DxfReadError> {
 }
 
 fn detect_codepage(data: &[u8]) -> Option<String> {
-    let haystack = if data.len() > 4096 { &data[..4096] } else { data };
+    let haystack = if data.len() > 4096 {
+        &data[..4096]
+    } else {
+        data
+    };
     let lossy = String::from_utf8_lossy(haystack);
     for line in lossy.lines() {
         let trimmed = line.trim();
@@ -1944,20 +1928,19 @@ fn post_process(doc: &mut CadDocument) {
     max_handle = max_handle.max(doc.header.handseed);
     doc.set_next_handle(max_handle + 1);
 
-    let pre_seeded: Vec<Handle> = doc
-        .block_records
-        .keys()
-        .copied()
-        .filter(|h| {
-            let br = &doc.block_records[h];
-            br.block_entity_handle == Handle::NULL
-                && (br.name == "*Model_Space" || br.name == "*Paper_Space")
-                && doc
-                    .block_records
-                    .values()
-                    .any(|other| other.name == br.name && other.block_entity_handle != Handle::NULL)
-        })
-        .collect();
+    let pre_seeded: Vec<Handle> =
+        doc.block_records
+            .keys()
+            .copied()
+            .filter(|h| {
+                let br = &doc.block_records[h];
+                br.block_entity_handle == Handle::NULL
+                    && (br.name == "*Model_Space" || br.name == "*Paper_Space")
+                    && doc.block_records.values().any(|other| {
+                        other.name == br.name && other.block_entity_handle != Handle::NULL
+                    })
+            })
+            .collect();
     for h in pre_seeded {
         doc.block_records.remove(&h);
     }
@@ -2163,7 +2146,9 @@ mod tests {
         let doc = read_dxf(input).unwrap();
         assert_eq!(doc.entities.len(), 1);
         match &doc.entities[0].data {
-            h7cad_native_model::EntityData::LwPolyline { vertices, closed, .. } => {
+            h7cad_native_model::EntityData::LwPolyline {
+                vertices, closed, ..
+            } => {
                 assert!(closed);
                 assert_eq!(vertices.len(), 3);
                 assert_eq!(vertices[0].x, 0.0);
@@ -2327,12 +2312,30 @@ mod tests {
 
     #[test]
     fn section_name_from_dxf_roundtrip() {
-        assert_eq!(DxfSectionName::from_dxf("HEADER"), Some(DxfSectionName::Header));
-        assert_eq!(DxfSectionName::from_dxf("CLASSES"), Some(DxfSectionName::Classes));
-        assert_eq!(DxfSectionName::from_dxf("TABLES"), Some(DxfSectionName::Tables));
-        assert_eq!(DxfSectionName::from_dxf("BLOCKS"), Some(DxfSectionName::Blocks));
-        assert_eq!(DxfSectionName::from_dxf("ENTITIES"), Some(DxfSectionName::Entities));
-        assert_eq!(DxfSectionName::from_dxf("OBJECTS"), Some(DxfSectionName::Objects));
+        assert_eq!(
+            DxfSectionName::from_dxf("HEADER"),
+            Some(DxfSectionName::Header)
+        );
+        assert_eq!(
+            DxfSectionName::from_dxf("CLASSES"),
+            Some(DxfSectionName::Classes)
+        );
+        assert_eq!(
+            DxfSectionName::from_dxf("TABLES"),
+            Some(DxfSectionName::Tables)
+        );
+        assert_eq!(
+            DxfSectionName::from_dxf("BLOCKS"),
+            Some(DxfSectionName::Blocks)
+        );
+        assert_eq!(
+            DxfSectionName::from_dxf("ENTITIES"),
+            Some(DxfSectionName::Entities)
+        );
+        assert_eq!(
+            DxfSectionName::from_dxf("OBJECTS"),
+            Some(DxfSectionName::Objects)
+        );
         assert_eq!(DxfSectionName::from_dxf("THUMBNAILIMAGE"), None);
         assert_eq!(DxfSectionName::from_dxf(""), None);
     }
@@ -2372,10 +2375,7 @@ mod tests {
         let doc = read_dxf(&input).unwrap();
         assert_eq!(doc.header.version, h7cad_native_model::DxfVersion::R2000);
         assert!(!doc.entities.is_empty(), "should have entities");
-        assert!(
-            !doc.tables.layer.entries.is_empty(),
-            "should have layers"
-        );
+        assert!(!doc.tables.layer.entries.is_empty(), "should have layers");
         eprintln!(
             "AC1015: {} entities, {} layers, {} classes, {} block_records",
             doc.entities.len(),
@@ -2504,7 +2504,8 @@ mod tests {
             return;
         };
         let doc = read_dxf(&input).unwrap();
-        let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        let mut counts: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
         for e in &doc.entities {
             let name = match &e.data {
                 h7cad_native_model::EntityData::Line { .. } => "LINE",
@@ -2579,10 +2580,7 @@ mod tests {
         let mut total_paths = 0;
         let mut total_edges = 0;
         for h in &hatches {
-            if let h7cad_native_model::EntityData::Hatch {
-                boundary_paths, ..
-            } = &h.data
-            {
+            if let h7cad_native_model::EntityData::Hatch { boundary_paths, .. } = &h.data {
                 total_paths += boundary_paths.len();
                 for bp in boundary_paths {
                     total_edges += bp.edges.len();
@@ -2625,7 +2623,15 @@ mod tests {
                     ..
                 } = &e.data
                 {
-                    Some((*dim_type, block_name.clone(), style_name.clone(), *measurement, *first_point, *second_point, *angle_vertex))
+                    Some((
+                        *dim_type,
+                        block_name.clone(),
+                        style_name.clone(),
+                        *measurement,
+                        *first_point,
+                        *second_point,
+                        *angle_vertex,
+                    ))
                 } else {
                     None
                 }
@@ -2641,7 +2647,11 @@ mod tests {
         eprintln!("DIMENSION sub-types: {:?}", type_counts);
 
         for (dt, block_name, style_name, measurement, _, _, _) in &dims {
-            assert!(!block_name.is_empty(), "dim type {} should have block_name", dt);
+            assert!(
+                !block_name.is_empty(),
+                "dim type {} should have block_name",
+                dt
+            );
             eprintln!(
                 "  dim_type={} (base={}), block={}, style={}, measurement={}",
                 dt,
@@ -2779,9 +2789,16 @@ mod tests {
             };
             *type_counts.entry(name.to_string()).or_insert(0u32) += 1;
         }
-        let unknown_count: u32 = doc.objects.iter().filter(|o| matches!(&o.data, h7cad_native_model::ObjectData::Unknown { .. })).count() as u32;
+        let unknown_count: u32 = doc
+            .objects
+            .iter()
+            .filter(|o| matches!(&o.data, h7cad_native_model::ObjectData::Unknown { .. }))
+            .count() as u32;
         let known_count = doc.objects.len() as u32 - unknown_count;
-        eprintln!("OBJECTS type distribution (AC1018, {} total):", doc.objects.len());
+        eprintln!(
+            "OBJECTS type distribution (AC1018, {} total):",
+            doc.objects.len()
+        );
         for (name, count) in &type_counts {
             let is_unknown = matches!(&name.as_str(), &n if {
                 let _doc_objs = &doc.objects;
@@ -2790,7 +2807,12 @@ mod tests {
                     "IMAGEDEF" | "IMAGEDEF_REACTOR" | "MLINESTYLE" | "MLEADERSTYLE" |
                     "TABLESTYLE" | "SORTENTSTABLE" | "DIMASSOC")
             });
-            eprintln!("  {}: {}{}", name, count, if is_unknown { " [unknown]" } else { "" });
+            eprintln!(
+                "  {}: {}{}",
+                name,
+                count,
+                if is_unknown { " [unknown]" } else { "" }
+            );
         }
         eprintln!("  >> {} known, {} unknown", known_count, unknown_count);
     }
@@ -2811,31 +2833,64 @@ mod tests {
         for ent in &doc.entities {
             match &ent.data {
                 EntityData::Line { start, end } => {
-                    assert!(start.iter().all(|v| v.is_finite()), "LINE start must be finite");
+                    assert!(
+                        start.iter().all(|v| v.is_finite()),
+                        "LINE start must be finite"
+                    );
                     assert!(end.iter().all(|v| v.is_finite()), "LINE end must be finite");
                 }
                 EntityData::Circle { center, radius } => {
                     assert!(center.iter().all(|v| v.is_finite()));
-                    assert!(*radius > 0.0, "CIRCLE radius must be positive, got {radius}");
+                    assert!(
+                        *radius > 0.0,
+                        "CIRCLE radius must be positive, got {radius}"
+                    );
                 }
-                EntityData::Arc { center, radius, start_angle, end_angle } => {
+                EntityData::Arc {
+                    center,
+                    radius,
+                    start_angle,
+                    end_angle,
+                } => {
                     assert!(center.iter().all(|v| v.is_finite()));
                     assert!(*radius > 0.0, "ARC radius must be positive");
                     assert!(start_angle.is_finite() && end_angle.is_finite());
                 }
-                EntityData::Ellipse { center, major_axis, ratio, .. } => {
+                EntityData::Ellipse {
+                    center,
+                    major_axis,
+                    ratio,
+                    ..
+                } => {
                     assert!(center.iter().all(|v| v.is_finite()));
-                    let axis_len = (major_axis[0].powi(2) + major_axis[1].powi(2) + major_axis[2].powi(2)).sqrt();
+                    let axis_len =
+                        (major_axis[0].powi(2) + major_axis[1].powi(2) + major_axis[2].powi(2))
+                            .sqrt();
                     assert!(axis_len > 0.0, "ELLIPSE major_axis length must be > 0");
-                    assert!(*ratio > 0.0 && *ratio <= 1.0, "ELLIPSE ratio must be in (0,1], got {ratio}");
+                    assert!(
+                        *ratio > 0.0 && *ratio <= 1.0,
+                        "ELLIPSE ratio must be in (0,1], got {ratio}"
+                    );
                 }
-                EntityData::Spline { degree, knots, control_points, weights, .. } => {
+                EntityData::Spline {
+                    degree,
+                    knots,
+                    control_points,
+                    weights,
+                    ..
+                } => {
                     assert!(*degree >= 1, "SPLINE degree must be >= 1, got {degree}");
-                    assert!(!control_points.is_empty(), "SPLINE must have control points");
+                    assert!(
+                        !control_points.is_empty(),
+                        "SPLINE must have control points"
+                    );
                     assert!(!knots.is_empty(), "SPLINE must have knots");
                     if !weights.is_empty() {
-                        assert_eq!(weights.len(), control_points.len(),
-                            "SPLINE weights count must match control_points count");
+                        assert_eq!(
+                            weights.len(),
+                            control_points.len(),
+                            "SPLINE weights count must match control_points count"
+                        );
                     }
                 }
                 EntityData::LwPolyline { vertices, .. } => {
@@ -2849,10 +2904,18 @@ mod tests {
                         assert!(!bp.edges.is_empty(), "HATCH boundary path must have edges");
                     }
                 }
-                EntityData::Insert { block_name, attribs, has_attribs, .. } => {
+                EntityData::Insert {
+                    block_name,
+                    attribs,
+                    has_attribs,
+                    ..
+                } => {
                     assert!(!block_name.is_empty(), "INSERT must have block_name");
                     if *has_attribs {
-                        assert!(!attribs.is_empty(), "INSERT with has_attribs should have attribs");
+                        assert!(
+                            !attribs.is_empty(),
+                            "INSERT with has_attribs should have attribs"
+                        );
                     }
                 }
                 EntityData::Dimension { block_name, .. } => {
@@ -2861,7 +2924,10 @@ mod tests {
                 _ => {}
             }
         }
-        eprintln!("Geometry data integrity: all {} entities passed", doc.entities.len());
+        eprintln!(
+            "Geometry data integrity: all {} entities passed",
+            doc.entities.len()
+        );
     }
 
     #[test]
@@ -2971,7 +3037,10 @@ mod tests {
             "should have at least Continuous/ByLayer/ByBlock, got {}",
             doc.linetypes.len(),
         );
-        let cont = doc.linetypes.get("Continuous").expect("Continuous must exist");
+        let cont = doc
+            .linetypes
+            .get("Continuous")
+            .expect("Continuous must exist");
         assert!(cont.is_continuous(), "Continuous should have no segments");
 
         let mut complex_ltypes = 0;
@@ -2999,17 +3068,11 @@ mod tests {
         );
 
         // --- STYLE ---
-        assert!(
-            !doc.text_styles.is_empty(),
-            "should have text styles",
-        );
+        assert!(!doc.text_styles.is_empty(), "should have text styles",);
         for (name, ts) in &doc.text_styles {
             eprintln!(
                 "  STYLE '{}': h={}, wf={}, font='{}'",
-                name,
-                ts.height,
-                ts.width_factor,
-                ts.font_name,
+                name, ts.height, ts.width_factor, ts.font_name,
             );
         }
         assert_eq!(
@@ -3019,19 +3082,15 @@ mod tests {
         );
 
         // --- DIMSTYLE ---
-        assert!(
-            !doc.dim_styles.is_empty(),
-            "should have dim styles",
-        );
-        let std_ds = doc.dim_styles.get("Standard").or_else(|| doc.dim_styles.values().next());
+        assert!(!doc.dim_styles.is_empty(), "should have dim styles",);
+        let std_ds = doc
+            .dim_styles
+            .get("Standard")
+            .or_else(|| doc.dim_styles.values().next());
         if let Some(ds) = std_ds {
             eprintln!(
                 "  DIMSTYLE '{}': scale={}, asz={}, txt={}, dec={}",
-                ds.name,
-                ds.dimscale,
-                ds.dimasz,
-                ds.dimtxt,
-                ds.dimdec,
+                ds.name, ds.dimscale, ds.dimasz, ds.dimtxt, ds.dimdec,
             );
             assert!(ds.dimscale > 0.0, "dimscale should be positive");
         }
@@ -3063,7 +3122,11 @@ mod tests {
             "  ltscale={}, textsize={}, dimscale={}, lunits={}, luprec={}",
             h.ltscale, h.textsize, h.dimscale, h.lunits, h.luprec,
         );
-        eprintln!("  handseed={:X}, next_handle={:X}", h.handseed, doc.next_handle());
+        eprintln!(
+            "  handseed={:X}, next_handle={:X}",
+            h.handseed,
+            doc.next_handle()
+        );
 
         assert!(h.extmax[0] > h.extmin[0], "extmax.x should > extmin.x");
         assert!(h.extmax[1] > h.extmin[1], "extmax.y should > extmin.y");
@@ -3088,7 +3151,11 @@ mod tests {
         let doc = read_dxf(&input).unwrap();
 
         let ms_handle = doc.model_space_handle();
-        assert_ne!(ms_handle, h7cad_native_model::Handle::NULL, "model space handle should exist");
+        assert_ne!(
+            ms_handle,
+            h7cad_native_model::Handle::NULL,
+            "model space handle should exist"
+        );
 
         let mut ms_entities = 0;
         let mut ps_entities = 0;
@@ -3153,9 +3220,11 @@ mod tests {
         let mut with_xdata = 0;
         let mut xdata_apps: std::collections::BTreeSet<String> = Default::default();
 
-        for entity in doc.entities.iter().chain(
-            doc.block_records.values().flat_map(|br| br.entities.iter()),
-        ) {
+        for entity in doc
+            .entities
+            .iter()
+            .chain(doc.block_records.values().flat_map(|br| br.entities.iter()))
+        {
             match &entity.data {
                 h7cad_native_model::EntityData::Text { style_name, .. } => {
                     if !style_name.is_empty() {
@@ -3297,12 +3366,18 @@ mod tests {
         let long_token = DxfToken::new(GroupCode::new(420).unwrap(), "16711680");
         let binary_token = DxfToken::new(GroupCode::new(1004).unwrap(), "0A0B");
 
-        assert_eq!(string_token.decode().unwrap(), DxfValue::Str("Layer0".into()));
+        assert_eq!(
+            string_token.decode().unwrap(),
+            DxfValue::Str("Layer0".into())
+        );
         assert_eq!(double_token.decode().unwrap(), DxfValue::Double(12.5));
         assert_eq!(short_token.decode().unwrap(), DxfValue::Short(7));
         assert_eq!(bool_token.decode().unwrap(), DxfValue::Bool(true));
         assert_eq!(long_token.decode().unwrap(), DxfValue::Long(16_711_680));
-        assert_eq!(binary_token.decode().unwrap(), DxfValue::Binary(vec![0x0A, 0x0B]));
+        assert_eq!(
+            binary_token.decode().unwrap(),
+            DxfValue::Binary(vec![0x0A, 0x0B])
+        );
     }
 
     #[test]
@@ -3312,11 +3387,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            DxfDecodeError::new(
-                GroupCode::new(10).unwrap(),
-                "abc",
-                "invalid numeric value"
-            )
+            DxfDecodeError::new(GroupCode::new(10).unwrap(), "abc", "invalid numeric value")
         );
 
         let err = DxfToken::new(GroupCode::new(290).unwrap(), "2")
@@ -3375,7 +3446,12 @@ mod tests {
             other => panic!("expected Circle, got {:?}", other),
         }
         match &doc2.entities[2].data {
-            EntityData::Arc { center, radius, start_angle, end_angle } => {
+            EntityData::Arc {
+                center,
+                radius,
+                start_angle,
+                end_angle,
+            } => {
                 assert_eq!(*center, [1.0, 2.0, 3.0]);
                 assert!((radius - 7.5).abs() < 1e-6);
                 assert!((start_angle - 0.0).abs() < 1e-6);
@@ -3468,10 +3544,7 @@ mod tests {
         let output = write_dxf(&doc1).unwrap();
         let doc2 = read_dxf(&output).unwrap();
 
-        assert_eq!(
-            doc2.header.version, doc1.header.version,
-            "version mismatch"
-        );
+        assert_eq!(doc2.header.version, doc1.header.version, "version mismatch");
         assert_eq!(
             doc2.entities.len(),
             doc1.entities.len(),
@@ -3479,11 +3552,7 @@ mod tests {
             doc1.entities.len(),
             doc2.entities.len()
         );
-        assert_eq!(
-            doc2.layers.len(),
-            doc1.layers.len(),
-            "layer count mismatch"
-        );
+        assert_eq!(doc2.layers.len(), doc1.layers.len(), "layer count mismatch");
 
         let counts1 = doc1.entity_type_counts();
         let counts2 = doc2.entity_type_counts();
@@ -3551,14 +3620,18 @@ mod tests {
         let doc2 = read_dxf(&output).expect(&format!("{name}: re-read failed"));
 
         assert_eq!(
-            doc2.entities.len(), doc1.entities.len(),
+            doc2.entities.len(),
+            doc1.entities.len(),
             "{name}: entity count {0} → {1}",
-            doc1.entities.len(), doc2.entities.len()
+            doc1.entities.len(),
+            doc2.entities.len()
         );
         assert_eq!(
-            doc2.layers.len(), doc1.layers.len(),
+            doc2.layers.len(),
+            doc1.layers.len(),
             "{name}: layer count {0} → {1}",
-            doc1.layers.len(), doc2.layers.len()
+            doc1.layers.len(),
+            doc2.layers.len()
         );
 
         let counts1 = doc1.entity_type_counts();
@@ -3569,20 +3642,62 @@ mod tests {
         }
     }
 
-    #[test] fn sample_ac1009_ascii()  { roundtrip_sample("sample_AC1009_ascii.dxf"); }
-    #[test] fn sample_ac1009_binary() { roundtrip_sample("sample_AC1009_binary.dxf"); }
-    #[test] fn sample_ac1015_ascii()  { roundtrip_sample("sample_AC1015_ascii.dxf"); }
-    #[test] fn sample_ac1015_binary() { roundtrip_sample("sample_AC1015_binary.dxf"); }
-    #[test] fn sample_ac1018_ascii()  { roundtrip_sample("sample_AC1018_ascii.dxf"); }
-    #[test] fn sample_ac1018_binary() { roundtrip_sample("sample_AC1018_binary.dxf"); }
-    #[test] fn sample_ac1021_ascii()  { roundtrip_sample("sample_AC1021_ascii.dxf"); }
-    #[test] fn sample_ac1021_binary() { roundtrip_sample("sample_AC1021_binary.dxf"); }
-    #[test] fn sample_ac1024_ascii()  { roundtrip_sample("sample_AC1024_ascii.dxf"); }
-    #[test] fn sample_ac1024_binary() { roundtrip_sample("sample_AC1024_binary.dxf"); }
-    #[test] fn sample_ac1027_ascii()  { roundtrip_sample("sample_AC1027_ascii.dxf"); }
-    #[test] fn sample_ac1027_binary() { roundtrip_sample("sample_AC1027_binary.dxf"); }
-    #[test] fn sample_ac1032_ascii()  { roundtrip_sample("sample_AC1032_ascii.dxf"); }
-    #[test] fn sample_ac1032_binary() { roundtrip_sample("sample_AC1032_binary.dxf"); }
+    #[test]
+    fn sample_ac1009_ascii() {
+        roundtrip_sample("sample_AC1009_ascii.dxf");
+    }
+    #[test]
+    fn sample_ac1009_binary() {
+        roundtrip_sample("sample_AC1009_binary.dxf");
+    }
+    #[test]
+    fn sample_ac1015_ascii() {
+        roundtrip_sample("sample_AC1015_ascii.dxf");
+    }
+    #[test]
+    fn sample_ac1015_binary() {
+        roundtrip_sample("sample_AC1015_binary.dxf");
+    }
+    #[test]
+    fn sample_ac1018_ascii() {
+        roundtrip_sample("sample_AC1018_ascii.dxf");
+    }
+    #[test]
+    fn sample_ac1018_binary() {
+        roundtrip_sample("sample_AC1018_binary.dxf");
+    }
+    #[test]
+    fn sample_ac1021_ascii() {
+        roundtrip_sample("sample_AC1021_ascii.dxf");
+    }
+    #[test]
+    fn sample_ac1021_binary() {
+        roundtrip_sample("sample_AC1021_binary.dxf");
+    }
+    #[test]
+    fn sample_ac1024_ascii() {
+        roundtrip_sample("sample_AC1024_ascii.dxf");
+    }
+    #[test]
+    fn sample_ac1024_binary() {
+        roundtrip_sample("sample_AC1024_binary.dxf");
+    }
+    #[test]
+    fn sample_ac1027_ascii() {
+        roundtrip_sample("sample_AC1027_ascii.dxf");
+    }
+    #[test]
+    fn sample_ac1027_binary() {
+        roundtrip_sample("sample_AC1027_binary.dxf");
+    }
+    #[test]
+    fn sample_ac1032_ascii() {
+        roundtrip_sample("sample_AC1032_ascii.dxf");
+    }
+    #[test]
+    fn sample_ac1032_binary() {
+        roundtrip_sample("sample_AC1032_binary.dxf");
+    }
 
     #[test]
     fn sample_entity_coverage_report() {
@@ -3604,30 +3719,54 @@ mod tests {
 
     #[test]
     fn sample_hatch_roundtrip_preserves_boundary_types() {
-        let Some(doc) = try_read_sample("sample_AC1015_ascii.dxf") else { return };
-        let hatches: Vec<_> = doc.entities.iter().filter(|e| {
-            matches!(&e.data, h7cad_native_model::EntityData::Hatch { .. })
-        }).collect();
-        if hatches.is_empty() { return; }
+        let Some(doc) = try_read_sample("sample_AC1015_ascii.dxf") else {
+            return;
+        };
+        let hatches: Vec<_> = doc
+            .entities
+            .iter()
+            .filter(|e| matches!(&e.data, h7cad_native_model::EntityData::Hatch { .. }))
+            .collect();
+        if hatches.is_empty() {
+            return;
+        }
 
         let output = write_dxf(&doc).unwrap();
         let doc2 = read_dxf(&output).unwrap();
-        let hatches2: Vec<_> = doc2.entities.iter().filter(|e| {
-            matches!(&e.data, h7cad_native_model::EntityData::Hatch { .. })
-        }).collect();
+        let hatches2: Vec<_> = doc2
+            .entities
+            .iter()
+            .filter(|e| matches!(&e.data, h7cad_native_model::EntityData::Hatch { .. }))
+            .collect();
 
-        assert_eq!(hatches.len(), hatches2.len(), "hatch count mismatch after roundtrip");
+        assert_eq!(
+            hatches.len(),
+            hatches2.len(),
+            "hatch count mismatch after roundtrip"
+        );
 
         for (i, (h1, h2)) in hatches.iter().zip(hatches2.iter()).enumerate() {
             if let (
-                h7cad_native_model::EntityData::Hatch { boundary_paths: bp1, .. },
-                h7cad_native_model::EntityData::Hatch { boundary_paths: bp2, .. },
-            ) = (&h1.data, &h2.data) {
-                assert_eq!(bp1.len(), bp2.len(), "hatch[{i}] boundary path count mismatch");
+                h7cad_native_model::EntityData::Hatch {
+                    boundary_paths: bp1,
+                    ..
+                },
+                h7cad_native_model::EntityData::Hatch {
+                    boundary_paths: bp2,
+                    ..
+                },
+            ) = (&h1.data, &h2.data)
+            {
+                assert_eq!(
+                    bp1.len(),
+                    bp2.len(),
+                    "hatch[{i}] boundary path count mismatch"
+                );
                 for (j, (p1, p2)) in bp1.iter().zip(bp2.iter()).enumerate() {
                     assert_eq!(p1.flags, p2.flags, "hatch[{i}].path[{j}] flags mismatch");
                     assert_eq!(
-                        p1.edges.len(), p2.edges.len(),
+                        p1.edges.len(),
+                        p2.edges.len(),
                         "hatch[{i}].path[{j}] edge count mismatch"
                     );
                 }
@@ -3637,24 +3776,41 @@ mod tests {
 
     #[test]
     fn sample_insert_roundtrip_preserves_attribs() {
-        let Some(doc) = try_read_sample("sample_AC1015_ascii.dxf") else { return };
-        let inserts: Vec<_> = doc.entities.iter().filter(|e| {
-            matches!(&e.data, h7cad_native_model::EntityData::Insert { .. })
-        }).collect();
-        if inserts.is_empty() { return; }
+        let Some(doc) = try_read_sample("sample_AC1015_ascii.dxf") else {
+            return;
+        };
+        let inserts: Vec<_> = doc
+            .entities
+            .iter()
+            .filter(|e| matches!(&e.data, h7cad_native_model::EntityData::Insert { .. }))
+            .collect();
+        if inserts.is_empty() {
+            return;
+        }
 
         let output = write_dxf(&doc).unwrap();
         let doc2 = read_dxf(&output).unwrap();
-        let inserts2: Vec<_> = doc2.entities.iter().filter(|e| {
-            matches!(&e.data, h7cad_native_model::EntityData::Insert { .. })
-        }).collect();
+        let inserts2: Vec<_> = doc2
+            .entities
+            .iter()
+            .filter(|e| matches!(&e.data, h7cad_native_model::EntityData::Insert { .. }))
+            .collect();
 
         assert_eq!(inserts.len(), inserts2.len(), "insert count mismatch");
         for (i, (ins1, ins2)) in inserts.iter().zip(inserts2.iter()).enumerate() {
             if let (
-                h7cad_native_model::EntityData::Insert { block_name: n1, attribs: a1, .. },
-                h7cad_native_model::EntityData::Insert { block_name: n2, attribs: a2, .. },
-            ) = (&ins1.data, &ins2.data) {
+                h7cad_native_model::EntityData::Insert {
+                    block_name: n1,
+                    attribs: a1,
+                    ..
+                },
+                h7cad_native_model::EntityData::Insert {
+                    block_name: n2,
+                    attribs: a2,
+                    ..
+                },
+            ) = (&ins1.data, &ins2.data)
+            {
                 assert_eq!(n1, n2, "insert[{i}] block_name mismatch");
                 assert_eq!(a1.len(), a2.len(), "insert[{i}] attrib count mismatch");
             }
@@ -3663,12 +3819,16 @@ mod tests {
 
     #[test]
     fn sample_layer_properties_roundtrip() {
-        let Some(doc) = try_read_sample("sample_AC1015_ascii.dxf") else { return };
+        let Some(doc) = try_read_sample("sample_AC1015_ascii.dxf") else {
+            return;
+        };
         let output = write_dxf(&doc).unwrap();
         let doc2 = read_dxf(&output).unwrap();
 
         for (name, layer) in &doc.layers {
-            let layer2 = doc2.layers.get(name)
+            let layer2 = doc2
+                .layers
+                .get(name)
                 .unwrap_or_else(|| panic!("layer '{name}' missing after roundtrip"));
             assert_eq!(layer.color, layer2.color, "layer '{name}' color");
             assert_eq!(layer.is_frozen, layer2.is_frozen, "layer '{name}' frozen");
@@ -3878,39 +4038,68 @@ mod tests {
         let doc = read_dxf(input).unwrap();
         assert_eq!(doc.objects.len(), 9);
 
-        let kinds: Vec<&str> = doc.objects.iter().map(|o| match &o.data {
-            h7cad_native_model::ObjectData::Field { .. } => "Field",
-            h7cad_native_model::ObjectData::IdBuffer { .. } => "IdBuffer",
-            h7cad_native_model::ObjectData::LayerFilter { .. } => "LayerFilter",
-            h7cad_native_model::ObjectData::WipeoutVariables { .. } => "WipeoutVariables",
-            h7cad_native_model::ObjectData::GeoData { .. } => "GeoData",
-            h7cad_native_model::ObjectData::SunStudy { .. } => "SunStudy",
-            h7cad_native_model::ObjectData::DataTable { .. } => "DataTable",
-            h7cad_native_model::ObjectData::RenderEnvironment { .. } => "RenderEnvironment",
-            h7cad_native_model::ObjectData::ProxyObject { .. } => "ProxyObject",
-            _ => "Other",
-        }).collect();
+        let kinds: Vec<&str> = doc
+            .objects
+            .iter()
+            .map(|o| match &o.data {
+                h7cad_native_model::ObjectData::Field { .. } => "Field",
+                h7cad_native_model::ObjectData::IdBuffer { .. } => "IdBuffer",
+                h7cad_native_model::ObjectData::LayerFilter { .. } => "LayerFilter",
+                h7cad_native_model::ObjectData::WipeoutVariables { .. } => "WipeoutVariables",
+                h7cad_native_model::ObjectData::GeoData { .. } => "GeoData",
+                h7cad_native_model::ObjectData::SunStudy { .. } => "SunStudy",
+                h7cad_native_model::ObjectData::DataTable { .. } => "DataTable",
+                h7cad_native_model::ObjectData::RenderEnvironment { .. } => "RenderEnvironment",
+                h7cad_native_model::ObjectData::ProxyObject { .. } => "ProxyObject",
+                _ => "Other",
+            })
+            .collect();
         assert_eq!(
             kinds,
-            vec!["Field", "IdBuffer", "LayerFilter", "WipeoutVariables",
-                 "GeoData", "SunStudy", "DataTable", "RenderEnvironment", "ProxyObject"]
+            vec![
+                "Field",
+                "IdBuffer",
+                "LayerFilter",
+                "WipeoutVariables",
+                "GeoData",
+                "SunStudy",
+                "DataTable",
+                "RenderEnvironment",
+                "ProxyObject"
+            ]
         );
 
-        if let h7cad_native_model::ObjectData::GeoData { reference_point, coordinate_type, .. } = &doc.objects[4].data {
+        if let h7cad_native_model::ObjectData::GeoData {
+            reference_point,
+            coordinate_type,
+            ..
+        } = &doc.objects[4].data
+        {
             assert_eq!(reference_point[0], 100.0);
             assert_eq!(reference_point[1], 200.0);
             assert_eq!(*coordinate_type, 1);
         } else {
             panic!("expected GeoData");
         }
-        if let h7cad_native_model::ObjectData::DataTable { column_count, row_count, name, .. } = &doc.objects[6].data {
+        if let h7cad_native_model::ObjectData::DataTable {
+            column_count,
+            row_count,
+            name,
+            ..
+        } = &doc.objects[6].data
+        {
             assert_eq!(*column_count, 3);
             assert_eq!(*row_count, 5);
             assert_eq!(name, "Tbl");
         } else {
             panic!("expected DataTable");
         }
-        if let h7cad_native_model::ObjectData::LayerFilter { layer_handles, name, .. } = &doc.objects[2].data {
+        if let h7cad_native_model::ObjectData::LayerFilter {
+            layer_handles,
+            name,
+            ..
+        } = &doc.objects[2].data
+        {
             assert_eq!(name, "RedOnly");
             assert_eq!(layer_handles.len(), 2);
         } else {
@@ -3954,7 +4143,13 @@ mod tests {
             .iter()
             .find(|e| matches!(e.data, h7cad_native_model::EntityData::Helix { .. }))
             .expect("helix should survive round trip");
-        if let h7cad_native_model::EntityData::Helix { radius, turns, is_ccw, .. } = &helix.data {
+        if let h7cad_native_model::EntityData::Helix {
+            radius,
+            turns,
+            is_ccw,
+            ..
+        } = &helix.data
+        {
             assert_eq!(*radius, 7.5);
             assert_eq!(*turns, 3.0);
             assert!(!*is_ccw);
@@ -3965,7 +4160,11 @@ mod tests {
             .iter()
             .find(|o| matches!(o.data, h7cad_native_model::ObjectData::Field { .. }))
             .expect("field should survive round trip");
-        if let h7cad_native_model::ObjectData::Field { evaluator_id, field_code } = &field.data {
+        if let h7cad_native_model::ObjectData::Field {
+            evaluator_id,
+            field_code,
+        } = &field.data
+        {
             assert_eq!(evaluator_id, "AcVar");
             assert_eq!(field_code, "\\f PageNumber");
         }

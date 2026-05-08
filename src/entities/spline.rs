@@ -1,3 +1,4 @@
+use h7cad_native_model::geom_ocs::ocs_to_wcs;
 use truck_modeling::{
     base::{BoundedCurve, ParametricCurve},
     builder, BSplineCurve, Curve, Edge, KnotVec, Point3, Wire,
@@ -10,14 +11,35 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 
 // ── Free functions ──────────────────────────────────────────────────────
 
-pub fn to_truck(
+/// Tessellate a SPLINE assuming OCS == WCS. Legacy 2D-plan path.
+///
+/// Callers with access to the entity's `extrusion` vector should
+/// prefer [`to_truck_with_normal`].
+#[allow(dead_code)]
+pub fn to_truck(degree: i32, knots: &[f64], control_points: &[[f64; 3]]) -> TruckEntity {
+    to_truck_with_normal(degree, knots, control_points, [0.0, 0.0, 1.0])
+}
+
+/// Tessellate a SPLINE with the DXF arbitrary-axis algorithm.
+///
+/// `control_points` are interpreted in OCS coordinates (DXF stores
+/// SPLINE control points relative to the entity's extrusion plane).
+/// Each control point is lifted to WCS via the entity's normal vector
+/// before the B-spline is constructed; downstream fitting / sampling
+/// then operates in WCS. When `normal == (0, 0, 1)` this matches the
+/// legacy [`to_truck`] behaviour up to floating-point round-off.
+pub fn to_truck_with_normal(
     degree: i32,
     knots: &[f64],
     control_points: &[[f64; 3]],
+    normal: [f64; 3],
 ) -> TruckEntity {
     let ctrl_pts: Vec<Point3> = control_points
         .iter()
-        .map(|p| Point3::new(p[0], p[1], p[2]))
+        .map(|p| {
+            let w = ocs_to_wcs(*p, [0.0, 0.0, 0.0], normal);
+            Point3::new(w[0], w[1], w[2])
+        })
         .collect();
     if ctrl_pts.len() < 2 {
         return TruckEntity {
@@ -39,7 +61,10 @@ pub fn to_truck(
 
     let key_vertices: Vec<[f32; 3]> = control_points
         .iter()
-        .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
+        .map(|p| {
+            let w = ocs_to_wcs(*p, [0.0, 0.0, 0.0], normal);
+            [w[0] as f32, w[1] as f32, w[2] as f32]
+        })
         .collect();
 
     let is_closed = false;
@@ -82,7 +107,11 @@ pub fn grips(control_points: &[[f64; 3]]) -> Vec<GripDef> {
         .collect()
 }
 
-pub fn properties(degree: i32, control_points: &[[f64; 3]], fit_points: &[[f64; 3]]) -> PropSection {
+pub fn properties(
+    degree: i32,
+    control_points: &[[f64; 3]],
+    fit_points: &[[f64; 3]],
+) -> PropSection {
     PropSection {
         title: "Geometry".into(),
         props: vec![
@@ -122,4 +151,3 @@ pub fn apply_transform(
         transform_pt(fp, t);
     }
 }
-

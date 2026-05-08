@@ -29,23 +29,34 @@ pub struct HatcheditCommand {
 
 impl HatcheditCommand {
     pub fn new() -> Self {
-        Self { step: HatcheditStep::PickHatch }
+        Self {
+            step: HatcheditStep::PickHatch,
+        }
     }
 
     pub fn with_handle(handle: Handle, name: String, scale: f32, angle: f32) -> Self {
         Self {
-            step: HatcheditStep::EditOptions { handle, name, scale, angle },
+            step: HatcheditStep::EditOptions {
+                handle,
+                name,
+                scale,
+                angle,
+            },
         }
     }
 }
 
 impl CadCommand for HatcheditCommand {
-    fn name(&self) -> &'static str { "HATCHEDIT" }
+    fn name(&self) -> &'static str {
+        "HATCHEDIT"
+    }
 
     fn prompt(&self) -> String {
         match &self.step {
             HatcheditStep::PickHatch => "HATCHEDIT  Select hatch:".into(),
-            HatcheditStep::EditOptions { name, scale, angle, .. } => format!(
+            HatcheditStep::EditOptions {
+                name, scale, angle, ..
+            } => format!(
                 "HATCHEDIT  Pattern:{name}  Scale:{scale:.4}  Angle:{angle:.1}  \
                  [P <pat> / S <scale> / A <angle> | Enter to apply]:"
             ),
@@ -57,7 +68,9 @@ impl CadCommand for HatcheditCommand {
     }
 
     fn on_entity_pick(&mut self, handle: Handle, _pt: Vec3) -> CmdResult {
-        if handle.is_null() { return CmdResult::NeedPoint; }
+        if handle.is_null() {
+            return CmdResult::NeedPoint;
+        }
         // Actual hatch model retrieval happens in commands.rs dispatch.
         // Store handle; name/scale/angle filled in by dispatch.
         self.step = HatcheditStep::EditOptions {
@@ -75,9 +88,12 @@ impl CadCommand for HatcheditCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let (handle, name, scale, angle) = match &mut self.step {
-            HatcheditStep::EditOptions { handle, name, scale, angle } => {
-                (*handle, name, scale, angle)
-            }
+            HatcheditStep::EditOptions {
+                handle,
+                name,
+                scale,
+                angle,
+            } => (*handle, name, scale, angle),
             _ => return None,
         };
 
@@ -96,12 +112,16 @@ impl CadCommand for HatcheditCommand {
         // Parse option: P/S/A followed by value
         if let Some(rest) = text.strip_prefix('P') {
             let n = rest.trim().to_string();
-            if !n.is_empty() { *name = n; }
+            if !n.is_empty() {
+                *name = n;
+            }
             return Some(CmdResult::NeedPoint);
         }
         if let Some(rest) = text.strip_prefix('S') {
             if let Ok(v) = rest.trim().replace(',', ".").parse::<f32>() {
-                if v > 0.0 { *scale = v; }
+                if v > 0.0 {
+                    *scale = v;
+                }
             }
             return Some(CmdResult::NeedPoint);
         }
@@ -116,16 +136,28 @@ impl CadCommand for HatcheditCommand {
         Some(CmdResult::NeedPoint)
     }
 
-    fn on_point(&mut self, _pt: Vec3) -> CmdResult { CmdResult::NeedPoint }
+    fn on_point(&mut self, _pt: Vec3) -> CmdResult {
+        CmdResult::NeedPoint
+    }
     fn on_enter(&mut self) -> CmdResult {
         // Enter without text → apply current settings
         let (handle, name, scale, angle) = match &self.step {
-            HatcheditStep::EditOptions { handle, name, scale, angle } => {
-                (*handle, name.clone(), *scale, *angle)
-            }
+            HatcheditStep::EditOptions {
+                handle,
+                name,
+                scale,
+                angle,
+            } => (*handle, name.clone(), *scale, *angle),
             _ => return CmdResult::Cancel,
         };
-        CmdResult::HatcheditApply { handle, name, scale, angle }
+        CmdResult::HatcheditApply {
+            handle,
+            name,
+            scale,
+            angle,
+        }
     }
-    fn on_escape(&mut self) -> CmdResult { CmdResult::Cancel }
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
 }

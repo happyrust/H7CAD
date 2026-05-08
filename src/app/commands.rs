@@ -1,4 +1,4 @@
-use super::{H7CAD, Message};
+use super::{Message, H7CAD};
 use crate::command::CadCommand;
 use crate::scene::Scene;
 use h7cad_native_model as nm;
@@ -33,7 +33,10 @@ fn kind_label(e: &acadrust::EntityType) -> &'static str {
 /// Parse `<CMD>` / `<CMD> ON` / `<CMD> OFF` / `<CMD> TOGGLE` (case-insensitive).
 /// Unknown/missing argument → toggle `current`.
 fn parse_on_off_toggle(cmd: &str, current: bool) -> bool {
-    let arg = cmd.split_whitespace().nth(1).map(|s| s.to_ascii_uppercase());
+    let arg = cmd
+        .split_whitespace()
+        .nth(1)
+        .map(|s| s.to_ascii_uppercase());
     match arg.as_deref() {
         Some("ON") => true,
         Some("OFF") => false,
@@ -67,7 +70,11 @@ impl H7CAD {
         self.tabs[i].scene.selected.iter().copied().collect()
     }
 
-    fn wire_models_for_handles(&self, i: usize, handles: &[acadrust::Handle]) -> Vec<crate::scene::WireModel> {
+    fn wire_models_for_handles(
+        &self,
+        i: usize,
+        handles: &[acadrust::Handle],
+    ) -> Vec<crate::scene::WireModel> {
         let wanted: HashSet<_> = handles.iter().copied().collect();
         self.tabs[i]
             .scene
@@ -130,15 +137,15 @@ impl H7CAD {
         let cmd: &str = rewritten.as_deref().unwrap_or(cmd);
 
         match cmd {
-            "NEW"                => return Task::done(Message::ClearScene),
-            "OPEN"               => return Task::done(Message::OpenFile),
-            "SAVE"|"QSAVE"       => return Task::done(Message::SaveFile),
-            "SAVEAS"             => return Task::done(Message::SaveAs),
-            "UNDO"|"U"           => return Task::done(Message::Undo),
-            "REDO"               => return Task::done(Message::Redo),
-            "CLEAR"|"CLR"        => return Task::done(Message::ClearScene),
-            "WIREFRAME"|"VW"     => return Task::done(Message::SetWireframe(true)),
-            "SOLID"|"VS"         => return Task::done(Message::SetWireframe(false)),
+            "NEW" => return Task::done(Message::ClearScene),
+            "OPEN" => return Task::done(Message::OpenFile),
+            "SAVE" | "QSAVE" => return Task::done(Message::SaveFile),
+            "SAVEAS" => return Task::done(Message::SaveAs),
+            "UNDO" | "U" => return Task::done(Message::Undo),
+            "REDO" => return Task::done(Message::Redo),
+            "CLEAR" | "CLR" => return Task::done(Message::ClearScene),
+            "WIREFRAME" | "VW" => return Task::done(Message::SetWireframe(true)),
+            "SOLID" | "VS" => return Task::done(Message::SetWireframe(false)),
 
             cmd if cmd == "NATIVERENDER" || cmd.starts_with("NATIVERENDER ") => {
                 let args: Vec<_> = cmd.split_whitespace().skip(1).collect();
@@ -156,9 +163,8 @@ impl H7CAD {
                     Some("OFF") => Some(false),
                     Some("TOGGLE") => Some(!current),
                     Some(_) => {
-                        self.command_line.push_info(
-                            "Usage: NATIVERENDER [ON|OFF|TOGGLE]",
-                        );
+                        self.command_line
+                            .push_info("Usage: NATIVERENDER [ON|OFF|TOGGLE]");
                         return Task::none();
                     }
                 };
@@ -166,9 +172,8 @@ impl H7CAD {
                 if desired == Some(true) && !has_native {
                     self.tabs[i].native_render_enabled = false;
                     self.tabs[i].scene.native_render_enabled = false;
-                    self.command_line.push_info(
-                        "NATIVERENDER: native document is not available for this tab.",
-                    );
+                    self.command_line
+                        .push_info("NATIVERENDER: native document is not available for this tab.");
                     self.refresh_properties();
                     self.refresh_selected_grips();
                     return Task::none();
@@ -196,7 +201,11 @@ impl H7CAD {
             cmd if cmd == "BACKGROUND" || cmd.starts_with("BACKGROUND ") => {
                 let args = cmd.split_whitespace().skip(1).collect::<Vec<_>>();
                 let is_paper = self.tabs[i].scene.current_layout != "Model";
-                if args.first().map(|s| s.eq_ignore_ascii_case("RESET")).unwrap_or(false) {
+                if args
+                    .first()
+                    .map(|s| s.eq_ignore_ascii_case("RESET"))
+                    .unwrap_or(false)
+                {
                     if is_paper {
                         self.tabs[i].paper_bg_color = None;
                         self.tabs[i].scene.paper_bg_color = [1.0, 1.0, 1.0, 1.0];
@@ -204,7 +213,8 @@ impl H7CAD {
                         self.tabs[i].bg_color = None;
                         self.tabs[i].scene.bg_color = [0.11, 0.11, 0.11, 1.0];
                     }
-                    self.command_line.push_output("Background reset to default.");
+                    self.command_line
+                        .push_output("Background reset to default.");
                 } else if args.len() >= 3 {
                     let r = args[0].parse::<u8>().unwrap_or(0) as f32 / 255.0;
                     let g = args[1].parse::<u8>().unwrap_or(0) as f32 / 255.0;
@@ -216,17 +226,18 @@ impl H7CAD {
                         self.tabs[i].bg_color = Some([r, g, b, 1.0]);
                         self.tabs[i].scene.bg_color = [r, g, b, 1.0];
                     }
-                    self.command_line
-                        .push_output(&format!("Background: rgb({}, {}, {})", args[0], args[1], args[2]));
+                    self.command_line.push_output(&format!(
+                        "Background: rgb({}, {}, {})",
+                        args[0], args[1], args[2]
+                    ));
                 } else {
-                    self.command_line.push_info(
-                        "Usage: BACKGROUND <r> <g> <b>  (0–255)  |  BACKGROUND RESET"
-                    );
+                    self.command_line
+                        .push_info("Usage: BACKGROUND <r> <g> <b>  (0–255)  |  BACKGROUND RESET");
                 }
             }
-            "ORTHO"              => return Task::done(Message::SetProjection(true)),
-            "PERSP"              => return Task::done(Message::SetProjection(false)),
-            "LAYERS"|"LA"        => return Task::done(Message::ToggleLayers),
+            "ORTHO" => return Task::done(Message::SetProjection(true)),
+            "PERSP" => return Task::done(Message::SetProjection(false)),
+            "LAYERS" | "LA" => return Task::done(Message::ToggleLayers),
 
             // ── View-tab UI visibility toggles ─────────────────────────────
             // Each accepts: `<CMD>` (toggle) | `<CMD> ON` | `<CMD> OFF`.
@@ -236,48 +247,65 @@ impl H7CAD {
                 for tab in &mut self.tabs {
                     tab.scene.show_viewcube = desired;
                 }
-                self.command_line.push_output(
-                    if desired { "ViewCube: ON" } else { "ViewCube: OFF" },
-                );
+                self.command_line.push_output(if desired {
+                    "ViewCube: ON"
+                } else {
+                    "ViewCube: OFF"
+                });
             }
             cmd if cmd == "NAVBAR" || cmd.starts_with("NAVBAR ") => {
                 let desired = parse_on_off_toggle(cmd, self.show_navbar);
                 self.show_navbar = desired;
-                self.command_line.push_output(
-                    if desired { "Navigation Bar: ON" } else { "Navigation Bar: OFF" },
-                );
+                self.command_line.push_output(if desired {
+                    "Navigation Bar: ON"
+                } else {
+                    "Navigation Bar: OFF"
+                });
             }
             cmd if cmd == "FILETAB" || cmd.starts_with("FILETAB ") => {
                 let desired = parse_on_off_toggle(cmd, self.show_file_tabs);
                 self.show_file_tabs = desired;
-                self.command_line.push_output(
-                    if desired { "File Tabs: ON" } else { "File Tabs: OFF" },
-                );
+                self.command_line.push_output(if desired {
+                    "File Tabs: ON"
+                } else {
+                    "File Tabs: OFF"
+                });
             }
             cmd if cmd == "LAYOUTTAB" || cmd.starts_with("LAYOUTTAB ") => {
                 let desired = parse_on_off_toggle(cmd, self.show_layout_tabs);
                 self.show_layout_tabs = desired;
-                self.command_line.push_output(
-                    if desired { "Layout Tabs: ON" } else { "Layout Tabs: OFF" },
-                );
+                self.command_line.push_output(if desired {
+                    "Layout Tabs: ON"
+                } else {
+                    "Layout Tabs: OFF"
+                });
             }
 
             // ── Layer object commands ──────────────────────────────────────
             "LAYOFF" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYOFF");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let layers: std::collections::HashSet<String> = self.tabs[i].scene
-                        .selected_entities().into_iter()
-                        .map(|(_, e)| e.common().layer.clone()).collect();
+                    let layers: std::collections::HashSet<String> = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(_, e)| e.common().layer.clone())
+                        .collect();
                     self.push_undo_snapshot(i, "LAYOFF");
                     for name in &layers {
-                        if name == "0" { continue; }
+                        if name == "0" {
+                            continue;
+                        }
                         if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                             dl.turn_off();
                         }
@@ -289,20 +317,29 @@ impl H7CAD {
             }
 
             "LAYFRZ" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYFRZ");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let layers: std::collections::HashSet<String> = self.tabs[i].scene
-                        .selected_entities().into_iter()
-                        .map(|(_, e)| e.common().layer.clone()).collect();
+                    let layers: std::collections::HashSet<String> = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(_, e)| e.common().layer.clone())
+                        .collect();
                     self.push_undo_snapshot(i, "LAYFRZ");
                     for name in &layers {
-                        if name == "0" { continue; }
+                        if name == "0" {
+                            continue;
+                        }
                         if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
                             dl.freeze();
                         }
@@ -314,17 +351,24 @@ impl H7CAD {
             }
 
             "LAYLCK" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYLCK");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let layers: std::collections::HashSet<String> = self.tabs[i].scene
-                        .selected_entities().into_iter()
-                        .map(|(_, e)| e.common().layer.clone()).collect();
+                    let layers: std::collections::HashSet<String> = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(_, e)| e.common().layer.clone())
+                        .collect();
                     self.push_undo_snapshot(i, "LAYLCK");
                     for name in &layers {
                         if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
@@ -349,15 +393,21 @@ impl H7CAD {
                     self.tabs[i].active_layer = layer.clone();
                     self.ribbon.active_layer = layer.clone();
                     self.tabs[i].layers.current_layer = layer.clone();
-                    self.command_line.push_info(&format!("Current layer set to \"{layer}\"."));
+                    self.command_line
+                        .push_info(&format!("Current layer set to \"{layer}\"."));
                     self.sync_ribbon_layers();
                 }
             }
 
             "LAYON" => {
                 self.push_undo_snapshot(i, "LAYON");
-                for name in self.tabs[i].scene.document.layers.iter()
-                    .map(|l| l.name.clone()).collect::<Vec<_>>()
+                for name in self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .iter()
+                    .map(|l| l.name.clone())
+                    .collect::<Vec<_>>()
                 {
                     if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
                         dl.turn_on();
@@ -370,8 +420,13 @@ impl H7CAD {
 
             "LAYTHW" => {
                 self.push_undo_snapshot(i, "LAYTHW");
-                for name in self.tabs[i].scene.document.layers.iter()
-                    .map(|l| l.name.clone()).collect::<Vec<_>>()
+                for name in self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .iter()
+                    .map(|l| l.name.clone())
+                    .collect::<Vec<_>>()
                 {
                     if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
                         dl.thaw();
@@ -383,17 +438,24 @@ impl H7CAD {
             }
 
             "LAYULK" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("LAYULK");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let layers: std::collections::HashSet<String> = self.tabs[i].scene
-                        .selected_entities().into_iter()
-                        .map(|(_, e)| e.common().layer.clone()).collect();
+                    let layers: std::collections::HashSet<String> = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(_, e)| e.common().layer.clone())
+                        .collect();
                     self.push_undo_snapshot(i, "LAYULK");
                     for name in &layers {
                         if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(name) {
@@ -408,15 +470,24 @@ impl H7CAD {
 
             // LAYISO — turn off all layers except those used by selected entities
             "LAYISO" => {
-                let sel_layers: std::collections::HashSet<String> = self.tabs[i].scene
-                    .selected_entities().into_iter()
-                    .map(|(_, e)| e.common().layer.clone()).collect();
+                let sel_layers: std::collections::HashSet<String> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(_, e)| e.common().layer.clone())
+                    .collect();
                 if sel_layers.is_empty() {
-                    self.command_line.push_error("LAYISO: select entities on the layers to isolate first.");
+                    self.command_line
+                        .push_error("LAYISO: select entities on the layers to isolate first.");
                 } else {
                     self.push_undo_snapshot(i, "LAYISO");
-                    let names: Vec<String> = self.tabs[i].scene.document.layers
-                        .iter().map(|l| l.name.clone()).collect();
+                    let names: Vec<String> = self.tabs[i]
+                        .scene
+                        .document
+                        .layers
+                        .iter()
+                        .map(|l| l.name.clone())
+                        .collect();
                     for name in names {
                         if !sel_layers.contains(&name) {
                             if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
@@ -426,17 +497,21 @@ impl H7CAD {
                     }
                     self.tabs[i].dirty = true;
                     self.sync_ribbon_layers();
-                    self.command_line.push_info(&format!(
-                        "LAYISO: isolated {} layer(s).", sel_layers.len()
-                    ));
+                    self.command_line
+                        .push_info(&format!("LAYISO: isolated {} layer(s).", sel_layers.len()));
                 }
             }
 
             // LAYUNISO — restore all layers that were turned off by LAYISO (turn all on)
             "LAYUNISO" => {
                 self.push_undo_snapshot(i, "LAYUNISO");
-                let names: Vec<String> = self.tabs[i].scene.document.layers
-                    .iter().map(|l| l.name.clone()).collect();
+                let names: Vec<String> = self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .iter()
+                    .map(|l| l.name.clone())
+                    .collect();
                 for name in names {
                     if let Some(dl) = self.tabs[i].scene.document.layers.get_mut(&name) {
                         dl.turn_on();
@@ -444,19 +519,24 @@ impl H7CAD {
                 }
                 self.tabs[i].dirty = true;
                 self.sync_ribbon_layers();
-                self.command_line.push_info("LAYUNISO: all layers restored.");
+                self.command_line
+                    .push_info("LAYUNISO: all layers restored.");
             }
 
-            "LAYMATCH"|"LAYMCH" => {
+            "LAYMATCH" | "LAYMCH" => {
                 use crate::modules::home::layers::match_layer::LayMatchCommand;
-                let dest: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+                let dest: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 let cmd = LayMatchCommand::new(dest);
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "MATCHPROP"|"MA" => {
+            "MATCHPROP" | "MA" => {
                 use crate::modules::home::properties::match_prop::MatchPropCommand;
                 self.tabs[i].scene.deselect_all();
                 let cmd = MatchPropCommand::new();
@@ -464,9 +544,13 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "GROUP"|"G" => {
+            "GROUP" | "G" => {
                 let handles: Vec<_> = self.tabs[i]
-                    .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("GROUP");
@@ -481,9 +565,13 @@ impl H7CAD {
                 }
             }
 
-            "UNGROUP"|"UG" => {
+            "UNGROUP" | "UG" => {
                 let handles: Vec<_> = self.tabs[i]
-                    .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::groups::ungroup::UngroupCommand;
                     let cmd = UngroupCommand::new();
@@ -494,45 +582,58 @@ impl H7CAD {
                     let count = self.tabs[i].scene.delete_groups_containing(&handles);
                     self.tabs[i].dirty = true;
                     if count > 0 {
-                        self.command_line.push_info(&format!("{} group(s) dissolved.", count));
+                        self.command_line
+                            .push_info(&format!("{} group(s) dissolved.", count));
                     } else {
-                        self.command_line.push_info("No groups found for selected objects.");
+                        self.command_line
+                            .push_info("No groups found for selected objects.");
                     }
                 }
             }
 
-            "COPYCLIP"|"CC" => {
+            "COPYCLIP" | "CC" => {
                 let handles: Vec<_> = self.tabs[i]
-                    .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("COPYCLIP");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let entities: Vec<_> = handles.iter()
+                    let entities: Vec<_> = handles
+                        .iter()
                         .filter_map(|&h| self.tabs[i].scene.document.get_entity(h).cloned())
                         .collect();
                     self.clipboard_centroid = super::helpers::entities_centroid(
                         &self.tabs[i].scene.wire_models_for(&handles),
                     );
                     self.clipboard = entities;
-                    self.command_line.push_info(
-                        &format!("{} object(s) copied to clipboard.", self.clipboard.len()),
-                    );
+                    self.command_line.push_info(&format!(
+                        "{} object(s) copied to clipboard.",
+                        self.clipboard.len()
+                    ));
                 }
             }
 
-            "CUTCLIP"|"CX" => {
+            "CUTCLIP" | "CX" => {
                 let handles: Vec<_> = self.tabs[i]
-                    .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("CUTCLIP");
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let entities: Vec<_> = handles.iter()
+                    let entities: Vec<_> = handles
+                        .iter()
                         .filter_map(|&h| self.tabs[i].scene.document.get_entity(h).cloned())
                         .collect();
                     self.clipboard_centroid = super::helpers::entities_centroid(
@@ -545,13 +646,12 @@ impl H7CAD {
                     self.tabs[i].scene.deselect_all();
                     self.tabs[i].dirty = true;
                     self.refresh_properties();
-                    self.command_line.push_info(
-                        &format!("{} object(s) cut to clipboard.", count),
-                    );
+                    self.command_line
+                        .push_info(&format!("{} object(s) cut to clipboard.", count));
                 }
             }
 
-            "PASTECLIP"|"PC" => {
+            "PASTECLIP" | "PC" => {
                 if self.clipboard.is_empty() {
                     self.command_line.push_error("Clipboard is empty.");
                 } else {
@@ -566,7 +666,8 @@ impl H7CAD {
             // PASTEORIG — paste at original coordinates (no move to pick point)
             "PASTEORIG" => {
                 if self.clipboard.is_empty() {
-                    self.command_line.push_error("PASTEORIG: clipboard is empty.");
+                    self.command_line
+                        .push_error("PASTEORIG: clipboard is empty.");
                 } else {
                     let count = self.clipboard.len();
                     self.push_undo_snapshot(i, "PASTEORIG");
@@ -575,14 +676,19 @@ impl H7CAD {
                     }
                     self.tabs[i].dirty = true;
                     self.command_line.push_output(&format!(
-                        "PASTEORIG: {} object(s) pasted at original coordinates.", count
+                        "PASTEORIG: {} object(s) pasted at original coordinates.",
+                        count
                     ));
                 }
             }
 
             "BLOCK" => {
                 let handles: Vec<_> = self.tabs[i]
-                    .scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("BLOCK");
@@ -652,7 +758,8 @@ impl H7CAD {
                     })
                     .collect();
                 if xrefs.is_empty() {
-                    self.command_line.push_output("XREF  No external references in this drawing.");
+                    self.command_line
+                        .push_output("XREF  No external references in this drawing.");
                 } else {
                     self.command_line.push_output("XREF  External references:");
                     for line in xrefs {
@@ -672,10 +779,8 @@ impl H7CAD {
                         for info in &infos {
                             match info.status {
                                 crate::io::xref::XrefStatus::Loaded => {
-                                    self.command_line.push_output(&format!(
-                                        "XREF  Reloaded \"{}\"",
-                                        info.name
-                                    ));
+                                    self.command_line
+                                        .push_output(&format!("XREF  Reloaded \"{}\"", info.name));
                                 }
                                 crate::io::xref::XrefStatus::NotFound => {
                                     self.command_line.push_error(&format!(
@@ -690,12 +795,13 @@ impl H7CAD {
                         self.tabs[i].scene.populate_meshes_from_document();
                     }
                 } else {
-                    self.command_line.push_error("XREF  Save the drawing first to resolve relative XREF paths.");
+                    self.command_line
+                        .push_error("XREF  Save the drawing first to resolve relative XREF paths.");
                 }
             }
 
             // ── Draw commands ──────────────────────────────────────────────
-            "LINE"|"L" => {
+            "LINE" | "L" => {
                 use crate::modules::home::draw::line::LineCommand;
                 let new_cmd = LineCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -706,7 +812,11 @@ impl H7CAD {
             "BASE" => {
                 use crate::modules::insert::base_point::SetBasePointCommand;
                 let current = {
-                    let v = self.tabs[i].scene.document.header.model_space_insertion_base;
+                    let v = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .model_space_insertion_base;
                     [v.x, v.y, v.z]
                 };
                 let new_cmd = SetBasePointCommand::new(current);
@@ -714,7 +824,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "MLINE"|"ML" => {
+            "MLINE" | "ML" => {
                 use crate::modules::home::draw::mline::MlineCommand;
                 let style = self.tabs[i].scene.document.header.multiline_style.clone();
                 let cmd_obj = MlineCommand::with_style(style);
@@ -724,7 +834,10 @@ impl H7CAD {
 
             cmd if cmd == "WIPEOUT" || cmd == "WO" || cmd.starts_with("WIPEOUT ") => {
                 use crate::modules::home::draw::wipeout::WipeoutCommand;
-                let args = cmd.split_once(' ').map(|(_, r)| r.trim().to_uppercase()).unwrap_or_default();
+                let args = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim().to_uppercase())
+                    .unwrap_or_default();
                 let wo_cmd = if args == "P" || args == "POLYGONAL" {
                     WipeoutCommand::new_polygonal()
                 } else {
@@ -762,7 +875,8 @@ impl H7CAD {
                 let selected_handles: Vec<acadrust::Handle> =
                     self.tabs[i].scene.selected.iter().copied().collect();
                 if selected_handles.is_empty() {
-                    self.command_line.push_error("ATTEDIT: select an Insert entity first.");
+                    self.command_line
+                        .push_error("ATTEDIT: select an Insert entity first.");
                 } else {
                     let mut found_any = false;
                     for sh in &selected_handles {
@@ -774,7 +888,8 @@ impl H7CAD {
                                 // List attributes.
                                 if ins.attributes.is_empty() {
                                     self.command_line.push_output(&format!(
-                                        "  Insert {:x}: no attributes.", sh.value()
+                                        "  Insert {:x}: no attributes.",
+                                        sh.value()
                                     ));
                                 } else {
                                     for attr in &ins.attributes {
@@ -794,13 +909,13 @@ impl H7CAD {
                                 if rest.is_empty() {
                                     if attrs.is_empty() {
                                         self.command_line.push_output(&format!(
-                                            "  Insert {:x}: no attributes.", sh.value()
+                                            "  Insert {:x}: no attributes.",
+                                            sh.value()
                                         ));
                                     } else {
                                         for (tag, val) in attrs {
-                                            self.command_line.push_output(&format!(
-                                                "  [{tag}] = {val}"
-                                            ));
+                                            self.command_line
+                                                .push_output(&format!("  [{tag}] = {val}"));
                                         }
                                     }
                                 }
@@ -808,7 +923,8 @@ impl H7CAD {
                         }
                     }
                     if !found_any {
-                        self.command_line.push_error("ATTEDIT: no Insert entities in selection.");
+                        self.command_line
+                            .push_error("ATTEDIT: no Insert entities in selection.");
                     }
                     // If tag + value supplied, mutate attributes.
                     if parts.len() == 2 && !parts[0].is_empty() {
@@ -820,7 +936,8 @@ impl H7CAD {
                             let nh = nm::Handle::new(sh.value());
                             if let Some(store) = self.tabs[i].scene.native_store.as_mut() {
                                 if let Some(entity) = store.inner_mut().get_entity_mut(nh) {
-                                    if let nm::EntityData::Insert { attribs, .. } = &mut entity.data {
+                                    if let nm::EntityData::Insert { attribs, .. } = &mut entity.data
+                                    {
                                         for attrib in attribs {
                                             if let nm::EntityData::Attrib { tag, value, .. } =
                                                 &mut attrib.data
@@ -863,9 +980,16 @@ impl H7CAD {
                         for entity in self.tabs[i].scene.document.entities_mut() {
                             if let acadrust::EntityType::AttributeDefinition(ad) = entity {
                                 match sub.as_str() {
-                                    "ON"     => { ad.flags.invisible = false; count += 1; }
-                                    "OFF"    => { ad.flags.invisible = true;  count += 1; }
-                                    "NORMAL" => { /* leave existing flags — they are already the "normal" state */ }
+                                    "ON" => {
+                                        ad.flags.invisible = false;
+                                        count += 1;
+                                    }
+                                    "OFF" => {
+                                        ad.flags.invisible = true;
+                                        count += 1;
+                                    }
+                                    "NORMAL" => { /* leave existing flags — they are already the "normal" state */
+                                    }
                                     _ => {}
                                 }
                             }
@@ -876,19 +1000,20 @@ impl H7CAD {
                         ));
                     }
                     _ => {
-                        self.command_line.push_info("Usage: ATTDISP ON | OFF | NORMAL");
+                        self.command_line
+                            .push_info("Usage: ATTDISP ON | OFF | NORMAL");
                     }
                 }
             }
 
-            "DONUT"|"DO" => {
+            "DONUT" | "DO" => {
                 use crate::modules::home::draw::donut::DonutCommand;
                 let cmd = DonutCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "CIRCLE"|"C" => {
+            "CIRCLE" | "C" => {
                 use crate::modules::home::draw::circle::CircleCommand;
                 let new_cmd = CircleCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -929,7 +1054,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "ARC"|"A" => {
+            "ARC" | "A" => {
                 use crate::modules::home::draw::arc::ArcCommand;
                 let new_cmd = ArcCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -990,7 +1115,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "RECT"|"RECTANG"|"REC" => {
+            "RECT" | "RECTANG" | "REC" => {
                 use crate::modules::home::draw::shapes::RectCommand;
                 let new_cmd = RectCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1008,7 +1133,7 @@ impl H7CAD {
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
-            "POLY"|"POLYGON"|"POL" => {
+            "POLY" | "POLYGON" | "POL" => {
                 use crate::modules::home::draw::shapes::PolyCommand;
                 let new_cmd = PolyCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1027,7 +1152,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "PLINE"|"PL" => {
+            "PLINE" | "PL" => {
                 use crate::modules::home::draw::polyline::PlineCommand;
                 let new_cmd = PlineCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1035,9 +1160,13 @@ impl H7CAD {
             }
 
             // ── Modify commands ────────────────────────────────────────────
-            "MOVE"|"M" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "MOVE" | "M" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("MOVE");
@@ -1052,9 +1181,13 @@ impl H7CAD {
                 }
             }
 
-            "COPY"|"CO" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "COPY" | "CO" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("COPY");
@@ -1069,9 +1202,13 @@ impl H7CAD {
                 }
             }
 
-            "ROTATE"|"RO" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "ROTATE" | "RO" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ROTATE");
@@ -1086,7 +1223,7 @@ impl H7CAD {
                 }
             }
 
-            "POINT"|"PO" => {
+            "POINT" | "PO" => {
                 use crate::modules::home::draw::point::PointCommand;
                 let new_cmd = PointCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1100,14 +1237,14 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "XLINE"|"XL"|"CONSTRUCTIONLINE" => {
+            "XLINE" | "XL" | "CONSTRUCTIONLINE" => {
                 use crate::modules::home::draw::ray::XLineCommand;
                 let new_cmd = XLineCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "HATCH"|"H" => {
+            "HATCH" | "H" => {
                 use crate::modules::home::draw::hatch::HatchCommand;
                 let outlines = self.tabs[i].scene.closed_outlines();
                 let new_cmd = HatchCommand::new(outlines);
@@ -1115,7 +1252,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "HATCHEDIT"|"HE" => {
+            "HATCHEDIT" | "HE" => {
                 use crate::modules::home::draw::hatchedit::HatcheditCommand;
                 // If a single hatch is already selected, skip the pick step.
                 let sel = self.tabs[i].scene.selected_entities();
@@ -1123,12 +1260,16 @@ impl H7CAD {
                     let (h, _) = sel[0];
                     if let Some(model) = self.tabs[i].scene.hatches.get(&h).cloned() {
                         let cmd = HatcheditCommand::with_handle(
-                            h, model.name.clone(), model.scale, model.angle_offset,
+                            h,
+                            model.name.clone(),
+                            model.scale,
+                            model.angle_offset,
                         );
                         self.command_line.push_info(&cmd.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
                     } else {
-                        self.command_line.push_error("HATCHEDIT: selected entity is not a hatch.");
+                        self.command_line
+                            .push_error("HATCHEDIT: selected entity is not a hatch.");
                     }
                 } else {
                     let cmd = HatcheditCommand::new();
@@ -1153,7 +1294,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "ELLIPSE"|"EL" => {
+            "ELLIPSE" | "EL" => {
                 use crate::modules::home::draw::ellipse::EllipseCommand;
                 let new_cmd = EllipseCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
@@ -1174,16 +1315,20 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "SPLINE"|"SPL" => {
+            "SPLINE" | "SPL" => {
                 use crate::modules::home::draw::spline::SplineCommand;
                 let new_cmd = SplineCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "SCALE"|"SC" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "SCALE" | "SC" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("SCALE");
@@ -1198,9 +1343,13 @@ impl H7CAD {
                 }
             }
 
-            "MIRROR"|"MI" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "MIRROR" | "MI" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("MIRROR");
@@ -1215,9 +1364,13 @@ impl H7CAD {
                 }
             }
 
-            "ERASE"|"E" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "ERASE" | "E" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ERASE");
@@ -1229,21 +1382,22 @@ impl H7CAD {
                     self.tabs[i].scene.erase_entities(&handles);
                     self.tabs[i].dirty = true;
                     self.refresh_properties();
-                    self.command_line.push_output(&format!("{n} object(s) erased."));
+                    self.command_line
+                        .push_output(&format!("{n} object(s) erased."));
                 }
             }
 
             // ── Annotate commands ──────────────────────────────────────────
-            "TEXT"|"T"|"DT" => {
+            "TEXT" | "T" | "DT" => {
                 use crate::modules::annotate::text::TextCommand;
                 let new_cmd = TextCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "DDEDIT"|"ED" => {
+            "DDEDIT" | "ED" => {
                 use crate::modules::annotate::ddedit::{
-                    DdeditCommand, entity_text, native_entity_text,
+                    entity_text, native_entity_text, DdeditCommand,
                 };
                 // If a single text/mtext entity is already selected, skip the pick step.
                 let selected_handles: Vec<acadrust::Handle> =
@@ -1263,10 +1417,12 @@ impl H7CAD {
                         });
                     if let Some(cur) = current {
                         let cmd = DdeditCommand::with_handle(h, cur.clone());
-                        self.command_line.push_info(&format!("DDEDIT  Enter new text <{cur}>:"));
+                        self.command_line
+                            .push_info(&format!("DDEDIT  Enter new text <{cur}>:"));
                         self.tabs[i].active_cmd = Some(Box::new(cmd));
                     } else {
-                        self.command_line.push_error("DDEDIT: selected entity is not text.");
+                        self.command_line
+                            .push_error("DDEDIT: selected entity is not text.");
                     }
                 } else {
                     let cmd = DdeditCommand::new();
@@ -1275,21 +1431,21 @@ impl H7CAD {
                 }
             }
 
-            "MTEXT"|"MT" => {
+            "MTEXT" | "MT" => {
                 use crate::modules::annotate::mtext::MTextCommand;
                 let new_cmd = MTextCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "DIMALIGNED"|"DAL" => {
+            "DIMALIGNED" | "DAL" => {
                 use crate::modules::annotate::aligned_dim::AlignedDimensionCommand;
                 let cmd = AlignedDimensionCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMDIAMETER"|"DDI" => {
+            "DIMDIAMETER" | "DDI" => {
                 use crate::modules::annotate::diameter_dim::DiameterDimensionCommand;
                 let cmd = DiameterDimensionCommand::new();
                 self.command_line.push_info(&cmd.prompt());
@@ -1317,28 +1473,28 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "DIMORDINATE"|"DOR" => {
+            "DIMORDINATE" | "DOR" => {
                 use crate::modules::annotate::ordinate_dim::OrdinateDimCommand;
                 let new_cmd = OrdinateDimCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "LEADER"|"LE" => {
+            "LEADER" | "LE" => {
                 use crate::modules::annotate::leader_cmd::LeaderCommand;
                 let new_cmd = LeaderCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "MLEADER"|"MLD" => {
+            "MLEADER" | "MLD" => {
                 use crate::modules::annotate::mleader_cmd::MLeaderCommand;
                 let new_cmd = MLeaderCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "TOLERANCE"|"TOL" => {
+            "TOLERANCE" | "TOL" => {
                 use crate::modules::annotate::tolerance_cmd::ToleranceCommand;
                 let cmd = ToleranceCommand::new();
                 self.command_line.push_info(&cmd.prompt());
@@ -1352,9 +1508,10 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMCONTINUE"|"DCO" => {
+            "DIMCONTINUE" | "DCO" => {
                 use crate::modules::annotate::dim_continue::DimContinueCommand;
-                let cmd = if let Some((p1, p2, dp, rot)) = find_last_linear_dim(&self.tabs[i].scene) {
+                let cmd = if let Some((p1, p2, dp, rot)) = find_last_linear_dim(&self.tabs[i].scene)
+                {
                     DimContinueCommand::from_base(p1, p2, dp, rot)
                 } else {
                     DimContinueCommand::new()
@@ -1363,9 +1520,10 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMBASELINE"|"DBA" => {
+            "DIMBASELINE" | "DBA" => {
                 use crate::modules::annotate::dim_baseline::DimBaselineCommand;
-                let cmd = if let Some((p1, p2, dp, rot)) = find_last_linear_dim(&self.tabs[i].scene) {
+                let cmd = if let Some((p1, p2, dp, rot)) = find_last_linear_dim(&self.tabs[i].scene)
+                {
                     DimBaselineCommand::from_base(p1, p2, dp, rot)
                 } else {
                     DimBaselineCommand::new()
@@ -1381,120 +1539,126 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMEDIT"|"DED" => {
+            "DIMEDIT" | "DED" => {
                 use crate::modules::annotate::dimedit::DimEditCommand;
                 let cmd = DimEditCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMTEDIT"|"DIMTED" => {
+            "DIMTEDIT" | "DIMTED" => {
                 use crate::modules::annotate::dimtedit::DimTeditCommand;
                 let cmd = DimTeditCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMBREAK"|"DBR" => {
+            "DIMBREAK" | "DBR" => {
                 use crate::modules::annotate::dimbreak::DimBreakCommand;
                 let cmd = DimBreakCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMSPACE"|"DSPACE" => {
+            "DIMSPACE" | "DSPACE" => {
                 use crate::modules::annotate::dimspace::DimSpaceCommand;
                 let cmd = DimSpaceCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIMJOGLINE"|"DJL" => {
+            "DIMJOGLINE" | "DJL" => {
                 use crate::modules::annotate::dimjogline::DimJogLineCommand;
                 let cmd = DimJogLineCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "MLEADERADD"|"MLA" => {
+            "MLEADERADD" | "MLA" => {
                 use crate::modules::annotate::mleader_edit::MLeaderAddCommand;
                 let cmd = MLeaderAddCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "MLEADERREMOVE"|"MLR" => {
+            "MLEADERREMOVE" | "MLR" => {
                 use crate::modules::annotate::mleader_edit::MLeaderRemoveCommand;
                 let cmd = MLeaderRemoveCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "MLEADERALIGN"|"MLAL" => {
+            "MLEADERALIGN" | "MLAL" => {
                 use crate::modules::annotate::mleader_edit::MLeaderAlignCommand;
                 let cmd = MLeaderAlignCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "MLEADERCOLLECT"|"MLC" => {
+            "MLEADERCOLLECT" | "MLC" => {
                 use crate::modules::annotate::mleader_edit::MLeaderCollectCommand;
                 let cmd = MLeaderCollectCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "ZOOM EXTENTS"|"ZOOMEXTENTS"|"ZE" => {
+            "ZOOM EXTENTS" | "ZOOMEXTENTS" | "ZE" => {
                 self.tabs[i].scene.fit_all();
                 self.command_line.push_output("Zoom Extents");
             }
 
-            "ZOOM IN"|"ZI" => {
+            "ZOOM IN" | "ZI" => {
                 self.tabs[i].scene.zoom_camera(1.0 / 1.5);
                 self.command_line.push_output("Zoom In");
             }
 
-            "ZOOM OUT"|"ZO" => {
+            "ZOOM OUT" | "ZO" => {
                 self.tabs[i].scene.zoom_camera(1.5);
                 self.command_line.push_output("Zoom Out");
             }
 
             // ZOOM ALL — fit all entities (same as EXTENTS for now)
-            "ZOOM ALL"|"ZOOM A"|"ZA" => {
+            "ZOOM ALL" | "ZOOM A" | "ZA" => {
                 self.tabs[i].scene.fit_all();
                 self.command_line.push_output("Zoom All");
             }
 
             // ZOOM SCALE — set zoom factor (e.g. "ZOOM SCALE 2" or "ZS 0.5")
             cmd if cmd.starts_with("ZOOM SCALE ") || cmd.starts_with("ZS ") => {
-                let rest = cmd.split_once(' ')
+                let rest = cmd
+                    .split_once(' ')
                     .and_then(|(_, r)| r.split_once(' ').map(|(_, v)| v).or(Some(r)))
                     .unwrap_or("1");
                 if let Ok(factor) = rest.trim().parse::<f32>() {
                     if factor > 0.0 {
                         self.tabs[i].scene.zoom_camera(1.0 / factor);
-                        self.command_line.push_output(&format!("Zoom Scale ×{factor:.3}"));
+                        self.command_line
+                            .push_output(&format!("Zoom Scale ×{factor:.3}"));
                     }
                 }
             }
 
-            "PLOTWINDOW"|"PW" => {
+            "PLOTWINDOW" | "PW" => {
                 use crate::modules::view::plot_window::PlotWindowCommand;
                 let cmd = PlotWindowCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "ZOOM WINDOW"|"ZOOM W"|"ZW" => {
+            "ZOOM WINDOW" | "ZOOM W" | "ZW" => {
                 use crate::modules::view::zoom_window::ZoomWindowCommand;
                 let new_cmd = ZoomWindowCommand::new();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "STRETCH"|"SS" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "STRETCH" | "SS" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("STRETCH");
@@ -1508,16 +1672,18 @@ impl H7CAD {
                 }
             }
 
-            "FILLET"|"F" => {
+            "FILLET" | "F" => {
                 use crate::modules::home::modify::fillet::FilletCommand;
                 let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = FilletCommand::new(
-                    crate::modules::home::defaults::get_fillet_radius(), all_entities);
+                    crate::modules::home::defaults::get_fillet_radius(),
+                    all_entities,
+                );
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "ARRAY"|"AR"|"ARRAYRECT" => {
+            "ARRAY" | "AR" | "ARRAYRECT" => {
                 let handles = self.selected_handles_snapshot(i);
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
@@ -1566,9 +1732,13 @@ impl H7CAD {
                 }
             }
 
-            "ARRAY3D"|"3DARRAY" => {
-                let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().map(|(h, _)| h).collect();
+            "ARRAY3D" | "3DARRAY" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
                 if handles.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("ARRAY3D");
@@ -1582,19 +1752,20 @@ impl H7CAD {
                 }
             }
 
-            "CHAMFER"|"CHA" => {
+            "CHAMFER" | "CHA" => {
                 use crate::modules::home::modify::fillet::ChamferCommand;
                 let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = ChamferCommand::new(
-                    crate::modules::home::defaults::get_chamfer_dist1(), all_entities);
+                    crate::modules::home::defaults::get_chamfer_dist1(),
+                    all_entities,
+                );
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "EXPLODE"|"X" => {
+            "EXPLODE" | "X" => {
                 use crate::modules::home::modify::explode::explode_entity;
-                let entities: Vec<_> = self.tabs[i].scene.selected_entities()
-                    .into_iter().collect();
+                let entities: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
                 if entities.is_empty() {
                     use crate::modules::home::select::SelectObjectsCommand;
                     let cmd = SelectObjectsCommand::new("EXPLODE");
@@ -1605,7 +1776,11 @@ impl H7CAD {
                         .iter()
                         .filter_map(|(h, e)| {
                             let pieces = explode_entity(e, &self.tabs[i].scene.document);
-                            if pieces.is_empty() { None } else { Some((*h, pieces)) }
+                            if pieces.is_empty() {
+                                None
+                            } else {
+                                Some((*h, pieces))
+                            }
                         })
                         .collect();
                     let exploded = replacements.len();
@@ -1621,23 +1796,27 @@ impl H7CAD {
                     if exploded > 0 {
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
-                        self.command_line.push_output(&format!("{exploded} object(s) exploded."));
+                        self.command_line
+                            .push_output(&format!("{exploded} object(s) exploded."));
                     } else {
-                        self.command_line.push_info("EXPLODE: no explodable objects selected.");
+                        self.command_line
+                            .push_info("EXPLODE: no explodable objects selected.");
                     }
                 }
             }
 
-            "OFFSET"|"O" => {
+            "OFFSET" | "O" => {
                 use crate::modules::home::modify::offset::OffsetCommand;
                 let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = OffsetCommand::new(
-                    crate::modules::home::defaults::get_offset_dist(), all_entities);
+                    crate::modules::home::defaults::get_offset_dist(),
+                    all_entities,
+                );
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "TRIM"|"TR" => {
+            "TRIM" | "TR" => {
                 use crate::modules::home::modify::trim::TrimCommand;
                 let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = TrimCommand::new(all_entities);
@@ -1645,7 +1824,7 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "EXTEND"|"EX" => {
+            "EXTEND" | "EX" => {
                 use crate::modules::home::modify::trim::ExtendCommand;
                 let all_entities = self.compat_entities_for_visible_wires(i);
                 let new_cmd = ExtendCommand::new(all_entities);
@@ -1653,14 +1832,17 @@ impl H7CAD {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "3DORBIT"|"3O" => {
-                self.command_line.push_info("3D Orbit: drag with right mouse button.");
+            "3DORBIT" | "3O" => {
+                self.command_line
+                    .push_info("3D Orbit: drag with right mouse button.");
             }
 
             // ── Selection utilities ───────────────────────────────────────
-            "SELECTALL"|"SA" => {
+            "SELECTALL" | "SA" => {
                 use crate::scene::Scene;
-                let handles: Vec<acadrust::Handle> = self.tabs[i].scene.entity_wires()
+                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .entity_wires()
                     .iter()
                     .filter_map(|w| Scene::handle_from_wire_name(&w.name))
                     .collect();
@@ -1668,11 +1850,12 @@ impl H7CAD {
                 for h in handles {
                     self.tabs[i].scene.select_entity(h, false);
                 }
-                self.command_line.push_output(&format!("SELECTALL: {} object(s) selected.", count));
+                self.command_line
+                    .push_output(&format!("SELECTALL: {} object(s) selected.", count));
                 self.refresh_properties();
             }
 
-            "DESELECT"|"DE"|"DESELALL" => {
+            "DESELECT" | "DE" | "DESELALL" => {
                 self.tabs[i].scene.deselect_all();
                 self.command_line.push_output("Deselected.");
                 self.refresh_properties();
@@ -1682,26 +1865,37 @@ impl H7CAD {
             "LIST" | "LI" => {
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities();
                 if selected.is_empty() {
-                    self.command_line.push_error("LIST: no entities selected. Select entities first.");
+                    self.command_line
+                        .push_error("LIST: no entities selected. Select entities first.");
                 } else {
                     for (handle, _) in &selected {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
                             let type_name = entity_type_name(entity);
                             let common = entity.common();
-                            let color_str = common.color.index()
+                            let color_str = common
+                                .color
+                                .index()
                                 .map(|c| c.to_string())
                                 .unwrap_or_else(|| "ByLayer".to_string());
-                            let linetype = if common.linetype.is_empty() || common.linetype == "ByLayer" {
-                                "ByLayer".to_string()
-                            } else {
-                                common.linetype.clone()
-                            };
+                            let linetype =
+                                if common.linetype.is_empty() || common.linetype == "ByLayer" {
+                                    "ByLayer".to_string()
+                                } else {
+                                    common.linetype.clone()
+                                };
                             // Entity-specific details
                             let details = entity_list_details(entity);
                             self.command_line.push_output(&format!(
                                 "{type_name}  Handle:{:X}  Layer:{}  Color:{}  LT:{}{}",
-                                handle.value(), common.layer, color_str, linetype,
-                                if details.is_empty() { String::new() } else { format!("\n    {details}") }
+                                handle.value(),
+                                common.layer,
+                                color_str,
+                                linetype,
+                                if details.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("\n    {details}")
+                                }
                             ));
                         }
                     }
@@ -1709,42 +1903,42 @@ impl H7CAD {
             }
 
             // ── Break / Join ─────────────────────────────────────────────────
-            "JOIN"|"J" => {
+            "JOIN" | "J" => {
                 use crate::modules::home::modify::join::JoinCommand;
                 let cmd = JoinCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "BREAK"|"BR" => {
+            "BREAK" | "BR" => {
                 use crate::modules::home::modify::break_cmd::BreakInteractiveCommand;
                 let cmd = BreakInteractiveCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "BREAKATPOINT"|"BAP" => {
+            "BREAKATPOINT" | "BAP" => {
                 use crate::modules::home::modify::break_cmd::BreakAtPointCommand;
                 let cmd = BreakAtPointCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "PEDIT"|"PE" => {
+            "PEDIT" | "PE" => {
                 use crate::modules::home::modify::pedit::PeditCommand;
                 let cmd_obj = PeditCommand::new();
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
-            "SPLINEDIT"|"SPE" => {
+            "SPLINEDIT" | "SPE" => {
                 use crate::modules::home::modify::splinedit::SplineditCommand;
                 let cmd_obj = SplineditCommand::new();
                 self.command_line.push_info(&cmd_obj.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
-            "ATTEDIT"|"ATE"|"-ATTEDIT" => {
+            "ATTEDIT" | "ATE" | "-ATTEDIT" => {
                 use crate::modules::home::modify::attedit::AtteditCommand;
                 let cmd_obj = AtteditCommand::new();
                 self.command_line.push_info(&cmd_obj.prompt());
@@ -1756,17 +1950,20 @@ impl H7CAD {
                 use crate::modules::home::modify::refedit::RefEditPickCommand;
                 // If a session is already active, tell the user.
                 if self.tabs[i].refedit_session.is_some() {
-                    self.command_line.push_error(
-                        "REFEDIT: a session is already active. Use REFCLOSE first."
-                    );
+                    self.command_line
+                        .push_error("REFEDIT: a session is already active. Use REFCLOSE first.");
                 } else {
                     // Check if a single INSERT is already selected.
-                    let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
+                    let selected: Vec<_> =
+                        self.tabs[i].scene.selected_entities().into_iter().collect();
                     if selected.len() == 1 {
-                        if let Some(acadrust::EntityType::Insert(_)) = selected.first().map(|(_, e)| e) {
+                        if let Some(acadrust::EntityType::Insert(_)) =
+                            selected.first().map(|(_, e)| e)
+                        {
                             let handle = selected[0].0;
                             // Skip pick phase — jump straight to begin.
-                            let _ = self.dispatch_command(&format!("REFEDIT_BEGIN:{}", handle.value()));
+                            let _ =
+                                self.dispatch_command(&format!("REFEDIT_BEGIN:{}", handle.value()));
                             return Task::none();
                         }
                     }
@@ -1777,18 +1974,20 @@ impl H7CAD {
             }
 
             cmd if cmd.starts_with("REFEDIT_BEGIN:") => {
-                use crate::modules::home::modify::refedit::{RefEditSession, apply_insert_transform};
+                use crate::modules::home::modify::refedit::{
+                    apply_insert_transform, RefEditSession,
+                };
                 use acadrust::Handle;
 
-                let handle_u64: u64 = cmd["REFEDIT_BEGIN:".len()..]
-                    .parse().unwrap_or(0);
+                let handle_u64: u64 = cmd["REFEDIT_BEGIN:".len()..].parse().unwrap_or(0);
                 let insert_handle = Handle::new(handle_u64);
 
                 // Get INSERT entity.
                 let insert = match self.tabs[i].scene.document.get_entity(insert_handle) {
                     Some(acadrust::EntityType::Insert(ins)) => ins.clone(),
                     _ => {
-                        self.command_line.push_error("REFEDIT: selected object is not an INSERT.");
+                        self.command_line
+                            .push_error("REFEDIT: selected object is not an INSERT.");
                         return Task::none();
                     }
                 };
@@ -1798,18 +1997,23 @@ impl H7CAD {
                 let sy = insert.y_scale();
                 let sz = insert.z_scale();
                 if (sx - sy).abs() > 1e-6 || (sx - sz).abs() > 1e-6 {
-                    self.command_line.push_error(
-                        "REFEDIT: non-uniform scale inserts are not supported."
-                    );
+                    self.command_line
+                        .push_error("REFEDIT: non-uniform scale inserts are not supported.");
                     return Task::none();
                 }
 
                 // Find the block record.
-                let br_handle = match self.tabs[i].scene.document.block_records.get(&insert.block_name) {
+                let br_handle = match self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .get(&insert.block_name)
+                {
                     Some(br) => br.handle,
                     None => {
                         self.command_line.push_error(&format!(
-                            "REFEDIT: block \"{}\" not found.", insert.block_name
+                            "REFEDIT: block \"{}\" not found.",
+                            insert.block_name
                         ));
                         return Task::none();
                     }
@@ -1817,15 +2021,23 @@ impl H7CAD {
 
                 // Collect block-local entities (skip structural Block/BlockEnd/AttDef).
                 let block_entities: Vec<_> = {
-                    let br = self.tabs[i].scene.document.block_records.get(&insert.block_name).unwrap();
+                    let br = self.tabs[i]
+                        .scene
+                        .document
+                        .block_records
+                        .get(&insert.block_name)
+                        .unwrap();
                     br.entity_handles
                         .iter()
                         .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
-                        .filter(|e| !matches!(e,
-                            acadrust::EntityType::Block(_) |
-                            acadrust::EntityType::BlockEnd(_) |
-                            acadrust::EntityType::AttributeDefinition(_)
-                        ))
+                        .filter(|e| {
+                            !matches!(
+                                e,
+                                acadrust::EntityType::Block(_)
+                                    | acadrust::EntityType::BlockEnd(_)
+                                    | acadrust::EntityType::AttributeDefinition(_)
+                            )
+                        })
                         .collect()
                 };
 
@@ -1884,18 +2096,20 @@ impl H7CAD {
                     self.command_line.push_info(&cmd_obj.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
                 } else {
-                    self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                    self.command_line
+                        .push_error("REFCLOSE: no REFEDIT session active.");
                 }
             }
 
             "REFCLOSE_SAVE" => {
-                use crate::modules::home::modify::refedit::apply_insert_inverse_transform;
                 use crate::modules::home::modify::explode::normalize_entity_for_block;
+                use crate::modules::home::modify::refedit::apply_insert_inverse_transform;
 
                 let session = match self.tabs[i].refedit_session.take() {
                     Some(s) => s,
                     None => {
-                        self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                        self.command_line
+                            .push_error("REFCLOSE: no REFEDIT session active.");
                         return Task::none();
                     }
                 };
@@ -1903,7 +2117,8 @@ impl H7CAD {
                 self.push_undo_snapshot(i, "REFCLOSE");
 
                 // Collect the edited temp entities.
-                let new_entities: Vec<acadrust::EntityType> = session.temp_handles
+                let new_entities: Vec<acadrust::EntityType> = session
+                    .temp_handles
                     .iter()
                     .filter_map(|h| self.tabs[i].scene.document.get_entity(*h).cloned())
                     .collect();
@@ -1924,8 +2139,11 @@ impl H7CAD {
                     .collect();
 
                 // Remove old block entities from the document.
-                let old_handles: Vec<_> = match self.tabs[i].scene.document
-                    .block_records.get(&session.block_name)
+                let old_handles: Vec<_> = match self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .get(&session.block_name)
                 {
                     Some(br) => br.entity_handles.clone(),
                     None => vec![],
@@ -1934,8 +2152,11 @@ impl H7CAD {
                     self.tabs[i].scene.document.remove_entity(*h);
                 }
                 // Flush the entity_handles list from the block record.
-                if let Some(br) = self.tabs[i].scene.document
-                    .block_records.get_mut(&session.block_name)
+                if let Some(br) = self.tabs[i]
+                    .scene
+                    .document
+                    .block_records
+                    .get_mut(&session.block_name)
                 {
                     br.entity_handles.clear();
                 }
@@ -1958,38 +2179,40 @@ impl H7CAD {
                 let session = match self.tabs[i].refedit_session.take() {
                     Some(s) => s,
                     None => {
-                        self.command_line.push_error("REFCLOSE: no REFEDIT session active.");
+                        self.command_line
+                            .push_error("REFCLOSE: no REFEDIT session active.");
                         return Task::none();
                     }
                 };
                 // Remove temp entities without modifying the block.
                 self.tabs[i].scene.erase_entities(&session.temp_handles);
                 self.tabs[i].scene.deselect_all();
-                self.command_line.push_output("REFCLOSE: Changes discarded.");
+                self.command_line
+                    .push_output("REFCLOSE: Changes discarded.");
             }
 
-            "ALIGN"|"AL" => {
+            "ALIGN" | "AL" => {
                 use crate::modules::home::modify::align::AlignCommand;
                 let cmd = AlignCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "LENGTHEN"|"LEN" => {
+            "LENGTHEN" | "LEN" => {
                 use crate::modules::home::modify::lengthen::LengthenCommand;
                 let cmd = LengthenCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "DIVIDE"|"DIV" => {
+            "DIVIDE" | "DIV" => {
                 use crate::modules::home::inquiry::divide::DivideCommand;
                 let cmd = DivideCommand::new();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
 
-            "MEASURE"|"ME" => {
+            "MEASURE" | "ME" => {
                 use crate::modules::home::inquiry::divide::MeasureCommand;
                 let cmd = MeasureCommand::new();
                 self.command_line.push_info(&cmd.prompt());
@@ -1997,7 +2220,7 @@ impl H7CAD {
             }
 
             // ── Inquiry ──────────────────────────────────────────────────────
-            "DIST"|"DI" => {
+            "DIST" | "DI" => {
                 use crate::modules::home::inquiry::dist::DistCommand;
                 let cmd = DistCommand::new();
                 self.command_line.push_info(&cmd.prompt());
@@ -2022,9 +2245,8 @@ impl H7CAD {
             "MASSPROP" => {
                 let selected = self.tabs[i].scene.selected_entities();
                 if selected.is_empty() {
-                    self.command_line.push_error(
-                        "MASSPROP: no entities selected. Select entities first."
-                    );
+                    self.command_line
+                        .push_error("MASSPROP: no entities selected. Select entities first.");
                 } else {
                     for (handle, _) in &selected {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
@@ -2049,7 +2271,10 @@ impl H7CAD {
                     let sel = self.tabs[i].scene.selected_entities();
                     if sel.is_empty() {
                         // Flatten all entities
-                        self.tabs[i].scene.document.entities()
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
                             .map(|e| e.common().handle)
                             .collect()
                     } else {
@@ -2067,7 +2292,8 @@ impl H7CAD {
                     }
                     self.tabs[i].dirty = true;
                     self.command_line.push_output(&format!(
-                        "FLATTEN: {} entity(ies) moved to Z=0.", handles.len()
+                        "FLATTEN: {} entity(ies) moved to Z=0.",
+                        handles.len()
                     ));
                     self.refresh_properties();
                 }
@@ -2082,16 +2308,20 @@ impl H7CAD {
                 let rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = rest.splitn(2, ' ').collect();
                 let prop = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
-                let val  = parts.get(1).map(|s| s.trim()).unwrap_or("").to_uppercase();
+                let val = parts.get(1).map(|s| s.trim()).unwrap_or("").to_uppercase();
 
-                let matched: Vec<acadrust::Handle> = self.tabs[i].scene.document
+                let matched: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
+                    .document
                     .entities()
                     .filter(|e| {
                         let c = e.common();
                         match prop.as_str() {
-                            "TYPE"     => entity_type_name(e).to_uppercase() == val,
-                            "LAYER"    => c.layer.to_uppercase() == val,
-                            "COLOR"    => c.color.index()
+                            "TYPE" => entity_type_name(e).to_uppercase() == val,
+                            "LAYER" => c.layer.to_uppercase() == val,
+                            "COLOR" => c
+                                .color
+                                .index()
                                 .map(|n| n.to_string() == val)
                                 .unwrap_or(val == "BYLAYER"),
                             "LINETYPE" => c.linetype.to_uppercase() == val,
@@ -2102,19 +2332,18 @@ impl H7CAD {
                     .collect();
 
                 if prop.is_empty() {
-                    self.command_line.push_info(
-                        "Usage: QSELECT TYPE|LAYER|COLOR|LINETYPE <value>"
-                    );
+                    self.command_line
+                        .push_info("Usage: QSELECT TYPE|LAYER|COLOR|LINETYPE <value>");
                 } else if matched.is_empty() {
-                    self.command_line.push_output("QSELECT: no matching entities.");
+                    self.command_line
+                        .push_output("QSELECT: no matching entities.");
                 } else {
                     self.tabs[i].scene.deselect_all();
                     for h in &matched {
                         self.tabs[i].scene.select_entity(*h, false);
                     }
-                    self.command_line.push_output(&format!(
-                        "QSELECT: {} entity(ies) selected.", matched.len()
-                    ));
+                    self.command_line
+                        .push_output(&format!("QSELECT: {} entity(ies) selected.", matched.len()));
                     self.refresh_properties();
                 }
             }
@@ -2128,10 +2357,12 @@ impl H7CAD {
                     let type_name = entity_type_name(e);
                     let key = match &filter {
                         Some(f) if f == "LAYER" => layer.clone(),
-                        Some(f) if f == "TYPE"  => type_name.to_string(),
+                        Some(f) if f == "TYPE" => type_name.to_string(),
                         Some(f) => {
                             // Filter by layer name
-                            if layer.to_uppercase() != *f { continue; }
+                            if layer.to_uppercase() != *f {
+                                continue;
+                            }
                             type_name.to_string()
                         }
                         None => type_name.to_string(),
@@ -2142,7 +2373,8 @@ impl H7CAD {
                 for (k, n) in &counts {
                     self.command_line.push_output(&format!("  {k}: {n}"));
                 }
-                self.command_line.push_output(&format!("COUNT: {total} entity(ies) total."));
+                self.command_line
+                    .push_output(&format!("COUNT: {total} entity(ies) total."));
             }
 
             "DATAEXTRACTION" | "EATTEXT" | "ATTEXT" => {
@@ -2154,12 +2386,17 @@ impl H7CAD {
             // FIND <search>              — list all Text/MText/Dimension containing <search>
             // FIND <search> REPLACE <rep> — replace first occurrence (case-insensitive)
             // FINDALL <search> REPLACE <rep> — replace all occurrences
-            cmd if cmd == "FIND" || cmd.starts_with("FIND ") || cmd == "FINDALL" || cmd.starts_with("FINDALL ") => {
+            cmd if cmd == "FIND"
+                || cmd.starts_with("FIND ")
+                || cmd == "FINDALL"
+                || cmd.starts_with("FINDALL ") =>
+            {
                 let all_mode = cmd.starts_with("FINDALL");
                 let rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
 
                 // Split at " REPLACE " keyword (case-insensitive)
-                let (search, replacement) = if let Some(pos) = rest.to_uppercase().find(" REPLACE ") {
+                let (search, replacement) = if let Some(pos) = rest.to_uppercase().find(" REPLACE ")
+                {
                     (&rest[..pos], Some(rest[pos + 9..].trim()))
                 } else {
                     (rest, None)
@@ -2170,7 +2407,9 @@ impl H7CAD {
                 } else {
                     let search_lc = search.to_lowercase();
                     let mut count = 0usize;
-                    let handles: Vec<acadrust::Handle> = self.tabs[i].scene.document
+                    let handles: Vec<acadrust::Handle> = self.tabs[i]
+                        .scene
+                        .document
                         .entities()
                         .filter_map(|e| {
                             let txt = entity_text_content(e)?;
@@ -2190,7 +2429,8 @@ impl H7CAD {
                             handles.iter().copied().take(1).collect()
                         };
                         if targets.is_empty() {
-                            self.command_line.push_output(&format!("FIND: \"{}\" not found.", search));
+                            self.command_line
+                                .push_output(&format!("FIND: \"{}\" not found.", search));
                         } else {
                             self.push_undo_snapshot(i, "FIND/REPLACE");
                             for h in &targets {
@@ -2209,25 +2449,30 @@ impl H7CAD {
                     } else {
                         // List mode
                         if handles.is_empty() {
-                            self.command_line.push_output(&format!("FIND: \"{}\" not found.", search));
+                            self.command_line
+                                .push_output(&format!("FIND: \"{}\" not found.", search));
                         } else {
                             for h in &handles {
                                 if let Some(e) = self.tabs[i].scene.document.get_entity(*h) {
                                     let txt = entity_text_content(e).unwrap_or_default();
                                     self.command_line.push_output(&format!(
-                                        "  Handle {:X}: \"{}\"", h.value(), txt
+                                        "  Handle {:X}: \"{}\"",
+                                        h.value(),
+                                        txt
                                     ));
                                 }
                             }
                             self.command_line.push_output(&format!(
-                                "FIND: {} match(es) for \"{}\".", handles.len(), search
+                                "FIND: {} match(es) for \"{}\".",
+                                handles.len(),
+                                search
                             ));
                         }
                     }
                 }
             }
 
-            "HELP"|"?" => {
+            "HELP" | "?" => {
                 self.command_line.push_output(
                     "Draw: LINE CIRCLE ARC PLINE RECTANG(RECT) POLYGON(POLY) POINT ELLIPSE SPLINE RAY XLINE HATCH DONUT REVCLOUD WIPEOUT MLINE ATTDEF  |  \
                      Modify: MOVE COPY ROTATE SCALE MIRROR ERASE OFFSET EXTEND FILLET CHAMFER STRETCH EXPLODE TRIM BREAK JOIN LENGTHEN ALIGN PEDIT  |  \
@@ -2283,7 +2528,8 @@ impl H7CAD {
                             self.command_line.push_error("Usage: SHORTCUTS SET <key> <command>  e.g. SHORTCUTS SET CTRL+D DIST");
                         } else {
                             self.shortcut_overrides.insert(key.clone(), cmd_str.clone());
-                            self.command_line.push_output(&format!("Shortcut set: {key} → {cmd_str}"));
+                            self.command_line
+                                .push_output(&format!("Shortcut set: {key} → {cmd_str}"));
                         }
                     }
                     "CLEAR" | "DELETE" | "REMOVE" => {
@@ -2291,13 +2537,16 @@ impl H7CAD {
                         if key.is_empty() {
                             self.command_line.push_error("Usage: SHORTCUTS CLEAR <key>");
                         } else if self.shortcut_overrides.remove(&key).is_some() {
-                            self.command_line.push_output(&format!("Shortcut '{key}' removed."));
+                            self.command_line
+                                .push_output(&format!("Shortcut '{key}' removed."));
                         } else {
-                            self.command_line.push_error(&format!("Shortcut '{key}' not found."));
+                            self.command_line
+                                .push_error(&format!("Shortcut '{key}' not found."));
                         }
                     }
                     _ => {
-                        self.command_line.push_info("Usage: SHORTCUTS LIST | SET <key> <cmd> | CLEAR <key>");
+                        self.command_line
+                            .push_info("Usage: SHORTCUTS LIST | SET <key> <cmd> | CLEAR <key>");
                     }
                 }
             }
@@ -2305,27 +2554,31 @@ impl H7CAD {
             // ── Color Scheme / Theme selector ─────────────────────────────
             cmd if cmd == "COLORSCHEME" || cmd.starts_with("COLORSCHEME ") => {
                 use iced::Theme;
-                let sub = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("").to_uppercase();
+                let sub = cmd
+                    .split_once(' ')
+                    .map(|(_, r)| r.trim())
+                    .unwrap_or("")
+                    .to_uppercase();
                 // Map name to Theme variant.
                 let theme: Option<Theme> = match sub.as_str() {
-                    "DARK"             => Some(Theme::Dark),
-                    "LIGHT"            => Some(Theme::Light),
-                    "DRACULA"          => Some(Theme::Dracula),
-                    "NORD"             => Some(Theme::Nord),
-                    "SOLARIZED_LIGHT" | "SOLARIZEDLIGHT"  => Some(Theme::SolarizedLight),
-                    "SOLARIZED_DARK"  | "SOLARIZEDDARK"   => Some(Theme::SolarizedDark),
-                    "GRUVBOX_LIGHT"   | "GRUVBOXLIGHT"    => Some(Theme::GruvboxLight),
-                    "GRUVBOX_DARK"    | "GRUVBOXDARK"     => Some(Theme::GruvboxDark),
-                    "TOKYONIGHT"      | "TOKYO_NIGHT"     => Some(Theme::TokyoNight),
+                    "DARK" => Some(Theme::Dark),
+                    "LIGHT" => Some(Theme::Light),
+                    "DRACULA" => Some(Theme::Dracula),
+                    "NORD" => Some(Theme::Nord),
+                    "SOLARIZED_LIGHT" | "SOLARIZEDLIGHT" => Some(Theme::SolarizedLight),
+                    "SOLARIZED_DARK" | "SOLARIZEDDARK" => Some(Theme::SolarizedDark),
+                    "GRUVBOX_LIGHT" | "GRUVBOXLIGHT" => Some(Theme::GruvboxLight),
+                    "GRUVBOX_DARK" | "GRUVBOXDARK" => Some(Theme::GruvboxDark),
+                    "TOKYONIGHT" | "TOKYO_NIGHT" => Some(Theme::TokyoNight),
                     "TOKYONIGHTSTORM" | "TOKYO_NIGHT_STORM" => Some(Theme::TokyoNightStorm),
                     "TOKYONIGHTLIGHT" | "TOKYO_NIGHT_LIGHT" => Some(Theme::TokyoNightLight),
-                    "KANAGAWAWAVE"    | "KANAGAWA_WAVE"   => Some(Theme::KanagawaWave),
-                    "KANAGAWADRAGON"  | "KANAGAWA_DRAGON" => Some(Theme::KanagawaDragon),
-                    "KANAGAWALOTUS"   | "KANAGAWA_LOTUS"  => Some(Theme::KanagawaLotus),
-                    "MOONFLY"         => Some(Theme::Moonfly),
-                    "NIGHTFLY"        => Some(Theme::Nightfly),
-                    "OXOCARBON"       => Some(Theme::Oxocarbon),
-                    "FERRA"           => Some(Theme::Ferra),
+                    "KANAGAWAWAVE" | "KANAGAWA_WAVE" => Some(Theme::KanagawaWave),
+                    "KANAGAWADRAGON" | "KANAGAWA_DRAGON" => Some(Theme::KanagawaDragon),
+                    "KANAGAWALOTUS" | "KANAGAWA_LOTUS" => Some(Theme::KanagawaLotus),
+                    "MOONFLY" => Some(Theme::Moonfly),
+                    "NIGHTFLY" => Some(Theme::Nightfly),
+                    "OXOCARBON" => Some(Theme::Oxocarbon),
+                    "FERRA" => Some(Theme::Ferra),
                     "" | "LIST" | "?" => {
                         self.command_line.push_output(
                             "Available themes: DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
@@ -2335,27 +2588,32 @@ impl H7CAD {
                         return Task::none();
                     }
                     _ => {
-                        self.command_line.push_error(&format!("COLORSCHEME: unknown theme '{}'. Type COLORSCHEME LIST for options.", sub));
+                        self.command_line.push_error(&format!(
+                            "COLORSCHEME: unknown theme '{}'. Type COLORSCHEME LIST for options.",
+                            sub
+                        ));
                         return Task::none();
                     }
                 };
                 if let Some(t) = theme {
                     let name = format!("{:?}", t);
-                    self.command_line.push_output(&format!("Color scheme set to '{name}'."));
+                    self.command_line
+                        .push_output(&format!("Color scheme set to '{name}'."));
                     return Task::done(Message::SetTheme(t));
                 }
                 return Task::none();
             }
 
             // ── Layout Manager GUI ─────────────────────────────────────────
-            "LAYOUTMANAGER"|"LAYOUTPANEL" => {
+            "LAYOUTMANAGER" | "LAYOUTPANEL" => {
                 return Task::done(Message::LayoutManagerOpen);
             }
 
             // ── Layout / viewport ──────────────────────────────────────────
-            "MVIEW"|"MV" => {
+            "MVIEW" | "MV" => {
                 if self.tabs[i].scene.current_layout == "Model" {
-                    self.command_line.push_error("MVIEW: switch to a paper space layout first.");
+                    self.command_line
+                        .push_error("MVIEW: switch to a paper space layout first.");
                 } else {
                     use crate::modules::layout::mview::MviewCommand;
                     let new_cmd = MviewCommand::new();
@@ -2365,7 +2623,7 @@ impl H7CAD {
             }
 
             // ── MSPACE / PSPACE ───────────────────────────────────────────
-            "MS"|"MSPACE" => {
+            "MS" | "MSPACE" => {
                 return Task::done(Message::MspaceCommand);
             }
             "PSPACE" => {
@@ -2377,28 +2635,47 @@ impl H7CAD {
                 let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
                 let scene = &self.tabs[i].scene;
                 if scene.current_layout == "Model" {
-                    self.command_line.push_error("VPORTS: switch to a paper space layout first.");
+                    self.command_line
+                        .push_error("VPORTS: switch to a paper space layout first.");
                 } else if sub.is_empty() {
                     // ── List existing viewports ──────────────────────────
                     let layout_block = scene.current_layout_block_handle_pub();
-                    let viewports: Vec<_> = scene.document.entities()
+                    let viewports: Vec<_> = scene
+                        .document
+                        .entities()
                         .filter_map(|e| {
                             if let acadrust::EntityType::Viewport(vp) = e {
                                 if vp.id > 1 && vp.common.owner_handle == layout_block {
-                                    Some((vp.id, vp.center.clone(), vp.width, vp.height, vp.custom_scale, vp.status.is_on, vp.status.locked))
-                                } else { None }
-                            } else { None }
+                                    Some((
+                                        vp.id,
+                                        vp.center.clone(),
+                                        vp.width,
+                                        vp.height,
+                                        vp.custom_scale,
+                                        vp.status.is_on,
+                                        vp.status.locked,
+                                    ))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
                         })
                         .collect();
                     if viewports.is_empty() {
                         self.command_line.push_info("No viewports. Use MVIEW to create one, or VPORTS 2H / 2V / 4 / SINGLE.");
                     } else {
-                        self.command_line.push_output(&format!("{} viewport(s) in layout \"{}\":", viewports.len(), scene.current_layout));
+                        self.command_line.push_output(&format!(
+                            "{} viewport(s) in layout \"{}\":",
+                            viewports.len(),
+                            scene.current_layout
+                        ));
                         for (id, center, w, h, scale, is_on, locked) in &viewports {
                             let state = match (is_on, locked) {
-                                (true, true)  => "On, Locked",
+                                (true, true) => "On, Locked",
                                 (true, false) => "On",
-                                (false, _)    => "Off",
+                                (false, _) => "Off",
                             };
                             self.command_line.push_output(&format!(
                                 "  VP #{id}: {w:.1}×{h:.1} @ ({:.1},{:.1})  scale={scale:.4}  [{state}]",
@@ -2428,13 +2705,13 @@ impl H7CAD {
                     let margin = 5.0_f64; // mm margin around the usable area
                     let uw = paper_w - 2.0 * margin; // usable width
                     let uh = paper_h - 2.0 * margin; // usable height
-                    // Collect rectangle specs: (cx, cz, w, h) in mm
+                                                     // Collect rectangle specs: (cx, cz, w, h) in mm
                     let rects: Vec<(f64, f64, f64, f64)> = match sub.as_str() {
                         "2H" => {
                             // Two viewports side by side (horizontal split)
                             let vw = (uw - 2.0) / 2.0;
                             vec![
-                                (margin + vw / 2.0,          margin + uh / 2.0, vw, uh),
+                                (margin + vw / 2.0, margin + uh / 2.0, vw, uh),
                                 (margin + vw + 2.0 + vw / 2.0, margin + uh / 2.0, vw, uh),
                             ]
                         }
@@ -2443,7 +2720,7 @@ impl H7CAD {
                             let vh = (uh - 2.0) / 2.0;
                             vec![
                                 (margin + uw / 2.0, margin + vh + 2.0 + vh / 2.0, uw, vh),
-                                (margin + uw / 2.0, margin + vh / 2.0,            uw, vh),
+                                (margin + uw / 2.0, margin + vh / 2.0, uw, vh),
                             ]
                         }
                         "4" => {
@@ -2451,10 +2728,15 @@ impl H7CAD {
                             let vw = (uw - 2.0) / 2.0;
                             let vh = (uh - 2.0) / 2.0;
                             vec![
-                                (margin + vw / 2.0,              margin + vh + 2.0 + vh / 2.0, vw, vh),
-                                (margin + vw + 2.0 + vw / 2.0,  margin + vh + 2.0 + vh / 2.0, vw, vh),
-                                (margin + vw / 2.0,              margin + vh / 2.0,             vw, vh),
-                                (margin + vw + 2.0 + vw / 2.0,  margin + vh / 2.0,             vw, vh),
+                                (margin + vw / 2.0, margin + vh + 2.0 + vh / 2.0, vw, vh),
+                                (
+                                    margin + vw + 2.0 + vw / 2.0,
+                                    margin + vh + 2.0 + vh / 2.0,
+                                    vw,
+                                    vh,
+                                ),
+                                (margin + vw / 2.0, margin + vh / 2.0, vw, vh),
+                                (margin + vw + 2.0 + vw / 2.0, margin + vh / 2.0, vw, vh),
                             ]
                         }
                         "SINGLE" | "1" => {
@@ -2463,7 +2745,7 @@ impl H7CAD {
                         }
                         _ => {
                             self.command_line.push_error(
-                                "VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE"
+                                "VPORTS: unknown option. Use VPORTS 2H | 2V | 4 | SINGLE",
                             );
                             vec![]
                         }
@@ -2471,13 +2753,20 @@ impl H7CAD {
                     if !rects.is_empty() {
                         // Remove existing user viewports in this layout first.
                         let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
-                        let to_erase: Vec<acadrust::Handle> = self.tabs[i].scene.document.entities()
+                        let to_erase: Vec<acadrust::Handle> = self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
                             .filter_map(|e| {
                                 if let acadrust::EntityType::Viewport(vp) = e {
                                     if vp.id > 1 && vp.common.owner_handle == layout_block {
                                         Some(vp.common.handle)
-                                    } else { None }
-                                } else { None }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
                             })
                             .collect();
                         self.push_undo_snapshot(i, "VPORTS");
@@ -2486,9 +2775,9 @@ impl H7CAD {
                         for (cx, cz, w, h) in &rects {
                             let mut vp = acadrust::entities::Viewport::new();
                             vp.center = crate::types::Vector3::new(*cx, 0.0, *cz);
-                            vp.width  = *w;
+                            vp.width = *w;
                             vp.height = *h;
-                            vp.id     = 2; // commit_entity will assign unique IDs
+                            vp.id = 2; // commit_entity will assign unique IDs
                             match self.tabs[i].scene.document.add_entity_to_layout(
                                 acadrust::EntityType::Viewport(vp),
                                 &layout_name,
@@ -2504,13 +2793,20 @@ impl H7CAD {
                         // Re-assign unique IDs (1 + existing max per viewport).
                         let layout_block2 = self.tabs[i].scene.current_layout_block_handle_pub();
                         let mut id_counter = 2_i16;
-                        let handles: Vec<acadrust::Handle> = self.tabs[i].scene.document.entities()
+                        let handles: Vec<acadrust::Handle> = self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
                             .filter_map(|e| {
                                 if let acadrust::EntityType::Viewport(vp) = e {
                                     if vp.id >= 2 && vp.common.owner_handle == layout_block2 {
                                         Some(vp.common.handle)
-                                    } else { None }
-                                } else { None }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
                             })
                             .collect();
                         for h in handles {
@@ -2523,7 +2819,9 @@ impl H7CAD {
                         }
                         self.tabs[i].dirty = true;
                         self.command_line.push_output(&format!(
-                            "VPORTS: created {} viewport(s) [{}].", rects.len(), sub
+                            "VPORTS: created {} viewport(s) [{}].",
+                            rects.len(),
+                            sub
                         ));
                     }
                 }
@@ -2533,9 +2831,11 @@ impl H7CAD {
             "VPLAYER" => {
                 let scene = &self.tabs[i].scene;
                 if scene.current_layout == "Model" {
-                    self.command_line.push_error("VPLAYER: switch to a paper space layout first.");
+                    self.command_line
+                        .push_error("VPLAYER: switch to a paper space layout first.");
                 } else if scene.active_viewport.is_none() {
-                    self.command_line.push_error("VPLAYER: enter a viewport first (double-click or MS).");
+                    self.command_line
+                        .push_error("VPLAYER: enter a viewport first (double-click or MS).");
                 } else {
                     use crate::modules::layout::vplayer::VplayerCommand;
                     let vp_handle = scene.active_viewport.unwrap();
@@ -2544,13 +2844,24 @@ impl H7CAD {
                         if let Some(acadrust::EntityType::Viewport(vp)) =
                             scene.document.get_entity(vp_handle)
                         {
-                            vp.frozen_layers.iter().filter_map(|h| {
-                                scene.document.layers.iter().find(|l| l.handle == *h).map(|l| l.name.clone())
-                            }).collect()
-                        } else { vec![] }
+                            vp.frozen_layers
+                                .iter()
+                                .filter_map(|h| {
+                                    scene
+                                        .document
+                                        .layers
+                                        .iter()
+                                        .find(|l| l.handle == *h)
+                                        .map(|l| l.name.clone())
+                                })
+                                .collect()
+                        } else {
+                            vec![]
+                        }
                     };
                     if frozen_names.is_empty() {
-                        self.command_line.push_info("VPLAYER: no frozen layers in active viewport.");
+                        self.command_line
+                            .push_info("VPLAYER: no frozen layers in active viewport.");
                     } else {
                         self.command_line.push_info(&format!(
                             "VPLAYER: frozen layers: {}",
@@ -2569,13 +2880,15 @@ impl H7CAD {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 let option = parts.get(1).unwrap_or(&"").to_uppercase();
                 let i = self.active_tab;
-                let selected: Vec<acadrust::Handle> = self.tabs[i].scene
+                let selected: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
                     .selected_entities()
                     .iter()
                     .map(|(h, _)| *h)
                     .collect();
                 if selected.is_empty() {
-                    self.command_line.push_error("DRAWORDER: select entities first.");
+                    self.command_line
+                        .push_error("DRAWORDER: select entities first.");
                 } else {
                     // Parse relative target handle for ABOVE/UNDER.
                     let relative_target: Option<(bool, acadrust::Handle)> = match option.as_str() {
@@ -2591,7 +2904,7 @@ impl H7CAD {
                     };
                     let to_front_opt = match option.as_str() {
                         "F" | "FRONT" => Some(true),
-                        "B" | "BACK"  => Some(false),
+                        "B" | "BACK" => Some(false),
                         _ => None,
                     };
 
@@ -2599,29 +2912,39 @@ impl H7CAD {
                         self.push_undo_snapshot(i, "DRAWORDER");
                         let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
                         let doc = &mut self.tabs[i].scene.document;
-                        let table_handle = doc.objects.iter()
-                            .find_map(|(h, obj)| {
-                                if let ObjectType::SortEntitiesTable(t) = obj {
-                                    if t.block_owner_handle == block_handle { Some(*h) } else { None }
-                                } else { None }
-                            });
-                        let get_or_create = |doc: &mut acadrust::CadDocument, block_handle| -> acadrust::Handle {
-                            if let Some(th) = doc.objects.iter()
-                                .find_map(|(h, obj)| {
-                                    if let ObjectType::SortEntitiesTable(t) = obj {
-                                        if t.block_owner_handle == block_handle { Some(*h) } else { None }
-                                    } else { None }
-                                })
-                            {
-                                th
+                        let table_handle = doc.objects.iter().find_map(|(h, obj)| {
+                            if let ObjectType::SortEntitiesTable(t) = obj {
+                                if t.block_owner_handle == block_handle {
+                                    Some(*h)
+                                } else {
+                                    None
+                                }
                             } else {
-                                let nh = acadrust::Handle::new(doc.next_handle());
-                                let mut table = SortEntitiesTable::for_block(block_handle);
-                                table.handle = nh;
-                                doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
-                                nh
+                                None
                             }
-                        };
+                        });
+                        let get_or_create =
+                            |doc: &mut acadrust::CadDocument, block_handle| -> acadrust::Handle {
+                                if let Some(th) = doc.objects.iter().find_map(|(h, obj)| {
+                                    if let ObjectType::SortEntitiesTable(t) = obj {
+                                        if t.block_owner_handle == block_handle {
+                                            Some(*h)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }) {
+                                    th
+                                } else {
+                                    let nh = acadrust::Handle::new(doc.next_handle());
+                                    let mut table = SortEntitiesTable::for_block(block_handle);
+                                    table.handle = nh;
+                                    doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
+                                    nh
+                                }
+                            };
                         let th = table_handle.unwrap_or_else(|| {
                             let nh = acadrust::Handle::new(doc.next_handle());
                             let mut table = SortEntitiesTable::for_block(block_handle);
@@ -2630,24 +2953,36 @@ impl H7CAD {
                             nh
                         });
                         let _ = get_or_create; // suppress unused warning
-                        if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th) {
+                        if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
+                        {
                             if let Some((above, target)) = relative_target {
                                 for h in &selected {
-                                    if above { table.move_above(*h, target); }
-                                    else      { table.move_below(*h, target); }
+                                    if above {
+                                        table.move_above(*h, target);
+                                    } else {
+                                        table.move_below(*h, target);
+                                    }
                                 }
                                 let rel = if above { "above" } else { "below" };
                                 self.command_line.push_info(&format!(
-                                    "DRAWORDER: moved {} entities {} {:x}.", selected.len(), rel, target.value()
+                                    "DRAWORDER: moved {} entities {} {:x}.",
+                                    selected.len(),
+                                    rel,
+                                    target.value()
                                 ));
                             } else if let Some(to_front) = to_front_opt {
                                 for h in &selected {
-                                    if to_front { table.bring_to_front(*h); }
-                                    else        { table.send_to_back(*h); }
+                                    if to_front {
+                                        table.bring_to_front(*h);
+                                    } else {
+                                        table.send_to_back(*h);
+                                    }
                                 }
                                 let dir = if to_front { "front" } else { "back" };
                                 self.command_line.push_info(&format!(
-                                    "DRAWORDER: moved {} entities to {}.", selected.len(), dir
+                                    "DRAWORDER: moved {} entities to {}.",
+                                    selected.len(),
+                                    dir
                                 ));
                             }
                         }
@@ -2674,33 +3009,48 @@ impl H7CAD {
                 let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "LIST" | "?" => {
-                        let info: Vec<String> = self.tabs[i].scene.document.layers.iter().map(|l| {
-                            let state = if l.flags.frozen { "frozen" }
-                                       else if l.flags.off { "off" }
-                                       else if l.flags.locked { "locked" }
-                                       else { "on" };
-                            format!("{}({})", l.name, state)
-                        }).collect();
-                        self.command_line.push_output(&format!("Layers: {}", info.join(", ")));
+                        let info: Vec<String> = self.tabs[i]
+                            .scene
+                            .document
+                            .layers
+                            .iter()
+                            .map(|l| {
+                                let state = if l.flags.frozen {
+                                    "frozen"
+                                } else if l.flags.off {
+                                    "off"
+                                } else if l.flags.locked {
+                                    "locked"
+                                } else {
+                                    "on"
+                                };
+                                format!("{}({})", l.name, state)
+                            })
+                            .collect();
+                        self.command_line
+                            .push_output(&format!("Layers: {}", info.join(", ")));
                     }
                     "NEW" | "N" => {
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         if name.is_empty() {
                             self.command_line.push_error("Usage: LAYER NEW <name>");
                         } else if self.tabs[i].scene.document.layers.contains(&name) {
-                            self.command_line.push_error(&format!("LAYER: '{}' already exists.", name));
+                            self.command_line
+                                .push_error(&format!("LAYER: '{}' already exists.", name));
                         } else {
                             let layer = Layer::new(&name);
                             let _ = self.tabs[i].scene.document.layers.add(layer);
                             self.push_undo_snapshot(i, "LAYER NEW");
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!("LAYER: '{}' created.", name));
+                            self.command_line
+                                .push_output(&format!("LAYER: '{}' created.", name));
                         }
                     }
                     "ON" => {
                         for name in &parts[1..] {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
-                                l.flags.off = false; l.flags.frozen = false;
+                                l.flags.off = false;
+                                l.flags.frozen = false;
                             }
                         }
                         self.push_undo_snapshot(i, "LAYER ON");
@@ -2762,25 +3112,33 @@ impl H7CAD {
                         let layer_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         let color_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
                         if let Ok(idx) = color_str.parse::<i16>() {
-                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(&layer_name) {
+                            if let Some(l) = self.tabs[i].scene.document.layers.get_mut(&layer_name)
+                            {
                                 l.color = crate::types::Color::from_index(idx);
                                 self.push_undo_snapshot(i, "LAYER COLOR");
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("LAYER: '{}' color set to ACI {}.", layer_name, idx));
+                                self.command_line.push_output(&format!(
+                                    "LAYER: '{}' color set to ACI {}.",
+                                    layer_name, idx
+                                ));
                             } else {
-                                self.command_line.push_error(&format!("LAYER: '{}' not found.", layer_name));
+                                self.command_line
+                                    .push_error(&format!("LAYER: '{}' not found.", layer_name));
                             }
                         } else {
-                            self.command_line.push_error("Usage: LAYER COLOR <name> <aci_index>");
+                            self.command_line
+                                .push_error("Usage: LAYER COLOR <name> <aci_index>");
                         }
                     }
                     "SET" | "S" | "CURRENT" => {
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         if self.tabs[i].scene.document.layers.contains(&name) {
                             self.tabs[i].layers.current_layer = name.clone();
-                            self.command_line.push_output(&format!("LAYER: current layer set to '{}'.", name));
+                            self.command_line
+                                .push_output(&format!("LAYER: current layer set to '{}'.", name));
                         } else {
-                            self.command_line.push_error(&format!("LAYER: '{}' not found.", name));
+                            self.command_line
+                                .push_error(&format!("LAYER: '{}' not found.", name));
                         }
                     }
                     _ => {
@@ -2793,25 +3151,35 @@ impl H7CAD {
 
             // ── UCS management ───────────────────────────────────────────
             cmd if cmd == "UCS" || cmd.starts_with("UCS ") => {
-                use acadrust::tables::Ucs;
+                use super::helpers::{ucs_rotated_z, ucs_to_wcs, ucs_z_axis};
                 use crate::types::Vector3;
-                use super::helpers::{ucs_to_wcs, ucs_z_axis, ucs_rotated_z};
+                use acadrust::tables::Ucs;
                 let parts: Vec<&str> = cmd.splitn(4, ' ').collect();
                 let sub = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "LIST" | "?" => {
-                        let active_name = self.tabs[i].active_ucs.as_ref()
+                        let active_name = self.tabs[i]
+                            .active_ucs
+                            .as_ref()
                             .map(|u| u.name.clone())
                             .unwrap_or_else(|| "WCS".into());
-                        let names: Vec<String> = self.tabs[i].scene.document
-                            .ucss.iter().map(|u| u.name.clone()).collect();
+                        let names: Vec<String> = self.tabs[i]
+                            .scene
+                            .document
+                            .ucss
+                            .iter()
+                            .map(|u| u.name.clone())
+                            .collect();
                         if names.is_empty() {
                             self.command_line.push_output(&format!(
-                                "Active UCS: {}  |  No named UCSs defined.", active_name
+                                "Active UCS: {}  |  No named UCSs defined.",
+                                active_name
                             ));
                         } else {
                             self.command_line.push_output(&format!(
-                                "Active UCS: {}  |  Named: {}", active_name, names.join(", ")
+                                "Active UCS: {}  |  Named: {}",
+                                active_name,
+                                names.join(", ")
                             ));
                         }
                     }
@@ -2831,7 +3199,8 @@ impl H7CAD {
                             };
                             self.tabs[i].scene.document.ucss.add_or_replace(ucs);
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!("UCS '{}' saved.", name));
+                            self.command_line
+                                .push_output(&format!("UCS '{}' saved.", name));
                         }
                     }
                     "DELETE" | "DEL" | "D" => {
@@ -2840,14 +3209,17 @@ impl H7CAD {
                             self.command_line.push_error("Usage: UCS DELETE <name>");
                         } else if self.tabs[i].scene.document.ucss.remove(&name).is_some() {
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!("UCS '{}' deleted.", name));
+                            self.command_line
+                                .push_output(&format!("UCS '{}' deleted.", name));
                         } else {
-                            self.command_line.push_error(&format!("UCS '{}' not found.", name));
+                            self.command_line
+                                .push_error(&format!("UCS '{}' not found.", name));
                         }
                     }
                     "W" | "WORLD" => {
                         self.tabs[i].active_ucs = None;
-                        self.command_line.push_output("UCS reset to World Coordinate System.");
+                        self.command_line
+                            .push_output("UCS reset to World Coordinate System.");
                     }
                     // UCS ORIGIN x,y,z  — shift the active UCS origin, keep axes
                     "ORIGIN" | "O" => {
@@ -2859,9 +3231,13 @@ impl H7CAD {
                             } else {
                                 pt
                             };
-                            let ucs = self.tabs[i].active_ucs.get_or_insert_with(|| Ucs::new("*ACTIVE*"));
+                            let ucs = self.tabs[i]
+                                .active_ucs
+                                .get_or_insert_with(|| Ucs::new("*ACTIVE*"));
                             ucs.origin = Vector3::new(
-                                wcs_origin.x as f64, wcs_origin.y as f64, wcs_origin.z as f64,
+                                wcs_origin.x as f64,
+                                wcs_origin.y as f64,
+                                wcs_origin.z as f64,
                             );
                             self.command_line.push_output(&format!(
                                 "UCS origin set to ({:.4}, {:.4}, {:.4}).",
@@ -2877,35 +3253,40 @@ impl H7CAD {
                         if let Some(angle_deg) = deg {
                             let rad = angle_deg.to_radians();
                             let current = self.tabs[i].active_ucs.as_ref();
-                            let origin = current.map(|u| {
-                                glam::Vec3::new(
-                                    u.origin.x as f32, u.origin.y as f32, u.origin.z as f32,
-                                )
-                            }).unwrap_or(glam::Vec3::ZERO);
+                            let origin = current
+                                .map(|u| {
+                                    glam::Vec3::new(
+                                        u.origin.x as f32,
+                                        u.origin.y as f32,
+                                        u.origin.z as f32,
+                                    )
+                                })
+                                .unwrap_or(glam::Vec3::ZERO);
                             let mut new_ucs = ucs_rotated_z(origin, rad);
                             // If already had axes, compose rotation on top
                             if let Some(ref ucs) = self.tabs[i].active_ucs {
                                 let old_x = glam::Vec3::new(
-                                    ucs.x_axis.x as f32, ucs.x_axis.y as f32, ucs.x_axis.z as f32,
+                                    ucs.x_axis.x as f32,
+                                    ucs.x_axis.y as f32,
+                                    ucs.x_axis.z as f32,
                                 );
                                 let old_y = glam::Vec3::new(
-                                    ucs.y_axis.x as f32, ucs.y_axis.y as f32, ucs.y_axis.z as f32,
+                                    ucs.y_axis.x as f32,
+                                    ucs.y_axis.y as f32,
+                                    ucs.y_axis.z as f32,
                                 );
                                 let z_ax = ucs_z_axis(ucs);
                                 let rot = glam::Quat::from_axis_angle(z_ax, rad);
                                 let nx = rot * old_x;
                                 let ny = rot * old_y;
-                                new_ucs.x_axis = Vector3::new(
-                                    nx.x as f64, nx.y as f64, nx.z as f64,
-                                );
-                                new_ucs.y_axis = Vector3::new(
-                                    ny.x as f64, ny.y as f64, ny.z as f64,
-                                );
+                                new_ucs.x_axis =
+                                    Vector3::new(nx.x as f64, nx.y as f64, nx.z as f64);
+                                new_ucs.y_axis =
+                                    Vector3::new(ny.x as f64, ny.y as f64, ny.z as f64);
                             }
                             self.tabs[i].active_ucs = Some(new_ucs);
-                            self.command_line.push_output(&format!(
-                                "UCS rotated {:.2}° around Z.", angle_deg
-                            ));
+                            self.command_line
+                                .push_output(&format!("UCS rotated {:.2}° around Z.", angle_deg));
                         } else {
                             self.command_line.push_error("Usage: UCS Z <angle_degrees>");
                         }
@@ -2915,19 +3296,24 @@ impl H7CAD {
                         let deg: Option<f32> = parts.get(2).and_then(|s| s.trim().parse().ok());
                         if let Some(angle_deg) = deg {
                             let rad = angle_deg.to_radians();
-                            let ucs = self.tabs[i].active_ucs.get_or_insert_with(|| Ucs::new("*ACTIVE*"));
+                            let ucs = self.tabs[i]
+                                .active_ucs
+                                .get_or_insert_with(|| Ucs::new("*ACTIVE*"));
                             let x_ax = glam::Vec3::new(
-                                ucs.x_axis.x as f32, ucs.x_axis.y as f32, ucs.x_axis.z as f32,
+                                ucs.x_axis.x as f32,
+                                ucs.x_axis.y as f32,
+                                ucs.x_axis.z as f32,
                             );
                             let old_y = glam::Vec3::new(
-                                ucs.y_axis.x as f32, ucs.y_axis.y as f32, ucs.y_axis.z as f32,
+                                ucs.y_axis.x as f32,
+                                ucs.y_axis.y as f32,
+                                ucs.y_axis.z as f32,
                             );
                             let rot = glam::Quat::from_axis_angle(x_ax, rad);
                             let ny = rot * old_y;
                             ucs.y_axis = Vector3::new(ny.x as f64, ny.y as f64, ny.z as f64);
-                            self.command_line.push_output(&format!(
-                                "UCS rotated {:.2}° around X.", angle_deg
-                            ));
+                            self.command_line
+                                .push_output(&format!("UCS rotated {:.2}° around X.", angle_deg));
                         } else {
                             self.command_line.push_error("Usage: UCS X <angle_degrees>");
                         }
@@ -2937,19 +3323,24 @@ impl H7CAD {
                         let deg: Option<f32> = parts.get(2).and_then(|s| s.trim().parse().ok());
                         if let Some(angle_deg) = deg {
                             let rad = angle_deg.to_radians();
-                            let ucs = self.tabs[i].active_ucs.get_or_insert_with(|| Ucs::new("*ACTIVE*"));
+                            let ucs = self.tabs[i]
+                                .active_ucs
+                                .get_or_insert_with(|| Ucs::new("*ACTIVE*"));
                             let y_ax = glam::Vec3::new(
-                                ucs.y_axis.x as f32, ucs.y_axis.y as f32, ucs.y_axis.z as f32,
+                                ucs.y_axis.x as f32,
+                                ucs.y_axis.y as f32,
+                                ucs.y_axis.z as f32,
                             );
                             let old_x = glam::Vec3::new(
-                                ucs.x_axis.x as f32, ucs.x_axis.y as f32, ucs.x_axis.z as f32,
+                                ucs.x_axis.x as f32,
+                                ucs.x_axis.y as f32,
+                                ucs.x_axis.z as f32,
                             );
                             let rot = glam::Quat::from_axis_angle(y_ax, rad);
                             let nx = rot * old_x;
                             ucs.x_axis = Vector3::new(nx.x as f64, nx.y as f64, nx.z as f64);
-                            self.command_line.push_output(&format!(
-                                "UCS rotated {:.2}° around Y.", angle_deg
-                            ));
+                            self.command_line
+                                .push_output(&format!("UCS rotated {:.2}° around Y.", angle_deg));
                         } else {
                             self.command_line.push_error("Usage: UCS Y <angle_degrees>");
                         }
@@ -2959,7 +3350,8 @@ impl H7CAD {
                         let name = sub.clone();
                         if let Some(named) = self.tabs[i].scene.document.ucss.get(&name).cloned() {
                             self.tabs[i].active_ucs = Some(named);
-                            self.command_line.push_output(&format!("UCS '{}' activated.", name));
+                            self.command_line
+                                .push_output(&format!("UCS '{}' activated.", name));
                         } else {
                             self.command_line.push_error(&format!(
                                 "UCS '{}' not found.  Usage: UCS LIST | SAVE <name> | DELETE <name> | W | ORIGIN x,y,z | X/Y/Z <angle>",
@@ -2976,14 +3368,18 @@ impl H7CAD {
                 let sub = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "LIST" | "?" => {
-                        let views: Vec<String> = self.tabs[i].scene.document
-                            .views.iter().map(|v| v.name.clone()).collect();
+                        let views: Vec<String> = self.tabs[i]
+                            .scene
+                            .document
+                            .views
+                            .iter()
+                            .map(|v| v.name.clone())
+                            .collect();
                         if views.is_empty() {
                             self.command_line.push_output("No named views saved.");
                         } else {
-                            self.command_line.push_output(&format!(
-                                "Named views: {}", views.join(", ")
-                            ));
+                            self.command_line
+                                .push_output(&format!("Named views: {}", views.join(", ")));
                         }
                     }
                     "SAVE" | "S" => {
@@ -2993,7 +3389,8 @@ impl H7CAD {
                         } else {
                             let new_view = self.tabs[i].scene.current_as_named_view(&name);
                             self.tabs[i].scene.document.views.add_or_replace(new_view);
-                            self.command_line.push_output(&format!("View '{}' saved.", name));
+                            self.command_line
+                                .push_output(&format!("View '{}' saved.", name));
                         }
                     }
                     "DELETE" | "DEL" | "D" => {
@@ -3002,9 +3399,11 @@ impl H7CAD {
                             self.command_line.push_error("Usage: VIEW DELETE <name>");
                         } else {
                             if self.tabs[i].scene.document.views.remove(&name).is_some() {
-                                self.command_line.push_output(&format!("View '{}' deleted.", name));
+                                self.command_line
+                                    .push_output(&format!("View '{}' deleted.", name));
                             } else {
-                                self.command_line.push_error(&format!("View '{}' not found.", name));
+                                self.command_line
+                                    .push_error(&format!("View '{}' not found.", name));
                             }
                         }
                     }
@@ -3016,9 +3415,11 @@ impl H7CAD {
                             let found = self.tabs[i].scene.document.views.get(&name).cloned();
                             if let Some(v) = found {
                                 self.tabs[i].scene.restore_named_view(&v);
-                                self.command_line.push_output(&format!("View '{}' restored.", v.name));
+                                self.command_line
+                                    .push_output(&format!("View '{}' restored.", v.name));
                             } else {
-                                self.command_line.push_error(&format!("View '{}' not found.", name));
+                                self.command_line
+                                    .push_error(&format!("View '{}' not found.", name));
                             }
                         }
                     }
@@ -3028,7 +3429,8 @@ impl H7CAD {
                         let found = self.tabs[i].scene.document.views.get(&name).cloned();
                         if let Some(v) = found {
                             self.tabs[i].scene.restore_named_view(&v);
-                            self.command_line.push_output(&format!("View '{}' restored.", v.name));
+                            self.command_line
+                                .push_output(&format!("View '{}' restored.", v.name));
                         } else {
                             self.command_line.push_error(
                                 "Usage: VIEW LIST | VIEW SAVE <name> | VIEW RESTORE <name> | VIEW DELETE <name>"
@@ -3041,7 +3443,7 @@ impl H7CAD {
             // ── DimStyle management ───────────────────────────────────────
             // TABLESTYLE — Table Style Manager.
             cmd if cmd == "TABLESTYLE" || cmd == "TS" || cmd.starts_with("TABLESTYLE ") => {
-                use acadrust::objects::{TableStyle, ObjectType};
+                use acadrust::objects::{ObjectType, TableStyle};
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
@@ -3051,14 +3453,28 @@ impl H7CAD {
                     }
                     "LIST" | "?" => {
                         let doc = &self.tabs[i].scene.document;
-                        let styles: Vec<String> = doc.objects.values()
-                            .filter_map(|o| if let ObjectType::TableStyle(s) = o { Some(s) } else { None })
-                            .map(|s| format!("{}  (h_margin:{:.2} v_margin:{:.2})", s.name, s.horizontal_margin, s.vertical_margin))
+                        let styles: Vec<String> = doc
+                            .objects
+                            .values()
+                            .filter_map(|o| {
+                                if let ObjectType::TableStyle(s) = o {
+                                    Some(s)
+                                } else {
+                                    None
+                                }
+                            })
+                            .map(|s| {
+                                format!(
+                                    "{}  (h_margin:{:.2} v_margin:{:.2})",
+                                    s.name, s.horizontal_margin, s.vertical_margin
+                                )
+                            })
                             .collect();
                         if styles.is_empty() {
                             self.command_line.push_output("No table styles.");
                         } else {
-                            self.command_line.push_output(&format!("TableStyles:\n  {}", styles.join("\n  ")));
+                            self.command_line
+                                .push_output(&format!("TableStyles:\n  {}", styles.join("\n  ")));
                         }
                     }
                     "NEW" | "N" => {
@@ -3071,23 +3487,30 @@ impl H7CAD {
                                 matches!(o, ObjectType::TableStyle(s) if s.name.eq_ignore_ascii_case(&name))
                             });
                             if exists {
-                                self.command_line.push_error(&format!("TABLESTYLE: '{}' already exists.", name));
+                                self.command_line
+                                    .push_error(&format!("TABLESTYLE: '{}' already exists.", name));
                             } else {
                                 self.push_undo_snapshot(i, "TABLESTYLE NEW");
                                 let mut style = TableStyle::standard();
                                 style.name = name.clone();
-                                let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
+                                let nh = acadrust::Handle::new(
+                                    self.tabs[i].scene.document.next_handle(),
+                                );
                                 style.handle = nh;
-                                self.tabs[i].scene.document.objects.insert(nh, ObjectType::TableStyle(style));
+                                self.tabs[i]
+                                    .scene
+                                    .document
+                                    .objects
+                                    .insert(nh, ObjectType::TableStyle(style));
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("TABLESTYLE: '{}' created.", name));
+                                self.command_line
+                                    .push_output(&format!("TABLESTYLE: '{}' created.", name));
                             }
                         }
                     }
                     _ => {
-                        self.command_line.push_error(
-                            "Usage: TABLESTYLE [LIST|NEW <name>]"
-                        );
+                        self.command_line
+                            .push_error("Usage: TABLESTYLE [LIST|NEW <name>]");
                     }
                 }
             }
@@ -3111,20 +3534,26 @@ impl H7CAD {
                     "LIST" | "?" => {
                         let doc = &self.tabs[i].scene.document;
                         let current = &doc.header.multiline_style;
-                        let styles: Vec<String> = doc.objects.values()
-                            .filter_map(|o| if let ObjectType::MLineStyle(s) = o { Some(s) } else { None })
+                        let styles: Vec<String> = doc
+                            .objects
+                            .values()
+                            .filter_map(|o| {
+                                if let ObjectType::MLineStyle(s) = o {
+                                    Some(s)
+                                } else {
+                                    None
+                                }
+                            })
                             .map(|s| {
                                 let cur = if &s.name == current { " (current)" } else { "" };
-                                format!("{}  [{}]{}",
-                                    s.name,
-                                    s.elements.len(),
-                                    cur)
+                                format!("{}  [{}]{}", s.name, s.elements.len(), cur)
                             })
                             .collect();
                         if styles.is_empty() {
                             self.command_line.push_output("No multiline styles.");
                         } else {
-                            self.command_line.push_output(&format!("MLineStyles:\n  {}", styles.join("\n  ")));
+                            self.command_line
+                                .push_output(&format!("MLineStyles:\n  {}", styles.join("\n  ")));
                         }
                     }
                     "NEW" | "N" => {
@@ -3137,18 +3566,24 @@ impl H7CAD {
                                 matches!(o, ObjectType::MLineStyle(s) if s.name.eq_ignore_ascii_case(&name))
                             });
                             if exists {
-                                self.command_line.push_error(&format!("MLSTYLE: '{}' already exists.", name));
+                                self.command_line
+                                    .push_error(&format!("MLSTYLE: '{}' already exists.", name));
                             } else {
                                 self.push_undo_snapshot(i, "MLSTYLE NEW");
                                 let mut style = MLineStyle::standard();
                                 style.name = name.clone();
-                                let nh = acadrust::Handle::new(self.tabs[i].scene.document.next_handle());
-                                style.handle = nh;
-                                self.tabs[i].scene.document.objects.insert(
-                                    nh, ObjectType::MLineStyle(style)
+                                let nh = acadrust::Handle::new(
+                                    self.tabs[i].scene.document.next_handle(),
                                 );
+                                style.handle = nh;
+                                self.tabs[i]
+                                    .scene
+                                    .document
+                                    .objects
+                                    .insert(nh, ObjectType::MLineStyle(style));
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("MLSTYLE: '{}' created.", name));
+                                self.command_line
+                                    .push_output(&format!("MLSTYLE: '{}' created.", name));
                             }
                         }
                     }
@@ -3165,43 +3600,58 @@ impl H7CAD {
                                 self.push_undo_snapshot(i, "MLSTYLE SET");
                                 self.tabs[i].scene.document.header.multiline_style = name.clone();
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("MLSTYLE: current style set to '{}'.", name));
+                                self.command_line.push_output(&format!(
+                                    "MLSTYLE: current style set to '{}'.",
+                                    name
+                                ));
                             } else {
-                                self.command_line.push_error(&format!("MLSTYLE: '{}' not found.", name));
+                                self.command_line
+                                    .push_error(&format!("MLSTYLE: '{}' not found.", name));
                             }
                         }
                     }
                     "DEL" | "DELETE" => {
                         let name = parts.get(1).copied().unwrap_or("").to_string();
                         if name.is_empty() || name.eq_ignore_ascii_case("Standard") {
-                            self.command_line.push_error("Cannot delete the Standard style.");
+                            self.command_line
+                                .push_error("Cannot delete the Standard style.");
                         } else {
                             let doc = &self.tabs[i].scene.document;
-                            let handle = doc.objects.iter()
-                                .find_map(|(&h, o)| {
-                                    if let ObjectType::MLineStyle(s) = o {
-                                        if s.name.eq_ignore_ascii_case(&name) { Some(h) } else { None }
-                                    } else { None }
-                                });
+                            let handle = doc.objects.iter().find_map(|(&h, o)| {
+                                if let ObjectType::MLineStyle(s) = o {
+                                    if s.name.eq_ignore_ascii_case(&name) {
+                                        Some(h)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            });
                             if let Some(h) = handle {
                                 self.push_undo_snapshot(i, "MLSTYLE DEL");
                                 self.tabs[i].scene.document.objects.remove(&h);
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("MLSTYLE: '{}' deleted.", name));
+                                self.command_line
+                                    .push_output(&format!("MLSTYLE: '{}' deleted.", name));
                             } else {
-                                self.command_line.push_error(&format!("MLSTYLE: '{}' not found.", name));
+                                self.command_line
+                                    .push_error(&format!("MLSTYLE: '{}' not found.", name));
                             }
                         }
                     }
                     _ => {
-                        self.command_line.push_error(
-                            "Usage: MLSTYLE [LIST|NEW <name>|SET <name>|DEL <name>]"
-                        );
+                        self.command_line
+                            .push_error("Usage: MLSTYLE [LIST|NEW <name>|SET <name>|DEL <name>]");
                     }
                 }
             }
 
-            cmd if cmd == "DIMSTYLE" || cmd == "DDIM" || cmd.starts_with("DIMSTYLE ") || cmd.starts_with("DDIM ") => {
+            cmd if cmd == "DIMSTYLE"
+                || cmd == "DDIM"
+                || cmd.starts_with("DIMSTYLE ")
+                || cmd.starts_with("DDIM ") =>
+            {
                 use acadrust::tables::DimStyle;
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
@@ -3212,14 +3662,18 @@ impl H7CAD {
                         return Task::done(Message::DimStyleDialogOpen);
                     }
                     "LIST" | "?" => {
-                        let styles: Vec<String> = self.tabs[i].scene.document
-                            .dim_styles.iter()
+                        let styles: Vec<String> = self.tabs[i]
+                            .scene
+                            .document
+                            .dim_styles
+                            .iter()
                             .map(|s| format!("{}(txt:{:.2} asz:{:.2})", s.name, s.dimtxt, s.dimasz))
                             .collect();
                         if styles.is_empty() {
                             self.command_line.push_output("No dim styles defined.");
                         } else {
-                            self.command_line.push_output(&format!("DimStyles: {}", styles.join(", ")));
+                            self.command_line
+                                .push_output(&format!("DimStyles: {}", styles.join(", ")));
                         }
                     }
                     "NEW" | "N" => {
@@ -3227,13 +3681,15 @@ impl H7CAD {
                         if name.is_empty() {
                             self.command_line.push_error("Usage: DIMSTYLE NEW <name>");
                         } else if self.tabs[i].scene.document.dim_styles.contains(&name) {
-                            self.command_line.push_error(&format!("DIMSTYLE: '{}' already exists.", name));
+                            self.command_line
+                                .push_error(&format!("DIMSTYLE: '{}' already exists.", name));
                         } else {
                             let style = DimStyle::new(&name);
                             let _ = self.tabs[i].scene.document.dim_styles.add(style);
                             self.push_undo_snapshot(i, "DIMSTYLE NEW");
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!("DIMSTYLE: '{}' created.", name));
+                            self.command_line
+                                .push_output(&format!("DIMSTYLE: '{}' created.", name));
                         }
                     }
                     "SET" | "S" => {
@@ -3243,21 +3699,49 @@ impl H7CAD {
                         let prop = parts.get(2).map(|s| s.to_lowercase()).unwrap_or_default();
                         let val_str = parts.get(3).map(|s| s.trim()).unwrap_or("");
                         if let Ok(val) = val_str.parse::<f64>() {
-                            if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&style_name) {
+                            if let Some(ds) =
+                                self.tabs[i].scene.document.dim_styles.get_mut(&style_name)
+                            {
                                 match prop.as_str() {
-                                    "dimtxt"    => { ds.dimtxt   = val; }
-                                    "dimasz"    => { ds.dimasz   = val; }
-                                    "dimdli"    => { ds.dimdli   = val; }
-                                    "dimexo"    => { ds.dimexo   = val; }
-                                    "dimexe"    => { ds.dimexe   = val; }
-                                    "dimgap"    => { ds.dimgap   = val; }
-                                    "dimscale"  => { ds.dimscale = val; }
-                                    "dimlfac"   => { ds.dimlfac  = val; }
-                                    "dimdle"    => { ds.dimdle   = val; }
-                                    "dimtvp"    => { ds.dimtvp   = val; }
-                                    "dimcen"    => { ds.dimcen   = val; }
-                                    "dimtsz"    => { ds.dimtsz   = val; }
-                                    "dimfxl"    => { ds.dimfxl   = val; }
+                                    "dimtxt" => {
+                                        ds.dimtxt = val;
+                                    }
+                                    "dimasz" => {
+                                        ds.dimasz = val;
+                                    }
+                                    "dimdli" => {
+                                        ds.dimdli = val;
+                                    }
+                                    "dimexo" => {
+                                        ds.dimexo = val;
+                                    }
+                                    "dimexe" => {
+                                        ds.dimexe = val;
+                                    }
+                                    "dimgap" => {
+                                        ds.dimgap = val;
+                                    }
+                                    "dimscale" => {
+                                        ds.dimscale = val;
+                                    }
+                                    "dimlfac" => {
+                                        ds.dimlfac = val;
+                                    }
+                                    "dimdle" => {
+                                        ds.dimdle = val;
+                                    }
+                                    "dimtvp" => {
+                                        ds.dimtvp = val;
+                                    }
+                                    "dimcen" => {
+                                        ds.dimcen = val;
+                                    }
+                                    "dimtsz" => {
+                                        ds.dimtsz = val;
+                                    }
+                                    "dimfxl" => {
+                                        ds.dimfxl = val;
+                                    }
                                     _ => {
                                         self.command_line.push_error(&format!(
                                             "DIMSTYLE: unknown property '{}'. Try: dimtxt dimasz dimdli dimexo dimexe dimgap dimscale dimlfac dimdle dimcen dimtsz", prop
@@ -3267,17 +3751,21 @@ impl H7CAD {
                                 }
                                 self.push_undo_snapshot(i, "DIMSTYLE SET");
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("DIMSTYLE: '{style_name}'.{prop} = {val:.3}"));
+                                self.command_line.push_output(&format!(
+                                    "DIMSTYLE: '{style_name}'.{prop} = {val:.3}"
+                                ));
                             } else {
-                                self.command_line.push_error(&format!("DIMSTYLE: '{}' not found.", style_name));
+                                self.command_line
+                                    .push_error(&format!("DIMSTYLE: '{}' not found.", style_name));
                             }
                         } else {
-                            self.command_line.push_error("Usage: DIMSTYLE SET <name> <property> <value>");
+                            self.command_line
+                                .push_error("Usage: DIMSTYLE SET <name> <property> <value>");
                         }
                     }
                     _ => {
                         self.command_line.push_info(
-                            "Usage: DIMSTYLE LIST | NEW <name> | SET <name> <prop> <val>"
+                            "Usage: DIMSTYLE LIST | NEW <name> | SET <name> <prop> <val>",
                         );
                     }
                 }
@@ -3285,40 +3773,66 @@ impl H7CAD {
 
             // ── MLeader Style management ──────────────────────────────────
             cmd if cmd == "MLEADERSTYLE" || cmd.starts_with("MLEADERSTYLE ") => {
-                use acadrust::objects::{ObjectType, MultiLeaderStyle};
+                use acadrust::objects::{MultiLeaderStyle, ObjectType};
                 let raw_rest = cmd.trim_start_matches("MLEADERSTYLE").trim();
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "LIST" | "?" => {
-                        let styles: Vec<String> = self.tabs[i].scene.document
-                            .objects.values()
-                            .filter_map(|o| if let ObjectType::MultiLeaderStyle(s) = o { Some(format!("{}(txt:{:.2} asz:{:.2})", s.name, s.text_height, s.arrowhead_size)) } else { None })
+                        let styles: Vec<String> = self.tabs[i]
+                            .scene
+                            .document
+                            .objects
+                            .values()
+                            .filter_map(|o| {
+                                if let ObjectType::MultiLeaderStyle(s) = o {
+                                    Some(format!(
+                                        "{}(txt:{:.2} asz:{:.2})",
+                                        s.name, s.text_height, s.arrowhead_size
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
                             .collect();
                         let current = &self.tabs[i].active_mleader_style;
                         if styles.is_empty() {
-                            self.command_line.push_output(&format!("MLeader styles: (none)  active: {current}"));
+                            self.command_line
+                                .push_output(&format!("MLeader styles: (none)  active: {current}"));
                         } else {
-                            self.command_line.push_output(&format!("MLeader styles: {}  active: {current}", styles.join(", ")));
+                            self.command_line.push_output(&format!(
+                                "MLeader styles: {}  active: {current}",
+                                styles.join(", ")
+                            ));
                         }
                     }
                     "NEW" | "N" => {
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         if name.is_empty() {
-                            self.command_line.push_error("Usage: MLEADERSTYLE NEW <name>");
+                            self.command_line
+                                .push_error("Usage: MLEADERSTYLE NEW <name>");
                         } else {
-                            let already_exists = self.tabs[i].scene.document.objects.values()
-                                .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
+                            let already_exists = self.tabs[i].scene.document.objects.values().any(
+                                |o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name),
+                            );
                             if already_exists {
-                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' already exists.", name));
+                                self.command_line.push_error(&format!(
+                                    "MLEADERSTYLE: '{}' already exists.",
+                                    name
+                                ));
                             } else {
                                 let handle = self.tabs[i].scene.document.allocate_handle();
                                 let mut style = MultiLeaderStyle::new(&name);
                                 style.handle = handle;
-                                self.tabs[i].scene.document.objects.insert(handle, ObjectType::MultiLeaderStyle(style));
+                                self.tabs[i]
+                                    .scene
+                                    .document
+                                    .objects
+                                    .insert(handle, ObjectType::MultiLeaderStyle(style));
                                 self.push_undo_snapshot(i, "MLEADERSTYLE NEW");
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("MLEADERSTYLE: '{}' created.", name));
+                                self.command_line
+                                    .push_output(&format!("MLEADERSTYLE: '{}' created.", name));
                             }
                         }
                     }
@@ -3329,14 +3843,36 @@ impl H7CAD {
                         let prop = parts.get(2).map(|s| s.to_lowercase()).unwrap_or_default();
                         let val_str = parts.get(3).map(|s| s.trim()).unwrap_or("");
                         if let Ok(val) = val_str.parse::<f64>() {
-                            let style_entry = self.tabs[i].scene.document.objects.values_mut()
-                                .find_map(|o| if let ObjectType::MultiLeaderStyle(s) = o { if s.name == style_name { Some(s) } else { None } } else { None });
+                            let style_entry = self.tabs[i]
+                                .scene
+                                .document
+                                .objects
+                                .values_mut()
+                                .find_map(|o| {
+                                    if let ObjectType::MultiLeaderStyle(s) = o {
+                                        if s.name == style_name {
+                                            Some(s)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                });
                             if let Some(s) = style_entry {
                                 match prop.as_str() {
-                                    "text_height" | "textheight" | "txth" => { s.text_height = val; }
-                                    "arrowhead_size" | "arrowsize" | "asz" => { s.arrowhead_size = val; }
-                                    "landing_distance" | "landing" | "dogleg" => { s.landing_distance = val; }
-                                    "landing_gap" | "gap" => { s.landing_gap = val; }
+                                    "text_height" | "textheight" | "txth" => {
+                                        s.text_height = val;
+                                    }
+                                    "arrowhead_size" | "arrowsize" | "asz" => {
+                                        s.arrowhead_size = val;
+                                    }
+                                    "landing_distance" | "landing" | "dogleg" => {
+                                        s.landing_distance = val;
+                                    }
+                                    "landing_gap" | "gap" => {
+                                        s.landing_gap = val;
+                                    }
                                     _ => {
                                         self.command_line.push_error(&format!(
                                             "MLEADERSTYLE: unknown property '{}'. Try: text_height arrowhead_size landing_distance landing_gap", prop
@@ -3346,26 +3882,38 @@ impl H7CAD {
                                 }
                                 self.push_undo_snapshot(i, "MLEADERSTYLE SET");
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("MLEADERSTYLE: '{style_name}'.{prop} = {val:.3}"));
+                                self.command_line.push_output(&format!(
+                                    "MLEADERSTYLE: '{style_name}'.{prop} = {val:.3}"
+                                ));
                             } else {
-                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' not found.", style_name));
+                                self.command_line.push_error(&format!(
+                                    "MLEADERSTYLE: '{}' not found.",
+                                    style_name
+                                ));
                             }
                         } else {
-                            self.command_line.push_error("Usage: MLEADERSTYLE SET <name> <property> <value>");
+                            self.command_line
+                                .push_error("Usage: MLEADERSTYLE SET <name> <property> <value>");
                         }
                     }
                     "CURRENT" | "C" | "ACTIVE" => {
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         if name.is_empty() {
-                            self.command_line.push_output(&format!("Current MLeader style: {}", self.tabs[i].active_mleader_style));
+                            self.command_line.push_output(&format!(
+                                "Current MLeader style: {}",
+                                self.tabs[i].active_mleader_style
+                            ));
                         } else {
                             let exists = name == "Standard" || self.tabs[i].scene.document.objects.values()
                                 .any(|o| matches!(o, ObjectType::MultiLeaderStyle(s) if s.name == name));
                             if exists {
                                 self.tabs[i].active_mleader_style = name.clone();
-                                self.command_line.push_output(&format!("MLEADERSTYLE: current style set to '{name}'."));
+                                self.command_line.push_output(&format!(
+                                    "MLEADERSTYLE: current style set to '{name}'."
+                                ));
                             } else {
-                                self.command_line.push_error(&format!("MLEADERSTYLE: '{}' not found.", name));
+                                self.command_line
+                                    .push_error(&format!("MLEADERSTYLE: '{}' not found.", name));
                             }
                         }
                     }
@@ -3378,7 +3926,11 @@ impl H7CAD {
             }
 
             // ── TextStyle / Style management ──────────────────────────────
-            cmd if cmd == "STYLE" || cmd == "TEXTSTYLE" || cmd.starts_with("STYLE ") || cmd.starts_with("TEXTSTYLE ") => {
+            cmd if cmd == "STYLE"
+                || cmd == "TEXTSTYLE"
+                || cmd.starts_with("STYLE ")
+                || cmd.starts_with("TEXTSTYLE ") =>
+            {
                 let (prefix, rest) = if cmd.starts_with("TEXTSTYLE") {
                     ("TEXTSTYLE", cmd.trim_start_matches("TEXTSTYLE").trim())
                 } else {
@@ -3391,38 +3943,54 @@ impl H7CAD {
                         return Task::done(Message::TextStyleDialogOpen);
                     }
                     "" | "LIST" | "?" => {
-                        let styles: Vec<String> = self.tabs[i].scene.document
-                            .text_styles.iter()
-                            .map(|s| format!("{} (font: {}, w: {:.2}, oblique: {:.1}°)",
-                                s.name, s.font_file, s.width_factor, s.oblique_angle.to_degrees()))
+                        let styles: Vec<String> = self.tabs[i]
+                            .scene
+                            .document
+                            .text_styles
+                            .iter()
+                            .map(|s| {
+                                format!(
+                                    "{} (font: {}, w: {:.2}, oblique: {:.1}°)",
+                                    s.name,
+                                    s.font_file,
+                                    s.width_factor,
+                                    s.oblique_angle.to_degrees()
+                                )
+                            })
                             .collect();
                         if styles.is_empty() {
                             self.command_line.push_output("No text styles defined.");
                         } else {
-                            self.command_line.push_output(&format!("Text styles: {}", styles.join(" | ")));
+                            self.command_line
+                                .push_output(&format!("Text styles: {}", styles.join(" | ")));
                         }
                     }
                     "SET" | "S" => {
                         // STYLE SET <name> — set active text style (for future text commands)
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("");
                         if self.tabs[i].scene.document.text_styles.get(name).is_some() {
-                            self.command_line.push_output(&format!("{prefix}: active style set to '{name}'."));
+                            self.command_line
+                                .push_output(&format!("{prefix}: active style set to '{name}'."));
                         } else {
-                            self.command_line.push_error(&format!("{prefix}: style '{name}' not found."));
+                            self.command_line
+                                .push_error(&format!("{prefix}: style '{name}' not found."));
                         }
                     }
                     "NEW" | "N" => {
                         let name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         if name.is_empty() {
-                            self.command_line.push_error(&format!("Usage: {prefix} NEW <name>"));
+                            self.command_line
+                                .push_error(&format!("Usage: {prefix} NEW <name>"));
                         } else if self.tabs[i].scene.document.text_styles.contains(&name) {
-                            self.command_line.push_error(&format!("{prefix}: style '{name}' already exists."));
+                            self.command_line
+                                .push_error(&format!("{prefix}: style '{name}' already exists."));
                         } else {
                             let style = acadrust::tables::TextStyle::new(&name);
                             let _ = self.tabs[i].scene.document.text_styles.add(style);
                             self.push_undo_snapshot(i, "STYLE NEW");
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!("{prefix}: style '{name}' created."));
+                            self.command_line
+                                .push_output(&format!("{prefix}: style '{name}' created."));
                         }
                     }
                     "FONT" | "F" => {
@@ -3430,14 +3998,20 @@ impl H7CAD {
                         let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         let font = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
                         if style_name.is_empty() || font.is_empty() {
-                            self.command_line.push_error(&format!("Usage: {prefix} FONT <style> <font_file>"));
-                        } else if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&style_name) {
+                            self.command_line
+                                .push_error(&format!("Usage: {prefix} FONT <style> <font_file>"));
+                        } else if let Some(s) =
+                            self.tabs[i].scene.document.text_styles.get_mut(&style_name)
+                        {
                             s.font_file = font.clone();
                             self.push_undo_snapshot(i, "STYLE FONT");
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(&format!("{prefix}: '{style_name}' font set to '{font}'."));
+                            self.command_line.push_output(&format!(
+                                "{prefix}: '{style_name}' font set to '{font}'."
+                            ));
                         } else {
-                            self.command_line.push_error(&format!("{prefix}: style '{style_name}' not found."));
+                            self.command_line
+                                .push_error(&format!("{prefix}: style '{style_name}' not found."));
                         }
                     }
                     "WIDTH" | "W" => {
@@ -3445,16 +4019,23 @@ impl H7CAD {
                         let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         let factor_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
                         if let Ok(factor) = factor_str.parse::<f64>() {
-                            if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&style_name) {
+                            if let Some(s) =
+                                self.tabs[i].scene.document.text_styles.get_mut(&style_name)
+                            {
                                 s.width_factor = factor;
                                 self.push_undo_snapshot(i, "STYLE WIDTH");
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("{prefix}: '{style_name}' width factor set to {factor:.3}."));
+                                self.command_line.push_output(&format!(
+                                    "{prefix}: '{style_name}' width factor set to {factor:.3}."
+                                ));
                             } else {
-                                self.command_line.push_error(&format!("{prefix}: style '{style_name}' not found."));
+                                self.command_line.push_error(&format!(
+                                    "{prefix}: style '{style_name}' not found."
+                                ));
                             }
                         } else {
-                            self.command_line.push_error(&format!("Usage: {prefix} WIDTH <style> <factor>"));
+                            self.command_line
+                                .push_error(&format!("Usage: {prefix} WIDTH <style> <factor>"));
                         }
                     }
                     "OBLIQUE" => {
@@ -3462,16 +4043,24 @@ impl H7CAD {
                         let style_name = parts.get(1).map(|s| s.trim()).unwrap_or("").to_string();
                         let angle_str = parts.get(2).map(|s| s.trim()).unwrap_or("");
                         if let Ok(deg) = angle_str.parse::<f64>() {
-                            if let Some(s) = self.tabs[i].scene.document.text_styles.get_mut(&style_name) {
+                            if let Some(s) =
+                                self.tabs[i].scene.document.text_styles.get_mut(&style_name)
+                            {
                                 s.oblique_angle = deg.to_radians();
                                 self.push_undo_snapshot(i, "STYLE OBLIQUE");
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("{prefix}: '{style_name}' oblique angle set to {deg:.1}°."));
+                                self.command_line.push_output(&format!(
+                                    "{prefix}: '{style_name}' oblique angle set to {deg:.1}°."
+                                ));
                             } else {
-                                self.command_line.push_error(&format!("{prefix}: style '{style_name}' not found."));
+                                self.command_line.push_error(&format!(
+                                    "{prefix}: style '{style_name}' not found."
+                                ));
                             }
                         } else {
-                            self.command_line.push_error(&format!("Usage: {prefix} OBLIQUE <style> <angle_degrees>"));
+                            self.command_line.push_error(&format!(
+                                "Usage: {prefix} OBLIQUE <style> <angle_degrees>"
+                            ));
                         }
                     }
                     _ => {
@@ -3483,20 +4072,28 @@ impl H7CAD {
             }
 
             // ── LINETYPE management ───────────────────────────────────────
-            cmd if cmd == "LINETYPE" || cmd == "LT" || cmd.starts_with("LINETYPE ") || cmd.starts_with("LT ") => {
+            cmd if cmd == "LINETYPE"
+                || cmd == "LT"
+                || cmd.starts_with("LINETYPE ")
+                || cmd.starts_with("LT ") =>
+            {
                 let raw_rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 let parts: Vec<&str> = raw_rest.split_whitespace().collect();
                 let sub = parts.get(0).map(|s| s.to_uppercase()).unwrap_or_default();
                 match sub.as_str() {
                     "" | "LIST" | "?" => {
-                        let ltypes: Vec<String> = self.tabs[i].scene.document
-                            .line_types.iter()
+                        let ltypes: Vec<String> = self.tabs[i]
+                            .scene
+                            .document
+                            .line_types
+                            .iter()
                             .map(|lt| format!("{} ({})", lt.name, lt.description))
                             .collect();
                         if ltypes.is_empty() {
                             self.command_line.push_output("No linetypes defined.");
                         } else {
-                            self.command_line.push_output(&format!("Linetypes: {}", ltypes.join(", ")));
+                            self.command_line
+                                .push_output(&format!("Linetypes: {}", ltypes.join(", ")));
                         }
                     }
                     _ => {
@@ -3568,18 +4165,30 @@ impl H7CAD {
                         total_defs, total_blocks
                     ));
                     for (block_name, defs) in per_block {
-                        self.command_line
-                            .push_info(&format!("  Block \"{}\" ({} attdef):", block_name, defs.len()));
+                        self.command_line.push_info(&format!(
+                            "  Block \"{}\" ({} attdef):",
+                            block_name,
+                            defs.len()
+                        ));
                         if defs.is_empty() {
-                            self.command_line.push_info("    (no AttributeDefinition entities)");
+                            self.command_line
+                                .push_info("    (no AttributeDefinition entities)");
                             continue;
                         }
                         for ad in defs {
                             let mut flag_tokens: Vec<&str> = Vec::new();
-                            if ad.flags.invisible { flag_tokens.push("INV"); }
-                            if ad.flags.constant  { flag_tokens.push("CONST"); }
-                            if ad.flags.verify    { flag_tokens.push("VERIFY"); }
-                            if ad.flags.preset    { flag_tokens.push("PRESET"); }
+                            if ad.flags.invisible {
+                                flag_tokens.push("INV");
+                            }
+                            if ad.flags.constant {
+                                flag_tokens.push("CONST");
+                            }
+                            if ad.flags.verify {
+                                flag_tokens.push("VERIFY");
+                            }
+                            if ad.flags.preset {
+                                flag_tokens.push("PRESET");
+                            }
                             let flag_str = if flag_tokens.is_empty() {
                                 "-".to_string()
                             } else {
@@ -3604,9 +4213,8 @@ impl H7CAD {
                 use crate::modules::view::vports_join::{join_rects, JoinRect};
 
                 if self.tabs[i].scene.current_layout == "Model" {
-                    self.command_line.push_error(
-                        "VPJOIN: switch to a paper space layout first.",
-                    );
+                    self.command_line
+                        .push_error("VPJOIN: switch to a paper space layout first.");
                     return Task::none();
                 }
 
@@ -3707,10 +4315,7 @@ impl H7CAD {
                     let h = common.handle;
 
                     if h.is_null() {
-                        issues.push(format!(
-                            "    NULL handle entity: {}",
-                            kind_label(e)
-                        ));
+                        issues.push(format!("    NULL handle entity: {}", kind_label(e)));
                     }
 
                     if !common.layer.is_empty() && !layer_names.contains(&common.layer) {
@@ -3785,22 +4390,16 @@ impl H7CAD {
                         continue;
                     }
                     if br.entity_handles.is_empty() {
-                        issues.push(format!(
-                            "    Block \"{}\" is empty (no entities)",
-                            br.name
-                        ));
+                        issues.push(format!("    Block \"{}\" is empty (no entities)", br.name));
                     }
                 }
 
                 if issues.is_empty() {
-                    self.command_line.push_output(
-                        "AUDIT: drawing passed — no integrity issues detected.",
-                    );
+                    self.command_line
+                        .push_output("AUDIT: drawing passed — no integrity issues detected.");
                 } else {
-                    self.command_line.push_output(&format!(
-                        "AUDIT: {} issue(s) detected:",
-                        issues.len()
-                    ));
+                    self.command_line
+                        .push_output(&format!("AUDIT: {} issue(s) detected:", issues.len()));
                     for line in &issues {
                         self.command_line.push_info(line);
                     }
@@ -3821,27 +4420,24 @@ impl H7CAD {
 
                 // Build (Handle, EntityType) list from the scope.
                 let selected = self.tabs[i].scene.selected_entities();
-                let entries: Vec<(acadrust::Handle, acadrust::EntityType)> =
-                    if !selected.is_empty() {
-                        selected
-                            .into_iter()
-                            .map(|(h, e)| (h, e.clone()))
-                            .collect()
-                    } else {
-                        self.tabs[i]
-                            .scene
-                            .document
-                            .entities()
-                            .filter_map(|e| {
-                                let handle = e.common().handle;
-                                if handle.is_null() {
-                                    None
-                                } else {
-                                    Some((handle, e.clone()))
-                                }
-                            })
-                            .collect()
-                    };
+                let entries: Vec<(acadrust::Handle, acadrust::EntityType)> = if !selected.is_empty()
+                {
+                    selected.into_iter().map(|(h, e)| (h, e.clone())).collect()
+                } else {
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .entities()
+                        .filter_map(|e| {
+                            let handle = e.common().handle;
+                            if handle.is_null() {
+                                None
+                            } else {
+                                Some((handle, e.clone()))
+                            }
+                        })
+                        .collect()
+                };
 
                 if entries.is_empty() {
                     self.command_line.push_info(
@@ -3874,10 +4470,10 @@ impl H7CAD {
             // WORKSPACECLOSE     — close the current workspace
             // WORKSPACEREFRESH   — re-scan the current root
             // WORKSPACETOGGLE    — show / hide the side panel
-            "WORKSPACE"        => return Task::done(Message::WorkspaceOpen),
-            "WORKSPACECLOSE"   => return Task::done(Message::WorkspaceClose),
+            "WORKSPACE" => return Task::done(Message::WorkspaceOpen),
+            "WORKSPACECLOSE" => return Task::done(Message::WorkspaceClose),
             "WORKSPACEREFRESH" => return Task::done(Message::WorkspaceRefresh),
-            "WORKSPACETOGGLE"  => return Task::done(Message::WorkspaceToggle),
+            "WORKSPACETOGGLE" => return Task::done(Message::WorkspaceToggle),
 
             // ── XCLIP: toggle / delete clipping on selected images & underlays ─
             // Sub-commands:
@@ -3896,11 +4492,13 @@ impl H7CAD {
                     .scene
                     .selected_entities()
                     .into_iter()
-                    .filter(|(_, e)| matches!(
-                        e,
-                        acadrust::EntityType::RasterImage(_)
-                            | acadrust::EntityType::Underlay(_)
-                    ))
+                    .filter(|(_, e)| {
+                        matches!(
+                            e,
+                            acadrust::EntityType::RasterImage(_)
+                                | acadrust::EntityType::Underlay(_)
+                        )
+                    })
                     .map(|(h, _)| h)
                     .collect();
                 if clippable_handles.is_empty() {
@@ -4043,10 +4641,12 @@ impl H7CAD {
                         let attdef_count = br
                             .entity_handles
                             .iter()
-                            .filter(|&&h| matches!(
-                                doc.get_entity(h),
-                                Some(acadrust::EntityType::AttributeDefinition(_))
-                            ))
+                            .filter(|&&h| {
+                                matches!(
+                                    doc.get_entity(h),
+                                    Some(acadrust::EntityType::AttributeDefinition(_))
+                                )
+                            })
                             .count();
                         (br.name.clone(), attdef_count)
                     })
@@ -4095,9 +4695,8 @@ impl H7CAD {
                     Some("INSERT") => {
                         let name = parts.get(2).map(|s| s.to_string());
                         let Some(name) = name else {
-                            self.command_line.push_info(
-                                "Usage: BLOCKPALETTE INSERT <blockname>",
-                            );
+                            self.command_line
+                                .push_info("Usage: BLOCKPALETTE INSERT <blockname>");
                             return Task::none();
                         };
                         if !user_blocks.iter().any(|(n, _)| n == &name) {
@@ -4119,12 +4718,12 @@ impl H7CAD {
                 }
             }
 
-            // ── TOOLPALETTES: informational — H7CAD uses the ribbon ────────
+            // ── TOOLPALETTES / TP: informational — H7CAD uses the ribbon ────
             // AutoCAD's Tool Palettes is a floating panel with drag-and-drop
             // tool tiles.  H7CAD's ribbon tabs (Home / Annotate / Insert /
             // View / Manage) already provide the equivalent surface; emit an
             // info message rather than a no-op.
-            "TOOLPALETTES" => {
+            "TOOLPALETTES" | "TP" => {
                 self.command_line.push_output(
                     "TOOLPALETTES: H7CAD uses the ribbon tabs (Home / Annotate / Insert / View / Manage) as the tool surface.",
                 );
@@ -4141,7 +4740,7 @@ impl H7CAD {
             //   CUILOAD   — load, MERGING into current maps (later wins)
             "CUIEXPORT" => return Task::done(Message::CuiExport),
             "CUIIMPORT" => return Task::done(Message::CuiImport),
-            "CUILOAD"   => return Task::done(Message::CuiLoad),
+            "CUILOAD" => return Task::done(Message::CuiLoad),
 
             // ── HORIZONTAL / VERTICAL / CASCADE: document window arrangement ─
             // Traditional AutoCAD MDI commands that arrange child drawing windows.
@@ -4151,8 +4750,8 @@ impl H7CAD {
             "HORIZONTAL" | "VERTICAL" | "CASCADE" => {
                 let mode = match cmd {
                     "HORIZONTAL" => "Tile Horizontal",
-                    "VERTICAL"   => "Tile Vertical",
-                    _            => "Cascade",
+                    "VERTICAL" => "Tile Vertical",
+                    _ => "Cascade",
                 };
                 let n = self.tabs.len();
                 if n <= 1 {
@@ -4337,9 +4936,8 @@ impl H7CAD {
                 let element = tokens.next().map(str::trim).unwrap_or("").to_string();
                 let value = tokens.next().map(str::trim).unwrap_or("").to_string();
                 if element.is_empty() || value.is_empty() {
-                    self.command_line.push_error(
-                        "PIDSETGENERAL: usage: PIDSETGENERAL <element> <value>",
-                    );
+                    self.command_line
+                        .push_error("PIDSETGENERAL: usage: PIDSETGENERAL <element> <value>");
                     return Task::none();
                 }
                 let i = self.active_tab;
@@ -4507,24 +5105,21 @@ impl H7CAD {
                             let val = match tokens.get(t_idx + 1) {
                                 Some(v) => *v,
                                 None => {
-                                    self.command_line.push_error(
-                                        "PIDNEIGHBORS: --depth requires a number",
-                                    );
+                                    self.command_line
+                                        .push_error("PIDNEIGHBORS: --depth requires a number");
                                     return Task::none();
                                 }
                             };
                             match val.parse::<usize>() {
                                 Ok(d) if d <= 1000 => depth = d,
                                 Ok(_) => {
-                                    self.command_line.push_error(
-                                        "PIDNEIGHBORS: --depth must be ≤ 1000",
-                                    );
+                                    self.command_line
+                                        .push_error("PIDNEIGHBORS: --depth must be ≤ 1000");
                                     return Task::none();
                                 }
                                 Err(e) => {
-                                    self.command_line.push_error(&format!(
-                                        "PIDNEIGHBORS: --depth parse: {e}"
-                                    ));
+                                    self.command_line
+                                        .push_error(&format!("PIDNEIGHBORS: --depth parse: {e}"));
                                     return Task::none();
                                 }
                             }
@@ -4577,7 +5172,10 @@ impl H7CAD {
                 }
                 match crate::io::pid_import::list_pid_neighbors(&source, &did, depth) {
                     Ok((self_info, neighbors)) => {
-                        let short = self_info.drawing_id.get(..8).unwrap_or(&self_info.drawing_id);
+                        let short = self_info
+                            .drawing_id
+                            .get(..8)
+                            .unwrap_or(&self_info.drawing_id);
                         let depth_text = if depth == 1 {
                             String::new()
                         } else {
@@ -4597,10 +5195,8 @@ impl H7CAD {
                                 .as_deref()
                                 .map(|t| format!("  {}", t))
                                 .unwrap_or_default();
-                            self.command_line.push_info(&format!(
-                                "    {}…  {}{}",
-                                short_n, n.item_type, tag
-                            ));
+                            self.command_line
+                                .push_info(&format!("    {}…  {}{}", short_n, n.item_type, tag));
                         }
                     }
                     Err(e) => self.command_line.push_error(&format!("PIDNEIGHBORS: {e}")),
@@ -4679,10 +5275,11 @@ impl H7CAD {
                 match crate::io::pid_import::list_pid_path(&source, parts[0], parts[1]) {
                     Ok((from_info, to_info, path)) => {
                         let hops = path.len().saturating_sub(1);
-                        let from_short =
-                            from_info.drawing_id.get(..8).unwrap_or(&from_info.drawing_id);
-                        let to_short =
-                            to_info.drawing_id.get(..8).unwrap_or(&to_info.drawing_id);
+                        let from_short = from_info
+                            .drawing_id
+                            .get(..8)
+                            .unwrap_or(&from_info.drawing_id);
+                        let to_short = to_info.drawing_id.get(..8).unwrap_or(&to_info.drawing_id);
                         self.command_line.push_output(&format!(
                             "PIDPATH  {} hop(s) from {}… ({}) to {}… ({})",
                             hops, from_short, from_info.item_type, to_short, to_info.item_type
@@ -4694,10 +5291,8 @@ impl H7CAD {
                                 .as_deref()
                                 .map(|t| format!("  {}", t))
                                 .unwrap_or_default();
-                            self.command_line.push_info(&format!(
-                                "    {}…  {}{}",
-                                short, n.item_type, tag
-                            ));
+                            self.command_line
+                                .push_info(&format!("    {}…  {}{}", short, n.item_type, tag));
                         }
                     }
                     Err(e) => self.command_line.push_error(&format!("PIDPATH: {e}")),
@@ -4709,14 +5304,10 @@ impl H7CAD {
             //   PIDFIND <item-type>      (e.g. PIDFIND PipeRun)
             //   PIDFIND <key>=<value>    (e.g. PIDFIND Tag=FIT-001)
             cmd if cmd == "PIDFIND" || cmd.starts_with("PIDFIND ") => {
-                let arg = cmd
-                    .split_once(' ')
-                    .map(|(_, r)| r.trim())
-                    .unwrap_or("");
+                let arg = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
                 if arg.is_empty() {
-                    self.command_line.push_error(
-                        "PIDFIND: usage: PIDFIND <item-type> | PIDFIND <key>=<value>",
-                    );
+                    self.command_line
+                        .push_error("PIDFIND: usage: PIDFIND <item-type> | PIDFIND <key>=<value>");
                     return Task::none();
                 }
                 let (criterion, label) = if let Some((k, v)) = arg.split_once('=') {
@@ -4774,10 +5365,8 @@ impl H7CAD {
                                 .as_deref()
                                 .map(|t| format!("  {}", t))
                                 .unwrap_or_default();
-                            self.command_line.push_info(&format!(
-                                "    {}…  {}{}",
-                                short_id, m.item_type, tag
-                            ));
+                            self.command_line
+                                .push_info(&format!("    {}…  {}{}", short_id, m.item_type, tag));
                         }
                     }
                     Err(e) => self.command_line.push_error(&format!("PIDFIND: {e}")),
@@ -4826,10 +5415,8 @@ impl H7CAD {
                         .and_then(|e| e.to_str())
                         .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
                     if !is_pid {
-                        self.command_line.push_error(&format!(
-                            "PIDVERIFY: '{}' is not a .pid file",
-                            arg
-                        ));
+                        self.command_line
+                            .push_error(&format!("PIDVERIFY: '{}' is not a .pid file", arg));
                         return Task::none();
                     }
                     target_label = path.display().to_string();
@@ -5008,10 +5595,7 @@ impl H7CAD {
             // so it works in headless / test environments.
             cmd if cmd == "PIDSHOT" || cmd.starts_with("PIDSHOT ") => {
                 let i = self.active_tab;
-                if !matches!(
-                    self.tabs[i].tab_mode,
-                    super::document::DocumentTabMode::Pid
-                ) {
+                if !matches!(self.tabs[i].tab_mode, super::document::DocumentTabMode::Pid) {
                     self.command_line
                         .push_error("PIDSHOT: active tab is not a PID tab");
                     return Task::none();
@@ -5037,8 +5621,7 @@ impl H7CAD {
                         .push_error("PIDSHOT: active PID tab has no native preview to export");
                     return Task::none();
                 };
-                match crate::io::pid_screenshot::export_pid_preview_png(native_doc, &out_path)
-                {
+                match crate::io::pid_screenshot::export_pid_preview_png(native_doc, &out_path) {
                     Ok(()) => {
                         self.command_line.push_output(&format!(
                             "PIDSHOT  saved screenshot to {}",
@@ -5250,10 +5833,8 @@ impl H7CAD {
                         .and_then(|e| e.to_str())
                         .is_some_and(|e| e.eq_ignore_ascii_case("pid"));
                     if !is_pid {
-                        self.command_line.push_error(&format!(
-                            "PIDRAWSTREAMS: '{}' is not a .pid file",
-                            arg
-                        ));
+                        self.command_line
+                            .push_error(&format!("PIDRAWSTREAMS: '{}' is not a .pid file", arg));
                         return Task::none();
                     }
                     target_label = path.display().to_string();
@@ -5377,8 +5958,7 @@ impl H7CAD {
                         nanos
                     ));
                     if let Err(e) = crate::io::pid_import::save_pid_native(&temp, &source) {
-                        self.command_line
-                            .push_error(&format!("PIDSAVEAS: {e}"));
+                        self.command_line.push_error(&format!("PIDSAVEAS: {e}"));
                         let _ = std::fs::remove_file(&temp);
                         return Task::none();
                     }
@@ -5405,10 +5985,7 @@ impl H7CAD {
                                 for m in report.mismatches.iter().take(3) {
                                     self.command_line.push_info(&format!(
                                         "    {}  source={} B  roundtrip={} B  first diff @ {}",
-                                        m.path,
-                                        m.source_len,
-                                        m.roundtrip_len,
-                                        m.first_diff_offset
+                                        m.path, m.source_len, m.roundtrip_len, m.first_diff_offset
                                     ));
                                 }
                             }
@@ -5519,9 +6096,8 @@ impl H7CAD {
                 self.command_line.push_info(
                     "        PIDVERIFY [<path>]                   round-trip byte-level fidelity check",
                 );
-                self.command_line.push_info(
-                    "        PIDSAVEAS <path> [--verify] [--force] [--dry-run]",
-                );
+                self.command_line
+                    .push_info("        PIDSAVEAS <path> [--verify] [--force] [--dry-run]");
                 self.command_line.push_info(
                     "                                             save current PID; --force overwrites, --dry-run writes to temp only",
                 );
@@ -5546,10 +6122,12 @@ impl H7CAD {
                     "        PIDREPORT                            one-shot health check (Basic+Metadata+Graph+Integrity)",
                 );
                 self.command_line.push_info("    Notes:");
-                self.command_line
-                    .push_info("        - All commands require an opened .pid file in the active tab.");
-                self.command_line
-                    .push_info("        - Edits are metadata-only; native scene changes are not flushed.");
+                self.command_line.push_info(
+                    "        - All commands require an opened .pid file in the active tab.",
+                );
+                self.command_line.push_info(
+                    "        - Edits are metadata-only; native scene changes are not flushed.",
+                );
             }
 
             cmd if cmd == "SPPIDLOADLIB" || cmd.starts_with("SPPIDLOADLIB ") => {
@@ -5634,7 +6212,8 @@ impl H7CAD {
                 match sub.as_deref() {
                     None | Some("LIST") => {
                         if self.command_aliases.is_empty() {
-                            self.command_line.push_output("ALIASEDIT: no aliases defined.");
+                            self.command_line
+                                .push_output("ALIASEDIT: no aliases defined.");
                         } else {
                             let mut rows: Vec<(String, String)> = self
                                 .command_aliases
@@ -5657,10 +6236,8 @@ impl H7CAD {
                         match (alias, target) {
                             (Some(a), Some(t)) if !a.is_empty() && !t.is_empty() => {
                                 self.command_aliases.insert(a.clone(), t.clone());
-                                self.command_line.push_output(&format!(
-                                    "ALIASEDIT: {} → {}",
-                                    a, t
-                                ));
+                                self.command_line
+                                    .push_output(&format!("ALIASEDIT: {} → {}", a, t));
                             }
                             _ => {
                                 self.command_line.push_error(
@@ -5677,16 +6254,13 @@ impl H7CAD {
                                     self.command_line
                                         .push_output(&format!("ALIASEDIT: removed {}", a));
                                 } else {
-                                    self.command_line.push_error(&format!(
-                                        "ALIASEDIT: alias {} not found.",
-                                        a
-                                    ));
+                                    self.command_line
+                                        .push_error(&format!("ALIASEDIT: alias {} not found.", a));
                                 }
                             }
                             _ => {
-                                self.command_line.push_error(
-                                    "ALIASEDIT DEL <alias>: alias name required.",
-                                );
+                                self.command_line
+                                    .push_error("ALIASEDIT DEL <alias>: alias name required.");
                             }
                         }
                     }
@@ -5734,9 +6308,8 @@ impl H7CAD {
                 for tab in &mut self.tabs {
                     tab.scene.underlay_snap_enabled = desired;
                 }
-                self.command_line.push_output(
-                    if desired { "UOSNAP: ON" } else { "UOSNAP: OFF" },
-                );
+                self.command_line
+                    .push_output(if desired { "UOSNAP: ON" } else { "UOSNAP: OFF" });
             }
 
             // ── ADJUST: tweak selected Underlay fade/contrast/monochrome ──
@@ -5762,18 +6335,24 @@ impl H7CAD {
 
                 let sub = parts[1].to_uppercase();
                 let adj: Option<Adj> = match sub.as_str() {
-                    "FADE" => parts.get(2).and_then(|s| s.parse::<u8>().ok())
+                    "FADE" => parts
+                        .get(2)
+                        .and_then(|s| s.parse::<u8>().ok())
                         .filter(|v| *v <= 80)
                         .map(Adj::Fade),
-                    "CONTRAST" => parts.get(2).and_then(|s| s.parse::<u8>().ok())
+                    "CONTRAST" => parts
+                        .get(2)
+                        .and_then(|s| s.parse::<u8>().ok())
                         .filter(|v| *v <= 100)
                         .map(Adj::Contrast),
-                    "MONO" | "MONOCHROME" => match parts.get(2).map(|s| s.to_uppercase()).as_deref() {
-                        Some("ON") => Some(Adj::Mono(Some(true))),
-                        Some("OFF") => Some(Adj::Mono(Some(false))),
-                        Some("TOGGLE") | None => Some(Adj::Mono(None)),
-                        _ => None,
-                    },
+                    "MONO" | "MONOCHROME" => {
+                        match parts.get(2).map(|s| s.to_uppercase()).as_deref() {
+                            Some("ON") => Some(Adj::Mono(Some(true))),
+                            Some("OFF") => Some(Adj::Mono(Some(false))),
+                            Some("TOGGLE") | None => Some(Adj::Mono(None)),
+                            _ => None,
+                        }
+                    }
                     _ => None,
                 };
 
@@ -5796,9 +6375,8 @@ impl H7CAD {
                     .collect();
 
                 if targets.is_empty() {
-                    self.command_line.push_error(
-                        "ADJUST: no Underlay entities in the current selection.",
-                    );
+                    self.command_line
+                        .push_error("ADJUST: no Underlay entities in the current selection.");
                     return Task::none();
                 }
 
@@ -5827,8 +6405,7 @@ impl H7CAD {
                                 let next = desired.unwrap_or(!u.is_monochrome());
                                 u.set_monochrome(next);
                                 if summary.is_empty() {
-                                    summary =
-                                        format!("mono={}", if next { "ON" } else { "OFF" });
+                                    summary = format!("mono={}", if next { "ON" } else { "OFF" });
                                 }
                             }
                         }
@@ -6094,8 +6671,7 @@ impl H7CAD {
                     self.command_line
                         .push_output("FINDNONPURGEABLE: all items are purgeable.");
                 } else {
-                    let total =
-                        lines.iter().filter(|l| l.starts_with("    ")).count();
+                    let total = lines.iter().filter(|l| l.starts_with("    ")).count();
                     self.command_line.push_output(&format!(
                         "FINDNONPURGEABLE: {} non-purgeable item(s):",
                         total
@@ -6108,16 +6684,31 @@ impl H7CAD {
 
             // ── PURGE unused definitions ──────────────────────────────────
             cmd if cmd == "PURGE" || cmd.starts_with("PURGE ") => {
-                let sub = cmd.split_whitespace().nth(1).unwrap_or("ALL").to_uppercase();
+                let sub = cmd
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("ALL")
+                    .to_uppercase();
                 let all = sub == "ALL" || sub.is_empty();
 
                 // Collect names in use (immutable borrows — done in their own scope)
-                let used_layers: std::collections::HashSet<String> = self.tabs[i].scene.document.entities()
+                let used_layers: std::collections::HashSet<String> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
                     .filter_map(|e| {
                         let name = &e.common().layer;
-                        if name.is_empty() { None } else { Some(name.clone()) }
-                    }).collect();
-                let used_text_styles: std::collections::HashSet<String> = self.tabs[i].scene.document.entities()
+                        if name.is_empty() {
+                            None
+                        } else {
+                            Some(name.clone())
+                        }
+                    })
+                    .collect();
+                let used_text_styles: std::collections::HashSet<String> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
                     .filter_map(|e| match e {
                         acadrust::EntityType::Text(t) => Some(t.style.clone()),
                         acadrust::EntityType::MText(t) => Some(t.style.clone()),
@@ -6125,41 +6716,79 @@ impl H7CAD {
                     })
                     .filter(|s| !s.is_empty())
                     .collect();
-                let used_linetypes: std::collections::HashSet<String> = self.tabs[i].scene.document.entities()
+                let used_linetypes: std::collections::HashSet<String> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
                     .filter_map(|e| {
                         let lt = &e.common().linetype;
-                        if lt.is_empty() || lt == "ByLayer" || lt == "ByBlock" { None } else { Some(lt.clone()) }
-                    }).collect();
+                        if lt.is_empty() || lt == "ByLayer" || lt == "ByBlock" {
+                            None
+                        } else {
+                            Some(lt.clone())
+                        }
+                    })
+                    .collect();
 
                 // Build removal lists (still immutable)
                 let layer_remove: Vec<String> = if all || sub == "LAYERS" {
-                    self.tabs[i].scene.document.layers.iter()
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .layers
+                        .iter()
                         .filter(|l| l.name != "0" && !used_layers.contains(&l.name))
-                        .map(|l| l.name.clone()).collect()
-                } else { vec![] };
+                        .map(|l| l.name.clone())
+                        .collect()
+                } else {
+                    vec![]
+                };
                 let style_remove: Vec<String> = if all || sub == "TEXTSTYLES" || sub == "STYLES" {
-                    self.tabs[i].scene.document.text_styles.iter()
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .text_styles
+                        .iter()
                         .filter(|s| s.name != "Standard" && !used_text_styles.contains(&s.name))
-                        .map(|s| s.name.clone()).collect()
-                } else { vec![] };
+                        .map(|s| s.name.clone())
+                        .collect()
+                } else {
+                    vec![]
+                };
                 let lt_remove: Vec<String> = if all || sub == "LINETYPES" || sub == "LT" {
                     let standard = ["Continuous", "ByLayer", "ByBlock"];
-                    self.tabs[i].scene.document.line_types.iter()
-                        .filter(|lt| !standard.iter().any(|s| s.eq_ignore_ascii_case(&lt.name))
-                            && !used_linetypes.contains(&lt.name))
-                        .map(|lt| lt.name.clone()).collect()
-                } else { vec![] };
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .line_types
+                        .iter()
+                        .filter(|lt| {
+                            !standard.iter().any(|s| s.eq_ignore_ascii_case(&lt.name))
+                                && !used_linetypes.contains(&lt.name)
+                        })
+                        .map(|lt| lt.name.clone())
+                        .collect()
+                } else {
+                    vec![]
+                };
 
                 // Apply removals (mutable)
                 let purged = layer_remove.len() + style_remove.len() + lt_remove.len();
-                for name in &layer_remove { self.tabs[i].scene.document.layers.remove(name); }
-                for name in &style_remove { self.tabs[i].scene.document.text_styles.remove(name); }
-                for name in &lt_remove { self.tabs[i].scene.document.line_types.remove(name); }
+                for name in &layer_remove {
+                    self.tabs[i].scene.document.layers.remove(name);
+                }
+                for name in &style_remove {
+                    self.tabs[i].scene.document.text_styles.remove(name);
+                }
+                for name in &lt_remove {
+                    self.tabs[i].scene.document.line_types.remove(name);
+                }
 
                 if purged > 0 {
                     self.push_undo_snapshot(i, "PURGE");
                     self.tabs[i].dirty = true;
-                    self.command_line.push_output(&format!("PURGE: {} definition(s) removed.", purged));
+                    self.command_line
+                        .push_output(&format!("PURGE: {} definition(s) removed.", purged));
                 } else {
                     self.command_line.push_output("PURGE: nothing to purge.");
                 }
@@ -6176,41 +6805,79 @@ impl H7CAD {
 
                 if prop.is_empty() {
                     self.command_line.push_info(
-                        "Usage: CHPROP <prop> <val>  (props: LAYER COLOR LINETYPE LTSCALE)"
+                        "Usage: CHPROP <prop> <val>  (props: LAYER COLOR LINETYPE LTSCALE)",
                     );
                 } else {
-                    let handles: Vec<_> = self.tabs[i].scene.selected_entities()
-                        .into_iter().map(|(h, _)| h).collect();
+                    let handles: Vec<_> = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(h, _)| h)
+                        .collect();
                     if handles.is_empty() {
-                        self.command_line.push_error("CHPROP: no entities selected.");
+                        self.command_line
+                            .push_error("CHPROP: no entities selected.");
                     } else {
                         // Validate value early to give clear errors
                         let color_val: Option<crate::types::Color> = if prop == "COLOR" {
-                            value.parse::<i16>().ok().map(crate::types::Color::from_index)
-                        } else { None };
+                            value
+                                .parse::<i16>()
+                                .ok()
+                                .map(crate::types::Color::from_index)
+                        } else {
+                            None
+                        };
                         let ltscale_val: Option<f64> = if prop == "LTSCALE" {
                             value.parse().ok()
-                        } else { None };
-                        let transparency_val: Option<crate::types::Transparency> = if prop == "TRANSPARENCY" {
-                            value.parse::<f64>().ok().map(crate::types::Transparency::from_percent)
-                        } else { None };
+                        } else {
+                            None
+                        };
+                        let transparency_val: Option<crate::types::Transparency> =
+                            if prop == "TRANSPARENCY" {
+                                value
+                                    .parse::<f64>()
+                                    .ok()
+                                    .map(crate::types::Transparency::from_percent)
+                            } else {
+                                None
+                            };
 
                         if (prop == "COLOR" && color_val.is_none())
                             || (prop == "LTSCALE" && ltscale_val.is_none())
                             || (prop == "TRANSPARENCY" && transparency_val.is_none())
                         {
-                            self.command_line.push_error(&format!("CHPROP: invalid value '{}' for {}.", value, prop));
+                            self.command_line.push_error(&format!(
+                                "CHPROP: invalid value '{}' for {}.",
+                                value, prop
+                            ));
                         } else {
                             let mut changed = 0usize;
                             for handle in &handles {
-                                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                                if let Some(entity) =
+                                    self.tabs[i].scene.document.get_entity_mut(*handle)
+                                {
                                     let common = entity.common_mut();
                                     match prop.as_str() {
-                                        "LAYER"            => { common.layer = value.clone(); changed += 1; }
-                                        "LINETYPE" | "LT"  => { common.linetype = value.clone(); changed += 1; }
-                                        "LTSCALE"          => { common.linetype_scale = ltscale_val.unwrap(); changed += 1; }
-                                        "COLOR"            => { common.color = color_val.unwrap(); changed += 1; }
-                                        "TRANSPARENCY"     => { common.transparency = transparency_val.unwrap(); changed += 1; }
+                                        "LAYER" => {
+                                            common.layer = value.clone();
+                                            changed += 1;
+                                        }
+                                        "LINETYPE" | "LT" => {
+                                            common.linetype = value.clone();
+                                            changed += 1;
+                                        }
+                                        "LTSCALE" => {
+                                            common.linetype_scale = ltscale_val.unwrap();
+                                            changed += 1;
+                                        }
+                                        "COLOR" => {
+                                            common.color = color_val.unwrap();
+                                            changed += 1;
+                                        }
+                                        "TRANSPARENCY" => {
+                                            common.transparency = transparency_val.unwrap();
+                                            changed += 1;
+                                        }
                                         _ => {
                                             self.command_line.push_error(&format!(
                                                 "CHPROP: unknown property '{}'. Use: LAYER COLOR LINETYPE LTSCALE TRANSPARENCY", prop
@@ -6223,7 +6890,10 @@ impl H7CAD {
                             if changed > 0 {
                                 self.push_undo_snapshot(i, "CHPROP");
                                 self.tabs[i].dirty = true;
-                                self.command_line.push_output(&format!("CHPROP: {} entity/entities updated.", changed));
+                                self.command_line.push_output(&format!(
+                                    "CHPROP: {} entity/entities updated.",
+                                    changed
+                                ));
                             }
                         }
                     }
@@ -6256,32 +6926,49 @@ impl H7CAD {
                                     }
                                 }
                                 true
-                            } else { false }
+                            } else {
+                                false
+                            }
                         }
                         "STYLE" | "TEXTSTYLE" => {
                             if let Some(s) = doc.text_styles.get_mut(&old_name) {
-                                s.name = new_name.clone(); true
-                            } else { false }
+                                s.name = new_name.clone();
+                                true
+                            } else {
+                                false
+                            }
                         }
                         "DIMSTYLE" => {
                             if let Some(s) = doc.dim_styles.get_mut(&old_name) {
-                                s.name = new_name.clone(); true
-                            } else { false }
+                                s.name = new_name.clone();
+                                true
+                            } else {
+                                false
+                            }
                         }
                         "LINETYPE" | "LT" => {
                             if let Some(lt) = doc.line_types.get_mut(&old_name) {
-                                lt.name = new_name.clone(); true
-                            } else { false }
+                                lt.name = new_name.clone();
+                                true
+                            } else {
+                                false
+                            }
                         }
                         "UCS" => {
                             if let Some(u) = doc.ucss.get_mut(&old_name) {
-                                u.name = new_name.clone(); true
-                            } else { false }
+                                u.name = new_name.clone();
+                                true
+                            } else {
+                                false
+                            }
                         }
                         "VIEW" => {
                             if let Some(v) = doc.views.get_mut(&old_name) {
-                                v.name = new_name.clone(); true
-                            } else { false }
+                                v.name = new_name.clone();
+                                true
+                            } else {
+                                false
+                            }
                         }
                         _ => {
                             self.command_line.push_error(&format!("RENAME: unknown type '{}'. Use LAYER BLOCK STYLE DIMSTYLE LINETYPE UCS VIEW", type_str));
@@ -6291,9 +6978,13 @@ impl H7CAD {
                     if ok {
                         self.push_undo_snapshot(i, "RENAME");
                         self.tabs[i].dirty = true;
-                        self.command_line.push_output(&format!("RENAME: '{}' → '{}'.", old_name, new_name));
+                        self.command_line
+                            .push_output(&format!("RENAME: '{}' → '{}'.", old_name, new_name));
                     } else if type_str != "BLOCK" {
-                        self.command_line.push_error(&format!("RENAME: '{}' not found in {}.", old_name, type_str));
+                        self.command_line.push_error(&format!(
+                            "RENAME: '{}' not found in {}.",
+                            old_name, type_str
+                        ));
                     }
                 }
             }
@@ -6307,29 +6998,40 @@ impl H7CAD {
                 let name_arg = cmd.trim_start_matches("CLAYER").trim();
                 if name_arg.is_empty() {
                     let cur = &self.tabs[i].scene.document.header.current_layer_name;
-                    self.command_line.push_output(&format!("CLAYER = \"{cur}\""));
+                    self.command_line
+                        .push_output(&format!("CLAYER = \"{cur}\""));
                 } else {
                     if self.tabs[i].scene.document.layers.contains(name_arg) {
-                        self.tabs[i].scene.document.header.current_layer_name = name_arg.to_string();
+                        self.tabs[i].scene.document.header.current_layer_name =
+                            name_arg.to_string();
                         self.tabs[i].dirty = true;
-                        self.command_line.push_output(&format!("CLAYER set to \"{name_arg}\""));
+                        self.command_line
+                            .push_output(&format!("CLAYER set to \"{name_arg}\""));
                     } else {
-                        self.command_line.push_error(&format!("CLAYER: layer '{}' not found.", name_arg));
+                        self.command_line
+                            .push_error(&format!("CLAYER: layer '{}' not found.", name_arg));
                     }
                 }
             }
-            cmd if cmd == "CDIMSTY" || cmd == "DIMCURRENT" || cmd.starts_with("CDIMSTY ") || cmd.starts_with("DIMCURRENT ") => {
+            cmd if cmd == "CDIMSTY"
+                || cmd == "DIMCURRENT"
+                || cmd.starts_with("CDIMSTY ")
+                || cmd.starts_with("DIMCURRENT ") =>
+            {
                 let name_arg = cmd.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
                 if name_arg.is_empty() {
                     let cur = &self.tabs[i].scene.document.header.current_dimstyle_name;
-                    self.command_line.push_output(&format!("CDIMSTY = \"{cur}\""));
+                    self.command_line
+                        .push_output(&format!("CDIMSTY = \"{cur}\""));
                 } else {
                     if self.tabs[i].scene.document.dim_styles.contains(&name_arg) {
                         self.tabs[i].scene.document.header.current_dimstyle_name = name_arg.clone();
                         self.tabs[i].dirty = true;
-                        self.command_line.push_output(&format!("Active dim style set to \"{name_arg}\""));
+                        self.command_line
+                            .push_output(&format!("Active dim style set to \"{name_arg}\""));
                     } else {
-                        self.command_line.push_error(&format!("CDIMSTY: dim style '{}' not found.", name_arg));
+                        self.command_line
+                            .push_error(&format!("CDIMSTY: dim style '{}' not found.", name_arg));
                     }
                 }
             }
@@ -6343,9 +7045,11 @@ impl H7CAD {
                         self.push_undo_snapshot(i, "LTSCALE");
                         self.tabs[i].scene.document.header.linetype_scale = v;
                         self.tabs[i].dirty = true;
-                        self.command_line.push_output(&format!("LTSCALE set to {v:.4}"));
+                        self.command_line
+                            .push_output(&format!("LTSCALE set to {v:.4}"));
                     } else {
-                        self.command_line.push_error("LTSCALE: value must be positive.");
+                        self.command_line
+                            .push_error("LTSCALE: value must be positive.");
                     }
                 } else {
                     self.command_line.push_error("Usage: LTSCALE [value]");
@@ -6354,15 +7058,26 @@ impl H7CAD {
             cmd if cmd == "CELTSCALE" || cmd.starts_with("CELTSCALE ") => {
                 let val_str = cmd.trim_start_matches("CELTSCALE").trim();
                 if val_str.is_empty() {
-                    let v = self.tabs[i].scene.document.header.current_entity_linetype_scale;
-                    self.command_line.push_output(&format!("CELTSCALE = {v:.4}"));
+                    let v = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .current_entity_linetype_scale;
+                    self.command_line
+                        .push_output(&format!("CELTSCALE = {v:.4}"));
                 } else if let Ok(v) = val_str.parse::<f64>() {
                     if v > 0.0 {
-                        self.tabs[i].scene.document.header.current_entity_linetype_scale = v;
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .header
+                            .current_entity_linetype_scale = v;
                         self.tabs[i].dirty = true;
-                        self.command_line.push_output(&format!("CELTSCALE set to {v:.4}"));
+                        self.command_line
+                            .push_output(&format!("CELTSCALE set to {v:.4}"));
                     } else {
-                        self.command_line.push_error("CELTSCALE: value must be positive.");
+                        self.command_line
+                            .push_error("CELTSCALE: value must be positive.");
                     }
                 } else {
                     self.command_line.push_error("Usage: CELTSCALE [value]");
@@ -6375,35 +7090,45 @@ impl H7CAD {
             cmd if cmd == "SCALETEXT" || cmd.starts_with("SCALETEXT ") => {
                 let rest = cmd.trim_start_matches("SCALETEXT").trim();
                 let parts: Vec<&str> = rest.split_whitespace().collect();
-                let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
                     .selected_entities()
                     .iter()
                     .map(|(h, _)| *h)
                     .collect();
                 if selected_handles.is_empty() {
-                    self.command_line.push_error("SCALETEXT: select Text/MText entities first.");
+                    self.command_line
+                        .push_error("SCALETEXT: select Text/MText entities first.");
                 } else {
-                    let (use_absolute, value) = match (parts.first().map(|s| s.to_uppercase()).as_deref(), parts.get(1)) {
+                    let (use_absolute, value) = match (
+                        parts.first().map(|s| s.to_uppercase()).as_deref(),
+                        parts.get(1),
+                    ) {
                         (Some("H"), Some(v)) => (true, v.parse::<f64>().ok()),
                         (Some(v), None) => (false, v.parse::<f64>().ok()),
                         _ => (false, None),
                     };
                     if let Some(val) = value {
                         if val <= 0.0 {
-                            self.command_line.push_error("SCALETEXT: value must be positive.");
+                            self.command_line
+                                .push_error("SCALETEXT: value must be positive.");
                         } else {
                             self.push_undo_snapshot(i, "SCALETEXT");
                             let mut count = 0usize;
                             for sh in &selected_handles {
                                 for entity in self.tabs[i].scene.document.entities_mut() {
-                                    if entity.common().handle != *sh { continue; }
+                                    if entity.common().handle != *sh {
+                                        continue;
+                                    }
                                     match entity {
                                         acadrust::EntityType::Text(t) => {
-                                            t.height = if use_absolute { val } else { t.height * val };
+                                            t.height =
+                                                if use_absolute { val } else { t.height * val };
                                             count += 1;
                                         }
                                         acadrust::EntityType::MText(t) => {
-                                            t.height = if use_absolute { val } else { t.height * val };
+                                            t.height =
+                                                if use_absolute { val } else { t.height * val };
                                             count += 1;
                                         }
                                         _ => {}
@@ -6417,17 +7142,19 @@ impl H7CAD {
                                     "SCALETEXT: scaled {count} text entity(ies)."
                                 ));
                             } else {
-                                self.command_line.push_error("SCALETEXT: no Text/MText in selection.");
+                                self.command_line
+                                    .push_error("SCALETEXT: no Text/MText in selection.");
                             }
                         }
                     } else {
-                        self.command_line.push_info("Usage: SCALETEXT <factor>  or  SCALETEXT H <height>");
+                        self.command_line
+                            .push_info("Usage: SCALETEXT <factor>  or  SCALETEXT H <height>");
                     }
                 }
             }
 
             // ── Display refresh (no-op in GPU raster pipeline) ────────────────
-            "REGEN"|"REGENALL"|"REDRAW"|"REDRWALL" => {
+            "REGEN" | "REGENALL" | "REDRAW" | "REDRWALL" => {
                 // Display is always up-to-date in the GPU raster pipeline.
                 self.command_line.push_output("Display regenerated.");
             }
@@ -6445,15 +7172,19 @@ impl H7CAD {
                     let text = parts.get(3).copied().unwrap_or("");
                     match (row_res, col_res) {
                         (Some(row), Some(col)) => {
-                            let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                            let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                                .scene
                                 .selected_entities()
                                 .iter()
                                 .map(|(h, _)| *h)
                                 .collect();
                             let mut found = false;
                             for sh in &selected_handles {
-                                if let Some(acadrust::EntityType::Table(tbl)) =
-                                    self.tabs[i].scene.document.entities_mut().find(|e| e.common().handle == *sh)
+                                if let Some(acadrust::EntityType::Table(tbl)) = self.tabs[i]
+                                    .scene
+                                    .document
+                                    .entities_mut()
+                                    .find(|e| e.common().handle == *sh)
                                 {
                                     if tbl.set_cell_text(row, col, text) {
                                         found = true;
@@ -6473,11 +7204,14 @@ impl H7CAD {
                             }
                         }
                         _ => {
-                            self.command_line.push_info("Usage: TABLE CELL <row> <col> <text>");
+                            self.command_line
+                                .push_info("Usage: TABLE CELL <row> <col> <text>");
                         }
                     }
                 } else {
-                    self.command_line.push_info("Usage: TABLE  (creates new table)  or  TABLE CELL <row> <col> <text>");
+                    self.command_line.push_info(
+                        "Usage: TABLE  (creates new table)  or  TABLE CELL <row> <col> <text>",
+                    );
                 }
             }
 
@@ -6525,7 +7259,8 @@ impl H7CAD {
                         self.command_line.push_output(&format!("UCSICON {state}"));
                     }
                     _ => {
-                        self.command_line.push_info("Usage: UCSICON ON | OFF | NOORIGIN | ORIGIN");
+                        self.command_line
+                            .push_info("Usage: UCSICON ON | OFF | NOORIGIN | ORIGIN");
                     }
                 }
             }
@@ -6555,14 +7290,10 @@ impl H7CAD {
                 return Task::done(Message::ToggleLayoutTabs);
             }
 
-            // ── TOOLPALETTES — not yet implemented ───────────────────────────────
-            "TOOLPALETTES" | "TP" => {
-                self.command_line.push_info("TOOLPALETTES: Tool Palettes not yet implemented.");
-            }
-
             // ── SHEETSET — not yet implemented ───────────────────────────────────
             "SHEETSET" | "SSM" => {
-                self.command_line.push_info("SHEETSET: Sheet Set Manager not yet implemented.");
+                self.command_line
+                    .push_info("SHEETSET: Sheet Set Manager not yet implemented.");
             }
 
             // ── XDATA — read/write extended entity data ──────────────────────────
@@ -6574,13 +7305,15 @@ impl H7CAD {
                 let rest = cmd.trim_start_matches("XDATA").trim();
                 let parts: Vec<&str> = rest.splitn(3, char::is_whitespace).collect();
                 let sub = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
-                let selected_handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                let selected_handles: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
                     .selected_entities()
                     .iter()
                     .map(|(h, _)| *h)
                     .collect();
                 if selected_handles.is_empty() {
-                    self.command_line.push_error("XDATA: select entities first.");
+                    self.command_line
+                        .push_error("XDATA: select entities first.");
                 } else {
                     match sub.as_str() {
                         "LIST" | "" => {
@@ -6594,14 +7327,19 @@ impl H7CAD {
                                     .map(|e| e.xdata.as_slice())
                                     .unwrap_or(&[]);
                                 if xdata.is_empty() {
-                                    self.command_line.push_output(&format!("  {:x}: no xdata.", sh.value()));
+                                    self.command_line
+                                        .push_output(&format!("  {:x}: no xdata.", sh.value()));
                                 } else {
                                     for (app, entries) in xdata {
                                         self.command_line.push_output(&format!(
-                                            "  {:x} [{}]: {} value(s)", sh.value(), app, entries.len()
+                                            "  {:x} [{}]: {} value(s)",
+                                            sh.value(),
+                                            app,
+                                            entries.len()
                                         ));
                                         for (code, val) in entries {
-                                            self.command_line.push_output(&format!("    {code}: {val}"));
+                                            self.command_line
+                                                .push_output(&format!("    {code}: {val}"));
                                         }
                                     }
                                 }
@@ -6640,7 +7378,8 @@ impl H7CAD {
                             }
                         }
                         _ => {
-                            self.command_line.push_info("Usage: XDATA LIST | SET <app> <value> | CLEAR [app]");
+                            self.command_line
+                                .push_info("Usage: XDATA LIST | SET <app> <value> | CLEAR [app]");
                         }
                     }
                 }
@@ -6674,7 +7413,7 @@ impl H7CAD {
             }
 
             // ── EXTRUDE ────────────────────────────────────────────────────
-            "EXTRUDE"|"EXT" => {
+            "EXTRUDE" | "EXT" => {
                 use crate::modules::insert::solid3d_cmds::ExtrudeCommand;
                 // If a single entity is already selected, skip the pick step.
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities().into_iter().collect();
@@ -6693,7 +7432,7 @@ impl H7CAD {
             }
 
             // ── REVOLVE ────────────────────────────────────────────────────
-            "REVOLVE"|"REV" => {
+            "REVOLVE" | "REV" => {
                 use crate::modules::insert::solid3d_cmds::RevolveCommand;
                 let color = self.tabs[i].scene.layer_color(&self.tabs[i].active_layer);
                 let cmd = RevolveCommand::new(color);
@@ -6720,27 +7459,27 @@ impl H7CAD {
             }
 
             // ── OBJ import ───────────────────────────────────────────────
-            "IMPORTOBJ"|"OBJIMPORT" => {
+            "IMPORTOBJ" | "OBJIMPORT" => {
                 return Task::done(Message::ObjImport);
             }
 
             // ── STL export ────────────────────────────────────────────────
-            "STLOUT"|"EXPORTSTL" => {
+            "STLOUT" | "EXPORTSTL" => {
                 return Task::done(Message::StlExport);
             }
 
             // STEPOUT — export 3D meshes to STEP AP203 format
-            "STEPOUT"|"EXPORTSTEP"|"STPOUT" => {
+            "STEPOUT" | "EXPORTSTEP" | "STPOUT" => {
                 return Task::done(Message::StepExport);
             }
 
             // ── Plot Style Editor GUI ─────────────────────────────────────
-            "PLOTSTYLEPANEL"|"PLOTSTYLEEDITOR"|"STYLESMANAGER" => {
+            "PLOTSTYLEPANEL" | "PLOTSTYLEEDITOR" | "STYLESMANAGER" => {
                 return Task::done(Message::PlotStylePanelOpen);
             }
 
             // ── Plot / Page Setup ──────────────────────────────────────────
-            "PLOT"|"EXPORT" => {
+            "PLOT" | "EXPORT" => {
                 return Task::done(Message::PlotExport);
             }
             // 三十三轮 Phase 2b: dedicated PDF options dialog command.
@@ -6753,10 +7492,13 @@ impl H7CAD {
             "SVGEXPORTDIALOG" | "SVGOPTIONS" | "SVGEXPORTOPTIONS" => {
                 return Task::done(Message::SvgExportDialogOpen);
             }
-            cmd if cmd == "SVGEXPORT" || cmd == "EXPORTSVG"
-                || cmd.starts_with("SVGEXPORT ") || cmd.starts_with("EXPORTSVG ") =>
+            cmd if cmd == "SVGEXPORT"
+                || cmd == "EXPORTSVG"
+                || cmd.starts_with("SVGEXPORT ")
+                || cmd.starts_with("EXPORTSVG ") =>
             {
-                let sub = cmd.split_once(' ')
+                let sub = cmd
+                    .split_once(' ')
                     .map(|(_, r)| r.trim().to_uppercase())
                     .unwrap_or_default();
                 let mut opts = crate::io::svg_export::SvgExportOptions::default();
@@ -6784,7 +7526,8 @@ impl H7CAD {
             }
             // PLOTSTYLE — load or clear CTB/STB plot style table
             cmd if cmd == "PLOTSTYLE" || cmd.starts_with("PLOTSTYLE ") => {
-                let sub = cmd.split_once(' ')
+                let sub = cmd
+                    .split_once(' ')
                     .map(|(_, r)| r.trim().to_uppercase())
                     .unwrap_or_default();
                 match sub.as_str() {
@@ -6792,26 +7535,31 @@ impl H7CAD {
                         return Task::done(Message::PlotStyleClear);
                     }
                     "" | "LOAD" => {
-                        let active = self.active_plot_style.as_ref()
+                        let active = self
+                            .active_plot_style
+                            .as_ref()
                             .map(|t| format!("Active: {}", t.name))
                             .unwrap_or_else(|| "No plot style loaded.".into());
                         self.command_line.push_info(&active);
                         return Task::done(Message::PlotStyleLoad);
                     }
                     "?" | "STATUS" => {
-                        let msg = self.active_plot_style.as_ref()
-                            .map(|t| format!(
-                                "Plot style: {}  ({} color overrides)",
-                                t.name,
-                                t.aci_entries.iter().filter(|e| e.color.is_some()).count()
-                            ))
+                        let msg = self
+                            .active_plot_style
+                            .as_ref()
+                            .map(|t| {
+                                format!(
+                                    "Plot style: {}  ({} color overrides)",
+                                    t.name,
+                                    t.aci_entries.iter().filter(|e| e.color.is_some()).count()
+                                )
+                            })
                             .unwrap_or_else(|| "No plot style table loaded.".into());
                         self.command_line.push_output(&msg);
                     }
                     _ => {
-                        self.command_line.push_error(
-                            "Usage: PLOTSTYLE [LOAD | CLEAR | STATUS]"
-                        );
+                        self.command_line
+                            .push_error("Usage: PLOTSTYLE [LOAD | CLEAR | STATUS]");
                     }
                 }
             }
@@ -6823,16 +7571,19 @@ impl H7CAD {
             //   UNDERLAY CLIP ON | OFF
             //   UNDERLAY MONO ON | OFF
             cmd if cmd == "UNDERLAY" || cmd.starts_with("UNDERLAY ") => {
-                let sub = cmd.split_once(' ')
+                let sub = cmd
+                    .split_once(' ')
                     .map(|(_, r)| r.trim().to_uppercase())
                     .unwrap_or_default();
-                let handles: Vec<acadrust::Handle> = self.tabs[i].scene
+                let handles: Vec<acadrust::Handle> = self.tabs[i]
+                    .scene
                     .selected_entities()
                     .iter()
                     .map(|(h, _)| *h)
                     .collect();
                 if handles.is_empty() {
-                    self.command_line.push_error("UNDERLAY: select underlay entities first.");
+                    self.command_line
+                        .push_error("UNDERLAY: select underlay entities first.");
                 } else {
                     let parts: Vec<&str> = sub.splitn(2, char::is_whitespace).collect();
                     let action = parts.first().copied().unwrap_or("");
@@ -6840,8 +7591,10 @@ impl H7CAD {
                     let mut changed = 0usize;
                     self.push_undo_snapshot(i, "UNDERLAY");
                     for h in &handles {
-                        if let Some(acadrust::EntityType::Underlay(ul)) = self.tabs[i].scene
-                            .document.entities_mut()
+                        if let Some(acadrust::EntityType::Underlay(ul)) = self.tabs[i]
+                            .scene
+                            .document
+                            .entities_mut()
                             .find(|e| e.common().handle == *h)
                         {
                             match action {
@@ -6857,28 +7610,37 @@ impl H7CAD {
                                         changed += 1;
                                     }
                                 }
-                                "ON" => { ul.set_on(true); changed += 1; }
-                                "OFF" => { ul.set_on(false); changed += 1; }
-                                "CLIP" => {
-                                    match arg {
-                                        "ON" => {
-                                            ul.flags |= acadrust::entities::UnderlayDisplayFlags::CLIPPING;
-                                            changed += 1;
-                                        }
-                                        "OFF" => {
-                                            ul.clear_clip();
-                                            changed += 1;
-                                        }
-                                        _ => {}
-                                    }
+                                "ON" => {
+                                    ul.set_on(true);
+                                    changed += 1;
                                 }
-                                "MONO" => {
-                                    match arg {
-                                        "ON" => { ul.set_monochrome(true); changed += 1; }
-                                        "OFF" => { ul.set_monochrome(false); changed += 1; }
-                                        _ => {}
-                                    }
+                                "OFF" => {
+                                    ul.set_on(false);
+                                    changed += 1;
                                 }
+                                "CLIP" => match arg {
+                                    "ON" => {
+                                        ul.flags |=
+                                            acadrust::entities::UnderlayDisplayFlags::CLIPPING;
+                                        changed += 1;
+                                    }
+                                    "OFF" => {
+                                        ul.clear_clip();
+                                        changed += 1;
+                                    }
+                                    _ => {}
+                                },
+                                "MONO" => match arg {
+                                    "ON" => {
+                                        ul.set_monochrome(true);
+                                        changed += 1;
+                                    }
+                                    "OFF" => {
+                                        ul.set_monochrome(false);
+                                        changed += 1;
+                                    }
+                                    _ => {}
+                                },
                                 _ => {
                                     // No sub-command: print status.
                                     self.command_line.push_output(&format!(
@@ -6896,9 +7658,8 @@ impl H7CAD {
                     }
                     if changed > 0 {
                         self.tabs[i].dirty = true;
-                        self.command_line.push_info(&format!(
-                            "Updated {changed} underlay(s)."
-                        ));
+                        self.command_line
+                            .push_info(&format!("Updated {changed} underlay(s)."));
                     } else if !action.is_empty() {
                         self.command_line.push_error(
                             "Usage: UNDERLAY [FADE <n>|CONTRAST <n>|ON|OFF|CLIP ON|OFF|MONO ON|OFF]"
@@ -6909,13 +7670,16 @@ impl H7CAD {
 
             "PAGESETUP" => {
                 if self.tabs[i].scene.current_layout == "Model" {
-                    self.command_line.push_error("PAGESETUP: switch to a paper space layout first.");
+                    self.command_line
+                        .push_error("PAGESETUP: switch to a paper space layout first.");
                 } else {
                     return Task::done(Message::PageSetupOpen);
                 }
             }
 
-            _ => self.command_line.push_error(&format!("Unknown command: {cmd}")),
+            _ => self
+                .command_line
+                .push_error(&format!("Unknown command: {cmd}")),
         }
 
         // Focus the command line whenever a command just became active.
@@ -6936,13 +7700,23 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
     match entity {
         acadrust::EntityType::Line(l) => format!(
             "from ({:.4},{:.4},{:.4}) to ({:.4},{:.4},{:.4})  len={:.4}",
-            l.start.x, l.start.y, l.start.z,
-            l.end.x, l.end.y, l.end.z,
-            ((l.end.x-l.start.x).powi(2)+(l.end.y-l.start.y).powi(2)+(l.end.z-l.start.z).powi(2)).sqrt()
+            l.start.x,
+            l.start.y,
+            l.start.z,
+            l.end.x,
+            l.end.y,
+            l.end.z,
+            ((l.end.x - l.start.x).powi(2)
+                + (l.end.y - l.start.y).powi(2)
+                + (l.end.z - l.start.z).powi(2))
+            .sqrt()
         ),
         acadrust::EntityType::Circle(c) => format!(
             "center ({:.4},{:.4},{:.4})  r={:.4}  area={:.4}",
-            c.center.x, c.center.y, c.center.z, c.radius,
+            c.center.x,
+            c.center.y,
+            c.center.z,
+            c.radius,
             PI * c.radius * c.radius
         ),
         acadrust::EntityType::Arc(a) => format!(
@@ -6951,7 +7725,9 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
         ),
         acadrust::EntityType::LwPolyline(p) => format!(
             "{} vertices  closed={}  elevation={:.4}",
-            p.vertices.len(), p.is_closed, p.elevation
+            p.vertices.len(),
+            p.is_closed,
+            p.elevation
         ),
         acadrust::EntityType::Text(t) => format!(
             "\"{}\"  h={:.4}  at ({:.4},{:.4})",
@@ -6960,21 +7736,33 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
         acadrust::EntityType::MText(t) => format!(
             "\"{}\"  h={:.4}  at ({:.4},{:.4})",
             t.value.chars().take(40).collect::<String>(),
-            t.height, t.insertion_point.x, t.insertion_point.y
+            t.height,
+            t.insertion_point.x,
+            t.insertion_point.y
         ),
         acadrust::EntityType::Insert(ins) => format!(
             "block=\"{}\"  at ({:.4},{:.4},{:.4})  scale=({:.4},{:.4},{:.4})  rot={:.2}°",
-            ins.block_name, ins.insert_point.x, ins.insert_point.y, ins.insert_point.z,
-            ins.x_scale(), ins.y_scale(), ins.z_scale(),
+            ins.block_name,
+            ins.insert_point.x,
+            ins.insert_point.y,
+            ins.insert_point.z,
+            ins.x_scale(),
+            ins.y_scale(),
+            ins.z_scale(),
             ins.rotation.to_degrees()
         ),
         acadrust::EntityType::Spline(s) => format!(
             "{} ctrl pts  degree={}  closed={}",
-            s.control_points.len(), s.degree, s.flags.closed
+            s.control_points.len(),
+            s.degree,
+            s.flags.closed
         ),
         acadrust::EntityType::Ellipse(e) => format!(
             "center ({:.4},{:.4})  major_len={:.4}  ratio={:.4}",
-            e.center.x, e.center.y, e.major_axis_length(), e.minor_axis_ratio
+            e.center.x,
+            e.center.y,
+            e.major_axis_length(),
+            e.minor_axis_ratio
         ),
         _ => String::new(),
     }
@@ -6982,26 +7770,51 @@ fn entity_list_details(entity: &acadrust::EntityType) -> String {
 
 fn flatten_entity_z(entity: &mut acadrust::EntityType) {
     match entity {
-        acadrust::EntityType::Line(l)        => { l.start.z = 0.0; l.end.z = 0.0; }
-        acadrust::EntityType::Circle(c)      => { c.center.z = 0.0; }
-        acadrust::EntityType::Arc(a)         => { a.center.z = 0.0; }
-        acadrust::EntityType::LwPolyline(p)  => { p.elevation = 0.0; }
-        acadrust::EntityType::Text(t)        => { t.insertion_point.z = 0.0; }
-        acadrust::EntityType::MText(t)       => { t.insertion_point.z = 0.0; }
-        acadrust::EntityType::Insert(ins)    => { ins.insert_point.z = 0.0; }
-        acadrust::EntityType::Point(p)       => { p.location.z = 0.0; }
-        acadrust::EntityType::Spline(s)      => {
-            for cp in &mut s.control_points { cp.z = 0.0; }
-            for fp in &mut s.fit_points     { fp.z = 0.0; }
+        acadrust::EntityType::Line(l) => {
+            l.start.z = 0.0;
+            l.end.z = 0.0;
         }
-        acadrust::EntityType::Ellipse(e)     => { e.center.z = 0.0; }
+        acadrust::EntityType::Circle(c) => {
+            c.center.z = 0.0;
+        }
+        acadrust::EntityType::Arc(a) => {
+            a.center.z = 0.0;
+        }
+        acadrust::EntityType::LwPolyline(p) => {
+            p.elevation = 0.0;
+        }
+        acadrust::EntityType::Text(t) => {
+            t.insertion_point.z = 0.0;
+        }
+        acadrust::EntityType::MText(t) => {
+            t.insertion_point.z = 0.0;
+        }
+        acadrust::EntityType::Insert(ins) => {
+            ins.insert_point.z = 0.0;
+        }
+        acadrust::EntityType::Point(p) => {
+            p.location.z = 0.0;
+        }
+        acadrust::EntityType::Spline(s) => {
+            for cp in &mut s.control_points {
+                cp.z = 0.0;
+            }
+            for fp in &mut s.fit_points {
+                fp.z = 0.0;
+            }
+        }
+        acadrust::EntityType::Ellipse(e) => {
+            e.center.z = 0.0;
+        }
         _ => {}
     }
 }
 
 /// Find the last placed linear or aligned dimension in the document.
 /// Returns `(first_point, second_point, definition_point, rotation_rad)` in world-space.
-fn find_last_linear_dim(scene: &crate::scene::Scene) -> Option<(glam::Vec3, glam::Vec3, glam::Vec3, f64)> {
+fn find_last_linear_dim(
+    scene: &crate::scene::Scene,
+) -> Option<(glam::Vec3, glam::Vec3, glam::Vec3, f64)> {
     use acadrust::entities::Dimension;
     let mut best_handle: u64 = 0;
     let mut result: Option<(glam::Vec3, glam::Vec3, glam::Vec3, f64)> = None;
@@ -7014,15 +7827,39 @@ fn find_last_linear_dim(scene: &crate::scene::Scene) -> Option<(glam::Vec3, glam
             }
             let item = match dim {
                 Dimension::Linear(d) => {
-                    let p1 = glam::Vec3::new(d.first_point.x as f32, d.first_point.y as f32, d.first_point.z as f32);
-                    let p2 = glam::Vec3::new(d.second_point.x as f32, d.second_point.y as f32, d.second_point.z as f32);
-                    let dp = glam::Vec3::new(d.base.definition_point.x as f32, d.base.definition_point.y as f32, d.base.definition_point.z as f32);
+                    let p1 = glam::Vec3::new(
+                        d.first_point.x as f32,
+                        d.first_point.y as f32,
+                        d.first_point.z as f32,
+                    );
+                    let p2 = glam::Vec3::new(
+                        d.second_point.x as f32,
+                        d.second_point.y as f32,
+                        d.second_point.z as f32,
+                    );
+                    let dp = glam::Vec3::new(
+                        d.base.definition_point.x as f32,
+                        d.base.definition_point.y as f32,
+                        d.base.definition_point.z as f32,
+                    );
                     Some((p1, p2, dp, d.rotation))
                 }
                 Dimension::Aligned(d) => {
-                    let p1 = glam::Vec3::new(d.first_point.x as f32, d.first_point.y as f32, d.first_point.z as f32);
-                    let p2 = glam::Vec3::new(d.second_point.x as f32, d.second_point.y as f32, d.second_point.z as f32);
-                    let dp = glam::Vec3::new(d.base.definition_point.x as f32, d.base.definition_point.y as f32, d.base.definition_point.z as f32);
+                    let p1 = glam::Vec3::new(
+                        d.first_point.x as f32,
+                        d.first_point.y as f32,
+                        d.first_point.z as f32,
+                    );
+                    let p2 = glam::Vec3::new(
+                        d.second_point.x as f32,
+                        d.second_point.y as f32,
+                        d.second_point.z as f32,
+                    );
+                    let dp = glam::Vec3::new(
+                        d.base.definition_point.x as f32,
+                        d.base.definition_point.y as f32,
+                        d.base.definition_point.z as f32,
+                    );
                     let dx = (d.second_point.x - d.first_point.x) as f32;
                     let dy = (d.second_point.y - d.first_point.y) as f32;
                     let rot = dy.atan2(dx) as f64;
@@ -7041,42 +7878,42 @@ fn find_last_linear_dim(scene: &crate::scene::Scene) -> Option<(glam::Vec3, glam
 
 fn entity_type_name(entity: &acadrust::EntityType) -> &'static str {
     match entity {
-        acadrust::EntityType::Line(_)               => "LINE",
-        acadrust::EntityType::Circle(_)             => "CIRCLE",
-        acadrust::EntityType::Arc(_)                => "ARC",
-        acadrust::EntityType::LwPolyline(_)         => "LWPOLYLINE",
-        acadrust::EntityType::Polyline(_)           => "POLYLINE",
-        acadrust::EntityType::Polyline2D(_)         => "POLYLINE2D",
-        acadrust::EntityType::Polyline3D(_)         => "POLYLINE3D",
-        acadrust::EntityType::Text(_)               => "TEXT",
-        acadrust::EntityType::MText(_)              => "MTEXT",
-        acadrust::EntityType::Insert(_)             => "INSERT",
-        acadrust::EntityType::Hatch(_)              => "HATCH",
-        acadrust::EntityType::Dimension(_)          => "DIMENSION",
-        acadrust::EntityType::Viewport(_)           => "VIEWPORT",
-        acadrust::EntityType::Spline(_)             => "SPLINE",
-        acadrust::EntityType::Ellipse(_)            => "ELLIPSE",
-        acadrust::EntityType::Point(_)              => "POINT",
-        acadrust::EntityType::Ray(_)                => "RAY",
-        acadrust::EntityType::XLine(_)              => "XLINE",
-        acadrust::EntityType::Face3D(_)             => "3DFACE",
-        acadrust::EntityType::Table(_)              => "TABLE",
-        acadrust::EntityType::MLine(_)              => "MLINE",
-        acadrust::EntityType::RasterImage(_)        => "RASTERIMAGE",
-        acadrust::EntityType::Wipeout(_)            => "WIPEOUT",
-        acadrust::EntityType::Underlay(_)           => "UNDERLAY",
-        acadrust::EntityType::AttributeDefinition(_)=> "ATTDEF",
-        acadrust::EntityType::AttributeEntity(_)    => "ATTRIB",
-        acadrust::EntityType::Leader(_)             => "LEADER",
-        acadrust::EntityType::Tolerance(_)          => "TOLERANCE",
-        acadrust::EntityType::Shape(_)              => "SHAPE",
+        acadrust::EntityType::Line(_) => "LINE",
+        acadrust::EntityType::Circle(_) => "CIRCLE",
+        acadrust::EntityType::Arc(_) => "ARC",
+        acadrust::EntityType::LwPolyline(_) => "LWPOLYLINE",
+        acadrust::EntityType::Polyline(_) => "POLYLINE",
+        acadrust::EntityType::Polyline2D(_) => "POLYLINE2D",
+        acadrust::EntityType::Polyline3D(_) => "POLYLINE3D",
+        acadrust::EntityType::Text(_) => "TEXT",
+        acadrust::EntityType::MText(_) => "MTEXT",
+        acadrust::EntityType::Insert(_) => "INSERT",
+        acadrust::EntityType::Hatch(_) => "HATCH",
+        acadrust::EntityType::Dimension(_) => "DIMENSION",
+        acadrust::EntityType::Viewport(_) => "VIEWPORT",
+        acadrust::EntityType::Spline(_) => "SPLINE",
+        acadrust::EntityType::Ellipse(_) => "ELLIPSE",
+        acadrust::EntityType::Point(_) => "POINT",
+        acadrust::EntityType::Ray(_) => "RAY",
+        acadrust::EntityType::XLine(_) => "XLINE",
+        acadrust::EntityType::Face3D(_) => "3DFACE",
+        acadrust::EntityType::Table(_) => "TABLE",
+        acadrust::EntityType::MLine(_) => "MLINE",
+        acadrust::EntityType::RasterImage(_) => "RASTERIMAGE",
+        acadrust::EntityType::Wipeout(_) => "WIPEOUT",
+        acadrust::EntityType::Underlay(_) => "UNDERLAY",
+        acadrust::EntityType::AttributeDefinition(_) => "ATTDEF",
+        acadrust::EntityType::AttributeEntity(_) => "ATTRIB",
+        acadrust::EntityType::Leader(_) => "LEADER",
+        acadrust::EntityType::Tolerance(_) => "TOLERANCE",
+        acadrust::EntityType::Shape(_) => "SHAPE",
         _ => "ENTITY",
     }
 }
 
 fn entity_text_content(entity: &acadrust::EntityType) -> Option<String> {
     match entity {
-        acadrust::EntityType::Text(t)  => Some(t.value.clone()),
+        acadrust::EntityType::Text(t) => Some(t.value.clone()),
         acadrust::EntityType::MText(t) => Some(t.value.clone()),
         acadrust::EntityType::AttributeDefinition(a) => Some(a.default_value.clone()),
         acadrust::EntityType::AttributeEntity(a) => Some(a.get_value().to_string()),
@@ -7110,7 +7947,11 @@ fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
             let r = a.radius;
             let span = {
                 let s = ((a.end_angle - a.start_angle) + 360.0) % 360.0;
-                if s < 1e-6 { 360.0 } else { s }
+                if s < 1e-6 {
+                    360.0
+                } else {
+                    s
+                }
             };
             let span_rad = span.to_radians();
             // Sector area (pie slice)
@@ -7138,7 +7979,9 @@ fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
         }
         acadrust::EntityType::LwPolyline(p) => {
             let n = p.vertices.len();
-            if n < 2 { return None; }
+            if n < 2 {
+                return None;
+            }
             // Shoelace area + perimeter
             let mut area_sum = 0.0f64;
             let mut perimeter = 0.0f64;
@@ -7165,7 +8008,12 @@ fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
                 let sy: f64 = p.vertices.iter().map(|v| v.location.y).sum::<f64>() / n as f64;
                 (sx, sy)
             };
-            Some(MassProps { area, perimeter, cx, cy })
+            Some(MassProps {
+                area,
+                perimeter,
+                cx,
+                cy,
+            })
         }
         acadrust::EntityType::Ellipse(e) => {
             let a = (e.major_axis.x.powi(2) + e.major_axis.y.powi(2)).sqrt();
@@ -7173,7 +8021,9 @@ fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
             let t0 = e.start_parameter;
             let t1 = {
                 let mut t = e.end_parameter;
-                if t <= t0 { t += TAU; }
+                if t <= t0 {
+                    t += TAU;
+                }
                 t
             };
             let span = t1 - t0;
@@ -7214,7 +8064,12 @@ fn massprop_entity(entity: &acadrust::EntityType) -> Option<MassProps> {
                 }
                 len
             };
-            Some(MassProps { area, perimeter, cx: e.center.x, cy: e.center.y })
+            Some(MassProps {
+                area,
+                perimeter,
+                cx: e.center.x,
+                cy: e.center.y,
+            })
         }
         _ => None,
     }
@@ -7248,7 +8103,6 @@ fn replace_entity_text(entity: &mut acadrust::EntityType, search: &str, rep: &st
     }
 }
 
-
 // ── DATAEXTRACTION ─────────────────────────────────────────────────────────
 
 /// Build a CSV string with one row per entity in model space.
@@ -7273,7 +8127,9 @@ fn build_data_extraction_csv(doc: &acadrust::CadDocument) -> String {
         let color = format!("{}", e.common().color);
         let lt = csv_escape(&e.common().linetype);
         let extra = csv_escape(&entity_extra_info(e));
-        out.push_str(&format!("{type_name},{handle},{layer},{color},{lt},{extra}\n"));
+        out.push_str(&format!(
+            "{type_name},{handle},{layer},{color},{lt},{extra}\n"
+        ));
     }
     out
 }
@@ -7286,17 +8142,19 @@ fn entity_extra_info(entity: &acadrust::EntityType) -> String {
             "({:.3},{:.3})-({:.3},{:.3})",
             e.start.x, e.start.y, e.end.x, e.end.y
         ),
-        EntityType::Circle(e) => format!(
-            "C({:.3},{:.3}) R={:.3}",
-            e.center.x, e.center.y, e.radius
-        ),
+        EntityType::Circle(e) => {
+            format!("C({:.3},{:.3}) R={:.3}", e.center.x, e.center.y, e.radius)
+        }
         EntityType::Arc(e) => format!(
             "C({:.3},{:.3}) R={:.3} {:.1}°-{:.1}°",
             e.center.x, e.center.y, e.radius, e.start_angle, e.end_angle
         ),
         EntityType::Text(e) => e.value.clone(),
         EntityType::MText(e) => e.value.chars().take(60).collect(),
-        EntityType::Insert(e) => format!("BLK={} @({:.3},{:.3})", e.block_name, e.insert_point.x, e.insert_point.y),
+        EntityType::Insert(e) => format!(
+            "BLK={} @({:.3},{:.3})",
+            e.block_name, e.insert_point.x, e.insert_point.y
+        ),
         EntityType::LwPolyline(e) => format!("{} vertices", e.vertices.len()),
         EntityType::Polyline(e) => format!("{} vertices", e.vertices.len()),
         EntityType::Polyline2D(e) => format!("{} vertices", e.vertices.len()),
@@ -7321,8 +8179,8 @@ fn csv_escape(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::command::CmdResult;
-    use h7cad_native_model as nm;
     use glam::Vec3;
+    use h7cad_native_model as nm;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -7341,14 +8199,13 @@ mod tests {
         let _ = app.dispatch_command("NATIVERENDER ON");
 
         assert!(!app.tabs[0].native_render_enabled);
-        assert!(
-            app.command_line
-                .history
-                .last()
-                .expect("history entry")
-                .text
-                .contains("native")
-        );
+        assert!(app
+            .command_line
+            .history
+            .last()
+            .expect("history entry")
+            .text
+            .contains("native"));
     }
 
     #[test]
@@ -7448,7 +8305,10 @@ mod tests {
             },
             other => panic!("expected native insert, got {other:?}"),
         }
-        assert!(app.tabs[0].dirty, "direct ATTEDIT should mark the tab dirty");
+        assert!(
+            app.tabs[0].dirty,
+            "direct ATTEDIT should mark the tab dirty"
+        );
     }
 
     #[test]
@@ -7472,7 +8332,10 @@ mod tests {
         app.tabs[0].native_render_enabled = true;
 
         let entities = app.compat_entities_for_visible_wires(0);
-        let handles: Vec<_> = entities.iter().map(|entity| entity.common().handle).collect();
+        let handles: Vec<_> = entities
+            .iter()
+            .map(|entity| entity.common().handle)
+            .collect();
         assert_eq!(entities.len(), 2);
         assert!(handles.contains(&acadrust::Handle::new(h1.value())));
         assert!(handles.contains(&acadrust::Handle::new(h2.value())));
@@ -7503,7 +8366,10 @@ mod tests {
             .active_cmd
             .as_mut()
             .expect("trim command should be active");
-        let result = cmd.on_entity_pick(acadrust::Handle::new(target.value()), Vec3::new(8.0, 0.0, 0.0));
+        let result = cmd.on_entity_pick(
+            acadrust::Handle::new(target.value()),
+            Vec3::new(8.0, 0.0, 0.0),
+        );
 
         assert!(
             matches!(result, CmdResult::ReplaceEntity(_, _)),
@@ -7621,10 +8487,7 @@ mod tests {
         aliases.insert("LINE".to_string(), "POLYLINE".to_string());
         // A cmd whose FIRST token is "ARC" must not be rewritten even if
         // "LINE" appears later.
-        assert_eq!(
-            resolve_command_alias("ARC LINE STUFF", &aliases),
-            None
-        );
+        assert_eq!(resolve_command_alias("ARC LINE STUFF", &aliases), None);
     }
 
     #[test]
@@ -7661,7 +8524,12 @@ mod tests {
 
         let _ = app.dispatch_command("SPPIDLOADLIB");
         assert!(
-            app.tabs[0].scene.document.block_records.get("SPPID_BRAN").is_some(),
+            app.tabs[0]
+                .scene
+                .document
+                .block_records
+                .get("SPPID_BRAN")
+                .is_some(),
             "SPPIDLOADLIB should seed the BRAN authoring block"
         );
 
@@ -7675,7 +8543,10 @@ mod tests {
                 acadrust::EntityType::Insert(insert) if insert.block_name.eq_ignore_ascii_case("SPPID_BRAN")
             ))
             .count();
-        assert_eq!(insert_count, 1, "demo command should place exactly one BRAN insert");
+        assert_eq!(
+            insert_count, 1,
+            "demo command should place exactly one BRAN insert"
+        );
 
         let _ = app.dispatch_command(&format!("SPPIDEXPORT {}", out.display()));
         assert!(out.exists(), "export should write the .pid package");

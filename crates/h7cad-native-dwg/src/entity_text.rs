@@ -134,8 +134,8 @@ mod tests {
         let handles = [0x51, 0x21];
         let mut main_reader = BitReader::new(&main);
         let mut handle_reader = BitReader::new(&handles);
-        let text = read_text_geometry(&mut main_reader, &mut handle_reader, Handle::new(0x10))
-            .unwrap();
+        let text =
+            read_text_geometry(&mut main_reader, &mut handle_reader, Handle::new(0x10)).unwrap();
         assert_eq!(text.insertion, [1.0, 2.0, 0.0]);
         assert_eq!(text.height, 3.0);
         assert_eq!(text.value, "A");

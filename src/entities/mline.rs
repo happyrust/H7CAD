@@ -6,6 +6,7 @@ use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
 use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
+use crate::scene::wire_model::SnapHint;
 
 impl TruckConvertible for MLine {
     fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
@@ -25,7 +26,11 @@ impl TruckConvertible for MLine {
 
         // Center spine.
         for v in &self.vertices {
-            pts.push([v.position.x as f32, v.position.y as f32, v.position.z as f32]);
+            pts.push([
+                v.position.x as f32,
+                v.position.y as f32,
+                v.position.z as f32,
+            ]);
         }
         if closed && n >= 2 {
             pts.push([
@@ -78,7 +83,7 @@ impl TruckConvertible for MLine {
                     [
                         [f32::NAN; 3],
                         [px + mx * (-half), py + my * (-half), pz + mz * (-half)],
-                        [px + mx * half,    py + my * half,    pz + mz * half   ],
+                        [px + mx * half, py + my * half, pz + mz * half],
                     ]
                 };
                 pts.extend_from_slice(&cap_v(&self.vertices[0]));
@@ -89,12 +94,33 @@ impl TruckConvertible for MLine {
         let key_verts: Vec<[f32; 3]> = self
             .vertices
             .iter()
-            .map(|v| [v.position.x as f32, v.position.y as f32, v.position.z as f32])
+            .map(|v| {
+                [
+                    v.position.x as f32,
+                    v.position.y as f32,
+                    v.position.z as f32,
+                ]
+            })
+            .collect();
+
+        let snap_pts = self
+            .vertices
+            .iter()
+            .map(|v| {
+                (
+                    Vec3::new(
+                        v.position.x as f32,
+                        v.position.y as f32,
+                        v.position.z as f32,
+                    ),
+                    SnapHint::Node,
+                )
+            })
             .collect();
 
         Some(TruckEntity {
             object: TruckObject::Lines(pts),
-            snap_pts: vec![],
+            snap_pts,
             tangent_geoms: vec![],
             key_vertices: key_verts,
         })
@@ -109,7 +135,11 @@ impl Grippable for MLine {
             .map(|(i, v)| {
                 square_grip(
                     i,
-                    Vec3::new(v.position.x as f32, v.position.y as f32, v.position.z as f32),
+                    Vec3::new(
+                        v.position.x as f32,
+                        v.position.y as f32,
+                        v.position.z as f32,
+                    ),
                 )
             })
             .collect()
@@ -161,12 +191,15 @@ impl PropertyEditable for MLine {
                 } else {
                     value == "true"
                 };
-                self.flags.set(acadrust::entities::MLineFlags::CLOSED, closed);
+                self.flags
+                    .set(acadrust::entities::MLineFlags::CLOSED, closed);
                 return;
             }
             _ => {}
         }
-        let Ok(v) = value.trim().parse::<f64>() else { return };
+        let Ok(v) = value.trim().parse::<f64>() else {
+            return;
+        };
         if field == "ml_scale" && v != 0.0 {
             self.scale_factor = v;
         }

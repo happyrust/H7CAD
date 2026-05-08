@@ -9,13 +9,12 @@ pub mod obj;
 pub mod open_error;
 pub mod pdf_export;
 pub mod plot_style;
-pub mod svg_export;
 pub mod print_to_printer;
 pub mod step;
 pub mod stl;
+pub mod svg_export;
 pub mod xref;
 
-use acadrust::entities::{Dimension, EntityType};
 use acadrust::io::dwg::DwgReader;
 use acadrust::{CadDocument, DwgWriter};
 use h7cad_native_model::CadDocument as NativeCadDocument;
@@ -26,7 +25,8 @@ pub mod pid_import;
 pub mod pid_package_store;
 pub mod pid_screenshot;
 
-#[allow(unused_imports)] // NoticeSeverity re-exported for downstream match/construction ergonomics
+#[allow(unused_imports)]
+// NoticeSeverity re-exported for downstream match/construction ergonomics
 pub use diagnostics::{NoticeCounts, NoticeSeverity, OpenNotice};
 pub use open_error::OpenError;
 
@@ -105,13 +105,12 @@ pub async fn open_path(path: PathBuf) -> Result<OpenFileResult, OpenError> {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "unknown".into());
-            let result =
-                open_document_blocking(&path).map(|(opened, notices)| OpenFileResult {
-                    name,
-                    path: path.clone(),
-                    opened,
-                    notices,
-                });
+            let result = open_document_blocking(&path).map(|(opened, notices)| OpenFileResult {
+                name,
+                path: path.clone(),
+                opened,
+                notices,
+            });
             let _ = tx.send(result);
         })
         .map_err(|e| OpenError::Io {
@@ -154,9 +153,7 @@ pub fn load_file_with_native_blocking(
 /// Synchronous document-open dispatch. Prefer [`open_path`] from
 /// async contexts so the iced main loop is not blocked for the
 /// duration of the parse.
-pub fn open_document_blocking(
-    path: &Path,
-) -> Result<(OpenedDocument, Vec<OpenNotice>), OpenError> {
+pub fn open_document_blocking(path: &Path) -> Result<(OpenedDocument, Vec<OpenNotice>), OpenError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -184,7 +181,8 @@ pub fn open_document_blocking(
 ///
 /// Returns `(document, notices)`. DWG reads surface acadrust's
 /// `NotificationCollection` through [`diagnostics::OpenNotice`]; DXF
-/// and PID currently produce no diagnostics and return an empty Vec.
+/// emits native advisories for preserved-but-limited content, while PID
+/// currently produces no diagnostics and returns an empty Vec.
 pub fn load_file_native_blocking(
     path: &Path,
 ) -> Result<(NativeCadDocument, Vec<OpenNotice>), OpenError> {
@@ -195,7 +193,11 @@ pub fn load_file_native_blocking(
 
     match ext.as_str() {
         "dwg" => load_dwg_native_blocking(path),
-        "dxf" => Ok((load_dxf_native_blocking(path)?, Vec::new())),
+        "dxf" => {
+            let native = load_dxf_native_blocking(path)?;
+            let notices = diagnostics::from_native_dxf_document(&native);
+            Ok((native, notices))
+        }
         "pid" => Ok((
             pid_import::load_pid_native(path).map_err(OpenError::from)?,
             Vec::new(),
@@ -203,7 +205,6 @@ pub fn load_file_native_blocking(
         _ => Err(OpenError::UnsupportedExtension { ext }),
     }
 }
-
 
 // ── Save dialog ───────────────────────────────────────────────────────────
 
@@ -359,51 +360,6 @@ pub fn save_dwg(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     DwgWriter::write_to_file(path, &acad_doc).map_err(|e| e.to_string())
 }
 
-/// Load a DWG file, trying the native parser first with acadrust fallback.
-///
-/// The native parser (`h7cad_native_dwg::read_dwg`) is attempted first.
-/// If it succeeds, the result is used directly. If it fails, the
-/// acadrust reader is used as a fallback, and a diagnostic notice is
-/// emitted to inform the user which path was taken.
-fn load_dwg_native_blocking(
-    path: &Path,
-) -> Result<(NativeCadDocument, Vec<OpenNotice>), OpenError> {
-    let bytes = std::fs::read(path).map_err(|e| OpenError::Io {
-        path: Some(path.to_path_buf()),
-        message: e.to_string(),
-    })?;
-
-    match h7cad_native_dwg::read_dwg(&bytes) {
-        Ok(doc) => {
-            let notices = vec![OpenNotice::new(
-                diagnostics::NoticeSeverity::NotImplemented,
-                "loaded via native DWG parser (experimental)",
-            )];
-            Ok((doc, notices))
-        }
-        Err(native_err) => {
-            let mut reader = DwgReader::from_file(path).map_err(|e| {
-                let mut err = open_error::classify_acadrust(e, "DWG");
-                if let OpenError::Io { path: slot, .. } = &mut err {
-                    *slot = Some(path.to_path_buf());
-                }
-                err
-            })?;
-            let acad_doc = reader
-                .read()
-                .map_err(|e| open_error::classify_acadrust(e, "DWG"))?;
-            let mut notices = diagnostics::from_acadrust_notifications(&acad_doc.notifications);
-            notices.push(OpenNotice::new(
-                diagnostics::NoticeSeverity::Warning,
-                format!(
-                    "native DWG parser failed ({native_err}), fell back to acadrust"
-                ),
-            ));
-            Ok((native_bridge::acadrust_doc_to_native(&acad_doc), notices))
-        }
-    }
-}
-
 /// Load a DXF file via the native reader (synchronous).
 fn load_dxf_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError> {
     let bytes = std::fs::read(path).map_err(|e| OpenError::Io {
@@ -413,27 +369,81 @@ fn load_dxf_native_blocking(path: &Path) -> Result<NativeCadDocument, OpenError>
     h7cad_native_dxf::read_dxf_bytes(&bytes).map_err(open_error::classify_native_dxf)
 }
 
+/// Load a DWG file, trying the native parser first with acadrust fallback.
+fn load_dwg_native_blocking(
+    path: &Path,
+) -> Result<(NativeCadDocument, Vec<OpenNotice>), OpenError> {
+    let bytes = std::fs::read(path).map_err(|e| OpenError::Io {
+        path: Some(path.to_path_buf()),
+        message: e.to_string(),
+    })?;
+
+    match h7cad_native_dwg::read_dwg(&bytes) {
+        Ok(doc) => Ok((doc, Vec::new())),
+        Err(native_err) => {
+            let mut reader = DwgReader::from_file(path).map_err(|e| {
+                let mut err = open_error::classify_acadrust(e, "DWG");
+                if let OpenError::Io { path: slot, .. } = &mut err {
+                    *slot = Some(path.to_path_buf());
+                }
+                err
+            })?;
+            let acad_doc = reader.read().map_err(|e| {
+                let mut err = open_error::classify_acadrust(e, "DWG");
+                if let OpenError::Io { path: slot, .. } = &mut err {
+                    *slot = Some(path.to_path_buf());
+                }
+                err
+            })?;
+            let mut notices = vec![OpenNotice::new(
+                diagnostics::NoticeSeverity::Warning,
+                format!("native DWG parser fell back to acadrust: {native_err}"),
+            )];
+            notices.extend(diagnostics::from_acadrust_notifications(
+                &acad_doc.notifications,
+            ));
+            Ok((native_bridge::acadrust_doc_to_native(&acad_doc), notices))
+        }
+    }
+}
+
 /// Write the document to a DXF file at `path`.
 pub fn save_dxf(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let text = h7cad_native_dxf::write_dxf(doc)?;
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
-// ── DXF post-load fixups ──────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
-    for entity in doc.entities_mut() {
-        match entity {
-            EntityType::Dimension(Dimension::Linear(d)) => {
-                d.rotation = d.rotation.to_radians();
-            }
-            EntityType::AttributeDefinition(a) => {
-                a.rotation = a.rotation.to_radians();
-            }
-            EntityType::AttributeEntity(a) => {
-                a.rotation = a.rotation.to_radians();
-            }
-            _ => {}
-        }
+    fn temp_dxf_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("h7cad-{name}-{}.dxf", std::process::id()))
+    }
+
+    #[test]
+    fn dxf_open_path_surfaces_unknown_entity_notice() {
+        let path = temp_dxf_path("unknown-entity-notice");
+        let dxf = concat!(
+            "  0\nSECTION\n  2\nHEADER\n",
+            "  9\n$ACADVER\n  1\nAC1015\n",
+            "  0\nENDSEC\n",
+            "  0\nSECTION\n  2\nENTITIES\n",
+            "  0\nFAKE_ENTITY_XYZ\n  5\nAB\n  8\n0\n",
+            "  0\nENDSEC\n",
+            "  0\nEOF\n",
+        );
+        std::fs::write(&path, dxf).expect("write temp dxf");
+
+        let (doc, notices) = load_file_native_blocking(&path).expect("open temp dxf");
+
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(doc.entities.len(), 1);
+        assert!(
+            notices
+                .iter()
+                .any(|notice| notice.message.contains("FAKE_ENTITY_XYZ x1")),
+            "expected unknown entity advisory, got {notices:?}"
+        );
     }
 }
