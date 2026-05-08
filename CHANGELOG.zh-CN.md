@@ -1,5 +1,30 @@
 # 更新日志
 
+## 2026-05-08
+
+### 合并上游 fork `origin/main` 80 个提交
+
+- 把 happyrust/H7CAD `origin/main` 上累积的 80 个提交合并回 local main，
+  含上游 HakanSeven12/H7CAD `v0.2.0` → `v0.2.3` 的 release 路径以及 fork 自家
+  `feat: improve DXF fidelity and diagnostics` / `Merge origin/main into DXF
+  fidelity work.` 两个 commit。
+- 解决 16 个文件 / 47 处冲突：保留 HEAD 端的 `world_offset`（PID 大坐标支持）、
+  `Scene::apply_grip` 包装、LwPolyline arc midpoint 编辑路径、TextStroke 真实 origin、
+  text_support style flag 解析、`native_wires_for_model_space` 集成；取 origin 端的
+  WireModel 新字段 `plinegen` / `vp_scissor`、`SegmentedLines` 分支、R49 viewport
+  paper-space sync 修复、Dimension `dimexo`/`dimexe` 透传、Spline / Arc OCS→WCS
+  修正、删除已迁移到 `ViewportPane` 的 `Scene::shader::Program` impl，并清理
+  io/mod.rs 重复函数与死代码。
+- 已知后续：upstream `HakanSeven12/H7CAD` 仍领先 12 个 commit（含 acadrust 切 GitHub
+  源、Polyface/Polygon mesh solid fill、annotation scale 等），冲突面更大，留待
+  单独 PR 合入。
+
+### 验证
+
+- `cargo +stable check --workspace --all-targets` 通过（0 error，10 warnings 全部
+  pre-existing dead_code）。
+- nightly toolchain 受 `pathfinder_simd-0.5.5` 工具链兼容性问题影响，与本合并无关。
+
 ## 2026-05-06
 
 ### DXF / Native 渲染保真
