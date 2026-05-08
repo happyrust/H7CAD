@@ -11,7 +11,7 @@ use crate::scene::wire_model::{SnapHint, TangentGeom};
 // ── TruckConvertible ────────────────────────────────────────────────────────
 
 /// Catmull-Rom spline tessellation through `ctrl` points, `segs_per_span` segments each.
-fn catmull_rom_pts(ctrl: &[[f32; 3]], segs_per_span: u32) -> Vec<[f32; 3]> {
+pub(crate) fn catmull_rom_pts(ctrl: &[[f32; 3]], segs_per_span: u32) -> Vec<[f32; 3]> {
     let n = ctrl.len();
     let mut out = Vec::new();
     for i in 0..n.saturating_sub(1) {
@@ -186,6 +186,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         snap_pts,
         tangent_geoms: tangents,
         key_vertices: key_verts,
+        fill_tris: vec![],
     })
 }
 

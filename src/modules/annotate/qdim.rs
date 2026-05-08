@@ -102,6 +102,7 @@ impl CadCommand for QdimCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         })
     }
 }

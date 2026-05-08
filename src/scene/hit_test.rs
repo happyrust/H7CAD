@@ -29,19 +29,23 @@ pub fn click_hit<'a>(
     let mut best_dist = CLICK_THRESHOLD_PX;
     let mut best: Option<&str> = None;
 
+    // Q: lazy projection — no Vec allocation per wire; NaN resets the segment chain.
     for wire in wires {
-        let screen: Vec<Point> = wire
-            .points
-            .iter()
-            .map(|&p| world_to_screen(Vec3::from(p), view_proj, bounds))
-            .collect();
-
-        for seg in screen.windows(2) {
-            let d = dist_point_to_segment(cursor, seg[0], seg[1]);
-            if d < best_dist {
-                best_dist = d;
-                best = Some(&wire.name);
+        let mut prev: Option<Point> = None;
+        for &[px, py, pz] in &wire.points {
+            if px.is_nan() {
+                prev = None;
+                continue;
             }
+            let cur = world_to_screen(Vec3::new(px, py, pz), view_proj, bounds);
+            if let Some(p0) = prev {
+                let d = dist_point_to_segment(cursor, p0, cur);
+                if d < best_dist {
+                    best_dist = d;
+                    best = Some(&wire.name);
+                }
+            }
+            prev = Some(cur);
         }
     }
 
@@ -84,6 +88,7 @@ pub fn box_hit<'a>(
     let box_bl = Point { x: min_x, y: max_y };
     let box_br = Point { x: max_x, y: max_y };
 
+    // Q: lazy projection — accumulate screen points without allocating per-wire Vec.
     wires
         .iter()
         .filter_map(|wire| {
@@ -91,32 +96,34 @@ pub fn box_hit<'a>(
                 return None;
             }
 
-            let screen: Vec<Point> = wire
-                .points
-                .iter()
-                .map(|&p| world_to_screen(Vec3::from(p), view_proj, bounds))
-                .collect();
+            let mut hit = false;
+            let mut all_inside = true;
+            let mut prev: Option<Point> = None;
 
-            let hit = if crossing {
-                // A wire is hit when any vertex is inside the box OR any of its
-                // segments crosses one of the four box edges.
-                screen.iter().any(|&sp| inside(sp))
-                    || screen.windows(2).any(|seg| {
-                        let (a, b) = (seg[0], seg[1]);
-                        segments_intersect(a, b, box_tl, box_tr)
-                            || segments_intersect(a, b, box_tr, box_br)
-                            || segments_intersect(a, b, box_br, box_bl)
-                            || segments_intersect(a, b, box_bl, box_tl)
-                    })
-            } else {
-                screen.iter().all(|&sp| inside(sp))
-            };
-
-            if hit {
-                Some(wire.name.as_str())
-            } else {
-                None
+            for &[px, py, pz] in &wire.points {
+                if px.is_nan() {
+                    prev = None;
+                    continue;
+                }
+                let sp = world_to_screen(Vec3::new(px, py, pz), view_proj, bounds);
+                if crossing {
+                    if inside(sp) { hit = true; }
+                    if let Some(p0) = prev {
+                        if !hit {
+                            hit = segments_intersect(p0, sp, box_tl, box_tr)
+                                || segments_intersect(p0, sp, box_tr, box_br)
+                                || segments_intersect(p0, sp, box_br, box_bl)
+                                || segments_intersect(p0, sp, box_bl, box_tl);
+                        }
+                    }
+                } else {
+                    if !inside(sp) { all_inside = false; }
+                }
+                prev = Some(sp);
             }
+
+            let result = if crossing { hit } else { all_inside && prev.is_some() };
+            if result { Some(wire.name.as_str()) } else { None }
         })
         .collect()
 }
@@ -139,6 +146,7 @@ pub fn poly_hit<'a>(
         return vec![];
     }
 
+    // Q: lazy projection — no Vec allocation per wire.
     wires
         .iter()
         .filter_map(|wire| {
@@ -146,27 +154,31 @@ pub fn poly_hit<'a>(
                 return None;
             }
 
-            let screen: Vec<Point> = wire
-                .points
-                .iter()
-                .map(|&p| world_to_screen(Vec3::from(p), view_proj, bounds))
-                .collect();
+            let mut hit = false;
+            let mut all_inside = true;
+            let mut prev: Option<Point> = None;
 
-            let hit = if crossing {
-                // Any vertex inside OR any wire segment crosses any polygon edge.
-                screen.iter().any(|&sp| point_in_polygon(sp, poly))
-                    || screen
-                        .windows(2)
-                        .any(|seg| segment_crosses_polygon(seg[0], seg[1], poly))
-            } else {
-                screen.iter().all(|&sp| point_in_polygon(sp, poly))
-            };
-
-            if hit {
-                Some(wire.name.as_str())
-            } else {
-                None
+            for &[px, py, pz] in &wire.points {
+                if px.is_nan() {
+                    prev = None;
+                    continue;
+                }
+                let sp = world_to_screen(Vec3::new(px, py, pz), view_proj, bounds);
+                if crossing {
+                    if point_in_polygon(sp, poly) { hit = true; }
+                    if !hit {
+                        if let Some(p0) = prev {
+                            if segment_crosses_polygon(p0, sp, poly) { hit = true; }
+                        }
+                    }
+                } else {
+                    if !point_in_polygon(sp, poly) { all_inside = false; }
+                }
+                prev = Some(sp);
             }
+
+            let result = if crossing { hit } else { all_inside && prev.is_some() };
+            if result { Some(wire.name.as_str()) } else { None }
         })
         .collect()
 }

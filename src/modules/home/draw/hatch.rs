@@ -113,7 +113,7 @@ impl HatchCommand {
                 }]
             });
         HatchModel {
-            boundary,
+            boundary: std::sync::Arc::new(boundary),
             pattern: HatchPattern::Pattern(families),
             name: pat_name.into(),
             color: [0.75, 0.75, 0.75, 0.85],
@@ -245,7 +245,7 @@ impl GradientCommand {
 
     fn make_hatch(&self, boundary: Vec<[f32; 2]>) -> HatchModel {
         HatchModel {
-            boundary,
+            boundary: std::sync::Arc::new(boundary),
             pattern: HatchPattern::Gradient {
                 angle_deg: 0.0,
                 color2: [0.18, 0.18, 0.18, 0.0],
@@ -396,7 +396,7 @@ impl CadCommand for BoundaryCommand {
                 self.missed = false;
                 // Store as a Hatch entity (solid fill) so it is selectable.
                 let model = HatchModel {
-                    boundary: outline.clone(),
+                    boundary: std::sync::Arc::new(outline.clone()),
                     pattern: HatchPattern::Solid,
                     name: "SOLID".into(),
                     color: [0.45, 0.45, 0.45, 0.60],

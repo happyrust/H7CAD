@@ -84,6 +84,7 @@ impl CadCommand for RayCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         })
     }
 }
@@ -164,6 +165,7 @@ impl CadCommand for XLineCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         })
     }
 }

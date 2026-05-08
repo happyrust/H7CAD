@@ -42,6 +42,12 @@ impl StatusBar {
         in_mspace: bool,
         // Whether to render the layout tab strip (LAYOUTTAB toggle).
         show_layout_tabs: bool,
+        // Current annotation scale for model space (1.0 = 1:1, 50.0 = 1:50, etc.).
+        annotation_scale: f32,
+        // True when the scale picker popup is open.
+        scale_popup_open: bool,
+        // True when the scale pill is interactive (always model space; paper space only when a viewport is active/selected).
+        scale_pill_enabled: bool,
     ) -> Element<'a, Message> {
         let menu_btn = button(text("≡").size(14).color(ICON_COLOR))
             .on_press(Message::Command("MENU".into()))
@@ -63,11 +69,23 @@ impl StatusBar {
         let osnap_active = snapper.is_active();
         let snap_grid_on = snapper.is_on(crate::snap::SnapType::Grid) && snapper.snap_enabled;
 
-        let scale_label = format_scale(viewport_scale);
         let vp_label = if viewport_count > 0 {
             format!("{} VP", viewport_count)
         } else {
             String::new()
+        };
+        // Scale pill: opens the scale picker popup.
+        // Model space: always interactive, shows annotation scale.
+        // Paper space: interactive only when a viewport is active/selected.
+        let scale_label = if current_layout == "Model" {
+            format_scale(Some(1.0 / annotation_scale as f64))
+        } else {
+            format_scale(viewport_scale)
+        };
+        let scale_element: Element<'_, Message> = if scale_pill_enabled {
+            tip(scale_popup_btn(&scale_label, scale_popup_open), "Annotation / Viewport Scale\nClick to change")
+        } else {
+            status_pill(scale_label).into()
         };
         let mut right_status = row![
             tip(
@@ -96,7 +114,7 @@ impl StatusBar {
                 space_mode_btn(&current_layout, in_mspace),
                 "PAPER: double-click viewport to enter MSPACE\nMODEL: click to switch to Model Space",
             ),
-            status_pill(scale_label),
+            scale_element,
         ]
         .spacing(2);
         if !vp_label.is_empty() {
@@ -652,6 +670,32 @@ const SNAP_OFF_HOVER: Color = Color {
     b: 0.22,
     a: 1.0,
 };
+
+// ── Scale popup button ────────────────────────────────────────────────────
+
+fn scale_popup_btn(label: &str, open: bool) -> Element<'static, Message> {
+    let label = label.to_string();
+    button(text(label).size(10).color(if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT }))
+        .on_press(Message::ToggleScalePopup)
+        .style(move |_: &Theme, status| button::Style {
+            background: Some(Background::Color(match (open, status) {
+                (true, button::Status::Hovered) => SNAP_ON_HOVER,
+                (true, _) => SNAP_ON_BG,
+                (false, button::Status::Hovered) => SNAP_OFF_HOVER,
+                (false, _) => SNAP_OFF_BG,
+            })),
+            border: Border {
+                color: if open { SNAP_BORDER_ON } else { BORDER_COLOR },
+                width: 1.0,
+                radius: 2.0.into(),
+            },
+            text_color: if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT },
+            shadow: iced::Shadow::default(),
+            snap: false,
+        })
+        .padding([2, 6])
+        .into()
+}
 
 // ── Scale display ─────────────────────────────────────────────────────────
 

@@ -123,6 +123,7 @@ impl TruckConvertible for MLine {
             snap_pts,
             tangent_geoms: vec![],
             key_vertices: key_verts,
+            fill_tris: vec![],
         })
     }
 }

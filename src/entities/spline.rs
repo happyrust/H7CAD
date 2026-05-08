@@ -47,6 +47,7 @@ pub fn to_truck_with_normal(
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
     let knot_vec = if !knots.is_empty() {
@@ -96,6 +97,7 @@ pub fn to_truck_with_normal(
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices,
+        fill_tris: vec![],
     }
 }
 

@@ -27,6 +27,10 @@ use crate::scene::wire_model::WireModel;
 use iced::wgpu;
 use iced::wgpu::util::DeviceExt;
 
+/// Hard cap on segments per wire entity. Entities with more segments are
+/// silently truncated to prevent a single complex object from exhausting GPU memory.
+pub const MAX_SEGS_PER_WIRE: usize = 100_000;
+
 // ── Vertex layout ─────────────────────────────────────────────────────────
 
 #[repr(C)]
@@ -156,10 +160,19 @@ impl WireGpu {
             ];
             let half_width = wire.line_weight_px * 0.5;
             let n = wire.points.len();
+            let raw_segs = n.saturating_sub(1);
+            let capped_segs = raw_segs.min(MAX_SEGS_PER_WIRE);
+            if raw_segs > MAX_SEGS_PER_WIRE {
+                eprintln!(
+                    "[H7CAD] wire '{}': {} segments exceeds limit ({MAX_SEGS_PER_WIRE}), truncating",
+                    wire.name, raw_segs
+                );
+            }
 
             // Cumulative arc-length per point.
-            let mut dists = vec![0.0_f32; n];
-            for i in 1..n {
+            let pts_len = capped_segs + 1;
+            let mut dists = vec![0.0_f32; pts_len];
+            for i in 1..pts_len {
                 let p = wire.points[i - 1];
                 let q = wire.points[i];
                 if !p[0].is_finite() || !q[0].is_finite() {
@@ -177,7 +190,7 @@ impl WireGpu {
                 }
             }
 
-            for i in 0..n.saturating_sub(1) {
+            for i in 0..capped_segs {
                 let a = wire.points[i];
                 let b = wire.points[i + 1];
                 if !a[0].is_finite()
@@ -257,7 +270,14 @@ impl WireGpu {
         let half_width = wire.line_weight_px * 0.5;
 
         let n = wire.points.len();
-        let seg_count = if n >= 2 { n - 1 } else { 0 };
+        let raw_seg_count = if n >= 2 { n - 1 } else { 0 };
+        let seg_count = raw_seg_count.min(MAX_SEGS_PER_WIRE);
+        if raw_seg_count > MAX_SEGS_PER_WIRE {
+            eprintln!(
+                "[H7CAD] wire '{}': {} segments exceeds limit ({MAX_SEGS_PER_WIRE}), truncating",
+                wire.name, raw_seg_count
+            );
+        }
         let mut vertices: Vec<WireVertex> = Vec::with_capacity(seg_count * 6);
 
         // Precompute cumulative arc-length at each point.
