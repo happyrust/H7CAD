@@ -26,6 +26,8 @@ use crate::scene::truck_tess::{
 };
 use crate::scene::wire_model::{SnapHint, TangentGeom, WireModel};
 
+const TAU: f64 = std::f64::consts::TAU;
+
 // ── Colour helper ──────────────────────────────────────────────────────────
 
 /// Convert an acadrust Color (ACI index or true-color) to a GPU RGBA value.
