@@ -104,6 +104,7 @@ pub fn resolve_document(pending: &PendingDocument) -> Result<CadDocument, DwgRea
                     .replace(':', "_"),
                 summary.semantic_link.to_ascii_uppercase().replace(':', "_")
             ),
+            raw_codes: Vec::new(),
         };
         doc.objects.push(CadObject {
             handle: object.handle,

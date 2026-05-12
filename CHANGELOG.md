@@ -2,6 +2,986 @@
 
 ## [未发布]
 
+### 2026-05-12：AC1015 HATCH entity body writer (F5.M5.E20)
+
+> 接续 M5.E21 VIEWPORT，本轮交付 `write_hatch_geometry` —— M5 阶段
+> 最复杂的 entity writer。M5 进度 15/22 → 16/22。sample_AC1015.dwg
+> 中 6 个 HATCH 实例从此可被 writer 处理。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_hatch.rs`：
+>   - `pub fn write_hatch_geometry(&HatchGeometry, &mut BitWriter, &mut BitWriter)`
+>     双流写入（handle 流仅 reserved，本子段不用）。
+>   - **三级嵌套变长结构**：
+>     - 顶层：`Vec<HatchBoundaryPath>`（变长）
+>     - 中层：每个 boundary path 的 `flags` 决定走 polyline 路径还是
+>       typed-edges 路径
+>     - 底层：4 种 `HatchEdge` 变体（Line / CircularArc / EllipticArc /
+>       Polyline），每种独立 1-byte type + 字段集
+>   - **polyline path 强约束**：`flags & 2 != 0` 时 `path.edges` 必须
+>     恰好含一个 `HatchEdge::Polyline`；缺失或多放都视为 caller bug，
+>     返回 `DwgWriteError::InvalidValue`。
+>   - **!solid_fill 最简 pattern 块**：写 angle=0 / scale=1 / is_double=0 /
+>     num_lines=0，避免拖入 pattern-line 字段（模型不携带）。
+> - `writer/document.rs::encode_entity` 加 `EntityData::Hatch`
+>   dispatch + `encode_hatch_entity` helper +
+>   `AC1015_OBJECT_TYPE_HATCH = 78` const。
+
+**TDD 验收**
+
+- 7 个新 writer-internal 单测全绿（**首次运行就全过**）：
+  - 空 solid（与 reader `hatch_geometry_decodes_empty_solid_payload`
+    镜像）。
+  - 单 Line edge 边界（typed-edges 路径）。
+  - CircularArc 边界 + is_ccw 双向 round-trip。
+  - EllipticArc 边界。
+  - polyline path 含 bulge + closed。
+  - !solid_fill pattern block 路径。
+  - polyline flag 缺失 Polyline edge 拒绝（`InvalidValue` 包含
+    "polyline" + "HatchEdge::Polyline"）。
+- 2 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_solid_hatch_entity_round_trips_through_read_dwg`：
+    solid_fill=true，1 boundary path with 4 Line edges（封闭矩形）。
+  - `write_dwg_with_single_pattern_hatch_entity_round_trips_through_read_dwg`：
+    solid_fill=false（pattern 块路径）+ 单 CircularArc edge。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 292 + read_headers 53 + real_samples 38 + roundtrip_minimal 23
+  = **406 全绿**（M5.E21 baseline 397 → +9）。
+- `$env:RUSTFLAGS='-Dwarnings'; cargo check -p h7cad-native-dwg --all-targets`：
+  零警告，零错误。
+
+**已锁定的 M5.E20 不变量**
+
+- `EntityData::Hatch.{pattern_name, solid_fill, boundary_paths}` →
+  writer → reader 精确相等（包含 4 种 HatchEdge variant 与
+  HatchBoundaryPath.flags）。
+- `encode_entity` 对 `EntityData::Hatch` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+**仍在 M5 总体范围内的 known limitation**
+
+- `boundary_handle_count` 永远写 0：HATCH 与源实体的关联性不保留，
+  AutoCAD 的 hover-highlight-source-entity 行为不支持。
+- pattern 定义不可 round-trip：!solid_fill 时 writer 只写最简形态
+  （angle=0 / scale=1 / num_lines=0）。完整 pattern fidelity 需 model
+  扩字段。
+- `num_seeds` 永远写 0：flood-fill seed points 不建模。
+- HATCH spline edges (wire type 4) 不发出：模型 `HatchEdge` enum
+  无 Spline variant。
+- `elevation` 永远写 0：reader 不读回该字段。
+
+详见 `docs/plans/2026-05-12-dwg-m5e20-hatch-plan.md` §9。
+
+### 2026-05-12：AC1015 VIEWPORT entity body writer (F5.M5.E21)
+
+> 接续 M5.E12 INSERT，本轮交付 `write_viewport_geometry`。
+> M5 进度 14/22 → 15/22。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_viewport.rs`：
+>   - `pub fn write_viewport_geometry(ViewportGeometry, &mut BitWriter)`
+>     按 reader 字段顺序写 3 字段 payload：
+>     `3BD center → BD width → BD height`。
+>   - **设计回避**：full VIEWPORT spec 还含 view direction / twist /
+>     lens length / frozen layers 等大量字段，**reader 当前一律 skip**；
+>     writer 镜像这一最简形态，与 model `EntityData::Viewport` 完全
+>     等价。完整 spec 扩展属于「model 端先长字段，再 reader 解出，
+>     最后 writer 跟进」三段式后续工作。
+> - `writer/document.rs::encode_entity` 加 `EntityData::Viewport`
+>   dispatch + `encode_viewport_entity` helper +
+>   `AC1015_OBJECT_TYPE_VIEWPORT = 34` const。
+> - `writer/mod.rs` + `lib.rs` re-export `write_viewport_geometry`。
+
+**TDD 验收**
+
+- 3 个新 writer-internal 单测全绿：
+  - 原点 + 单位尺寸（紧凑前缀路径）。
+  - 偏移中心 + 任意矩形。
+  - 退化 width=height=0 边界。
+- 1 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_viewport_entity_round_trips_through_read_dwg`：
+    构造单 VIEWPORT entity，center / width / height 全部 roundtrip。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 285 + read_headers 53 + real_samples 38 + roundtrip_minimal 21
+  = **397 全绿**（M5.E12 baseline 393 → +4）。
+- `$env:RUSTFLAGS='-Dwarnings'; cargo check -p h7cad-native-dwg --all-targets`：
+  零警告，零错误。
+
+**已锁定的 M5.E21 不变量**
+
+- `EntityData::Viewport.{center, width, height}` → writer → reader
+  精确相等。
+- `encode_entity` 对 `EntityData::Viewport` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+**仍在 M5 总体范围内的 known limitation**
+
+- 上文「设计回避」段所述：view direction / twist / lens length /
+  frozen layers 等字段都不在 model 中，故 writer 不发出。完整字段
+  list 是 reader / model 联合扩展任务，不在本子段。
+
+### 2026-05-12：AC1015 INSERT entity body writer (F5.M5.E12)
+
+> 接续 M5.E11，本轮交付 `write_insert_geometry`。M5 进度 13/22 → 14/22。
+> INSERT 是首个 writer 通过 BLOCK_RECORD 表名→handle 解析的 entity。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_insert.rs`：
+>   - `pub fn write_insert_geometry(&InsertGeometry, &mut BitWriter, &mut BitWriter)`
+>     按 reader 字段顺序写 payload：
+>     `3BD insertion → 2B scale_flag → ? scale_xyz → BD rotation →
+>     3BD extrusion → B has_attribs`，handle 路径写
+>     `HANDLE_CODE_HARD_OWNER` 的 block_header_handle。
+>   - **scale_flag 智能选择**（镜像 reader 4 分支）：
+>     - `01`：scale=(1,1,1)，零字节
+>     - `10`：sx==sy==sz，仅写 1 个 RD x（broadcast）
+>     - `00`：异质 scale，写 RD x + DD y(default x) + DD z(default x)
+>     - `11`：reader catch-all，writer 永不发出
+>   - **has_attribs 已知限制**：reader 的 `read_insert_geometry` 只
+>     从 handle 流读 `block_header_handle`，**从不**读 first_attrib /
+>     last_attrib / seqend；`EntityData::Insert.attribs` 一直为空。
+>     writer 一律 force `has_attribs = false`，避免 handle 流契约
+>     失配。完整 attrib 链 round-trip 不在 M5.E12 范围。
+> - `writer/document.rs::encode_entity` 加 `EntityData::Insert`
+>   dispatch（解构出 `block_name / insertion / scale / rotation`，
+>   忽略 `has_attribs / attribs`）+ `encode_insert_entity` helper +
+>   `AC1015_OBJECT_TYPE_INSERT = 7` const。
+>   - **block_name 解析**：`doc.block_records.values().find(|br| br.name == block_name)`
+>     线性扫描；找不到则 `Handle::NULL`，reader 走 `$BLOCK_<HEX>`
+>     fallback（BLOCK_RECORD 表 writer 未上线，与 M5.E5/E11 的 STYLE
+>     表 fallback 同质）。
+> - `writer/mod.rs` + `lib.rs` re-export `write_insert_geometry`。
+
+**TDD 验收**
+
+- 5 个新 writer-internal 单测全绿：
+  - unit scale (`01` 路径，零 scale 字节)。
+  - single scale (`10` 路径，1 个 RD)。
+  - DD scale (`00` 路径，3 字段全异)。
+  - DD scale mid-row default (`00` 路径，y 与 x 等但 z 异)。
+  - **writer 强制 has_attribs=false 已知限制**：caller 传 true，
+    round-trip 后 reader 看到 false，writer-side 限制断言。
+- 1 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_insert_entity_round_trips_through_read_dwg`：
+    构造单 INSERT entity，DD scale 路径 + 非零 rotation；
+    `block_name` 走 `$BLOCK_80` fallback（与 M5.E5/E11 同质）。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 282 + read_headers 53 + real_samples 38 + roundtrip_minimal 20
+  = **393 全绿**（M5.E11 baseline 387 → +6）。
+- `$env:RUSTFLAGS='-Dwarnings'; cargo check -p h7cad-native-dwg --all-targets`：
+  零警告，零错误。
+
+**已锁定的 M5.E12 不变量**
+
+- `EntityData::Insert.{insertion, scale, rotation}` → writer → reader
+  还原 INSERT 的同字段精确相等（包括 scale 3 模式各自的 round-trip）。
+- `extrusion` 经 common header + body 双向传递保持相等。
+- `encode_entity` 对 `EntityData::Insert` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+**仍在 M5 总体范围内的 known limitation**
+
+- BLOCK_RECORD 表 writer 未上线 → `block_name` 不能 round-trip，
+  reader 走 `$BLOCK_<HEX>` fallback（与 M5.E5/E11 的 STYLE 表 fallback
+  同质）。BLOCK_RECORD 表 writer 列入 M5 末尾追加任务。
+- `has_attribs / attribs` 链不 round-trip：writer 永远 force false，
+  reader 永远返回 empty。完整 ATTRIB 链 round-trip 需 reader 端先
+  补 first/last/seqend 读取，超出 M5.E12 范围。
+
+### 2026-05-12：AC1015 MTEXT entity body writer (F5.M5.E11)
+
+> 接续 M5.E10，本轮交付 `write_mtext_geometry`。M5 进度 12/22 → 13/22。
+> MTEXT 是首个 writer 同时写入 main + handle 两路位流，并依赖
+> 格式化字符串的 entity。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_mtext.rs`：
+>   - `pub fn write_mtext_geometry(&MTextGeometry, &mut BitWriter, &mut BitWriter)`
+>     按 reader 字段顺序写 13 字段 payload：
+>     `3BD insertion → 3BD extrusion → 3BD x_direction →
+>     BD rect_width → BD rect_height → BD height → BS attachment →
+>     BS drawing_direction → BD ext_height(0) → BD ext_width(0) →
+>     T value → BS line_spacing_style(0) → BD line_spacing_factor →
+>     B unknown_bit(0)`，handle 路径写入 `HANDLE_CODE_HARD_OWNER`
+>     的 `style_handle`。
+>   - **reader 丢弃字段**：`ext_height` / `ext_width` /
+>     `line_spacing_style` / `unknown_bit` writer 一律写 0/false，
+>     reader 不读回故 round-trip 不受影响。
+>   - **`rotation ↔ x_direction` 非 bit-exact**：`EntityData::MText`
+>     只保留标量 `rotation`，writer 由 `[cos, sin, 0]` 反推；
+>     reader 用 `atan2` 还原 rotation。`cos/sin → atan2` 在 f64 下
+>     不是 bit-exact，调用方需 ε ≤ 1e-12 比较；测试中 rotation=0.0
+>     精确 round-trip，rotation≠0 走 ε 容差。
+> - `writer/document.rs::encode_entity` 加 `EntityData::MText`
+>   dispatch + `encode_mtext_entity` helper +
+>   `AC1015_OBJECT_TYPE_MTEXT = 44` const。
+>   - **style 解析链**：writer 先 `text_styles.get(style_name)`，
+>     找不到则回退 "Standard"，再找不到则 `Handle::NULL`。
+>     reader 把 handle 反查为 style_name；当前 STYLE 表 writer 未
+>     上线，所以 reader 走 `$STYLE_<HEX>` fallback，与 M5.E5 TEXT
+>     已知限制同质。
+>   - **`rectangle_height: Option<f64>`** ↔ wire `rect_height: f64`：
+>     writer 用 `unwrap_or(0.0)`，reader `> 0.0 ? Some : None`，
+>     `None ↔ Some(0.0)` 同归 None（与 reader 语义对齐）。
+> - `writer/mod.rs` + `lib.rs` re-export `write_mtext_geometry`。
+
+**TDD 验收**
+
+- 3 个新 writer-internal 单测全绿：
+  - canonical x_direction（rotation=0.0，bit-exact 全等）。
+  - 非零 rotation 经 cos/sin/atan2 ε ≤ 1e-12 round-trip。
+  - 空字符串 + `rect_height=0.0` 边界。
+- 1 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_mtext_entity_round_trips_through_read_dwg`：
+    构造单 MTEXT entity（rotation=0），验证 9 个 EntityData::MText
+    字段；`style_name` 走 `$STYLE_20` fallback（与 M5.E5 同质）。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 277 + read_headers 53 + real_samples 38 + roundtrip_minimal 19
+  = **387 全绿**（M5.E10 baseline 383 → +4）。
+- `$env:RUSTFLAGS='-Dwarnings'; cargo check -p h7cad-native-dwg --all-targets`：
+  零警告，零错误。
+
+**已锁定的 M5.E11 不变量**
+
+- 任意 `EntityData::MText` → writer → reader 还原后
+  `insertion / height / width / rectangle_height / value /
+  attachment_point / line_spacing_factor / drawing_direction` 精确相等。
+- `rotation` 经 cos/sin/atan2 链路 round-trip 在 ε ≤ 1e-12 内。
+- `encode_entity` 对 `EntityData::MText` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+**仍在 M5 总体范围内的 known limitation**
+
+- STYLE 表 writer 未上线 → `style_name` 不能与 caller 输入 round-trip，
+  reader 走 `$STYLE_<HEX>` fallback（与 M5.E5 TEXT 同质）。
+  STYLE 表 writer 已加入 M5 末尾追加任务列表。
+
+### 2026-05-12：AC1015 SPLINE entity body writer (F5.M5.E10)
+
+> 接续 M5.E9，本轮交付 `write_spline_geometry`。M5 进度 11/22 → 12/22。
+> 这是 writer 链路第一个含变长嵌套数组 + scenario 分支的 entity。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_spline.rs`：
+>   - `pub fn write_spline_geometry(&SplineGeometry, &mut BitWriter)`
+>     按 reader 端字段顺序写完整 payload：
+>     `BL scenario → BL degree → [scenario==2: BD fit_tolerance →
+>     3BD start_tangent → 3BD end_tangent → BL num_fit_points →
+>     3BD × num_fit_points] → B rational → B closed → B periodic →
+>     BD knot_tolerance → BD control_tolerance → BL num_knots →
+>     BD × num_knots → BL num_control_points → (3BD + BD weight?) ×
+>     num_control_points`。
+> - **scenario 选择规则**：
+>   - `scenario = 2` 当 `!fit_points.is_empty() || start_tangent != [0,0,0]
+>     || end_tangent != [0,0,0]`（reader 在 scenario=1 时 fit-point
+>     字段强制归 default，所以这是 round-trip 的最小充分条件）。
+>   - 否则 `scenario = 1`。
+> - **rational 推导**：`!geom.weights.is_empty()`；weights 与
+>   control_points 长度不一致时 writer 返回 `DwgWriteError::InvalidValue`。
+> - **reader 丢弃字段**（`periodic` / `fit_tolerance` / `knot_tolerance`
+>   / `control_tolerance`）writer 一律写 0：reader 不会读回来，所以
+>   写什么都不影响 round-trip。
+> - `writer/document.rs::encode_entity` 加 `EntityData::Spline`
+>   dispatch + `encode_spline_entity` helper +
+>   `AC1015_OBJECT_TYPE_SPLINE = 36` const。
+> - `writer/mod.rs` + `lib.rs` re-export `write_spline_geometry`。
+
+**TDD 验收**
+
+- 5 个新 writer-internal 单测全绿：
+  - scenario=1 极简（空 spline，degree=3）。
+  - scenario=1 含 4 控制点 + 8 节点 + closed=true。
+  - scenario=2 fit-points + 非零切线（强制 scenario 2 路径）。
+  - rational：weights 与 control_points 等长。
+  - rejects：weights 长度与 control_points 不一致 → `InvalidValue`，
+    错误信息包含两个长度来源。
+- 1 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_spline_entity_round_trips_through_read_dwg`：
+    constructs 非平凡 closed scenario=1 SPLINE entity，验证 8 个
+    EntityData::Spline 字段全部 roundtrip。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 274 + read_headers 53 + real_samples 38 + roundtrip_minimal 18
+  = **383 全绿**（M5.E9 baseline 377 → +6）。
+- `$env:RUSTFLAGS='-Dwarnings'; cargo check -p h7cad-native-dwg --all-targets`：
+  零警告，零错误。
+
+**已锁定的 M5.E10 不变量**
+
+- `EntityData::Spline` 任意有效组合 → writer → reader 还原为同字段
+  精确相等（含 fit_points 与 control_points 混合非空场景）。
+- rational 路径 weights 长度严格校验，不允许 silent truncation。
+- `encode_entity` 对 `EntityData::Spline` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+详见 `docs/plans/2026-05-09-dwg-m5-entity-body-writers-plan.md` §2.2。
+
+### 2026-05-12：AC1015 ELLIPSE entity body writer (F5.M5.E9)
+
+> 接续 M5.E8，本轮交付 `write_ellipse_geometry`。M5 进度 10/22 → 11/22。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_ellipse.rs`：
+>   - `pub fn write_ellipse_geometry(EllipseGeometry, &mut BitWriter)`
+>     按 reader 端字段顺序写 6 字段 payload：
+>     `3BD center → 3BD major_axis → 3BD extrusion → BD ratio →
+>     BD start_param → BD end_param`。
+>   - **`3BD extrusion` 区别于 CIRCLE/ARC**：ELLIPSE 的 extrusion 走
+>     纯 `3BD` 三元组路径，而非 R2000+ 短路 `BE` 格式。这一点与
+>     ACadSharp `DwgEntityReader.ReadEllipse` 行为一致。
+> - `writer/document.rs::encode_entity` 加 `EntityData::Ellipse`
+>   dispatch + `encode_ellipse_entity` helper +
+>   `AC1015_OBJECT_TYPE_ELLIPSE = 35` const。
+>   - **extrusion 字段来源**：reader 读到的 body extrusion 被赋给
+>     `entity.extrusion`（common header），writer 从 `entity.extrusion`
+>     读回再写入 body —— 形成读写对偶链。
+> - `writer/mod.rs` + `lib.rs` re-export `write_ellipse_geometry`。
+
+**TDD 验收**
+
+- 3 个新 writer-internal 单测全绿：
+  - 经典 full ellipse（ratio=0.5, params=0→2π）。
+  - 偏移 + 任意 major_axis 的椭圆弧（ratio=0.25, params=0.25→2.75）。
+  - 紧凑前缀路径压力测试（canonical zeros + unit ratio + canonical
+    OCS Z extrusion，与 reader `ellipse_shortest_encoding` 测试镜像）。
+- 1 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_ellipse_entity_round_trips_through_read_dwg`：
+    构造单 ELLIPSE entity，验证 5 个 EntityData 字段 +
+    `entity.extrusion` 全部 roundtrip。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 269 + read_headers 53 + real_samples 38 + roundtrip_minimal 17
+  = **377 全绿**（M5.E8 baseline 373 → +4）。
+- `$env:RUSTFLAGS='-Dwarnings'; cargo check -p h7cad-native-dwg --all-targets`：
+  零警告，零错误。
+- 新文件 `rustfmt --edition 2021` 通过；`ReadLints` 零错。
+
+**已锁定的 M5.E9 不变量**
+
+- `EntityData::Ellipse` 字段 → writer → reader 还原为同字段精确相等。
+- `entity.extrusion` 经 writer → reader 还原后保持相等（writer 把它
+  写入 body `3BD extrusion`，reader 把 body 解出来赋回 `entity.extrusion`）。
+- `encode_entity` 对 `EntityData::Ellipse` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+详见 `docs/plans/2026-05-09-dwg-m5-entity-body-writers-plan.md` §2.2。
+
+### 2026-05-12：AC1015 RAY + XLINE entity body writer (F5.M5.E8)
+
+> 接续 M5.E7，本轮交付 `write_ray_geometry`（RAY 与 XLINE 共用 wire body）。
+> M5 进度 8/22 → 10/22。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_ray.rs`：
+>   - `pub fn write_ray_geometry(RayGeometry, &mut BitWriter)`
+>     按 reader 端字段顺序写 2 字段 payload：`3BD origin → 3BD direction`。
+>   - **RAY (object_type=38) 与 XLINE (object_type=40) 共用 writer 函数**：
+>     wire 格式完全一致，仅在 `compose_entity_object_slice` 阶段以
+>     `object_type` 与 DXF type name 区分。
+> - `writer/document.rs::encode_entity` 加 `EntityData::Ray` /
+>   `EntityData::XLine` 两条 dispatch，配套 `encode_ray_like_entity`
+>   helper（用 `EntityKind::{Ray, XLine}` 内部 enum 区分类型代码）
+>   与 `AC1015_OBJECT_TYPE_RAY = 38` / `AC1015_OBJECT_TYPE_XLINE = 40`
+>   两个 const。
+> - `writer/mod.rs` + `lib.rs` re-export `write_ray_geometry`。
+
+**TDD 验收**
+
+- 3 个新 writer-internal 单测全绿：
+  - 经典 X 轴方向单位射线（origin=0, direction=X）。
+  - 平移 origin + 对角线 direction。
+  - 全负 direction 分量。
+- 2 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_ray_entity_round_trips_through_read_dwg`：
+    构造单 RAY entity，origin/direction/handle/color/linetype_scale
+    全部 roundtrip。
+  - `write_dwg_with_single_xline_entity_round_trips_through_read_dwg`：
+    构造单 XLINE entity，验证 dispatch 正确路由到 `XLINE_OBJECT_TYPE = 40`
+    而非 38；`EntityData::XLine` 字段 roundtrip。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 266 + read_headers 53 + real_samples 38 + roundtrip_minimal 16
+  = **373 全绿**（M5.E7 baseline 368 → +5）。
+- `$env:RUSTFLAGS='-Dwarnings'; cargo check -p h7cad-native-dwg --all-targets`：
+  零警告，零错误。
+- 新文件 `rustfmt --edition 2021` 通过；`ReadLints` 零错。
+
+**已锁定的 M5.E8 不变量**
+
+- `EntityData::Ray` → writer → `read_ray_geometry` 还原后
+  `origin / direction` 字段精确相等。
+- `EntityData::XLine` → writer → reader 还原为 `EntityData::XLine`
+  （而非 Ray）；object_type 必须为 `XLINE_OBJECT_TYPE = 40`。
+- `encode_entity` 对 `EntityData::Ray` / `XLine` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+详见 `docs/plans/2026-05-09-dwg-m5-entity-body-writers-plan.md` §2.2。
+
+### 2026-05-12：AC1015 SOLID + 3DFACE entity body writers (F5.M5.E7)
+
+> 接续 M5.E6 ATTRIB，本轮交付 `write_solid_geometry` 与 `write_face3d_geometry`
+> —— `read_solid_geometry` / `read_face3d_geometry` 的反函数。M5 进度 6/22 → 8/22。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_solid.rs`：
+>   - `pub fn write_solid_geometry(SolidGeometry, &mut BitWriter)`
+>     按 reader 端字段顺序写 7 字段 payload：
+>     `BT thickness` → `BD elevation` → `4 × 2RD corner(x,y)` →
+>     `BE extrusion`。
+>   - **共享 elevation 强约束**：SOLID wire 格式只携带单一 z；调用
+>     方传入 4 个 corner 的 `c[2]` 不一致时返回 `DwgWriteError::InvalidValue`，
+>     错误信息显式给出两个不同 z 值。reader 端也是给 4 个 corner 赋
+>     同一 elevation，因此非一致 z 不可能 roundtrip。
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_face3d.rs`：
+>   - `pub fn write_face3d_geometry(Face3DGeometry, &mut BitWriter)`
+>     按 reader 端字段顺序写 6 字段 payload：
+>     `B has_no_flags=0` → `BS invisible_edges` → `4 × 3BD corner`。
+>   - **`has_no_flags = 0` 恒定路径**：始终写出 BS `invisible_edges`，
+>     即使为 0；保证 mask round-trip 与 M5.E1…E6 一致的可预测行为。
+> - `writer/document.rs::encode_entity` 加 `EntityData::Solid` / `Face3D`
+>   两条 dispatch，配套 `encode_solid_entity` / `encode_face3d_entity`
+>   helper，以及 `AC1015_OBJECT_TYPE_SOLID = 31` / `AC1015_OBJECT_TYPE_FACE3D = 28`
+>   两个 const（与 reader 端 `lib.rs` 中的常量同步）。
+> - `writer/mod.rs` + `lib.rs` re-export `write_solid_geometry` /
+>   `write_face3d_geometry`。
+
+**TDD 验收**
+
+- 6 个新 writer-internal 单测全绿：
+  - SOLID：单位正方形 / 非零 elevation 平移 / 不一致 z 拒绝。
+  - 3DFACE：平面 quad / 非平面 + invisible_edges mask / 零 mask
+    依然写 `has_no_flags=0+BS`（位计数下界 27 bits）。
+- 2 个新 `tests/roundtrip_minimal.rs` 集成测试全绿：
+  - `write_dwg_with_single_solid_entity_round_trips_through_read_dwg`：
+    构造单 SOLID entity，corners / normal(extrusion) / thickness /
+    layer / handle / color / linetype_scale 全部 roundtrip。
+  - `write_dwg_with_single_face3d_entity_round_trips_through_read_dwg`：
+    构造单 3DFACE entity，4 个独立 3BD corner + `invisible_edges=0b1010`
+    round-trip；额外验证 `invisible` 与 `linetype_scale`。
+- `cargo test -p h7cad-native-dwg --all-targets`：
+  lib 263 + read_headers 53 + real_samples 38 + roundtrip_minimal 14
+  = **368 全绿**（M5.E6 baseline 360 → +8）。
+- `cargo check -p h7cad-native-dwg --all-targets`（默认 + `-Dwarnings`）：
+  零警告，零错误。
+- 新文件 `rustfmt --edition 2021` 通过；`ReadLints` 零错。
+
+**已锁定的 M5.E7 不变量**
+
+- 任意 `SolidGeometry` 满足共享 elevation → writer →
+  `read_solid_geometry` 还原 `corners / thickness / extrusion`
+  字段精确相等。
+- 任意 `Face3DGeometry` → writer → `read_face3d_geometry` 还原
+  `corners / invisible_edges` 字段精确相等；i16 invisible_edges
+  完整保留（包括负值、位掩码、零三态）。
+- `encode_entity` 对 `EntityData::Solid` / `Face3D` 不再返回
+  `Unsupported(pending F5.M5)`。
+
+**仍在 M5 总体范围内的 known limitation**
+
+- common entity header `owner_handle` / `lineweight` 仍走 M4.C
+  minimal placeholder（reader 解码出的值为 `Handle::NULL` /
+  ByDefault），与 M5.E1…E6 同质，待 M5 末尾 `write_ac1015_entity_common_full`
+  统一解锁。
+- 3DFACE 与部分 sample 物理字节不同（sample 可能用 `has_no_flags=1`
+  shortcut 省略零 BS），但 reader 与本 writer 之间 round-trip 严格
+  等价；sample_AC1015 byte 级比对不在 M5.E7 范围。
+
+详见 `docs/plans/2026-05-12-dwg-m5e7-solid-face3d-plan.md`。
+
+### 2026-05-09：AC1015 LINE entity body writer (F5.M4.D)
+
+> 接续 M4.C，本轮交付 `write_line_geometry(LineGeometry, &mut BitWriter)`
+> —— `read_line_geometry` 的反函数。M4 进度 4/5；M4.E 是最后一砖。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_line.rs`：
+>   - `pub fn write_line_geometry(LineGeometry, &mut BitWriter)`
+>     按 reader 端 `read_line_geometry` 的字段顺序写入 9 字段
+>     payload：`B z_are_zero` → `RD sx` → `DD ex (default sx)` →
+>     `RD sy` → `DD ey (default sy)` → 可选 `RD sz / DD ez` →
+>     `BT thickness` → `BE extrusion`。
+>   - **z_are_zero 自动检测**：`start[2] == 0.0 && end[2] == 0.0`
+>     → 紧凑路径（省去 80+ bits sz/ez 对）；否则全展开。IEEE 754
+>     `-0.0 == +0.0` 触发 reader 把 `-0.0` z 解为 `+0.0`，与
+>     AutoCAD "geometric -0 == +0" 语义一致。
+>   - 紧凑 thickness/extrusion 走 `BitWriter::write_bit_thickness_r2000_plus`
+>     / `write_bit_extrusion_r2000_plus`（M1 已实现）。
+> - `lib.rs` re-export `write_line_geometry`。
+
+**TDD 验收**
+
+- 5 个新单测：2D 紧凑路径 / 3D 显式 sz/ez / DD-default `00`
+  prefix 路径 / 非平凡 thickness+extrusion / `-0.0` z 边界处理。
+  **5/5 首次运行就全绿**。
+- DD-default 路径单测精确预测 LINE payload bit count 为 **135**（1
+  z_are_zero + 64 sx + 2 DD prefix + 64 sy + 2 DD prefix + 1
+  thickness + 1 extrusion = 135），证明字段时序与紧凑路径选择算
+  法精确对偶。
+- `cargo test -p h7cad-native-dwg --all-targets`：lib 240 +
+  read_headers 53 + real_samples 38 + roundtrip_minimal 4 = **335 全绿**。
+- `cargo check -p h7cad-native-dwg --all-targets -- -Dwarnings`：零警告。
+- 新文件 `rustfmt --edition 2021` 通过；`ReadLints` 零错误。
+
+**已锁定的 M4.D 不变量**
+
+- 任意 `LineGeometry` 经 writer → `read_line_geometry` 还原后字段
+  全等价（除 `-0.0` z 被规范化为 `+0.0`，已显式锁定）。
+- `start == end` 时 DD prefix 选 `0b00` 节省 128 bits（端点 ex/ey
+  各省 64 bit raw double + 6 bits prefix）。
+- z_are_zero = true + thickness = 0 + extrusion = `[0,0,1]` 时整
+  个 LINE payload 仅 **135 bits**（约 17 字节，含 1 字节 byte
+  align padding）。
+
+facade `save(NativeFormat::Dwg, _)` 仍然锁定 placeholder。
+
+### 2026-05-09：AC1015 common entity header minimal writer (F5.M4.C)
+
+> 接续 M4.B，本轮交付 `write_ac1015_entity_common_minimal(EntityCommonMinimal,
+> &mut BitWriter, &mut BitWriter)` —— `parse_ac1015_entity_common`
+> 的反函数（最简配置）。M4 进度 3/5。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/entity_common.rs`：
+>   - `EntityCommonMinimal { owner_block_handle, layer_handle,
+>     color_index, linetype_scale, lineweight, invisible }` —— 最
+>     小可控字段集。`owner_block_handle` 与 `lineweight` 字段是
+>     M4.C minimal 的 known limitation 占位（前者无效，后者强制
+>     ByDefault），由测试 `round_trips_lineweight_decodes_to_by_default`
+>     显式锁定。
+>   - `pub fn write_ac1015_entity_common_minimal(...)`：按 reader
+>     端 `parse_ac1015_entity_common_after_extended_data` 的字段
+>     时序写出 main 流 11 个字段（EED 终止符 0 → has_graphic 0 →
+>     entity_mode 0b01 → reactor_count 0 → nolinks 1 → color_index
+>     → linetype_scale → linetype_flags 0b00 → plotstyle_flags 0b00
+>     → invisible → lineweight_index 31）+ handle 流 2 个 handle
+>     ref（NULL xdictionary + 显式 layer）。
+> - `lib.rs` re-export `write_ac1015_entity_common_minimal` 与
+>   `EntityCommonMinimal`。
+
+**TDD 验收**
+
+- 5 个新单测：典型字段 round-trip / invisible 双 case / 负 color_index
+  / lineweight 锁定 ByDefault / `u64::MAX` layer handle 边界。**首次
+  运行就全绿**（5/5）—— 字段时序对照表在子计划 §1 已完成详细推敲。
+- `cargo test -p h7cad-native-dwg --all-targets`：lib 235 +
+  read_headers 53 + real_samples 38 + roundtrip_minimal 4 = **330 全绿**。
+- `cargo check -p h7cad-native-dwg --all-targets -- -Dwarnings`：零警告。
+- 新文件 `rustfmt --edition 2021` 通过；`ReadLints` 零错误。
+
+**已锁定的 M4.C 不变量**
+
+- writer 输出经 `parse_ac1015_entity_common(main_reader, handle_reader,
+  object_handle)` 还原后，`layer_handle / color_index / linetype_scale
+  / invisible / linetype_flags(=0)` 与 caller 输入精确等价。
+- known limitation by design：`owner_handle = NULL` 不论 caller 输入
+  （entity_mode = 0b01 触发 reader 跳过 owner inline 引用）；`lineweight
+  = -3 ByDefault` 不论 caller 输入（lineweight_index 硬编码 31）。
+  解锁路径：M5 中段独立 PR 加 `write_ac1015_entity_common_full` 反查表。
+- `linetype_handle = NULL`、`plotstyle` 不写入 handle 流：与 reader 在
+  `linetype_flags = 0b00` / `plotstyle_flags = 0b00` 路径一致。
+
+facade `save(NativeFormat::Dwg, _)` 仍然锁定 placeholder。
+
+### 2026-05-09：AC1015 object slice composer (F5.M4.B)
+
+> 接续 M4.A，本轮交付 `compose_ac1015_object_slice(header, &main_stream,
+> &handle_stream) -> Result<Vec<u8>, DwgWriteError>` —— 把 M4.A 的
+> object header writer 与 caller-supplied main / handle BitWriter
+> 拼成完整 object slice，并经 `split_ac1015_object_streams` 严格
+> roundtrip。M4 进度 2/5。
+>
+> - `crates/h7cad-native-dwg/src/modular.rs` 新增 `pub(crate) fn
+>   write_modular_short(value: u64, &mut Vec<u8>)`，与
+>   `read_modular_short` 字节级对偶（LE 2-byte 块、`0x8000` 续字段
+>   位、低 15 bits payload）。
+> - 新建 `crates/h7cad-native-dwg/src/writer/object_slice.rs`：
+>   - `pub fn compose_ac1015_object_slice(ObjectHeader, &BitWriter, &BitWriter)`：
+>     先 `write_ac1015_object_header` 写 BS/RL/H 三字段，再逐 bit 拷贝
+>     main 流 + handle 流到 body BitWriter（保持 unaligned trailing
+>     bits 精确传递），最后 align_to_byte，加 MS prefix（modular short）
+>     与 2 字节 CRC 占位输出。
+>   - 上线 `header.main_size_bits == header_bit_count + main_stream.bits()`
+>     一致性自检；不一致 → `DwgWriteError::InvalidValue`，错误信息
+>     标明三方 bit count，便于调试 caller 端 off-by-one。
+>   - 公开 `pub const CRC_STUB: [u8; 2] = [0, 0]`，与
+>     `handle_map.rs` 的 advisory CRC 注释保持同一姿态。
+> - `lib.rs` re-export `compose_ac1015_object_slice`、`CRC_STUB`。
+
+**TDD 验收**
+
+- 6 个新单测：3 个 `modular::tests::write_modular_short_*`
+  （单 chunk、多 chunk、`0x8000` 边界双字节）+ 3 个
+  `writer::object_slice::tests`（典型 roundtrip via
+  `split_ac1015_object_streams`、空 main + 空 handle 流的 edge case、
+  `main_size_bits` 不一致拒绝）。
+- `cargo test -p h7cad-native-dwg --all-targets`：lib 230 +
+  read_headers 53 + real_samples 38 + roundtrip_minimal 4 = **325 全绿**。
+- `cargo check -p h7cad-native-dwg --all-targets -- -Dwarnings`：零警告。
+- 新文件 `rustfmt --edition 2021` 通过；`ReadLints` 零错误。
+
+**已锁定的 M4.B 不变量**
+
+- 任何 `(header, main_stream, handle_stream)` 经 composer →
+  `split_ac1015_object_streams` 还原后：header 三字段相等、main 读
+  回 `bit_short` 等同步、handle 读回 `(code, value)` 等同步。
+- 空 main + 空 handle 流的 `main_size_bits == header_bit_count`
+  亦通过；reader 端 `main.bits_remaining() == 0`、handle stream
+  剩余 < 8 bits（仅 byte-align padding）。
+- `main_size_bits` 不等于 `header_bit_count + main_stream.bits()`
+  → `InvalidValue`，错误文案显式列出三方 bit count。
+
+facade `save(NativeFormat::Dwg, _)` 仍然锁定 placeholder：M4 整体
+要等 M4.C/D/E 全部到位才会切换。
+
+### 2026-05-09：AC1015 object header writer 起步 (F5.M4.A)
+
+> 接续同日 F5.M3，本轮把 native DWG writer 推进到 object slice 三字段
+> 中的第一字段 — object header（BS object_type + RL main_size_bits + H
+> handle）。同时制定 F5.M4 子计划，把「object stream writer」拆成
+> M4.A..M4.E 五个 vertical slice 子里程碑。
+>
+> - 起草 `docs/plans/2026-05-09-dwg-m4-object-stream-writer-plan.md`：
+>   M4.A object header writer / M4.B object slice composer / M4.C
+>   common entity header minimal / M4.D LINE body writer / M4.E
+>   `write_dwg` 集成 + LINE roundtrip。每段独立 PR。预估 9–14h。
+> - 新建 `crates/h7cad-native-dwg/src/writer/object_header.rs`：
+>   - `pub fn write_ac1015_object_header(ObjectHeader, &mut BitWriter)` 与
+>     `crate::read_ac1015_object_header` 字节级对偶；只写 BS/RL/H
+>     三字段，不含 MS prefix 与 trailing CRC（M4.B 负责）。
+>   - `pub fn write_ac1015_object_self_header(object_type, main_size_bits, handle, &mut BitWriter)`：
+>     便利接口，自动用 `HANDLE_CODE_HARD_OWNER` 自我引用编码。
+> - `lib.rs` re-export `write_ac1015_object_header` 与
+>   `write_ac1015_object_self_header`。
+
+**TDD 验收**
+
+- 4 个新单测：经典字段、4 字节 handle、self-header bit count = 58
+  bits（与 reader 端 `reader_positioned_exactly_after_header` 对应）、
+  handle_code 越界传播错误。
+- `cargo test -p h7cad-native-dwg --all-targets`：lib 224 +
+  read_headers 53 + real_samples 38 + roundtrip_minimal 4 = **319 全绿**。
+- `cargo check -p h7cad-native-dwg --all-targets -- -Dwarnings`：零警告。
+- 新文件 `rustfmt --edition 2021` 通过；`ReadLints` 零错误。
+
+**已锁定的 M4.A 不变量**
+
+- 任意 `ObjectHeader` 经 writer → 加 MS prefix → reader 还原等价。
+- self-header（即 handle_code = 0x5）在 1 字节 handle 时占 58 bits；
+  与 reader 端 `reader_positioned_exactly_after_header` 单测一致。
+- `handle_code > 0x0F` → `DwgWriteError::InvalidValue`（透传 BitWriter
+  的 4-bit nibble 校验）。
+
+facade `save(NativeFormat::Dwg, _)` 仍然锁定 placeholder：M4.A 是 M4
+入口砖，集成进 `write_dwg` 要等 M4.B + M4.C + M4.D + M4.E 全部到位。
+
+### 2026-05-09：AC1015 handle map writer (F5.M3 落地)
+
+> 接续同日 F5.M2 收口，本轮按
+> `docs/plans/2026-05-08-dwg-next-step-plan.md` §F5.M3 把 native DWG
+> writer 推进到「能把 `&[HandleMapEntry]` 编码为 reader 可恢复的
+> `AcDb:Handles` 段 payload」。`section_handles.rs` 从「empty 或拒绝」
+> 升级到「empty 或真正的 chunk-encoded payload」。
+>
+> - `crates/h7cad-native-dwg/src/modular.rs` 新增 `write_modular_char`
+>   与 `write_signed_modular_char`，与 `read_modular_char` /
+>   `read_signed_modular_char` 字节级对偶。
+> - 新建 `crates/h7cad-native-dwg/src/writer/handle_map.rs`：
+>   - `pub fn write_ac1015_handle_map_payload(&[HandleMapEntry]) -> Result<Vec<u8>, DwgWriteError>`。
+>   - 单 chunk 实现：`size: u16(BE)` + `(delta_handle, delta_loc)` 流
+>     + 2 字节 CRC 占位（reader 不验证，沿用 advisory 约定）+ 空尾
+>     chunk `0x00 0x02`。
+>   - `entries` 自动按 `handle` 升序排序后再编码（reader 假设单调）。
+>   - 重复 handle → `DwgWriteError::InvalidDocument`；entry 流超出
+>     单 chunk 上限 (`MAX_CHUNK_PAYLOAD = 2032`) → `DwgWriteError::SectionTooLarge`。
+>   - 多 chunk 编码留作 entity body 写入器 (F5.M5+) 自然产生大数据
+>     量时再做。
+> - `crates/h7cad-native-dwg/src/writer/section_handles.rs` 升级：
+>   空 entries → 空 `Vec`（保留 M2 tracer-bullet 不变量），非空
+>   entries → 转发 `write_ac1015_handle_map_payload`。`Unsupported`
+>   分支删除。
+> - `lib.rs` re-export `write_ac1015_handle_map_payload` 与
+>   `MAX_CHUNK_PAYLOAD`，让 facade / 主 bin / 集成测试都能复用 M3
+>   编码器。
+
+**TDD 验收**
+
+- 12 个新单测：6 个 `modular` 模块（覆盖单字节、多字节、字节边界、
+  正负号、终结字节高 6 bit 跨进位）+ 6 个 `writer::handle_map` 模块
+  （覆盖空、5 entries、未排序、负 offset delta、duplicate handle、
+  payload overflow）。
+- `cargo test -p h7cad-native-dwg --all-targets`：lib 220 + read_headers
+  53 + real_samples 38 + roundtrip_minimal 4 = **315 全绿**，零回归。
+- `cargo check --workspace --all-targets`：通过；零新增 warning。
+- `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`：
+  零警告。
+- 新文件 `rustfmt --edition 2021` 格式化通过；`ReadLints` 零错误。
+
+**已锁定的 M3 不变量**
+
+- `write_ac1015_handle_map_payload(&[]) == [0x00, 0x02]`：空输入 ⇒
+  仅空尾 chunk。
+- 任意 5 entries 经 writer → `parse_handle_map` 后得到原始 entries。
+- writer 在 entries 未排序时不 panic 也不丢数据，而是排序后再编码；
+  reader 读回的 entry 顺序 = 排序后 entries。
+- 重复 handle → `InvalidDocument`，永不"silently coalesce"。
+- 单 chunk payload > 2032 字节 → `SectionTooLarge { section: "AcDb:Handles", limit: 2032, .. }`。
+
+**与既存测试的关系**
+
+- `parse_handle_map_*` 系列既存 reader 单测继续锁定 wire format；任
+  何 writer 偏移都会同时让 reader 单测和 M3 roundtrip 单测变红，双
+  向夹击。
+- F5.M2 的 `roundtrip_minimal.rs` 4 个测试不变；空 doc → empty
+  handles section payload (0 字节) 仍由 `write_dwg_section_payloads_are_byte_for_byte_empty`
+  锁定，因为 `write_ac1015_handles_section` 对空 entries 返回空 Vec。
+
+### 2026-05-09：AC1015 section composer 闭环 (F5.M2 收口)
+
+> 接续同日的 F5.M2.T1+T2，本轮按
+> `docs/plans/2026-05-09-dwg-section-composer-empty-payloads-plan.md`
+> 把 native DWG writer 推进到「写出最小空 R2000 文档 → 经 native
+> reader 读回 → 与 fresh `CadDocument::new()` 默认表等价」这条
+> tracer bullet。F5.M2 整体收口；M3 (handle map writer) 起为下一片。
+>
+> - 新增 6 个 known section composer，每个都返回最小空 payload：
+>   - `crates/h7cad-native-dwg/src/writer/section_header.rs`
+>   - `crates/h7cad-native-dwg/src/writer/section_classes.rs`
+>   - `crates/h7cad-native-dwg/src/writer/section_handles.rs`
+>     （非空 entries → `DwgWriteError::Unsupported`，显式指向 F5.M3）
+>   - `crates/h7cad-native-dwg/src/writer/section_obj_free_space.rs`
+>   - `crates/h7cad-native-dwg/src/writer/section_template.rs`
+>   - `crates/h7cad-native-dwg/src/writer/section_aux_header.rs`
+> - 新增 `crates/h7cad-native-dwg/src/writer/document.rs::write_dwg(&CadDocument)`：
+>   组装 file header prefix (0x19) + section locator directory
+>   (6×9) + 6 个空 payload；按 record_number 升序紧密排列；非空
+>   `doc.entities` 显式拒绝为 `DwgWriteError::Unsupported`，错误
+>   信息含 `F5.M5` 指引；descriptor `offset` 用单一 `cursor: u32`
+>   累加防 off-by-one，溢出 → `SectionTooLarge`。
+> - 新增 `crates/h7cad-native-dwg/tests/roundtrip_minimal.rs` 4 个集成测试：
+>   - `write_dwg_empty_doc_round_trips_through_read_dwg`：空 doc
+>     写出 → 读回，`entities` 仍为空，`layers` / `linetypes` 与
+>     fresh `CadDocument::new()` 等价。
+>   - `write_dwg_rejects_non_empty_entities_with_unsupported`：单
+>     LINE entity 触发 `Unsupported`，错误指向 F5.M5。
+>   - `write_dwg_directory_offsets_are_within_file_bounds`：6 个
+>     descriptor 的 `[offset, offset+size)` 全在文件字节区间内，
+>     `section_count == 6`，`section_directory_offset == 0x19`。
+>   - `write_dwg_section_payloads_are_byte_for_byte_empty`：6 个
+>     payload 字节级为空、record_number 严格按 0..=5 升序排列。
+> - `lib.rs` re-export `write_dwg`、6 个 `write_ac1015_<section>_section`、
+>   `AC1015_EMPTY_DWG_MIN_LEN`、`AC1015_KNOWN_SECTION_COUNT`，公共
+>   表面与 reader 端对偶。
+>
+> facade `save(NativeFormat::Dwg, _)` **继续** 锁定 placeholder：
+> `dwg_runtime_save_is_unavailable` 测试不动；切换留给 F5.M6（在
+> 至少一类 entity 真实 roundtrip 后才有意义）。
+
+**TDD 验收**
+
+- 新增 4 个集成测试 + 既存 7 个 file header writer 单测 + 30 个
+  BitWriter 单测全绿。
+- `cargo test -p h7cad-native-dwg --all-targets`：lib 208 +
+  read_headers 53 + real_samples 38 + roundtrip_minimal 4 =
+  **303 全绿**，零回归。
+- `cargo check --workspace --all-targets`：通过；零新增 warning
+  （10 个 dead-code 全在 H7CAD 主 bin，先前已存在）。
+- `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`：
+  零警告。
+- 新文件 `rustfmt --edition 2021 --check` 通过；零 lint。
+
+**已锁定的 M2 不变量**
+
+- 写出文件 `section_count == 6`，directory 严格按
+  `Header(0) → Classes(1) → Handles(2) → ObjFreeSpace(3) →
+  Template(4) → AuxHeader(5)` 排列。
+- 每个 directory entry 的 `[offset, offset+size)` 严格 ⊂
+  `[file_header_prefix_len + directory_len, bytes.len())`。
+- 任何会让 writer 偏离「空 payload」语义的改动都会被
+  `write_dwg_section_payloads_are_byte_for_byte_empty` 拦截。
+- 任何会让 writer 偷偷接受 entity 但不真正写出的改动都会被
+  `write_dwg_rejects_non_empty_entities_with_unsupported` 拦截。
+
+### 2026-05-09：AC1015 file header writer (F5.M2.T1+T2 起步)
+
+> 接续 F5.M1 的 `BitWriter`，本轮按
+> `docs/plans/2026-05-08-dwg-next-step-plan.md` §F5.M2 把 writer 模块
+> 骨架立起来，并交付第一砖：AC1015 文件头前缀 + section locator
+> directory 的字节级写入器。剩余 M2 任务（Header/Classes/Handles/
+> ObjFreeSpace/Template/AuxHeader 六个 known section 的最小空 payload）
+> 留作后续提交。
+>
+> - 新建 `crates/h7cad-native-dwg/src/writer/mod.rs` 作为 writer 流水线
+>   的入口；为后续 section composer / handle map / object stream
+>   writer 留好挂载点。
+> - 新建 `crates/h7cad-native-dwg/src/writer/file_header.rs`，与
+>   `DwgFileHeader::parse` + `SectionMap::parse` 严格对偶：
+>   `write_ac1015_file_header_prefix(section_count) -> [u8; 0x19]`
+>   填充 magic / release / preview seeker / undocumented / codepage /
+>   section_count；`write_ac1015_section_locator_directory(&[
+>   SectionDescriptor])` 输出 `record_number` + LE `offset` + LE `size`
+>   的 9 字节/记录序列。
+> - `lib.rs` re-export `write_ac1015_file_header_prefix`、
+>   `write_ac1015_section_locator_directory`、
+>   `AC1015_FILE_HEADER_PREFIX_LEN`、`AC1015_SECTION_LOCATOR_ENTRY_LEN`，
+>   保持公共表面与 reader 端 (`DwgFileHeader`/`SectionMap`) 对称。
+>
+> 顶层 `write_dwg(doc) -> Result<Vec<u8>, DwgWriteError>` 仍未引入；
+> 计划留给 M2 完整收口（六个 known section payload 全部到位后）再做。
+> facade `save(NativeFormat::Dwg, _)` 继续锁定 placeholder，
+> `dwg_runtime_save_is_unavailable` 测试不动。
+
+**字段默认值**（reader 不读、写出可被外部工具识别为合法 R2000 头）
+
+| 字段 | 偏移 | 默认值 | 说明 |
+|---|---|---|---|
+| Magic | `0x00..0x06` | `"AC1015"` | reader 据此 sniff version |
+| Release marker | `0x06..0x0D` | 7 个 `0x00` | reader 不读 |
+| Preview seeker | `0x0D..0x11` | `0xFFFFFFFF` | "无 preview" 哨兵 |
+| Undocumented | `0x11..0x13` | `0x0000` | reader 不读 |
+| Codepage | `0x13..0x15` | `30` (ANSI_1252) | LE u16，西文 R2000 默认 |
+| Section count | `0x15..0x19` | 调用方传入 | LE u32，reader 据此截取 directory |
+
+**TDD 验收**
+
+- 7 个新 unit test：
+  - `prefix_has_fixed_length_and_starts_with_ac1015_magic`
+  - `prefix_encodes_section_count_at_documented_offset`
+  - `prefix_uses_documented_defaults_for_padding_bytes`
+  - `prefix_rejects_section_count_above_reader_cap`
+  - `prefix_round_trips_through_dwg_file_header_parser`
+  - `directory_length_matches_descriptor_count`
+  - `directory_round_trips_through_section_map_parser`
+  - `directory_rejects_more_entries_than_reader_cap`
+- `cargo test -p h7cad-native-dwg --all-targets`：lib 38 + read_headers 53 +
+  real_samples 38 = **129 全绿**，零回归。
+- `cargo check --workspace --all-targets`：编译通过；零新增 warning
+  （10 个 dead-code warning 来自 H7CAD 主 bin，先前已存在）。
+- `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`：零警告。
+
+**已锁定的对偶不变量**
+
+- 写出的前缀 + 任意 directory 必能被 `DwgFileHeader::parse` +
+  `SectionMap::parse` 解出并 `record_number / offset / size` 等价。
+- writer 与 reader 共享同一 section-count 上限
+  (`MAX_SECTION_RECORDS = 128`)：超出者 writer 直接 `InvalidValue`
+  拒绝，不留下"写出但读不回"的失衡文件。
+
+### 2026-05-08：BitWriter 镜像 BitReader (F5.M1 起步)
+
+> native DWG writer 的最小可用骨架。`docs/plans/2026-05-08-dwg-next-step-plan.md`
+> §F5 把 native writer 拆成 M1 (BitWriter) → M2 (Section composer) →
+> M3 (Handle map) → M4 (Object stream) → M5 (Entity bodies) → M6
+> (facade 切换) → M7 (AC1018) 七个里程碑。本轮交付 M1：
+>
+> - `crates/h7cad-native-dwg/src/bit_writer.rs` 新建，与 `BitReader`
+>   完全对偶的 MSB-first 位流写入器。
+> - `crates/h7cad-native-dwg/src/error.rs` 新增 `DwgWriteError` 枚举
+>   (`InvalidValue` / `InvalidDocument` / `Unsupported` /
+>   `SectionTooLarge` / `Io`)。
+> - `crates/h7cad-native-dwg/src/lib.rs` 把 `BitWriter` 与
+>   `DwgWriteError` 加入公共 re-export。
+>
+> M1 不引入顶层 `write_dwg(doc) -> Vec<u8>` 接口；那是 M2 之后的工作。
+> facade `save(NativeFormat::Dwg, _)` 仍按 plan 锁定原 placeholder
+> 错误，`dwg_runtime_save_is_unavailable` 测试不动。
+
+**BitWriter 接口**（与 BitReader 一一对应，MSB-first）
+
+| BitReader → BitWriter | 说明 |
+|---|---|
+| `read_bit` → `write_bit` | 单 bit |
+| `read_bits` → `write_bits` | up to 64 bits |
+| `read_bytes` → `write_bytes` | unaligned bytes |
+| `read_raw_u8/u16_le/u32_le/u64_le/f64_le` → `write_*` | 原始 LE 整数与双精度 |
+| `read_bit_short` → `write_bit_short` | 2-bit 前缀 + payload，自动选择最紧凑前缀 |
+| `read_bit_long` → `write_bit_long` | 2-bit 前缀 + payload |
+| `read_bit_long_long` → `write_bit_long_long` | 3-bit 长度前缀 + N raw bytes（最多 7 bytes，与 reader 一致） |
+| `read_bit_double` → `write_bit_double` | 0.0/1.0 collapse；其他走 raw f64 |
+| `read_bit_double_with_default` → `write_bit_double_with_default` | DD 编码，自动选 `00`/`01`/`10`/`11` 前缀 |
+| `read_3bit_double / 2bit_double / 2raw_double` → 对应 `write_*` | (x,y,z) / (x,y) 组合 |
+| `read_bit_extrusion_r2000_plus` → `write_bit_extrusion_r2000_plus` | unit Z 单 bit collapse |
+| `read_bit_thickness_r2000_plus` → `write_bit_thickness_r2000_plus` | 0.0 单 bit collapse |
+| `read_handle` → `write_handle` | 控制字节 + N 大端 bytes |
+| `read_text_ascii` → `write_text_ascii` | BS 长度 + ASCII bytes + `\0` |
+
+**TDD 验收**
+
+- `cargo test -p h7cad-native-dwg --lib bit_writer`：30 个新测试全绿。
+- `cargo test -p h7cad-native-dwg --tests`：lib 200 + read_headers 53 +
+  real_samples 38 = **291 全绿**，零回归。
+- 每条 BitReader 单测都有对偶的 `write → read` roundtrip 单测；任何
+  BitWriter 行为偏离 BitReader 都会立刻被红灯捕获。
+- `cargo check -p h7cad-native-dwg --all-targets -- -Dwarnings`：零新警告。
+
+**已发现并锁定的边界条件**
+
+- **BitLongLong 的 7 字节上限**：reader 用 `read_bits(3)` 读长度前缀，
+  最大只能读出 7（不是 8）。writer 拒绝需要 8 字节的 value 并返回
+  `InvalidValue`，避免静默数据丢失。该约束已在测试
+  `bit_long_long_rejects_values_needing_eight_bytes` 中锁定。
+- **align_to_byte 推进语义**：与 reader 一致，跳到下一个字节边界
+  并把跳过的 bit 标记为零填充，`position_in_bits` 从 3 跳到 8 而不是
+  保持在 3。
+
+### 2026-05-08：AC1018 entity recovery baseline ratchet (F2 / R46-F)
+
+> `sample_AC1018.dwg` 在 R46-E2 落地后只剩 weak gate（≥1 entity），
+> 容易出现「明明回归到 0 但 baseline 仍绿」的静默漂移。本轮按
+> `docs/plans/2026-05-08-dwg-next-step-plan.md` §F2 把 AC1018 也升到
+> per-family ratchet，与 AC1015 一视同仁。
+
+**测量基线（2026-05-08，R46-E2 之后）**
+
+```
+sample_AC1018.dwg: 11 entities total
+  0 LINE / 1 CIRCLE / 0 ARC / 0 POINT / 0 TEXT / 0 LWPOLYLINE
+  2 HATCH / 0 ELLIPSE / 0 SPLINE / 0 MTEXT / 2 INSERT
+  0 DIMENSION / 6 VIEWPORT
+  2 block_records / 2 layouts / 281 objects
+```
+
+**新增断言**（`crates/h7cad-native-dwg/tests/real_samples.rs`）
+
+- `doc.entities.len() >= 10`（实测 11，留 1 entity buffer）
+- `circle_count >= 1`
+- `hatch_count >= 2`（锁实测值，不能再退）
+- `insert_count >= 2`（锁实测值）
+- `viewport_count >= 5`（实测 6，留 1 buffer）
+- `doc.block_records.len() >= 2`
+- `doc.layouts.len() >= 2`
+
+零 family（LINE/ARC/POINT/TEXT/LWPOLYLINE/ELLIPSE/SPLINE/MTEXT/DIMENSION）
+不加断言，避免锁死分布；只对实测 > 0 的 family 设下界。
+
+**验收**
+
+- `cargo test -p h7cad-native-dwg -- --test-threads=1`：170 + 53 + 38 全绿。
+- `cargo check -p h7cad-native-dwg --all-targets -- -Dwarnings`：零新警告。
+- `cargo check --locked --workspace --all-targets`：通过；workspace 上
+  的 10 个 dead_code 警告全部位于 H7CAD 主 bin（与 DWG 无关），是
+  pre-existing 项（`progress.md` 已多次记录），本轮未引入。
+- AC1015 baseline_m3b 不动，无回归。
+
+### 2026-05-08：DWG 读写状态文档校准 (F1)
+
+> `README.md` 中「Public runtime DWG loading is still intentionally
+> unavailable; the facade keeps returning `native DWG reader not
+> implemented yet`」的描述早已与代码事实不符——`h7cad_native_facade::load(Dwg, _)`
+> 在 R48 之后已直连 `h7cad_native_dwg::read_dwg`，AC1015 / AC1018
+> 端到端读取均已落地，主 bin 还有 acadrust fallback 兜底。本轮按
+> `docs/plans/2026-05-08-dwg-next-step-plan.md` §F1 把对外承诺与代码
+> 事实对齐，避免下游用户误判能力边界。
+
+**改动文件**
+
+- `README.md`：「Native DWG Parser Status」→「Native DWG Status」，按
+  Read / Write / Useful commands 三段重写，明确版本支持矩阵、实体覆盖
+  清单、写入仍走 acadrust 的事实。
+- `crates/h7cad-native-facade/src/lib.rs`：`load` 模块级 doc comment
+  更新「today that crate covers AC1015 only」描述，改成 AC1015 + AC1018
+  端到端，并指向新 plan §F3/§F4。
+- `docs/DEVELOPMENT-PLAN.md`：P2 表格添加 `状态` 列；P2.1/P2.2/P2.3
+  标注 ✅ 完成；新增 P2.4 (native writer)、P2.5 (高版本 reader)、
+  P2.6 (AC1018 ratchet) 占位条目，指向新 plan。
+- `docs/plans/2026-05-08-dwg-next-step-plan.md`：新 plan 文件本体，
+  覆盖 F1–F6 六个工作流、F5 (native writer) M1–M7 子里程碑、执行节奏
+  与 DoD。
+
+**验收**
+
+- 仅文档改动，零代码逻辑变更；workspace test 不受影响。
+- README 中描述的版本号与 `crates/h7cad-native-dwg/src/version.rs` enum
+  严格对应。
+- facade 测试 `dwg_runtime_save_is_unavailable` 仍锁定原 placeholder
+  字符串（本轮不动写入路径，placeholder 在 §F5.M6 才会替换）。
+
 ### 2026-04-30（四十）：DXF OCS→WCS 任意轴变换（P0.1 系统级显示偏差修复）
 
 > `INTEGRATION_GAPS.md` 列出的"systemic gap：17 种实体的 `normal` 字段被忽略，

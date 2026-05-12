@@ -14,12 +14,14 @@ pub enum NativeFormat {
 /// Read a CAD document from in-memory bytes through the native facade.
 ///
 /// Both DXF and DWG paths return a `h7cad_native_model::CadDocument`
-/// directly. The DWG arm bridges to `h7cad_native_dwg::read_dwg` —
-/// today that crate covers AC1015 only and rejects everything else as
-/// `UnsupportedVersion` / `UnsupportedHeaderLayout`; runtime callers
-/// that need wider coverage continue to use the acadrust path through
-/// `src/io::load_file_native_blocking`. See `docs/plans/
-/// 2026-04-28-r48-facade-and-build-cleanup-plan.md` for the rationale.
+/// directly. The DWG arm bridges to `h7cad_native_dwg::read_dwg`,
+/// which today covers `AC1015` (R2000) and `AC1018` (R2004) end-to-end
+/// (R46-A → R46-E2). Other versions sniff successfully but currently
+/// surface `UnsupportedHeaderLayout`; runtime callers that need wider
+/// coverage rely on the desktop's `acadrust` fallback wired in
+/// `src/io::load_dwg_native_blocking`. See
+/// `docs/plans/2026-05-08-dwg-next-step-plan.md` §F3/§F4 for the
+/// staged roadmap to the remaining versions.
 pub fn load(format: NativeFormat, bytes: &[u8]) -> Result<CadDocument, String> {
     match format {
         NativeFormat::Dxf => h7cad_native_dxf::read_dxf_bytes(bytes).map_err(|e| e.to_string()),

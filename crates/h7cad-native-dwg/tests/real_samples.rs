@@ -488,6 +488,54 @@ fn real_dwg_samples_baseline_m3b() {
                         "{name}: at least one recovered geometric entity must retain non-default owner/layer/color/linetype metadata"
                     );
                 }
+                if version == DwgVersion::Ac1018 {
+                    // R46-F (2026-05-08): AC1018 baseline ratchet against
+                    // the real `sample_AC1018.dwg`. Measured per-family:
+                    //
+                    //   total = 11
+                    //   1 CIRCLE / 2 HATCH / 2 INSERT / 6 VIEWPORT
+                    //   2 block_records / 2 layouts / 281 objects
+                    //
+                    // Lower bounds keep a one-entity buffer on the larger
+                    // numbers; the small-number families (HATCH, INSERT,
+                    // blocks, layouts) lock onto the measured values
+                    // because they cannot drop without something
+                    // genuinely regressing. Ratchet upward when future
+                    // fixes raise these numbers — never relax. This is
+                    // the F2 step from
+                    // `docs/plans/2026-05-08-dwg-next-step-plan.md`.
+                    assert!(
+                        doc.entities.len() >= 10,
+                        "{name}: AC1018 baseline must recover at least 10 entities, got {}",
+                        doc.entities.len()
+                    );
+                    assert!(
+                        circle_count >= 1,
+                        "{name}: AC1018 baseline must recover at least 1 CIRCLE; got {circle_count}"
+                    );
+                    assert!(
+                        hatch_count >= 2,
+                        "{name}: AC1018 baseline must recover at least 2 HATCH; got {hatch_count}"
+                    );
+                    assert!(
+                        insert_count >= 2,
+                        "{name}: AC1018 baseline must recover at least 2 INSERT; got {insert_count}"
+                    );
+                    assert!(
+                        viewport_count >= 5,
+                        "{name}: AC1018 baseline must recover at least 5 VIEWPORT; got {viewport_count}"
+                    );
+                    assert!(
+                        doc.block_records.len() >= 2,
+                        "{name}: AC1018 baseline must surface at least 2 block records; got {}",
+                        doc.block_records.len()
+                    );
+                    assert!(
+                        doc.layouts.len() >= 2,
+                        "{name}: AC1018 baseline must surface at least 2 layouts; got {}",
+                        doc.layouts.len()
+                    );
+                }
             }
             Err(DwgReadError::UnsupportedVersion(reported)) => {
                 assert_eq!(

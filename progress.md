@@ -86,3 +86,96 @@
 - Ran `cargo test -p H7CAD nativerender_nested_insert_hatch_byblock_uses_nearest_insert_color`: passed.
 - Ran `cargo test -p H7CAD nativerender_insert`: 5 passed.
 - Checked lints for `src/scene/mod.rs` and `src/scene/render.rs`: no linter errors.
+- Created `docs/plans/2026-05-06-dxf-hatch-fidelity-phase2-brainstorm-plan.md`.
+- Started Hatch OCS boundary TDD.
+- RED: `nativerender_hatch_ocs_boundary_uses_extrusion` failed because native Hatch boundary ignored `Entity.extrusion`.
+- GREEN: `hatch_model_from_native` now projects Hatch OCS boundary points through `transform::ocs_point_to_wcs`.
+- Ran `cargo test -p H7CAD nativerender_hatch_ocs_boundary_uses_extrusion`: passed.
+- Ran `cargo test -p H7CAD nativerender_insert`: 6 passed.
+- Ran `cargo test -p H7CAD nativerender_hatch`: 4 passed.
+- Ran `cargo check --workspace`: passed with existing warnings.
+- Started Hatch arc edge under INSERT rotation TDD.
+- RED: `nativerender_insert_hatch_arc_edge_applies_rotation` failed because native Hatch arc angles were sampled as radians instead of DXF/native degrees.
+- GREEN: circular and elliptic Hatch arc edge sampling now converts start/end angles from degrees to radians before tessellating the hatch boundary.
+- Ran `cargo test -p H7CAD nativerender_insert_hatch_arc_edge_applies_rotation`: passed.
+- Ran `cargo test -p H7CAD nativerender_hatch`: 4 passed.
+- Ran `cargo test -p H7CAD nativerender_insert`: 7 passed.
+- Ran `cargo test -p h7cad-native-dxf --test entity_2d_roundtrip`: 38 passed.
+- Ran `cargo check --workspace`: passed with existing warnings.
+
+## 2026-05-09
+
+- Resumed via `check_messages` directive: continue DWG read/write task.
+- Confirmed F1 (README/facade/DEVELOPMENT-PLAN doc alignment) already landed.
+- Confirmed F2 (AC1018 per-family ratchet, R46-F) already landed.
+- Confirmed F5.M1 (`BitWriter` mirror of `BitReader`) already landed with 30 unit tests.
+- Started F5.M2 — Section composer.
+- Created `crates/h7cad-native-dwg/src/writer/mod.rs` to host the writer pipeline.
+- Created `crates/h7cad-native-dwg/src/writer/file_header.rs` with `write_ac1015_file_header_prefix` and `write_ac1015_section_locator_directory` mirroring `DwgFileHeader::parse` and `SectionMap::parse`.
+- Re-exported the new writer surface from `crates/h7cad-native-dwg/src/lib.rs` (`write_ac1015_file_header_prefix`, `write_ac1015_section_locator_directory`, `AC1015_FILE_HEADER_PREFIX_LEN`, `AC1015_SECTION_LOCATOR_ENTRY_LEN`).
+- Added 7 TDD unit tests covering prefix layout, default padding bytes, section_count cap rejection, prefix→`DwgFileHeader::parse` round-trip, and directory→`SectionMap::parse` round-trip.
+- Ran `cargo test -p h7cad-native-dwg --all-targets`: 38 lib + read_headers/real_samples integration tests all pass; no regression.
+- Ran `cargo check --workspace --all-targets`: passed; only pre-existing dead-code warnings on the H7CAD main bin (unchanged from before this slice).
+- Ran `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`: clean.
+- Updated `CHANGELOG.md` with a 2026-05-09 entry under `[未发布]` documenting the F5.M2.T1+T2 slice.
+- Noted full-workspace `cargo test --workspace --all-targets` failed during the `H7CAD` bin link step with `rustc-LLVM ERROR: out of memory`. This is an environment-level Windows linker/LLVM issue independent of this change set; the per-crate `cargo test -p h7cad-native-dwg --all-targets` and the `cargo check --workspace --all-targets` paths both succeed.
+- Drafted `docs/plans/2026-05-09-dwg-section-composer-empty-payloads-plan.md` covering F5.M2.T3 + T4: minimal empty payloads for the six AC1015 known sections, top-level `write_dwg(doc)`, and the `tests/roundtrip_minimal.rs` matrix.
+- Executed F5.M2.T3 — added 6 `writer/section_*.rs` files emitting empty payloads for `Header / Classes / Handles / ObjFreeSpace / Template / AuxHeader`. `section_handles.rs` accepts a `&[HandleMapEntry]` slice and explicitly rejects non-empty entries via `DwgWriteError::Unsupported` pointing at F5.M3.
+- Executed F5.M2.T4 — added `writer/document.rs::write_dwg(&CadDocument) -> Result<Vec<u8>, DwgWriteError>` that glues file header prefix (0x19 bytes) + section locator directory (6 × 9 bytes) + 6 empty payloads in record-number order; rejects `doc.entities` non-empty with `Unsupported` mentioning F5.M5; uses a single `cursor: u32` accumulator with `checked_add` to avoid off-by-one, and converts overflow to `DwgWriteError::SectionTooLarge`.
+- Re-exported `write_dwg`, 6 `write_ac1015_<section>_section`, `AC1015_EMPTY_DWG_MIN_LEN`, and `AC1015_KNOWN_SECTION_COUNT` from `crates/h7cad-native-dwg/src/lib.rs`.
+- Added `crates/h7cad-native-dwg/tests/roundtrip_minimal.rs` with 4 integration tests: empty-doc round-trip, non-empty rejection, directory offset bounds, and per-section empty payload verification. RED → GREEN: tests 2/3/4 passed on first run; test 1 caught a false precondition in my draft (asserting `parsed.layers.is_empty()` instead of `parsed.layers == fresh.layers`) — `CadDocument::new()` seeds the default `0` layer + 3 linetypes + standard text/dim styles + active vport + `*Model_Space` / `*Paper_Space` block records + `Model` / `Layout1` layouts, and the resolver echoes those defaults verbatim.
+- Fixed test 1 to assert `parsed.layers == fresh.layers && parsed.linetypes == fresh.linetypes`; all 4 tests now pass.
+- Ran `rustfmt --edition 2021` on the new files (3 of them needed minor reflow); re-ran the integration suite green.
+- Ran `cargo test -p h7cad-native-dwg --all-targets`: lib 208 + read_headers 53 + real_samples 38 + roundtrip_minimal 4 = 303 all pass.
+- Ran `cargo check --workspace --all-targets`: pass; only the same 10 dead-code warnings on the `H7CAD` main bin (unchanged from before this slice).
+- Ran `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`: clean.
+- Updated `CHANGELOG.md` with a 2026-05-09 entry for F5.M2 closure (separate section above the F5.M2.T1+T2 entry).
+- Started F5.M3 — handle map writer (`parse_handle_map` inverse).
+- Slice 1 (modular char writer): added `pub(crate) fn write_modular_char(u64, &mut Vec<u8>)` and `pub(crate) fn write_signed_modular_char(i64, &mut Vec<u8>)` to `crates/h7cad-native-dwg/src/modular.rs`. Round-trip TDD: unit tests cover single byte, multi-byte (incl. `u64::MAX` and `i64::MIN+1`), and the byte-boundary edge cases (0x80 unsigned, ±0x40 signed). One RED hit: my draft assertion expected `+64` to encode as `[0xC0, 0x01]`; actual is `[0xC0, 0x00]` because `64 >> 7 == 0` and the terminator's 6-bit payload is therefore `0`. Verified the reader path `[0xC0, 0x00] → 64` and corrected the assertion.
+- Slice 2 (handle map payload composer): added `crates/h7cad-native-dwg/src/writer/handle_map.rs::write_ac1015_handle_map_payload`. Single-chunk strategy at this milestone with `MAX_CHUNK_PAYLOAD = 2032`. Sorts entries ascending by handle (reader assumes monotonicity); rejects duplicate handles with `InvalidDocument`; rejects entry-stream overflow with `SectionTooLarge { section: "AcDb:Handles", .. }`. CRC trailer is `0x00 0x00` placeholder (reader does not verify, sticks with the existing advisory comment in `handle_map.rs`).
+- Slice 3 (section_handles upgrade): rewrote `crates/h7cad-native-dwg/src/writer/section_handles.rs` so empty `entries` still returns a 0-byte `Vec` (preserving the F5.M2 tracer-bullet invariant `write_dwg_section_payloads_are_byte_for_byte_empty`) while non-empty `entries` now flows through `write_ac1015_handle_map_payload`. Removed the placeholder `Unsupported` branch.
+- Re-exported `write_ac1015_handle_map_payload` and `MAX_CHUNK_PAYLOAD` from `crates/h7cad-native-dwg/src/lib.rs` and `writer/mod.rs`.
+- 12 new unit tests across `modular::tests` (6) and `writer::handle_map::tests` (6) all green.
+- Ran `cargo test -p h7cad-native-dwg --all-targets`: lib 220 + read_headers 53 + real_samples 38 + roundtrip_minimal 4 = 315 all pass.
+- Ran `cargo check --workspace --all-targets`: pass; same 10 pre-existing dead-code warnings on the `H7CAD` main bin, no new ones.
+- Ran `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`: clean.
+- `rustfmt --edition 2021` applied to the modified files; `ReadLints` zero errors.
+- Updated `CHANGELOG.md` with a separate 2026-05-09 entry for F5.M3 above the F5.M2 closure entry.
+- Drafted `docs/plans/2026-05-09-dwg-m4-object-stream-writer-plan.md`: F5.M4 sub-milestones M4.A..M4.E with explicit interfaces, reader↔writer pairing, test suites, time estimates, and risk fallbacks. The plan keeps each sub-milestone independent enough to land as its own PR and explicitly absorbs the F5.M3.T4 "derive handle_offsets from doc.entities" step into M4.E (where the entity body writers actually exist).
+- Started F5.M4.A — object header writer.
+- Added `crates/h7cad-native-dwg/src/writer/object_header.rs::write_ac1015_object_header(ObjectHeader, &mut BitWriter)` mirroring `read_ac1015_object_header`. Only writes `BS object_type` + `RL main_size_bits` + `H handle` — does not emit the modular-short body-size prefix or the trailing 2-byte CRC (those are M4.B's job, mirroring how the reader's `ObjectStreamCursor::object_slice_by_handle` strips them).
+- Added `write_ac1015_object_self_header(object_type, main_size_bits, handle, &mut BitWriter)` convenience wrapper that hard-codes `handle_code = HANDLE_CODE_HARD_OWNER` (the canonical AC1015 self-handle code).
+- Re-exported both functions from `crates/h7cad-native-dwg/src/lib.rs`.
+- 4 new unit tests cover: canonical fields round-trip, multi-byte handle round-trip, self-header at 58 bits (matching reader's `reader_positioned_exactly_after_header`), and `handle_code` overflow → `DwgWriteError::InvalidValue` transparency.
+- Ran `cargo test -p h7cad-native-dwg --all-targets`: lib 224 + read_headers 53 + real_samples 38 + roundtrip_minimal 4 = 319 all pass.
+- Ran `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`: clean.
+- `rustfmt --edition 2021` applied; `ReadLints` zero errors.
+- Updated `CHANGELOG.md` with a separate 2026-05-09 entry for F5.M4.A above the F5.M3 entry.
+- Hit one transient `LNK1104 cannot open ... .exe` from the previous test run still holding the `h7cad_native_dwg-*.exe` test binary; sleeping 5s and re-running succeeded. Recorded as a known-flaky test runner behaviour, not a code regression.
+- Continued F5.M4.B — object slice composer.
+- Added `pub(crate) fn write_modular_short(u64, &mut Vec<u8>)` to `crates/h7cad-native-dwg/src/modular.rs`, byte-aligned inverse of `read_modular_short` (LE 2-byte chunks, `0x8000` continuation flag, 15-bit payload).
+- Created `crates/h7cad-native-dwg/src/writer/object_slice.rs::compose_ac1015_object_slice(ObjectHeader, &BitWriter, &BitWriter) -> Result<Vec<u8>, DwgWriteError>`. Writes the M4.A object header, then walks `main_stream` and `handle_stream` bit-by-bit (via `BitReader` over their `as_bytes()`) so unaligned trailing bits in either stream survive the merge. Aligns to byte after the handle stream, prepends an `MS body_size` modular short, appends the two-byte `CRC_STUB`. Validates `header.main_size_bits == header_bit_count + main_stream.position_in_bits()` up-front and rejects mismatches with a `DwgWriteError::InvalidValue` whose message lists all three bit counts.
+- Re-exported `compose_ac1015_object_slice` and `CRC_STUB` from `crates/h7cad-native-dwg/src/lib.rs` and `writer/mod.rs`.
+- 6 new unit tests across `modular::tests::write_modular_short_*` (single-chunk, multi-chunk, `0x8000` boundary) and `writer::object_slice::tests::*` (round-trips via `split_ac1015_object_streams`, empty-streams edge case, `main_size_bits` mismatch rejection). All green on first run.
+- Ran `cargo test -p h7cad-native-dwg --all-targets`: lib 230 + read_headers 53 + real_samples 38 + roundtrip_minimal 4 = 325 all pass.
+- Ran `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`: clean.
+- `rustfmt --edition 2021` applied; `ReadLints` zero errors.
+- Updated `CHANGELOG.md` with a 2026-05-09 entry for F5.M4.B above the F5.M4.A entry.
+- Filled the M4.A and M4.B execution rows in `docs/plans/2026-05-09-dwg-m4-object-stream-writer-plan.md` §6.
+- Drafted `docs/plans/2026-05-09-dwg-m4c-entity-common-minimal-plan.md`, `docs/plans/2026-05-09-dwg-m4d-line-body-writer-plan.md`, `docs/plans/2026-05-09-dwg-m4e-write-dwg-line-roundtrip-plan.md`, and `docs/plans/2026-05-09-dwg-m5-entity-body-writers-plan.md` covering F5.M4.C..E and F5.M5 respectively.
+- Executed F5.M4.C — common entity header minimal writer.
+- Created `crates/h7cad-native-dwg/src/writer/entity_common.rs`. Mirrors `parse_ac1015_entity_common_after_extended_data`'s 11-field main stream + 2-handle handle stream wire format with hard-coded minimal flags (EED terminator 0 / has_graphic 0 / entity_mode 0b01 / reactor_count 0 / nolinks 1 / linetype_flags 0b00 / plotstyle_flags 0b00 / lineweight_index 31). Public surface: `EntityCommonMinimal` struct + `write_ac1015_entity_common_minimal(EntityCommonMinimal, &mut BitWriter, &mut BitWriter)`.
+- Re-exported the new public surface from `lib.rs` and `writer/mod.rs`.
+- 5 new unit tests in `entity_common.rs` covering: typical fields round-trip + known limitation assertions, invisible flag both ways, negative color_index, lineweight always decodes to ByDefault (-3) regardless of caller, `u64::MAX` layer handle boundary. **All 5 passed on first run** — the field-by-field table in the M4.C sub-plan §1 was accurate enough to skip the typical RED→GREEN debugging cycle.
+- Ran `cargo test -p h7cad-native-dwg --all-targets`: lib 235 + read_headers 53 + real_samples 38 + roundtrip_minimal 4 = 330 all pass.
+- Ran `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`: clean.
+- `rustfmt --edition 2021` applied; `ReadLints` zero errors.
+- Updated `CHANGELOG.md` with a separate 2026-05-09 entry for F5.M4.C above the F5.M4.B entry.
+- Executed F5.M4.D — LINE entity body writer.
+- Created `crates/h7cad-native-dwg/src/writer/entity_line.rs::write_line_geometry(LineGeometry, &mut BitWriter)`. Mirrors `read_line_geometry`'s 9-field bit-stream: `B z_are_zero` → `RD sx` → `DD ex` → `RD sy` → `DD ey` → optional `RD sz / DD ez` → `BT thickness` → `BE extrusion`. z_are_zero is auto-detected (`start[2] == 0.0 && end[2] == 0.0`); IEEE 754 quirk (`-0.0 == +0.0`) means a `-0.0` z component takes the compact path and the reader recovers `+0.0`, locked by `negative_zero_z_collapses_to_compact_path`.
+- Re-exported `write_line_geometry` from `lib.rs` and `writer/mod.rs`.
+- 5 new unit tests in `entity_line.rs` covering 2D compact / 3D explicit / DD-default `0b00` / nontrivial thickness+extrusion / `-0.0` z. **All 5 passed on first run.** The DD-default test asserts a precise total bit count of **135** (1+64+2+64+2+1+1) for the minimum-bits LINE configuration, confirming the field-by-field table in the M4.D sub-plan §1.
+- Ran `cargo test -p h7cad-native-dwg --all-targets`: lib 240 + read_headers 53 + real_samples 38 + roundtrip_minimal 4 = 335 all pass.
+- Ran `RUSTFLAGS=-Dwarnings cargo check -p h7cad-native-dwg --all-targets`: clean.
+- `rustfmt --edition 2021` applied; `ReadLints` zero errors.
+- Updated `CHANGELOG.md` with a separate 2026-05-09 entry for F5.M4.D above the F5.M4.C entry.

@@ -1,4 +1,5 @@
 mod bit_reader;
+mod bit_writer;
 mod entity_arc;
 mod entity_attrib;
 mod entity_circle;
@@ -34,6 +35,7 @@ mod section_data_ac1018;
 mod section_map;
 mod section_map_ac1018;
 mod version;
+mod writer;
 
 use h7cad_native_model::CadDocument;
 use h7cad_native_model::Entity;
@@ -41,6 +43,7 @@ use h7cad_native_model::EntityData;
 use h7cad_native_model::Handle;
 
 pub use bit_reader::BitReader;
+pub use bit_writer::BitWriter;
 pub use entity_arc::{read_arc_geometry, ArcGeometry};
 pub use entity_attrib::{
     read_attdef_geometry, read_attrib_geometry, AttDefGeometry, AttribGeometry,
@@ -64,7 +67,7 @@ pub use entity_solid::{read_face3d_geometry, read_solid_geometry, Face3DGeometry
 pub use entity_spline::{read_spline_geometry, SplineGeometry};
 pub use entity_text::{read_text_geometry, TextGeometry};
 pub use entity_viewport::{read_viewport_geometry, ViewportGeometry};
-pub use error::DwgReadError;
+pub use error::{DwgReadError, DwgWriteError};
 pub use file_header::DwgFileHeader;
 pub use file_header_ac1018::{
     parse_ac1018_encrypted_metadata, Ac1018EncryptedMetadata, AC1018_ENCRYPTED_BLOCK_LEN,
@@ -106,6 +109,21 @@ pub use section_map_ac1018::{
     SECTION_NAME_LEN,
 };
 pub use version::DwgVersion;
+pub use writer::{
+    compose_ac1015_object_slice, write_ac1015_aux_header_section, write_ac1015_classes_section,
+    write_ac1015_entity_common_minimal, write_ac1015_file_header_prefix,
+    write_ac1015_handle_map_payload, write_ac1015_handles_section, write_ac1015_header_section,
+    write_ac1015_obj_free_space_section, write_ac1015_object_header,
+    write_ac1015_object_self_header, write_ac1015_section_locator_directory,
+    write_ac1015_template_section, write_arc_geometry, write_attrib_geometry,
+    write_circle_geometry, write_dwg, write_ellipse_geometry, write_face3d_geometry,
+    write_hatch_geometry, write_insert_geometry, write_line_geometry, write_lwpolyline_geometry,
+    write_mtext_geometry, write_point_geometry, write_ray_geometry, write_solid_geometry,
+    write_spline_geometry, write_text_geometry, write_viewport_geometry, EntityCommonMinimal,
+    AC1015_EMPTY_DWG_MIN_LEN,
+    AC1015_FILE_HEADER_PREFIX_LEN, AC1015_KNOWN_SECTION_COUNT, AC1015_SECTION_LOCATOR_ENTRY_LEN,
+    CRC_STUB, MAX_CHUNK_PAYLOAD,
+};
 
 pub fn sniff_version(bytes: &[u8]) -> Result<DwgVersion, DwgReadError> {
     let magic = bytes.get(..6).ok_or(DwgReadError::TruncatedHeader {
@@ -2445,7 +2463,7 @@ mod tests {
         let doc = read_dwg(&fixture_ac1018(1, &[(0x25, 0x02)], &[b"HI"])).unwrap();
         assert_eq!(doc.objects.len(), 1);
         match &doc.objects[0].data {
-            h7cad_native_model::ObjectData::Unknown { object_type } => {
+            h7cad_native_model::ObjectData::Unknown { object_type, .. } => {
                 assert_eq!(object_type, "DWG_TABLE_SECTION_0_RECORD_0_SIZE_2_TABLE_");
             }
             other => panic!("expected unknown object summary, got {other:?}"),

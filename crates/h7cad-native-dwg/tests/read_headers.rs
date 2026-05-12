@@ -1620,7 +1620,7 @@ fn resolved_object_projection(doc: &h7cad_native_model::CadDocument) -> Vec<(u64
         .iter()
         .map(|object| {
             let object_type = match &object.data {
-                h7cad_native_model::ObjectData::Unknown { object_type } => object_type.clone(),
+                h7cad_native_model::ObjectData::Unknown { object_type, .. } => object_type.clone(),
                 other => panic!("expected unknown object summary, got {other:?}"),
             };
             (
@@ -1642,7 +1642,9 @@ fn resolved_parser_emitted_object_projection(
         .filter_map(|object| {
             handles.contains(&object.handle.value()).then(|| {
                 let summary = match &object.data {
-                    h7cad_native_model::ObjectData::Unknown { object_type } => object_type.clone(),
+                    h7cad_native_model::ObjectData::Unknown { object_type, .. } => {
+                        object_type.clone()
+                    }
                     other => {
                         panic!("expected parser-emitted unknown object summary, got {other:?}")
                     }

@@ -22,11 +22,14 @@
 
 ## 阶段 P2 — DWG 运行时（facade 层）
 
-| ID | 目标 | 备注 |
-|----|------|------|
-| P2.1 | `h7cad_native_dwg` 解析结果映射到 `nm::CadDocument` | 与 README「Native DWG Parser Status」对齐 |
-| P2.2 | `h7cad_native_facade::load(Dwg, …)` 返回真实文档或结构化错误 | 替换占位字符串前更新测试期望 |
-| P2.3 | GUI / CLI 打开 `.dwg` 的 UX 与错误提示 | 需产品文案与安全边界（大文件、恶意输入） |
+| ID | 目标 | 状态 | 备注 |
+|----|------|------|------|
+| P2.1 | `h7cad_native_dwg` 解析结果映射到 `nm::CadDocument` | ✅ 完成 | AC1015 + AC1018 端到端；其他版本仍 fail-closed 并由 runtime fallback |
+| P2.2 | `h7cad_native_facade::load(Dwg, …)` 返回真实文档或结构化错误 | ✅ 完成 | R48 已接通，placeholder 字符串被测试明令禁止 |
+| P2.3 | GUI / CLI 打开 `.dwg` 的 UX 与错误提示 | ✅ 完成 | `OpenNotice::Warning` 已能区分 native / fallback / 双失败三态 |
+| P2.4 | native DWG writer | 🚧 已启动 | AC1015 空文档 + LINE/CIRCLE/ARC/POINT/LWPOLYLINE/TEXT roundtrip 已在 crate 内通过；facade/runtime 尚未接入，见 §F5 |
+| P2.5 | 高版本 reader（AC1014 / AC1021+） | ⏳ 未启动 | 同上 §F3/§F4 |
+| P2.6 | AC1018 baseline ratchet (R46-F) | ✅ 完成 | `sample_AC1018.dwg` 锁定 CIRCLE / HATCH / INSERT / VIEWPORT、blocks、layouts 基线 |
 
 ## 阶段 P3 — 质量与自动化
 
