@@ -49,8 +49,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2545729000aceb2c30e7002bdc26050532d5fa806bb6a6fef37175ebe6c8c5d2"
+source = "git+https://github.com/hakanaktt/acadrust#4025fd212880dfaa9bcb8b0a52b0bc2b3d2d4415"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",

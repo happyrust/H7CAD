@@ -575,7 +575,7 @@ pub fn native_entity_to_acadrust(entity: &nm::Entity) -> Option<ar::EntityType> 
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Underlay(e))
         }
-        nm::EntityData::Unknown { entity_type } => {
+        nm::EntityData::Unknown { entity_type, .. } => {
             let mut e = ar::UnknownEntity::new(entity_type.clone());
             apply_common(&mut e.common, entity);
             Some(ar::EntityType::Unknown(e))
@@ -1092,6 +1092,7 @@ pub fn acadrust_entity_to_native(entity: &ar::EntityType) -> Option<nm::Entity> 
             entity,
             nm::EntityData::Unknown {
                 entity_type: unknown.dxf_name.clone(),
+                raw_codes: Vec::new(),
             },
         )),
         ar::EntityType::Polyline2D(pline) => Some(native_common_from_acadrust(
@@ -3206,6 +3207,7 @@ mod tests {
             }),
             nm::Entity::new(nm::EntityData::Unknown {
                 entity_type: "ACAD_PROXY_ENTITY".into(),
+                raw_codes: Vec::new(),
             }),
             nm::Entity::new(nm::EntityData::Solid3D {
                 acis_data: "body\nline-two\n".into(),

@@ -83,7 +83,10 @@ impl StatusBar {
             format_scale(viewport_scale)
         };
         let scale_element: Element<'_, Message> = if scale_pill_enabled {
-            tip(scale_popup_btn(&scale_label, scale_popup_open), "Annotation / Viewport Scale\nClick to change")
+            tip(
+                scale_popup_btn(&scale_label, scale_popup_open),
+                "Annotation / Viewport Scale\nClick to change",
+            )
         } else {
             status_pill(scale_label).into()
         };
@@ -675,26 +678,30 @@ const SNAP_OFF_HOVER: Color = Color {
 
 fn scale_popup_btn(label: &str, open: bool) -> Element<'static, Message> {
     let label = label.to_string();
-    button(text(label).size(10).color(if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT }))
-        .on_press(Message::ToggleScalePopup)
-        .style(move |_: &Theme, status| button::Style {
-            background: Some(Background::Color(match (open, status) {
-                (true, button::Status::Hovered) => SNAP_ON_HOVER,
-                (true, _) => SNAP_ON_BG,
-                (false, button::Status::Hovered) => SNAP_OFF_HOVER,
-                (false, _) => SNAP_OFF_BG,
-            })),
-            border: Border {
-                color: if open { SNAP_BORDER_ON } else { BORDER_COLOR },
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            text_color: if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT },
-            shadow: iced::Shadow::default(),
-            snap: false,
-        })
-        .padding([2, 6])
-        .into()
+    button(
+        text(label)
+            .size(10)
+            .color(if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT }),
+    )
+    .on_press(Message::ToggleScalePopup)
+    .style(move |_: &Theme, status| button::Style {
+        background: Some(Background::Color(match (open, status) {
+            (true, button::Status::Hovered) => SNAP_ON_HOVER,
+            (true, _) => SNAP_ON_BG,
+            (false, button::Status::Hovered) => SNAP_OFF_HOVER,
+            (false, _) => SNAP_OFF_BG,
+        })),
+        border: Border {
+            color: if open { SNAP_BORDER_ON } else { BORDER_COLOR },
+            width: 1.0,
+            radius: 2.0.into(),
+        },
+        text_color: if open { SNAP_BORDER_ON } else { OSNAP_OFF_TEXT },
+        shadow: iced::Shadow::default(),
+        snap: false,
+    })
+    .padding([2, 6])
+    .into()
 }
 
 // ── Scale display ─────────────────────────────────────────────────────────

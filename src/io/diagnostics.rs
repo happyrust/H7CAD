@@ -166,6 +166,47 @@ pub fn from_acadrust_notifications(src: &NotificationCollection) -> Vec<OpenNoti
     src.iter().map(OpenNotice::from).collect()
 }
 
+/// Produce PID-specific advisories from a [`PidImportSummary`].
+///
+/// Surface only high-signal facts to the open-notice channel:
+/// * unresolved relationships (broken object references)
+/// * missing object graph despite present relationships (navigation impact)
+/// * absence of Sheet streams (no source-backed geometry possible)
+///
+/// All other summary fields stay implicit; the PID workbench panel can
+/// expose detailed counts where appropriate.
+pub fn from_pid_import_summary(
+    summary: &crate::io::pid_import::PidImportSummary,
+) -> Vec<OpenNotice> {
+    let mut notices = Vec::new();
+
+    if summary.unresolved_relationship_count > 0 {
+        notices.push(OpenNotice::new(
+            NoticeSeverity::Warning,
+            format!(
+                "PID 文件含 {} 个未解析关系，部分对象引用可能无法定位",
+                summary.unresolved_relationship_count
+            ),
+        ));
+    }
+
+    if !summary.object_graph_available && summary.relationship_count > 0 {
+        notices.push(OpenNotice::new(
+            NoticeSeverity::Warning,
+            "PID 对象关系图未生成，导航/搜索功能可能受限".to_string(),
+        ));
+    }
+
+    if summary.sheet_count == 0 {
+        notices.push(OpenNotice::new(
+            NoticeSeverity::NotImplemented,
+            "PID 文件无 Sheet stream，当前无法显示原始几何".to_string(),
+        ));
+    }
+
+    notices
+}
+
 /// Produce DXF-specific advisories from a successfully parsed native
 /// document. These are not parse errors; they flag content preserved for
 /// round-trip but not yet fully understood or editable by H7CAD.
@@ -179,7 +220,7 @@ pub fn from_native_dxf_document(doc: &h7cad_native_model::CadDocument) -> Vec<Op
     ) {
         for entity in entities {
             match &entity.data {
-                EntityData::Unknown { entity_type } => {
+                EntityData::Unknown { entity_type, .. } => {
                     *unknown_entities.entry(entity_type.clone()).or_default() += 1;
                 }
                 EntityData::ProxyEntity { .. } => *proxy_entities += 1,
@@ -207,7 +248,7 @@ pub fn from_native_dxf_document(doc: &h7cad_native_model::CadDocument) -> Vec<Op
     let mut proxy_objects = 0usize;
     for object in &doc.objects {
         match &object.data {
-            ObjectData::Unknown { object_type } => {
+            ObjectData::Unknown { object_type, .. } => {
                 *unknown_objects.entry(object_type.clone()).or_default() += 1;
             }
             ObjectData::ProxyObject { .. } => proxy_objects += 1,
@@ -365,6 +406,7 @@ mod tests {
         let mut doc = CadDocument::new();
         doc.entities.push(Entity::new(EntityData::Unknown {
             entity_type: "CUSTOM_ENTITY".into(),
+            raw_codes: Vec::new(),
         }));
         doc.entities.push(Entity::new(EntityData::ProxyEntity {
             class_id: 1,
@@ -376,6 +418,7 @@ mod tests {
             owner_handle: Handle::NULL,
             data: ObjectData::Unknown {
                 object_type: "CUSTOM_OBJECT".into(),
+                raw_codes: Vec::new(),
             },
         });
         doc.objects.push(CadObject {
@@ -408,5 +451,84 @@ mod tests {
     fn native_dxf_diagnostics_empty_for_fully_supported_document() {
         let doc = CadDocument::new();
         assert!(from_native_dxf_document(&doc).is_empty());
+    }
+
+    use crate::io::pid_import::PidImportSummary;
+
+    fn pid_summary_baseline() -> PidImportSummary {
+        PidImportSummary {
+            title: "T".into(),
+            object_count: 5,
+            relationship_count: 3,
+            unresolved_relationship_count: 0,
+            symbol_count: 1,
+            cluster_count: 1,
+            sheet_count: 1,
+            stream_count: 10,
+            attribute_class_count: 0,
+            tagged_text_count: 0,
+            dynamic_attribute_record_count: 0,
+            rendered_geom_points: 0,
+            rendered_geom_lines: 0,
+            skipped_probe_only_geometry: 0,
+            skipped_broad_coordinate_hints: 0,
+            object_graph_available: true,
+        }
+    }
+
+    #[test]
+    fn pid_diagnostics_empty_for_healthy_summary() {
+        assert!(from_pid_import_summary(&pid_summary_baseline()).is_empty());
+    }
+
+    #[test]
+    fn pid_diagnostics_warn_when_relationships_unresolved() {
+        let mut summary = pid_summary_baseline();
+        summary.unresolved_relationship_count = 7;
+        let notices = from_pid_import_summary(&summary);
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.severity == NoticeSeverity::Warning && n.message.contains("7")),
+            "expected unresolved warning, got {notices:?}"
+        );
+    }
+
+    #[test]
+    fn pid_diagnostics_warn_when_object_graph_missing_but_relationships_present() {
+        let mut summary = pid_summary_baseline();
+        summary.object_graph_available = false;
+        let notices = from_pid_import_summary(&summary);
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.severity == NoticeSeverity::Warning && n.message.contains("对象关系图")),
+            "expected object-graph warning, got {notices:?}"
+        );
+    }
+
+    #[test]
+    fn pid_diagnostics_skip_object_graph_warning_when_no_relationships() {
+        let mut summary = pid_summary_baseline();
+        summary.object_graph_available = false;
+        summary.relationship_count = 0;
+        let notices = from_pid_import_summary(&summary);
+        assert!(
+            !notices.iter().any(|n| n.message.contains("对象关系图")),
+            "object-graph warning should not fire without relationships, got {notices:?}"
+        );
+    }
+
+    #[test]
+    fn pid_diagnostics_flag_when_no_sheet_streams() {
+        let mut summary = pid_summary_baseline();
+        summary.sheet_count = 0;
+        let notices = from_pid_import_summary(&summary);
+        assert!(
+            notices.iter().any(
+                |n| n.severity == NoticeSeverity::NotImplemented && n.message.contains("Sheet")
+            ),
+            "expected no-Sheet advisory, got {notices:?}"
+        );
     }
 }

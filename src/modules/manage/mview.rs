@@ -88,6 +88,7 @@ impl CadCommand for MviewCommand {
             tangent_geoms: vec![],
             plinegen: true,
     vp_scissor: None,
+    fill_tris: vec![],
 })
     }
 }

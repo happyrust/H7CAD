@@ -338,6 +338,7 @@ pub fn to_truck_native(
         snap_pts: vec![(insertion_vec, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],
+        fill_tris: vec![],
     }
 }
 

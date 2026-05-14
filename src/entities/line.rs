@@ -29,6 +29,7 @@ pub fn to_truck(start: &[f64; 3], end: &[f64; 3]) -> TruckEntity {
             p2: kv[1],
         }],
         key_vertices: kv,
+        fill_tris: vec![],
     }
 }
 

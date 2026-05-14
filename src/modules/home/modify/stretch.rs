@@ -162,6 +162,7 @@ impl CadCommand for StretchCommand {
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
                 vp_scissor: None,
+                fill_tris: vec![],
             }),
             _ => None,
         }

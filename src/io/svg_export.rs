@@ -503,7 +503,7 @@ fn emit_gradient_hatch_svg(
         f32::NEG_INFINITY,
         f32::NEG_INFINITY,
     );
-    for &[x, y] in &hatch.boundary {
+    for &[x, y] in hatch.boundary.iter() {
         let (wx, wy) = (x + ox, y + oy);
         if wx < min_x {
             min_x = wx;
@@ -2589,6 +2589,7 @@ mod tests {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         }
     }
 
@@ -2722,7 +2723,7 @@ mod tests {
     fn solid_hatch_emits_polygon() {
         use crate::scene::hatch_model::HatchPattern;
         let hatch = HatchModel {
-            boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].into(),
             pattern: HatchPattern::Solid,
             name: "SOLID".into(),
             color: [1.0, 0.0, 0.0, 1.0],
@@ -2753,7 +2754,7 @@ mod tests {
     fn monochrome_hatch_forces_black_fill() {
         use crate::scene::hatch_model::HatchPattern;
         let hatch = HatchModel {
-            boundary: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            boundary: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]].into(),
             pattern: HatchPattern::Solid,
             name: "SOLID".into(),
             color: [1.0, 0.5, 0.25, 1.0], // orange
@@ -4928,7 +4929,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xF0),
             HatchModel {
-                boundary: vec![[0.0, 0.0], [50.0, 0.0], [50.0, 30.0], [0.0, 30.0]],
+                boundary: vec![[0.0, 0.0], [50.0, 0.0], [50.0, 30.0], [0.0, 30.0]].into(),
                 pattern: HatchPattern::Gradient {
                     angle_deg: 0.0,
                     color2: [0.0, 0.0, 1.0, 1.0],

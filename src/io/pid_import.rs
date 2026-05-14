@@ -30,6 +30,7 @@ const UNRESOLVED_PANEL_Y: f64 = -520.0;
 const FALLBACK_PANEL_X: f64 = CROSSREF_PANEL_X + 380.0;
 const FALLBACK_START_Y: f64 = 96.0;
 const FALLBACK_SPACING_Y: f64 = 92.0;
+const PID_GEOMETRY_XDATA_APP: &str = "H7CAD_PID_GEOMETRY";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PidImportSummary {
@@ -44,7 +45,25 @@ pub struct PidImportSummary {
     pub attribute_class_count: usize,
     pub tagged_text_count: usize,
     pub dynamic_attribute_record_count: usize,
+    pub rendered_geom_points: usize,
+    pub rendered_geom_lines: usize,
+    pub skipped_probe_only_geometry: usize,
+    pub skipped_broad_coordinate_hints: usize,
     pub object_graph_available: bool,
+}
+
+impl PidImportSummary {
+    pub fn rendered_source_geometry_count(&self) -> usize {
+        self.rendered_geom_points + self.rendered_geom_lines
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PidGeometryRenderStats {
+    rendered_geom_points: usize,
+    rendered_geom_lines: usize,
+    skipped_probe_only_geometry: usize,
+    skipped_broad_coordinate_hints: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -230,6 +249,18 @@ pub fn load_pid_native(path: &Path) -> Result<nm::CadDocument, String> {
     Ok(open_pid(path)?.native_preview)
 }
 
+/// Native-first PID loader that also returns [`OpenNotice`] diagnostics
+/// derived from the [`PidImportSummary`]. Mirrors the DWG/DXF
+/// `(NativeCadDocument, Vec<OpenNotice>)` shape so `io::mod`'s dispatcher
+/// can produce uniform notice channels for every supported extension.
+pub fn load_pid_native_with_notices(
+    path: &Path,
+) -> Result<(nm::CadDocument, Vec<super::diagnostics::OpenNotice>), String> {
+    let bundle = open_pid(path)?;
+    let notices = super::diagnostics::from_pid_import_summary(&bundle.summary);
+    Ok((bundle.native_preview, notices))
+}
+
 /// Load a PID file and additionally cache its `PidPackage` (raw CFB
 /// stream bytes) for later round-trip on save. Returns the visualization
 /// `CadDocument` and an `(object_count, relationship_count, unresolved)`
@@ -274,6 +305,109 @@ pub struct DrawingNumberEdit {
 
 const DRAWING_STREAM_PATH: &str = "/TaggedTxtData/Drawing";
 
+/// Tracked text encoding for a metadata XML stream. Captured at decode
+/// time so [`encode_xml_string`] can put bytes back in the same shape
+/// — preserving the BOM and byte order SmartPlant expects on disk.
+///
+/// SmartPlant typically writes Drawing/General XML as UTF-16 LE with a
+/// BOM. Older fixtures and synthetic test bytes may be UTF-8 with or
+/// without a BOM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XmlEncoding {
+    Utf8 { bom: bool },
+    Utf16Le { bom: bool },
+    Utf16Be { bom: bool },
+}
+
+/// Decode an OLE-stream XML byte buffer into UTF-8 text plus the
+/// detected source [`XmlEncoding`]. Recognises:
+///
+/// * UTF-8 BOM (`EF BB BF`)
+/// * UTF-16 LE BOM (`FF FE`) — SmartPlant native shape
+/// * UTF-16 BE BOM (`FE FF`)
+/// * Bare UTF-8 (no BOM)
+///
+/// Returns an explanatory error for anything else (eg. UTF-16 without
+/// a BOM, partial high-surrogate runs) so callers can keep the
+/// existing typed-error UX without losing diagnostic context.
+fn decode_xml_bytes(bytes: &[u8]) -> Result<(String, XmlEncoding), String> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        let s = std::str::from_utf8(&bytes[3..])
+            .map_err(|e| format!("UTF-8 BOM but invalid UTF-8 body: {e}"))?;
+        return Ok((s.to_string(), XmlEncoding::Utf8 { bom: true }));
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        let s = decode_utf16(&bytes[2..], true)
+            .map_err(|e| format!("UTF-16 LE BOM decode failed: {e}"))?;
+        return Ok((s, XmlEncoding::Utf16Le { bom: true }));
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let s = decode_utf16(&bytes[2..], false)
+            .map_err(|e| format!("UTF-16 BE BOM decode failed: {e}"))?;
+        return Ok((s, XmlEncoding::Utf16Be { bom: true }));
+    }
+    let s = std::str::from_utf8(bytes)
+        .map_err(|e| format!("XML bytes are neither UTF-8 nor BOM-prefixed UTF-16: {e}"))?;
+    Ok((s.to_string(), XmlEncoding::Utf8 { bom: false }))
+}
+
+/// Decode a UTF-16 byte stream (without BOM) into a UTF-8 string.
+/// `little_endian` selects byte ordering. Lone surrogates and odd
+/// byte counts are surfaced as errors rather than silently mangled.
+fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<String, String> {
+    if bytes.len() % 2 != 0 {
+        return Err(format!("odd byte count {}", bytes.len()));
+    }
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| {
+            if little_endian {
+                u16::from_le_bytes([c[0], c[1]])
+            } else {
+                u16::from_be_bytes([c[0], c[1]])
+            }
+        })
+        .collect();
+    String::from_utf16(&units).map_err(|e| e.to_string())
+}
+
+/// Encode UTF-8 text back into the original on-disk shape. Preserves
+/// BOM presence and byte order so a decode → edit → encode cycle
+/// leaves SmartPlant-readable bytes on disk.
+fn encode_xml_string(text: &str, encoding: XmlEncoding) -> Vec<u8> {
+    match encoding {
+        XmlEncoding::Utf8 { bom: false } => text.as_bytes().to_vec(),
+        XmlEncoding::Utf8 { bom: true } => {
+            let mut out = Vec::with_capacity(3 + text.len());
+            out.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+            out.extend_from_slice(text.as_bytes());
+            out
+        }
+        XmlEncoding::Utf16Le { bom } => encode_utf16(text, true, bom),
+        XmlEncoding::Utf16Be { bom } => encode_utf16(text, false, bom),
+    }
+}
+
+fn encode_utf16(text: &str, little_endian: bool, bom: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len() * 2 + if bom { 2 } else { 0 });
+    if bom {
+        if little_endian {
+            out.extend_from_slice(&[0xFF, 0xFE]);
+        } else {
+            out.extend_from_slice(&[0xFE, 0xFF]);
+        }
+    }
+    for unit in text.encode_utf16() {
+        let b = if little_endian {
+            unit.to_le_bytes()
+        } else {
+            unit.to_be_bytes()
+        };
+        out.extend_from_slice(&b);
+    }
+    out
+}
+
 /// Replace an arbitrary attribute on `<Tag …>` lines inside the cached
 /// `PidPackage`'s `/TaggedTxtData/Drawing` stream and re-cache the
 /// modified package. Generic foundation behind both PIDSETDRAWNO and
@@ -300,14 +434,14 @@ pub fn edit_pid_drawing_attribute(
     let raw = package
         .get_stream(DRAWING_STREAM_PATH)
         .ok_or_else(|| format!("source PID is missing {} stream", DRAWING_STREAM_PATH))?;
-    let xml = std::str::from_utf8(&raw.data)
-        .map_err(|e| format!("Drawing XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
+    let (xml, encoding) =
+        decode_xml_bytes(&raw.data).map_err(|e| format!("Drawing XML decode failed: {e}"))?;
 
-    let previous = pid_parse::writer::get_drawing_attribute(xml, attr);
-    let new_xml = pid_parse::writer::set_drawing_attribute(xml, attr, value)
+    let previous = pid_parse::writer::get_drawing_attribute(&xml, attr);
+    let new_xml = pid_parse::writer::set_drawing_attribute(&xml, attr, value)
         .map_err(|e| format!("metadata edit failed: {e}"))?;
     let new_xml_len = new_xml.len();
-    package.replace_stream(DRAWING_STREAM_PATH, new_xml.into_bytes());
+    package.replace_stream(DRAWING_STREAM_PATH, encode_xml_string(&new_xml, encoding));
     pid_package_store::cache_package(source, package);
 
     Ok(DrawingAttributeEdit {
@@ -352,14 +486,14 @@ pub fn edit_pid_general_element(
     let raw = package
         .get_stream(GENERAL_STREAM_PATH)
         .ok_or_else(|| format!("source PID is missing {} stream", GENERAL_STREAM_PATH))?;
-    let xml = std::str::from_utf8(&raw.data)
-        .map_err(|e| format!("General XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
+    let (xml, encoding) =
+        decode_xml_bytes(&raw.data).map_err(|e| format!("General XML decode failed: {e}"))?;
 
-    let previous = pid_parse::writer::get_general_element_text(xml, element);
-    let new_xml = pid_parse::writer::set_element_text(xml, element, value)
+    let previous = pid_parse::writer::get_general_element_text(&xml, element);
+    let new_xml = pid_parse::writer::set_element_text(&xml, element, value)
         .map_err(|e| format!("metadata edit failed: {e}"))?;
     let new_xml_len = new_xml.len();
-    package.replace_stream(GENERAL_STREAM_PATH, new_xml.into_bytes());
+    package.replace_stream(GENERAL_STREAM_PATH, encode_xml_string(&new_xml, encoding));
     pid_package_store::cache_package(source, package);
 
     Ok(GeneralElementEdit {
@@ -380,8 +514,8 @@ pub fn edit_pid_general_element(
 pub fn read_pid_drawing_attribute(source: &Path, attr: &str) -> Option<String> {
     let arc = pid_package_store::get_package(source)?;
     let raw = arc.get_stream(DRAWING_STREAM_PATH)?;
-    let xml = std::str::from_utf8(&raw.data).ok()?;
-    pid_parse::writer::get_drawing_attribute(xml, attr)
+    let (xml, _enc) = decode_xml_bytes(&raw.data).ok()?;
+    pid_parse::writer::get_drawing_attribute(&xml, attr)
 }
 
 /// Read-only lookup of an element's text content inside the cached
@@ -390,8 +524,8 @@ pub fn read_pid_drawing_attribute(source: &Path, attr: &str) -> Option<String> {
 pub fn read_pid_general_element(source: &Path, element: &str) -> Option<String> {
     let arc = pid_package_store::get_package(source)?;
     let raw = arc.get_stream(GENERAL_STREAM_PATH)?;
-    let xml = std::str::from_utf8(&raw.data).ok()?;
-    pid_parse::writer::get_general_element_text(xml, element)
+    let (xml, _enc) = decode_xml_bytes(&raw.data).ok()?;
+    pid_parse::writer::get_general_element_text(&xml, element)
 }
 
 /// Snapshot of every readable metadata field on a cached PID:
@@ -423,16 +557,16 @@ pub fn list_pid_metadata(source: &Path) -> Result<PidPropsListing, String> {
     let drawing_raw = arc
         .get_stream(DRAWING_STREAM_PATH)
         .ok_or_else(|| format!("source PID is missing {} stream", DRAWING_STREAM_PATH))?;
-    let drawing_xml = std::str::from_utf8(&drawing_raw.data)
-        .map_err(|e| format!("Drawing XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
-    listing.drawing_attributes = pid_parse::writer::list_drawing_attributes(drawing_xml);
+    let (drawing_xml, _drawing_enc) = decode_xml_bytes(&drawing_raw.data)
+        .map_err(|e| format!("Drawing XML decode failed: {e}"))?;
+    listing.drawing_attributes = pid_parse::writer::list_drawing_attributes(&drawing_xml);
 
     let general_raw = arc
         .get_stream(GENERAL_STREAM_PATH)
         .ok_or_else(|| format!("source PID is missing {} stream", GENERAL_STREAM_PATH))?;
-    let general_xml = std::str::from_utf8(&general_raw.data)
-        .map_err(|e| format!("General XML is not UTF-8 (BOM/UTF-16 not yet supported): {e}"))?;
-    listing.general_elements = pid_parse::writer::list_general_elements(general_xml);
+    let (general_xml, _general_enc) = decode_xml_bytes(&general_raw.data)
+        .map_err(|e| format!("General XML decode failed: {e}"))?;
+    listing.general_elements = pid_parse::writer::list_general_elements(&general_xml);
 
     Ok(listing)
 }
@@ -2162,6 +2296,10 @@ fn pid_document_to_preview(
     ensure_layer(&mut native, "PID_CROSSREF", 7);
     ensure_layer(&mut native, "PID_UNRESOLVED", 6);
     ensure_layer(&mut native, "PID_GEOM_POINTS", 3);
+    ensure_layer(&mut native, "PID_GEOM_LINES", 1);
+    ensure_layer(&mut native, "PID_GEOM_TEXT", 7);
+    ensure_layer(&mut native, "PID_GEOM_SYMBOLS", 4);
+    ensure_layer(&mut native, "PID_GEOM_INFERRED", 8);
 
     let mut preview_index = PidPreviewIndex::default();
     let mut positions = BTreeMap::new();
@@ -2192,7 +2330,7 @@ fn pid_document_to_preview(
     add_stream_entities(&mut native, &mut preview_index, doc);
     add_cross_reference_entities(&mut native, &mut preview_index, doc);
     add_unresolved_entities(&mut native, &mut preview_index, view, unresolved_edges);
-    add_geometry_entities(&mut native, &mut preview_index, doc);
+    let geometry_stats = add_geometry_entities(&mut native, &mut preview_index, doc);
 
     let attribute_class_count = doc
         .cross_reference
@@ -2222,6 +2360,10 @@ fn pid_document_to_preview(
         attribute_class_count,
         tagged_text_count,
         dynamic_attribute_record_count,
+        rendered_geom_points: geometry_stats.rendered_geom_points,
+        rendered_geom_lines: geometry_stats.rendered_geom_lines,
+        skipped_probe_only_geometry: geometry_stats.skipped_probe_only_geometry,
+        skipped_broad_coordinate_hints: geometry_stats.skipped_broad_coordinate_hints,
         object_graph_available: doc.object_graph.is_some(),
     };
     (native, summary, preview_index)
@@ -2231,36 +2373,242 @@ fn add_geometry_entities(
     native: &mut nm::CadDocument,
     preview_index: &mut PidPreviewIndex,
     doc: &PidDocument,
-) {
+) -> PidGeometryRenderStats {
     let geometry = build_normalized_geometry(doc);
+    add_geometry_entities_from(native, preview_index, &geometry)
+}
+
+/// Render a pre-built [`pid_parse::NormalizedPidGeometry`] into the
+/// `PID_GEOM_*` layer family. Split from [`add_geometry_entities`] so
+/// tests can drive the renderer with synthetic geometry without
+/// needing a full [`pid_parse::PidDocument`] round trip through
+/// [`pid_parse::build_normalized_geometry`].
+///
+/// Render policy (Slice 2 baseline):
+/// * `Decoded` and `Inferred` confidence pass; `ProbeOnly` is skipped.
+/// * `Inferred Point` additionally requires `field_x` provenance to
+///   render — preserves the prior coordinate-hint gating that kept
+///   raw `(x,y)` pairs out of the main view.
+/// * `Unknown` is never rendered; it is diagnostic-only.
+fn add_geometry_entities_from(
+    native: &mut nm::CadDocument,
+    preview_index: &mut PidPreviewIndex,
+    geometry: &pid_parse::NormalizedPidGeometry,
+) -> PidGeometryRenderStats {
+    let mut stats = PidGeometryRenderStats::default();
     if geometry.is_empty() {
-        return;
+        return stats;
     }
 
     let point_radius = 6.0;
     for geom_entity in &geometry.entities {
-        if geom_entity.confidence != PidGeometryConfidence::Inferred {
+        let render_allowed = match geom_entity.confidence {
+            PidGeometryConfidence::Decoded => true,
+            PidGeometryConfidence::Inferred => true,
+            PidGeometryConfidence::ProbeOnly => false,
+        };
+        if !render_allowed {
+            stats.skipped_probe_only_geometry += 1;
             continue;
         }
-        if let PidGraphicKind::Point { position } = &geom_entity.kind {
-            if geom_entity.source.field_x.is_none() {
-                continue;
+
+        let entity = match &geom_entity.kind {
+            PidGraphicKind::Line { start, end } => {
+                let mut e = nm::Entity::new(nm::EntityData::Line {
+                    start: [start.x, start.y, 0.0],
+                    end: [end.x, end.y, 0.0],
+                });
+                e.layer_name = "PID_GEOM_LINES".into();
+                Some(e)
             }
-            let mut marker = nm::Entity::new(nm::EntityData::Circle {
-                center: [position.x, position.y, 0.0],
-                radius: point_radius,
-            });
-            marker.layer_name = "PID_GEOM_POINTS".into();
+            PidGraphicKind::Polyline { points, closed } => {
+                if points.is_empty() {
+                    None
+                } else {
+                    let vertices = points
+                        .iter()
+                        .map(|p| nm::LwVertex {
+                            x: p.x,
+                            y: p.y,
+                            bulge: 0.0,
+                            start_width: 0.0,
+                            end_width: 0.0,
+                        })
+                        .collect();
+                    let mut e = nm::Entity::new(nm::EntityData::LwPolyline {
+                        vertices,
+                        closed: *closed,
+                        constant_width: 0.0,
+                    });
+                    e.layer_name = "PID_GEOM_LINES".into();
+                    Some(e)
+                }
+            }
+            PidGraphicKind::Arc {
+                center,
+                radius,
+                start_angle,
+                end_angle,
+            } => {
+                let mut e = nm::Entity::new(nm::EntityData::Arc {
+                    center: [center.x, center.y, 0.0],
+                    radius: *radius,
+                    start_angle: *start_angle,
+                    end_angle: *end_angle,
+                });
+                e.layer_name = "PID_GEOM_LINES".into();
+                Some(e)
+            }
+            PidGraphicKind::Circle { center, radius } => {
+                let mut e = nm::Entity::new(nm::EntityData::Circle {
+                    center: [center.x, center.y, 0.0],
+                    radius: *radius,
+                });
+                e.layer_name = "PID_GEOM_LINES".into();
+                Some(e)
+            }
+            PidGraphicKind::Point { position } => {
+                if geom_entity.confidence == PidGeometryConfidence::Inferred
+                    && geom_entity.source.field_x.is_none()
+                {
+                    stats.skipped_broad_coordinate_hints += 1;
+                    None
+                } else {
+                    let mut e = nm::Entity::new(nm::EntityData::Circle {
+                        center: [position.x, position.y, 0.0],
+                        radius: point_radius,
+                    });
+                    e.layer_name = "PID_GEOM_POINTS".into();
+                    Some(e)
+                }
+            }
+            PidGraphicKind::Text {
+                insertion,
+                value,
+                height,
+                rotation,
+            } => {
+                let mut e = nm::Entity::new(nm::EntityData::Text {
+                    insertion: [insertion.x, insertion.y, 0.0],
+                    height: *height,
+                    value: value.clone(),
+                    rotation: *rotation,
+                    style_name: "Standard".into(),
+                    width_factor: 1.0,
+                    oblique_angle: 0.0,
+                    horizontal_alignment: 0,
+                    vertical_alignment: 0,
+                    alignment_point: None,
+                });
+                e.layer_name = "PID_GEOM_TEXT".into();
+                Some(e)
+            }
+            PidGraphicKind::SymbolInstance {
+                insertion,
+                symbol_path,
+                rotation,
+                scale,
+            } => {
+                let block_name = symbol_block_name(symbol_path.as_deref());
+                let mut e = nm::Entity::new(nm::EntityData::Insert {
+                    block_name,
+                    insertion: [insertion.x, insertion.y, 0.0],
+                    scale: [scale[0], scale[1], 1.0],
+                    rotation: *rotation,
+                    has_attribs: false,
+                    attribs: Vec::new(),
+                });
+                e.layer_name = "PID_GEOM_SYMBOLS".into();
+                Some(e)
+            }
+            PidGraphicKind::Unknown { .. } => None,
+        };
+
+        if let Some(mut entity) = entity {
+            match entity.layer_name.as_str() {
+                "PID_GEOM_POINTS" => stats.rendered_geom_points += 1,
+                "PID_GEOM_LINES" => stats.rendered_geom_lines += 1,
+                _ => {}
+            }
+            attach_pid_geometry_xdata(&mut entity, geom_entity);
             let _ = add_layout_indexed_entity(
                 native,
                 preview_index,
                 None,
                 geom_entity.drawing_id.as_deref(),
                 geom_entity.graphic_oid,
-                marker,
+                entity,
             );
         }
     }
+    stats
+}
+
+fn attach_pid_geometry_xdata(entity: &mut nm::Entity, geom_entity: &pid_parse::PidGraphicEntity) {
+    let mut values = vec![
+        (1000, format!("id={}", geom_entity.id)),
+        (
+            1000,
+            format!(
+                "confidence={}",
+                geometry_confidence_name(geom_entity.confidence)
+            ),
+        ),
+    ];
+    if let Some(record_kind) = geom_entity.source.record_kind {
+        values.push((
+            1000,
+            format!("record_kind={}", sheet_record_kind_name(record_kind)),
+        ));
+    }
+    if let Some(field_x) = geom_entity.source.field_x {
+        values.push((1070, format!("field_x={field_x}")));
+    }
+    entity
+        .xdata
+        .push((PID_GEOMETRY_XDATA_APP.to_string(), values));
+}
+
+fn geometry_confidence_name(confidence: PidGeometryConfidence) -> &'static str {
+    match confidence {
+        PidGeometryConfidence::Decoded => "decoded",
+        PidGeometryConfidence::Inferred => "inferred",
+        PidGeometryConfidence::ProbeOnly => "probe_only",
+    }
+}
+
+fn sheet_record_kind_name(kind: pid_parse::SheetRecordKind) -> &'static str {
+    match kind {
+        pid_parse::SheetRecordKind::PrimitiveLine => "primitive_line",
+        pid_parse::SheetRecordKind::PrimitivePolyline => "primitive_polyline",
+        pid_parse::SheetRecordKind::PrimitiveCircle => "primitive_circle",
+        pid_parse::SheetRecordKind::PrimitiveArc => "primitive_arc",
+        pid_parse::SheetRecordKind::SymbolPlacement => "symbol_placement",
+        pid_parse::SheetRecordKind::TextPlacementStyle => "text_placement_style",
+        pid_parse::SheetRecordKind::EndpointPair => "endpoint_pair",
+        pid_parse::SheetRecordKind::CoordinatePageMetadata => "coordinate_page_metadata",
+        pid_parse::SheetRecordKind::Unknown => "unknown",
+    }
+}
+
+/// Map a SmartPlant symbol path (e.g. `/Pumps/Centrifugal.sym`) to a
+/// stable native block name. Until `.sym` content is decoded H7CAD
+/// renders symbols as named-block placeholders; the block need not be
+/// pre-registered for the entity to participate in `PID_GEOM_SYMBOLS`
+/// layer fits and `PidPreviewIndex` reverse lookups.
+fn symbol_block_name(symbol_path: Option<&str>) -> String {
+    const PLACEHOLDER: &str = "PID_SYMBOL_PLACEHOLDER";
+    let Some(path) = symbol_path else {
+        return PLACEHOLDER.to_string();
+    };
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if stem.is_empty() {
+        return PLACEHOLDER.to_string();
+    }
+    format!("PID_SYM_{}", sanitize_layer_name(stem))
 }
 
 fn ensure_layer(doc: &mut nm::CadDocument, name: &str, color: i16) {
@@ -3820,6 +4168,11 @@ mod tests {
         path.exists().then_some(path)
     }
 
+    fn phase9b_geometry_sample_pid_path() -> Option<PathBuf> {
+        let path = PathBuf::from(r"D:\work\plant-code\cad\pid-parse\test-file\DWG-0201GP06-01.pid");
+        path.exists().then_some(path)
+    }
+
     #[test]
     fn target_pid_preview_layout_is_primary_visual_focus() {
         // Task 2 focused test (plan docs/plans/2026-04-21-pid-real-sample-
@@ -3998,6 +4351,74 @@ mod tests {
              (panels + grid + layout items), got {}",
             bundle.native_preview.entities.len()
         );
+    }
+
+    #[test]
+    fn pid_import_real_sample_geometry_consumes_source_backed_layers() {
+        let Some(path) = phase9b_geometry_sample_pid_path() else {
+            eprintln!("SKIP: phase 9B geometry sample not found");
+            return;
+        };
+
+        let bundle = open_pid(&path).expect("open phase 9B geometry sample");
+        let layer_count = |layer: &str| {
+            bundle
+                .native_preview
+                .entities
+                .iter()
+                .filter(|entity| entity.layer_name == layer)
+                .count()
+        };
+        let geom_points = layer_count("PID_GEOM_POINTS");
+        let geom_lines = layer_count("PID_GEOM_LINES");
+        let geom_text = layer_count("PID_GEOM_TEXT");
+        let geom_symbols = layer_count("PID_GEOM_SYMBOLS");
+
+        assert_eq!(bundle.summary.rendered_geom_points, geom_points);
+        assert_eq!(bundle.summary.rendered_geom_lines, geom_lines);
+        assert!(
+            bundle.summary.rendered_source_geometry_count() > 0,
+            "sample should expose source-backed geometry; summary={:?}",
+            bundle.summary
+        );
+        assert!(
+            geom_points > 0,
+            "promoted object positions should render as PID_GEOM_POINTS"
+        );
+        assert_eq!(
+            geom_text, 0,
+            "Text geometry must stay disabled until pid-parse adds an independent gate"
+        );
+        assert_eq!(
+            geom_symbols, 0,
+            "Symbol geometry must stay disabled until pid-parse adds an independent gate"
+        );
+
+        eprintln!(
+            "phase 9B geometry sample: points={}, lines={}, skipped_probe={}, skipped_broad={}",
+            geom_points,
+            geom_lines,
+            bundle.summary.skipped_probe_only_geometry,
+            bundle.summary.skipped_broad_coordinate_hints
+        );
+        if geom_lines > 0 {
+            let endpoint_line = bundle.native_preview.entities.iter().find(|entity| {
+                entity.layer_name == "PID_GEOM_LINES"
+                    && entity.xdata.iter().any(|(app, values)| {
+                        app == PID_GEOMETRY_XDATA_APP
+                            && values
+                                .iter()
+                                .any(|(_, value)| value == "record_kind=endpoint_pair")
+                            && values
+                                .iter()
+                                .any(|(_, value)| value == "confidence=inferred")
+                    })
+            });
+            assert!(
+                endpoint_line.is_some(),
+                "inferred endpoint-pair lines should retain confidence and record_kind xdata"
+            );
+        }
     }
 
     #[test]
@@ -4230,19 +4651,21 @@ mod tests {
     }
 
     #[test]
-    fn edit_pid_drawing_number_rejects_non_utf8_drawing_xml() {
-        let src = unique_pid_path("edit-non-utf8");
+    fn edit_pid_drawing_number_rejects_undecodable_drawing_xml() {
+        let src = unique_pid_path("edit-undecodable");
         // Build a synthetic PidPackage in-memory whose Drawing stream is
-        // intentionally not valid UTF-8 (UTF-16 BOM + a couple of code
-        // units). We bypass build_fixture_pid + parse_package because
-        // the parser would reject this too — we want to test the edit
-        // helper's response to a cached but malformed stream.
+        // truly undecodable: invalid UTF-8 with no BOM and a high byte
+        // (0xC3 followed by an invalid continuation), and odd byte count
+        // so UTF-16 fallback also rejects. After Slice 3 the helper
+        // accepts UTF-8 (with/without BOM) and UTF-16 LE/BE (with BOM);
+        // this test pins the remaining rejection boundary so future
+        // encoding work doesn't accidentally swallow malformed bytes.
         use pid_parse::model::PidDocument;
         use pid_parse::package::{PidPackage, RawStream};
         use std::collections::BTreeMap;
 
         let mut streams = BTreeMap::new();
-        let bad_bytes = vec![0xFF, 0xFE, 0x44, 0x00, 0x72, 0x00]; // "Dr" in UTF-16 LE
+        let bad_bytes = vec![0xC3, 0x28, 0xFF]; // invalid UTF-8 + odd-byte count
         streams.insert(
             FIXTURE_DRAWING.to_string(),
             RawStream {
@@ -4254,10 +4677,10 @@ mod tests {
         let pkg = PidPackage::new(Some(src.clone()), streams, PidDocument::default());
         pid_package_store::cache_package(&src, pkg);
 
-        let err = edit_pid_drawing_number(&src, "X").expect_err("non-UTF-8 must error");
+        let err = edit_pid_drawing_number(&src, "X").expect_err("undecodable bytes must error");
         assert!(
-            err.contains("not UTF-8"),
-            "error must call out UTF-8 problem; got: {err}"
+            err.contains("decode failed") || err.contains("UTF"),
+            "error must surface decode failure; got: {err}"
         );
 
         pid_package_store::clear_package(&src);
@@ -5803,5 +6226,434 @@ mod tests {
             err.contains("exactly one SPPID_BRAN insert per drawing"),
             "error should call out the first-phase one-BRAN limit; got: {err}"
         );
+    }
+
+    #[test]
+    fn decode_xml_bytes_handles_utf8_without_bom() {
+        let bytes = b"<?xml version=\"1.0\"?><Drawing/>";
+        let (text, enc) = decode_xml_bytes(bytes).expect("plain utf-8");
+        assert_eq!(text, "<?xml version=\"1.0\"?><Drawing/>");
+        assert_eq!(enc, XmlEncoding::Utf8 { bom: false });
+    }
+
+    #[test]
+    fn decode_xml_bytes_handles_utf8_with_bom() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"<?xml?><A/>");
+        let (text, enc) = decode_xml_bytes(&bytes).expect("utf-8 bom");
+        assert_eq!(text, "<?xml?><A/>");
+        assert_eq!(enc, XmlEncoding::Utf8 { bom: true });
+    }
+
+    #[test]
+    fn decode_xml_bytes_handles_utf16_le_with_bom() {
+        let body = "<?xml?><A/>";
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in body.encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        let (text, enc) = decode_xml_bytes(&bytes).expect("utf-16 le");
+        assert_eq!(text, body);
+        assert_eq!(enc, XmlEncoding::Utf16Le { bom: true });
+    }
+
+    #[test]
+    fn decode_xml_bytes_handles_utf16_be_with_bom() {
+        let body = "<?xml?><A/>";
+        let mut bytes = vec![0xFE, 0xFF];
+        for u in body.encode_utf16() {
+            bytes.extend_from_slice(&u.to_be_bytes());
+        }
+        let (text, enc) = decode_xml_bytes(&bytes).expect("utf-16 be");
+        assert_eq!(text, body);
+        assert_eq!(enc, XmlEncoding::Utf16Be { bom: true });
+    }
+
+    #[test]
+    fn encode_xml_string_round_trips_each_encoding() {
+        for enc in [
+            XmlEncoding::Utf8 { bom: false },
+            XmlEncoding::Utf8 { bom: true },
+            XmlEncoding::Utf16Le { bom: true },
+            XmlEncoding::Utf16Be { bom: true },
+        ] {
+            let original = "<Drawing>测试</Drawing>";
+            let bytes = encode_xml_string(original, enc);
+            let (decoded, decoded_enc) =
+                decode_xml_bytes(&bytes).expect("re-decode after encode round-trip");
+            assert_eq!(
+                decoded, original,
+                "round-trip preserves content for {enc:?}"
+            );
+            assert_eq!(decoded_enc, enc, "round-trip preserves encoding tag");
+        }
+    }
+
+    /// Inject a `PidPackage` carrying a UTF-16 LE BOM Drawing stream
+    /// directly into the cache, bypassing `pid-parse`'s parser. This
+    /// isolates the H7CAD-side encoding wrappers from the upstream
+    /// reader's current UTF-8 assumption (the parser cannot yet ingest
+    /// UTF-16 streams; that's a `pid-parse` follow-up).
+    fn cache_synthetic_utf16_drawing_pkg(src: &Path, drawing_xml: &str) {
+        use pid_parse::model::PidDocument;
+        use pid_parse::package::{PidPackage, RawStream};
+        use std::collections::BTreeMap;
+
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in drawing_xml.encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+
+        let mut streams = BTreeMap::new();
+        streams.insert(
+            DRAWING_STREAM_PATH.to_string(),
+            RawStream {
+                path: DRAWING_STREAM_PATH.into(),
+                data: bytes,
+                modified: false,
+            },
+        );
+
+        let pkg = PidPackage::new(None, streams, PidDocument::default());
+        pid_package_store::cache_package(src, pkg);
+    }
+
+    #[test]
+    fn read_pid_drawing_attribute_handles_utf16_le_bom_fixture() {
+        let src = unique_pid_path("utf16-le-read");
+        cache_synthetic_utf16_drawing_pkg(
+            &src,
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\
+             <Drawing><Tag SP_DRAWINGNUMBER=\"UTF16-001\"/></Drawing>",
+        );
+
+        let value = read_pid_drawing_attribute(&src, "SP_DRAWINGNUMBER");
+        assert_eq!(
+            value.as_deref(),
+            Some("UTF16-001"),
+            "read should decode UTF-16 LE BOM Drawing XML"
+        );
+
+        pid_package_store::clear_package(&src);
+    }
+
+    #[test]
+    fn edit_pid_drawing_attribute_round_trips_through_utf16_le_bom() {
+        let src = unique_pid_path("utf16-le-edit");
+        cache_synthetic_utf16_drawing_pkg(
+            &src,
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\
+             <Drawing><Tag SP_DRAWINGNUMBER=\"BEFORE\"/></Drawing>",
+        );
+
+        let edit = edit_pid_drawing_attribute(&src, "SP_DRAWINGNUMBER", "AFTER")
+            .expect("UTF-16 BOM edit should succeed");
+        assert_eq!(edit.previous.as_deref(), Some("BEFORE"));
+        assert_eq!(edit.next, "AFTER");
+
+        let after = read_pid_drawing_attribute(&src, "SP_DRAWINGNUMBER");
+        assert_eq!(
+            after.as_deref(),
+            Some("AFTER"),
+            "edit should be visible to subsequent reads through the cached package"
+        );
+
+        // Confirm bytes still carry a BOM so re-opening on Windows
+        // (where SmartPlant expects UTF-16) keeps the encoding.
+        let arc = pid_package_store::get_package(&src).expect("cache hit");
+        let stream_bytes = &arc.get_stream(DRAWING_STREAM_PATH).expect("Drawing").data;
+        assert_eq!(
+            &stream_bytes[..2],
+            &[0xFF, 0xFE],
+            "post-edit bytes must keep UTF-16 LE BOM, got {:?}",
+            &stream_bytes[..2.min(stream_bytes.len())]
+        );
+
+        pid_package_store::clear_package(&src);
+    }
+
+    #[test]
+    fn add_geometry_entities_from_renders_decoded_kinds_to_geom_layers() {
+        use pid_parse::{
+            NormalizedPidGeometry, PidCoordinateContext, PidGeometryConfidence, PidGraphicEntity,
+            PidGraphicKind, PidGraphicProvenance, PidPoint, SheetRecordKind,
+        };
+
+        fn ent(id: &str, kind: PidGraphicKind) -> PidGraphicEntity {
+            PidGraphicEntity {
+                id: id.into(),
+                drawing_id: None,
+                graphic_oid: None,
+                kind,
+                coordinate_context: PidCoordinateContext::default(),
+                source: PidGraphicProvenance::default(),
+                confidence: PidGeometryConfidence::Decoded,
+            }
+        }
+
+        let geometry = NormalizedPidGeometry {
+            entities: vec![
+                ent(
+                    "line-1",
+                    PidGraphicKind::Line {
+                        start: PidPoint { x: 0.0, y: 0.0 },
+                        end: PidPoint { x: 100.0, y: 0.0 },
+                    },
+                ),
+                ent(
+                    "poly-1",
+                    PidGraphicKind::Polyline {
+                        points: vec![
+                            PidPoint { x: 0.0, y: 0.0 },
+                            PidPoint { x: 50.0, y: 0.0 },
+                            PidPoint { x: 50.0, y: 50.0 },
+                        ],
+                        closed: false,
+                    },
+                ),
+                ent(
+                    "arc-1",
+                    PidGraphicKind::Arc {
+                        center: PidPoint { x: 0.0, y: 0.0 },
+                        radius: 10.0,
+                        start_angle: 0.0,
+                        end_angle: std::f64::consts::PI,
+                    },
+                ),
+                ent(
+                    "circ-1",
+                    PidGraphicKind::Circle {
+                        center: PidPoint { x: 5.0, y: 5.0 },
+                        radius: 3.0,
+                    },
+                ),
+                ent(
+                    "text-1",
+                    PidGraphicKind::Text {
+                        insertion: PidPoint { x: 1.0, y: 2.0 },
+                        value: "PUMP-101".into(),
+                        height: 2.5,
+                        rotation: 0.0,
+                    },
+                ),
+                ent(
+                    "sym-1",
+                    PidGraphicKind::SymbolInstance {
+                        insertion: PidPoint { x: 10.0, y: 10.0 },
+                        symbol_path: Some("/Pumps/Centrifugal.sym".into()),
+                        rotation: 0.0,
+                        scale: [1.0, 1.0],
+                    },
+                ),
+                ent(
+                    "unk-1",
+                    PidGraphicKind::Unknown {
+                        note: "should not render".into(),
+                    },
+                ),
+                PidGraphicEntity {
+                    id: "inferred-endpoint-line".into(),
+                    drawing_id: None,
+                    graphic_oid: None,
+                    kind: PidGraphicKind::Line {
+                        start: PidPoint { x: 10.0, y: 20.0 },
+                        end: PidPoint { x: 30.0, y: 40.0 },
+                    },
+                    coordinate_context: PidCoordinateContext::default(),
+                    source: PidGraphicProvenance {
+                        record_kind: Some(SheetRecordKind::EndpointPair),
+                        field_x: Some(200),
+                        note: Some("endpoint pair promoted to inferred line".into()),
+                        ..PidGraphicProvenance::default()
+                    },
+                    confidence: PidGeometryConfidence::Inferred,
+                },
+                PidGraphicEntity {
+                    id: "inferred-field-point".into(),
+                    drawing_id: None,
+                    graphic_oid: None,
+                    kind: PidGraphicKind::Point {
+                        position: PidPoint { x: 42.0, y: 24.0 },
+                    },
+                    coordinate_context: PidCoordinateContext::default(),
+                    source: PidGraphicProvenance {
+                        field_x: Some(300),
+                        ..PidGraphicProvenance::default()
+                    },
+                    confidence: PidGeometryConfidence::Inferred,
+                },
+            ],
+            warnings: Vec::new(),
+        };
+
+        let mut native = nm::CadDocument::new();
+        let mut preview_index = PidPreviewIndex::default();
+        let stats = add_geometry_entities_from(&mut native, &mut preview_index, &geometry);
+
+        let layers: BTreeMap<&str, usize> =
+            native
+                .entities
+                .iter()
+                .fold(BTreeMap::new(), |mut acc, entity| {
+                    *acc.entry(entity.layer_name.as_str()).or_default() += 1;
+                    acc
+                });
+
+        assert!(
+            layers.contains_key("PID_GEOM_LINES"),
+            "expected PID_GEOM_LINES for line/polyline/arc/circle entities, got {layers:?}"
+        );
+        assert_eq!(
+            layers.get("PID_GEOM_LINES").copied().unwrap_or(0),
+            5,
+            "Decoded line/polyline/arc/circle plus inferred endpoint line = 5 entities on PID_GEOM_LINES"
+        );
+        assert_eq!(
+            layers.get("PID_GEOM_POINTS").copied().unwrap_or(0),
+            1,
+            "field-backed inferred point should land on PID_GEOM_POINTS"
+        );
+        assert_eq!(
+            layers.get("PID_GEOM_TEXT").copied().unwrap_or(0),
+            1,
+            "Text entity should land on PID_GEOM_TEXT"
+        );
+        assert_eq!(
+            layers.get("PID_GEOM_SYMBOLS").copied().unwrap_or(0),
+            1,
+            "SymbolInstance should land on PID_GEOM_SYMBOLS"
+        );
+        // Unknown intentionally not rendered.
+        assert_eq!(
+            native.entities.iter().count(),
+            8,
+            "8 source-backed entities should render; Unknown skipped"
+        );
+        assert_eq!(stats.rendered_geom_lines, 5);
+        assert_eq!(stats.rendered_geom_points, 1);
+        assert_eq!(stats.skipped_probe_only_geometry, 0);
+        assert_eq!(stats.skipped_broad_coordinate_hints, 0);
+        let inferred_line = native
+            .entities
+            .iter()
+            .find(|entity| {
+                entity.xdata.iter().any(|(app, values)| {
+                    app == PID_GEOMETRY_XDATA_APP
+                        && values
+                            .iter()
+                            .any(|(_, value)| value == "id=inferred-endpoint-line")
+                })
+            })
+            .expect("inferred endpoint line should carry PID geometry xdata");
+        let xdata_values = inferred_line
+            .xdata
+            .iter()
+            .find(|(app, _)| app == PID_GEOMETRY_XDATA_APP)
+            .map(|(_, values)| values)
+            .expect("PID geometry xdata app");
+        assert!(xdata_values
+            .iter()
+            .any(|(_, value)| value == "confidence=inferred"));
+        assert!(xdata_values
+            .iter()
+            .any(|(_, value)| value == "record_kind=endpoint_pair"));
+    }
+
+    #[test]
+    fn add_geometry_entities_from_skips_probe_only_kinds() {
+        use pid_parse::{
+            NormalizedPidGeometry, PidCoordinateContext, PidGeometryConfidence, PidGraphicEntity,
+            PidGraphicKind, PidGraphicProvenance, PidPoint,
+        };
+
+        let geometry = NormalizedPidGeometry {
+            entities: vec![PidGraphicEntity {
+                id: "probe-line".into(),
+                drawing_id: None,
+                graphic_oid: None,
+                kind: PidGraphicKind::Line {
+                    start: PidPoint { x: 0.0, y: 0.0 },
+                    end: PidPoint { x: 1.0, y: 1.0 },
+                },
+                coordinate_context: PidCoordinateContext::default(),
+                source: PidGraphicProvenance::default(),
+                confidence: PidGeometryConfidence::ProbeOnly,
+            }],
+            warnings: Vec::new(),
+        };
+
+        let mut native = nm::CadDocument::new();
+        let mut preview_index = PidPreviewIndex::default();
+        let stats = add_geometry_entities_from(&mut native, &mut preview_index, &geometry);
+
+        assert_eq!(
+            native.entities.iter().count(),
+            0,
+            "probe-only entities must not enter main render path"
+        );
+        assert_eq!(stats.skipped_probe_only_geometry, 1);
+    }
+
+    #[test]
+    fn add_geometry_entities_from_skips_broad_inferred_points() {
+        use pid_parse::{
+            NormalizedPidGeometry, PidCoordinateContext, PidGeometryConfidence, PidGraphicEntity,
+            PidGraphicKind, PidGraphicProvenance, PidPoint,
+        };
+
+        let geometry = NormalizedPidGeometry {
+            entities: vec![PidGraphicEntity {
+                id: "broad-point".into(),
+                drawing_id: None,
+                graphic_oid: None,
+                kind: PidGraphicKind::Point {
+                    position: PidPoint { x: 10.0, y: 20.0 },
+                },
+                coordinate_context: PidCoordinateContext::default(),
+                source: PidGraphicProvenance::default(),
+                confidence: PidGeometryConfidence::Inferred,
+            }],
+            warnings: Vec::new(),
+        };
+
+        let mut native = nm::CadDocument::new();
+        let mut preview_index = PidPreviewIndex::default();
+        let stats = add_geometry_entities_from(&mut native, &mut preview_index, &geometry);
+
+        assert_eq!(
+            native.entities.iter().count(),
+            0,
+            "inferred points without field provenance are broad hints and must stay out of the main view"
+        );
+        assert_eq!(stats.rendered_geom_points, 0);
+        assert_eq!(stats.skipped_broad_coordinate_hints, 1);
+    }
+
+    #[test]
+    fn load_pid_native_with_notices_surfaces_summary_advisories_for_synthetic_fixture() {
+        let src = unique_pid_path("notices-synth");
+        build_fixture_pid(&src);
+        let (doc, notices) =
+            load_pid_native_with_notices(&src).expect("load synthetic pid with notices");
+
+        assert!(
+            !notices.is_empty(),
+            "synthetic fixture should surface at least one PID summary advisory; native doc had {} entities",
+            doc.entities.len()
+        );
+
+        // The synthetic fixture seeds enough metadata for `pid-parse` to
+        // discover relationships, so at minimum the unresolved-relationship
+        // advisory should fire (relationships are present, no other source
+        // can resolve them).
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.severity == crate::io::diagnostics::NoticeSeverity::Warning),
+            "expected at least one Warning notice from synthetic fixture, got {notices:?}"
+        );
+
+        pid_package_store::clear_package(&src);
+        let _ = std::fs::remove_file(&src);
     }
 }

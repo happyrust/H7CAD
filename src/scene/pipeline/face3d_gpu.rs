@@ -57,8 +57,14 @@ impl Face3DGpu {
     /// Each WireModel's `key_vertices` holds the 4 corners in local space
     /// (world_offset already applied by tessellate.rs).  Two triangles are
     /// emitted per face: (p0,p1,p2) and (p0,p2,p3).
-    pub fn from_wires(device: &wgpu::Device, wires: &[WireModel]) -> Self {
-        let mut vertices: Vec<Face3DVertex> = Vec::with_capacity(wires.len() * 6);
+    pub fn from_wires(
+        device: &wgpu::Device,
+        wires: &[WireModel],
+        fill_sources: &[WireModel],
+    ) -> Self {
+        let fill_vertex_count: usize = fill_sources.iter().map(|wire| wire.fill_tris.len()).sum();
+        let mut vertices: Vec<Face3DVertex> =
+            Vec::with_capacity(wires.len() * 6 + fill_vertex_count);
 
         for wire in wires {
             // key_vertices has exactly 4 entries for Face3D (p0..p3).
@@ -81,6 +87,18 @@ impl Face3DGpu {
             vertices.push(v(0));
             vertices.push(v(2));
             vertices.push(v(3));
+        }
+
+        for wire in fill_sources {
+            if wire.fill_tris.is_empty() {
+                continue;
+            }
+            let [r, g, b, a] = wire.color;
+            let fill_color = [r * 0.45, g * 0.45, b * 0.45, a];
+            vertices.extend(wire.fill_tris.iter().copied().map(|position| Face3DVertex {
+                position,
+                color: fill_color,
+            }));
         }
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

@@ -1163,7 +1163,7 @@ impl Scene {
             ]
         };
 
-        for point in &mut model.boundary {
+        for point in Arc::make_mut(&mut model.boundary).iter_mut() {
             *point = transform(*point);
         }
 
@@ -1327,7 +1327,8 @@ impl Scene {
                 }
 
                 let mut model = hatch.clone();
-                model.boundary = clip_polygon_to_rect(&projected, vp_x0, vp_y0, vp_x1, vp_y1);
+                model.boundary =
+                    Arc::new(clip_polygon_to_rect(&projected, vp_x0, vp_y0, vp_x1, vp_y1));
                 if model.boundary.len() < 3 {
                     continue;
                 }
@@ -2288,7 +2289,7 @@ impl Scene {
                 models.push((
                     common.handle,
                     HatchModel {
-                        boundary,
+                        boundary: Arc::new(boundary),
                         pattern: hatch_model::HatchPattern::Solid,
                         name: "SOLID".into(),
                         color,
@@ -2350,7 +2351,7 @@ impl Scene {
                     fill_color = [0.15, 0.55, 1.00, 0.35];
                 }
                 models.push(HatchModel {
-                    boundary,
+                    boundary: Arc::new(boundary),
                     pattern: hatch_model::HatchPattern::Solid,
                     name: "WIPEOUT_FILL".into(),
                     color: fill_color,
@@ -2647,7 +2648,7 @@ impl Scene {
             dxf.pattern.name.clone()
         };
         Some(HatchModel {
-            boundary,
+            boundary: Arc::new(boundary),
             pattern,
             name,
             color,
@@ -2668,6 +2669,11 @@ impl Scene {
 
         let path = boundary_paths.first()?;
         let mut boundary: Vec<[f32; 2]> = Vec::new();
+        let normal = (hatch.extrusion[0], hatch.extrusion[1], hatch.extrusion[2]);
+        let ocs_to_boundary = |x: f64, y: f64| -> [f32; 2] {
+            let (wx, wy, _) = transform::ocs_point_to_wcs((x, y, 0.0), normal);
+            [wx as f32, wy as f32]
+        };
 
         for edge in &path.edges {
             match edge {
@@ -2683,7 +2689,7 @@ impl Scene {
                         let v1 = vertices[(i + 1) % count];
                         let bulge = v0[2] as f32;
                         if bulge.abs() < 1e-9 {
-                            boundary.push([v0[0] as f32, v0[1] as f32]);
+                            boundary.push(ocs_to_boundary(v0[0], v0[1]));
                         } else {
                             let p0 = [v0[0] as f32, v0[1] as f32];
                             let p1 = [v1[0] as f32, v1[1] as f32];
@@ -2713,7 +2719,10 @@ impl Scene {
                                 .max(4.0) as u32;
                             for j in 0..segs {
                                 let t = sa + span * (j as f32 / segs as f32);
-                                boundary.push([cx + r * t.cos(), cy + r * t.sin()]);
+                                boundary.push(ocs_to_boundary(
+                                    (cx + r * t.cos()) as f64,
+                                    (cy + r * t.sin()) as f64,
+                                ));
                             }
                         }
                     }
@@ -2724,8 +2733,8 @@ impl Scene {
                     }
                 }
                 nm::HatchEdge::Line { start, end } => {
-                    boundary.push([start[0] as f32, start[1] as f32]);
-                    boundary.push([end[0] as f32, end[1] as f32]);
+                    boundary.push(ocs_to_boundary(start[0], start[1]));
+                    boundary.push(ocs_to_boundary(end[0], end[1]));
                 }
                 nm::HatchEdge::CircularArc {
                     center,
@@ -2738,9 +2747,15 @@ impl Scene {
                     let cy = center[1] as f32;
                     let r = *radius as f32;
                     let (sa, ea) = if *is_ccw {
-                        (*start_angle as f32, *end_angle as f32)
+                        (
+                            start_angle.to_radians() as f32,
+                            end_angle.to_radians() as f32,
+                        )
                     } else {
-                        (*end_angle as f32, *start_angle as f32)
+                        (
+                            end_angle.to_radians() as f32,
+                            start_angle.to_radians() as f32,
+                        )
                     };
                     let mut end = ea;
                     if end < sa {
@@ -2750,7 +2765,10 @@ impl Scene {
                     let segs = ((span / std::f32::consts::TAU) * 32.0).ceil().max(4.0) as u32;
                     for i in 0..=segs {
                         let t = sa + span * (i as f32 / segs as f32);
-                        boundary.push([cx + r * t.cos(), cy + r * t.sin()]);
+                        boundary.push(ocs_to_boundary(
+                            (cx + r * t.cos()) as f64,
+                            (cy + r * t.sin()) as f64,
+                        ));
                     }
                 }
                 nm::HatchEdge::EllipticArc {
@@ -2769,9 +2787,15 @@ impl Scene {
                     let r_min = r_maj * *minor_ratio as f32;
                     let rot = maj_y.atan2(maj_x);
                     let (sa, ea) = if *is_ccw {
-                        (*start_angle as f32, *end_angle as f32)
+                        (
+                            start_angle.to_radians() as f32,
+                            end_angle.to_radians() as f32,
+                        )
                     } else {
-                        (*end_angle as f32, *start_angle as f32)
+                        (
+                            end_angle.to_radians() as f32,
+                            start_angle.to_radians() as f32,
+                        )
                     };
                     let mut end = ea;
                     if end < sa {
@@ -2783,10 +2807,10 @@ impl Scene {
                         let t = sa + span * (i as f32 / segs as f32);
                         let lx = r_maj * t.cos();
                         let ly = r_min * t.sin();
-                        boundary.push([
-                            cx + lx * rot.cos() - ly * rot.sin(),
-                            cy + lx * rot.sin() + ly * rot.cos(),
-                        ]);
+                        boundary.push(ocs_to_boundary(
+                            (cx + lx * rot.cos() - ly * rot.sin()) as f64,
+                            (cy + lx * rot.sin() + ly * rot.cos()) as f64,
+                        ));
                     }
                 }
             }
@@ -2813,7 +2837,7 @@ impl Scene {
         };
 
         Some(HatchModel {
-            boundary,
+            boundary: Arc::new(boundary),
             pattern,
             name: if *solid_fill {
                 "SOLID".into()
@@ -2950,7 +2974,7 @@ impl Scene {
             ],
         ];
         HatchModel {
-            boundary,
+            boundary: Arc::new(boundary),
             pattern: hatch_model::HatchPattern::Solid,
             name: "SOLID".into(),
             color,
@@ -3993,6 +4017,7 @@ mod tests {
         native
             .add_entity(nm::Entity::new(nm::EntityData::Unknown {
                 entity_type: "FAKE_ENTITY_XYZ".into(),
+                raw_codes: Vec::new(),
             }))
             .expect("unknown entity");
 
@@ -4283,6 +4308,86 @@ mod tests {
                 .iter()
                 .any(|point| (point[0] - 8.0).abs() < 1.0e-4 && (point[1] - 5.0).abs() < 1.0e-4),
             "scaled y-axis point should rotate to negative x"
+        );
+    }
+
+    #[test]
+    fn nativerender_hatch_ocs_boundary_uses_extrusion() {
+        let mut native = nm::CadDocument::new();
+        let mut hatch = nm::Entity::new(nm::EntityData::Hatch {
+            pattern_name: "SOLID".into(),
+            solid_fill: true,
+            boundary_paths: vec![nm::HatchBoundaryPath {
+                flags: 2,
+                edges: vec![nm::HatchEdge::Polyline {
+                    closed: true,
+                    vertices: vec![
+                        [0.0, 0.0, 0.0],
+                        [2.0, 0.0, 0.0],
+                        [2.0, 1.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                    ],
+                }],
+            }],
+        });
+        hatch.extrusion = [0.0, 1.0, 0.0];
+        native.add_entity(hatch).expect("native hatch");
+
+        let scene = scene_with_native(native);
+        let hatches = scene.synced_hatch_models();
+
+        assert_eq!(hatches.len(), 1);
+        assert!(
+            hatches[0]
+                .boundary
+                .iter()
+                .any(|point| (point[0] + 2.0).abs() < 1.0e-4 && point[1].abs() < 1.0e-4),
+            "OCS x-axis should be projected through extrusion before hatch boundary rendering"
+        );
+    }
+
+    #[test]
+    fn nativerender_insert_hatch_arc_edge_applies_rotation() {
+        let mut native = nm::CadDocument::new();
+        block_with_entities(
+            &mut native,
+            "HATCH_ARC_XFORM",
+            vec![nm::Entity::new(nm::EntityData::Hatch {
+                pattern_name: "SOLID".into(),
+                solid_fill: true,
+                boundary_paths: vec![nm::HatchBoundaryPath {
+                    flags: 1,
+                    edges: vec![nm::HatchEdge::CircularArc {
+                        center: [1.0, 1.0],
+                        radius: 1.0,
+                        start_angle: 0.0,
+                        end_angle: 90.0,
+                        is_ccw: true,
+                    }],
+                }],
+            })],
+        );
+        native
+            .add_entity(nm::Entity::new(nm::EntityData::Insert {
+                block_name: "HATCH_ARC_XFORM".into(),
+                insertion: [10.0, 5.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: 90.0,
+                has_attribs: false,
+                attribs: vec![],
+            }))
+            .expect("insert");
+
+        let scene = scene_with_native(native);
+        let hatches = scene.synced_hatch_models();
+
+        assert_eq!(hatches.len(), 1);
+        assert!(
+            hatches[0]
+                .boundary
+                .iter()
+                .any(|point| (point[0] - 8.0).abs() < 1.0e-4 && (point[1] - 6.0).abs() < 1.0e-4),
+            "90-degree hatch arc endpoint should rotate with the containing INSERT"
         );
     }
 

@@ -107,6 +107,7 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
                     vp_scissor: None,
+                    fill_tris: vec![],
                 };
             }
 
@@ -137,6 +138,7 @@ pub fn tessellate(
                             aabb: WireModel::UNBOUNDED_AABB,
                             plinegen: true,
                             vp_scissor: None,
+                            fill_tris: vec![],
                         };
                     }
                     _ => {}
@@ -167,6 +169,7 @@ pub fn tessellate(
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
                         vp_scissor: None,
+                        fill_tris: vec![],
                     };
                 }
             }
@@ -195,6 +198,7 @@ pub fn tessellate(
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
                         vp_scissor: None,
+                        fill_tris: vec![],
                     };
                 }
             }
@@ -235,6 +239,7 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
                     vp_scissor: None,
+                    fill_tris: vec![],
                 };
             }
 
@@ -271,6 +276,7 @@ pub fn tessellate(
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: false,
                     vp_scissor: None,
+                    fill_tris: vec![],
                 };
             }
 
@@ -302,6 +308,7 @@ pub fn tessellate(
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
+        fill_tris: vec![],
     }
 }
 
@@ -375,6 +382,7 @@ pub fn tessellate_native_dimension(
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
+        fill_tris: vec![],
     }];
 
     if let Some(mut wire) = native_dimension_text_wire(
@@ -487,6 +495,7 @@ pub fn tessellate_dimension(
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
+        fill_tris: vec![],
     }];
 
     if let Some(text) = dimension_text_entity(dim) {
@@ -911,6 +920,7 @@ fn tessellate_leader(
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         }];
     }
 
@@ -981,6 +991,7 @@ fn tessellate_leader(
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
+        fill_tris: vec![],
     }]
 }
 
@@ -1110,6 +1121,7 @@ fn tessellate_multileader(
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
+        fill_tris: vec![],
     }];
 
     // Render text content as MText wire
@@ -1225,6 +1237,7 @@ fn truck_wire_from_entity(
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
                 vp_scissor: None,
+                fill_tris: vec![],
             }
         }
         TruckObject::Point(v) => match tessellate_vertex(&v, [0.0; 3]) {
@@ -1245,6 +1258,7 @@ fn truck_wire_from_entity(
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
                     vp_scissor: None,
+                    fill_tris: vec![],
                 }
             }
             _ => WireModel::solid(name, vec![], color, selected),
@@ -1265,6 +1279,7 @@ fn truck_wire_from_entity(
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
                 vp_scissor: None,
+                fill_tris: vec![],
             },
             _ => WireModel::solid(name, vec![], color, selected),
         },
@@ -1284,6 +1299,7 @@ fn truck_wire_from_entity(
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
                 vp_scissor: None,
+                fill_tris: vec![],
             },
             _ => WireModel::solid(name, vec![], color, selected),
         },
@@ -1302,6 +1318,7 @@ fn truck_wire_from_entity(
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         },
         TruckObject::SegmentedLines(points) => WireModel {
             name,
@@ -1318,6 +1335,7 @@ fn truck_wire_from_entity(
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: false,
             vp_scissor: None,
+            fill_tris: vec![],
         },
         TruckObject::Volume(_) => WireModel::solid(name, volume_fallback, color, selected),
     }

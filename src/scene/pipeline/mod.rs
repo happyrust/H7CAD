@@ -609,7 +609,11 @@ impl Pipeline {
         self.gpu_wires = wires
             .iter()
             .filter(|w| {
-                let segs = w.points.len().saturating_sub(1).min(wire_gpu::MAX_SEGS_PER_WIRE);
+                let segs = w
+                    .points
+                    .len()
+                    .saturating_sub(1)
+                    .min(wire_gpu::MAX_SEGS_PER_WIRE);
                 if total_segs + segs > MAX_TOTAL_SEGS {
                     skipped += 1;
                     false
@@ -669,9 +673,14 @@ impl Pipeline {
     /// Upload all 3DFACE entities as two batched GPU objects:
     /// - `gpu_face3d_fill`: filled triangles (1 buffer, 1 draw call)
     /// - `gpu_face3d_edges`: merged edge wires (1 buffer, 1 draw call)
-    pub fn upload_face3d(&mut self, device: &wgpu::Device, face3d_wires: &[WireModel], all_wires: &[WireModel]) {
-        let has_fills = !face3d_wires.is_empty()
-            || all_wires.iter().any(|w| !w.fill_tris.is_empty());
+    pub fn upload_face3d(
+        &mut self,
+        device: &wgpu::Device,
+        face3d_wires: &[WireModel],
+        all_wires: &[WireModel],
+    ) {
+        let has_fills =
+            !face3d_wires.is_empty() || all_wires.iter().any(|w| !w.fill_tris.is_empty());
         if !has_fills {
             self.gpu_face3d_fill = None;
             self.gpu_face3d_edges = vec![];

@@ -95,6 +95,7 @@ pub fn to_truck_with_normal(center: &[f64; 3], radius: f64, normal: [f64; 3]) ->
             radius: rf,
         }],
         key_vertices: vec![],
+        fill_tris: vec![],
     }
 }
 

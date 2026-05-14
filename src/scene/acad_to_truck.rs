@@ -338,6 +338,7 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
                         .unwrap_or_default(),
                     tangent_geoms: tangents,
                     key_vertices,
+                    fill_tris: vec![],
                 })
             }
         }

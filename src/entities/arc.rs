@@ -80,6 +80,7 @@ pub fn to_truck_with_normal(
             radius: r as f32,
         }],
         key_vertices: vec![],
+        fill_tris: vec![],
     }
 }
 

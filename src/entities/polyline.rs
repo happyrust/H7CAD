@@ -38,6 +38,7 @@ fn tessellate_polyline(pl: &Polyline) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 
@@ -138,6 +139,7 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -227,6 +229,7 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 
@@ -356,6 +359,7 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 

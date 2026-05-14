@@ -1,5 +1,20 @@
 # 更新日志
 
+## 2026-05-14
+
+### DXF / PID 保真与运行时显示
+
+- 扩展 native DXF 模型与 writer，补齐多类保真对象的读写/回写覆盖，包括 block 动态参数、book color、raster 变量、raw/unknown object、spatial filter、table object、underlay definition 等 round-trip 场景。
+- 强化 PID 导入路径：提升真实 PID 包中的几何恢复、属性诊断与缓存可观察性，并让 UI/状态栏能更清楚地反馈导入后的 preserved-only / fallback 内容。
+- 扩展实体公共属性和 scene 命中/渲染链路，覆盖更多实体的 grip、显示属性、PDF/SVG 导出与 native bridge 转换。
+- 完成 AC1015 DWG writer 阶段性闭环：LINE / CIRCLE / ARC / POINT / LWPOLYLINE / TEXT / ATTRIB / INSERT / MTEXT / SPLINE / ELLIPSE / RAY / XLINE / SOLID / 3DFACE / VIEWPORT / HATCH 等实体 writer 均有 round-trip 防回归记录。
+
+### 验证
+
+- `cargo build --release` 通过。
+- 当前构建仅剩 11 个未使用代码相关 warning，未阻断 release binary 生成。
+- `target/release/H7CAD.exe` 已在本机启动验证。
+
 ## 2026-05-06
 
 ### DXF / Native 渲染保真

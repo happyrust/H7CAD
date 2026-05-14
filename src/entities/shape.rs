@@ -63,6 +63,7 @@ pub fn to_truck_with_normal(insertion: &[f64; 3], size: f64, normal: [f64; 3]) -
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![[ox, oy, oz]],
+        fill_tris: vec![],
     }
 }
 

@@ -35,6 +35,7 @@ pub fn to_truck(corners: &[[f64; 3]; 4]) -> TruckEntity {
         snap_pts: snap,
         tangent_geoms: vec![],
         key_vertices: p,
+        fill_tris: vec![],
     })
     .unwrap()
 }

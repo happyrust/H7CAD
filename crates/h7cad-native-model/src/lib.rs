@@ -2184,9 +2184,14 @@ pub enum EntityData {
         /// Raw (code, value) tuples captured verbatim
         raw_codes: Vec<(i16, String)>,
     },
-    /// Placeholder for entity types not yet fully parsed
+    /// Placeholder for entity types not yet fully parsed.
+    ///
+    /// `raw_codes` stores the entity-specific group codes that are not already
+    /// represented by [`Entity`]'s common fields, allowing lossless DXF
+    /// read/write for unsupported records.
     Unknown {
         entity_type: String,
+        raw_codes: Vec<(i16, String)>,
     },
 }
 
@@ -2233,7 +2238,7 @@ impl EntityData {
             Self::Camera { .. } => "CAMERA".into(),
             Self::Section { .. } => "SECTION".into(),
             Self::ProxyEntity { .. } => "ACAD_PROXY_ENTITY".into(),
-            Self::Unknown { entity_type } => entity_type.clone(),
+            Self::Unknown { entity_type, .. } => entity_type.clone(),
         }
     }
 }
@@ -2438,6 +2443,169 @@ pub enum ObjectData {
         /// code 1 — Table name
         name: String,
     },
+    /// PDF/DWF/DGN underlay definition object.
+    UnderlayDefinition {
+        /// Original DXF object type (PDFDEFINITION / DWFDEFINITION / DGNDEFINITION).
+        definition_type: String,
+        /// code 1 — external file path.
+        file_path: String,
+        /// code 2 — page/sheet/model name.
+        page_name: String,
+        /// code 3 — optional definition name.
+        name: String,
+        /// Additional object-specific codes not modelled above.
+        raw_codes: Vec<(i16, String)>,
+    },
+    /// RASTERVARIABLES — global raster image display settings.
+    RasterVariables {
+        /// code 90 — class version.
+        class_version: i32,
+        /// code 70 — image frame display setting.
+        display_image_frame: i16,
+        /// code 71 — image quality.
+        image_quality: i16,
+        /// code 72 — image units.
+        units: i16,
+    },
+    /// DBCOLOR — named color from an AutoCAD color book.
+    BookColor {
+        /// code 1 — color name.
+        color_name: String,
+        /// code 2 — color book name.
+        book_name: String,
+    },
+    /// SPATIAL_FILTER / SPATIALFILTER — xref clipping filter.
+    SpatialFilter {
+        /// Original DXF object type spelling.
+        object_type: String,
+        /// Object-specific codes preserved verbatim.
+        raw_codes: Vec<(i16, String)>,
+    },
+    /// TABLECONTENT — detailed table cell/content payload.
+    TableContent {
+        /// Object-specific codes preserved verbatim.
+        raw_codes: Vec<(i16, String)>,
+    },
+    /// TABLEGEOMETRY — detailed table geometry payload.
+    TableGeometry {
+        /// Object-specific codes preserved verbatim.
+        raw_codes: Vec<(i16, String)>,
+    },
+    /// A recognized DXF object type whose fields are intentionally preserved
+    /// as raw group-code pairs until a semantic model is needed.
+    RawKnown {
+        object_type: String,
+        raw_codes: Vec<(i16, String)>,
+    },
+    /// BLOCKGRIPLOCATIONCOMPONENT — dynamic-block grip expression value.
+    BlockGripLocationComponent {
+        /// AcDbEvalExpr code 90 — expression id.
+        eval_id: i32,
+        /// AcDbEvalExpr code 98 — evaluation graph source id.
+        value_98: i32,
+        /// AcDbEvalExpr code 99 — evaluation graph target id.
+        value_99: i32,
+        /// AcDbEvalExpr value payload such as the 1/70/140 triplet.
+        eval_value_codes: Vec<(i16, String)>,
+        /// AcDbBlockGripExpr code 91.
+        value_91: i32,
+        /// AcDbBlockGripExpr code 300 — expression name.
+        expression_name: String,
+        /// Any object-specific codes not covered by the semantic fields above.
+        raw_codes: Vec<(i16, String)>,
+    },
+    /// BLOCKLINEARGRIP — dynamic-block linear grip descriptor.
+    BlockLinearGrip {
+        /// AcDbEvalExpr code 90 — expression id.
+        eval_id: i32,
+        /// AcDbEvalExpr code 98.
+        eval_value_98: i32,
+        /// AcDbEvalExpr code 99.
+        eval_value_99: i32,
+        /// AcDbBlockElement code 300 — grip display name.
+        element_name: String,
+        /// AcDbBlockElement code 98.
+        element_value_98: i32,
+        /// AcDbBlockElement code 99.
+        element_value_99: i32,
+        /// AcDbBlockElement code 1071.
+        element_value_1071: i32,
+        /// AcDbBlockGrip code 91.
+        grip_value_91: i32,
+        /// AcDbBlockGrip code 92.
+        grip_value_92: i32,
+        /// AcDbBlockGrip code 1010/1020/1030 — grip location.
+        location: [f64; 3],
+        /// AcDbBlockGrip code 280.
+        grip_flag_280: i16,
+        /// AcDbBlockGrip code 93.
+        grip_value_93: i32,
+        /// AcDbBlockLinearGrip code 140/141/142.
+        linear_vector: [f64; 3],
+        /// Any object-specific codes not covered by the semantic fields above.
+        raw_codes: Vec<(i16, String)>,
+    },
+    /// BLOCKLINEARPARAMETER — dynamic-block linear parameter descriptor.
+    BlockLinearParameter {
+        /// AcDbEvalExpr code 90 — expression id.
+        eval_id: i32,
+        /// AcDbEvalExpr code 98.
+        eval_value_98: i32,
+        /// AcDbEvalExpr code 99.
+        eval_value_99: i32,
+        /// AcDbBlockElement code 300 — parameter name.
+        element_name: String,
+        /// AcDbBlockElement code 98.
+        element_value_98: i32,
+        /// AcDbBlockElement code 99.
+        element_value_99: i32,
+        /// AcDbBlockElement code 1071.
+        element_value_1071: i32,
+        /// AcDbBlockParameter code 280.
+        parameter_value_280: i16,
+        /// AcDbBlockParameter code 281.
+        parameter_value_281: i16,
+        /// AcDbBlock2PtParameter code 1010/1020/1030.
+        first_point: [f64; 3],
+        /// AcDbBlock2PtParameter code 1011/1021/1031.
+        second_point: [f64; 3],
+        /// AcDbBlock2PtParameter code 170.
+        value_170: i16,
+        /// AcDbBlock2PtParameter repeated code 91 values.
+        value_91_entries: Vec<i32>,
+        /// AcDbBlock2PtParameter code 171.
+        value_171: i16,
+        /// AcDbBlock2PtParameter code 92.
+        value_92: i32,
+        /// AcDbBlock2PtParameter code 301.
+        value_301: String,
+        /// AcDbBlock2PtParameter code 172.
+        value_172: i16,
+        /// AcDbBlock2PtParameter code 93.
+        value_93: i32,
+        /// AcDbBlock2PtParameter code 302.
+        value_302: String,
+        /// AcDbBlock2PtParameter code 173.
+        value_173: i16,
+        /// AcDbBlock2PtParameter code 94.
+        value_94: i32,
+        /// AcDbBlock2PtParameter code 303.
+        value_303: String,
+        /// AcDbBlock2PtParameter code 174.
+        value_174: i16,
+        /// AcDbBlock2PtParameter code 95.
+        value_95: i32,
+        /// AcDbBlock2PtParameter code 304.
+        value_304: String,
+        /// AcDbBlockLinearParameter code 305 — label.
+        label: String,
+        /// AcDbBlockLinearParameter code 306 — description.
+        description: String,
+        /// AcDbBlockLinearParameter code 140 — label offset.
+        label_offset: f64,
+        /// Any object-specific codes not covered by the semantic fields above.
+        raw_codes: Vec<(i16, String)>,
+    },
     /// WIPEOUTVARIABLES — global wipeout frame draw mode.
     WipeoutVariables {
         /// code 70 — Frame setting (0=off, 1=on, 2=on+print)
@@ -2475,6 +2643,7 @@ pub enum ObjectData {
     },
     Unknown {
         object_type: String,
+        raw_codes: Vec<(i16, String)>,
     },
 }
 

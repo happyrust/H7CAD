@@ -23,6 +23,7 @@ pub fn ray_to_truck(origin: &[f64; 3], direction: &[f64; 3]) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: vec![start],
+        fill_tris: vec![],
     }
 }
 
@@ -160,5 +161,6 @@ pub fn xline_to_truck(origin: &[f64; 3], direction: &[f64; 3]) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: vec![[origin[0] as f32, origin[1] as f32, origin[2] as f32]],
+        fill_tris: vec![],
     }
 }

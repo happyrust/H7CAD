@@ -39,6 +39,7 @@ pub(super) struct H7CAD {
     vp_size: (f32, f32),
     snapper: Snapper,
     snap_popup_open: bool,
+    scale_popup_open: bool,
     /// Whether Tangent snap was enabled before a tangent-pick command started.
     pre_cmd_tangent: Option<bool>,
     /// Orthogonal drawing constraint (F8): constrains picks to 0°/90°/180°/270°.
@@ -51,6 +52,8 @@ pub(super) struct H7CAD {
     show_grid: bool,
     /// Dynamic input overlay (F12): show coordinate tooltip near cursor.
     dyn_input: bool,
+    /// Model-space annotation scale shown in the status-bar scale picker.
+    annotation_scale: f32,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
     /// Show the ViewCube in the top-right of the viewport (NAVVCUBE).
@@ -399,6 +402,14 @@ pub enum Message {
     ToggleSnapPopup,
     /// Close the OSNAP popup (click-catcher outside the panel).
     CloseSnapPopup,
+    /// Open / close the annotation or viewport scale popup.
+    ToggleScalePopup,
+    /// Close the scale popup.
+    CloseScalePopup,
+    /// Set model-space annotation scale.
+    SetAnnotationScale(f32),
+    /// Set active paper viewport scale.
+    SetViewportScale(f64),
     /// Enable all snap modes.
     SnapSelectAll,
     /// Disable all snap modes.
@@ -746,12 +757,14 @@ impl H7CAD {
             vp_size: (1280.0, 720.0),
             snapper: Snapper::default(),
             snap_popup_open: false,
+            scale_popup_open: false,
             pre_cmd_tangent: None,
             ortho_mode: false,
             polar_mode: false,
             polar_increment_deg: 45.0,
             show_grid: false,
             dyn_input: true,
+            annotation_scale: 1.0,
             show_ucs_icon: true,
             show_viewcube: true,
             show_navbar: true,

@@ -382,12 +382,23 @@ impl H7CAD {
                         self.tabs[i].scene.native_render_enabled =
                             self.tabs[i].native_render_enabled;
 
-                        format!(
-                            "Opened \"{name}\" — {} objects, {} relationships ({} unresolved)",
-                            summary.object_count,
-                            summary.relationship_count,
-                            summary.unresolved_relationship_count
-                        )
+                        let source_geometry_count = summary.rendered_source_geometry_count();
+                        if source_geometry_count > 0 {
+                            format!(
+                                "Opened \"{name}\" — {} objects, {} relationships ({} unresolved), {} source geometry entities",
+                                summary.object_count,
+                                summary.relationship_count,
+                                summary.unresolved_relationship_count,
+                                source_geometry_count
+                            )
+                        } else {
+                            format!(
+                                "Opened \"{name}\" — {} objects, {} relationships ({} unresolved), topology preview",
+                                summary.object_count,
+                                summary.relationship_count,
+                                summary.unresolved_relationship_count
+                            )
+                        }
                     }
                 };
 
@@ -442,11 +453,30 @@ impl H7CAD {
                 // DXF / DWG tabs stay on `fit_all` (main drawing lives
                 // on whatever layers the source file used, not on
                 // H7CAD's PID_* prefixes).
-                let pid_main_layers: &[&str] =
+                //
+                // When `pid-parse` produces source-backed geometry, fit
+                // only those layers so far-offset topology panels cannot
+                // dominate the camera. Files without source geometry keep
+                // the existing topology-preview fallback.
+                let pid_geom_layers: &[&str] = &["PID_GEOM_POINTS", "PID_GEOM_LINES"];
+                let pid_topology_layers: &[&str] =
                     &["PID_OBJECTS_", "PID_LAYOUT_TEXT", "PID_RELATIONSHIPS"];
                 let use_pid_fit =
                     matches!(self.tabs[i].tab_mode, super::document::DocumentTabMode::Pid);
-                let fitted = use_pid_fit && self.tabs[i].scene.fit_layers_matching(pid_main_layers);
+                let fitted = if use_pid_fit {
+                    let pid_state = self.tabs[i].pid_state.as_ref();
+                    let has_source_geometry = pid_state
+                        .map(|state| state.summary.rendered_source_geometry_count() > 0)
+                        .unwrap_or(false);
+                    let layers = if has_source_geometry {
+                        pid_geom_layers
+                    } else {
+                        pid_topology_layers
+                    };
+                    self.tabs[i].scene.fit_layers_matching(layers)
+                } else {
+                    false
+                };
                 if !fitted {
                     self.tabs[i].scene.fit_all();
                 }
@@ -2006,6 +2036,7 @@ impl H7CAD {
                                     aabb: crate::scene::WireModel::UNBOUNDED_AABB,
                                     plinegen: true,
                                     vp_scissor: None,
+                                    fill_tris: vec![],
                                 };
                                 previews.push(guide);
                             }
@@ -2869,10 +2900,47 @@ impl H7CAD {
             }
             Message::ToggleSnapPopup => {
                 self.snap_popup_open ^= true;
+                if self.snap_popup_open {
+                    self.scale_popup_open = false;
+                }
                 Task::none()
             }
             Message::CloseSnapPopup => {
                 self.snap_popup_open = false;
+                Task::none()
+            }
+            Message::ToggleScalePopup => {
+                self.scale_popup_open ^= true;
+                if self.scale_popup_open {
+                    self.snap_popup_open = false;
+                }
+                Task::none()
+            }
+            Message::CloseScalePopup => {
+                self.scale_popup_open = false;
+                Task::none()
+            }
+            Message::SetAnnotationScale(scale) => {
+                self.annotation_scale = scale.max(0.001);
+                self.scale_popup_open = false;
+                Task::none()
+            }
+            Message::SetViewportScale(scale) => {
+                let i = self.active_tab;
+                if let Some(handle) = self.tabs[i].scene.active_viewport {
+                    if let Some(acadrust::EntityType::Viewport(vp)) =
+                        self.tabs[i].scene.document.get_entity_mut(handle)
+                    {
+                        let scale = scale.max(1e-9);
+                        vp.custom_scale = scale;
+                        if vp.height.abs() > 1e-9 {
+                            vp.view_height = vp.height / scale;
+                        }
+                        self.tabs[i].scene.bump_geometry();
+                        self.tabs[i].dirty = true;
+                    }
+                }
+                self.scale_popup_open = false;
                 Task::none()
             }
             Message::SnapSelectAll => {
@@ -5213,6 +5281,10 @@ mod tests {
             attribute_class_count: 0,
             tagged_text_count: 0,
             dynamic_attribute_record_count: 0,
+            rendered_geom_points: 0,
+            rendered_geom_lines: 0,
+            skipped_probe_only_geometry: 0,
+            skipped_broad_coordinate_hints: 0,
             object_graph_available: true,
         }
     }

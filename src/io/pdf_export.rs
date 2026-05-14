@@ -2027,7 +2027,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xAB),
             HatchModel {
-                boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].into(),
                 pattern: HatchPattern::Solid,
                 name: "SOLID".into(),
                 color: [0.5, 0.5, 0.5, 1.0],
@@ -2081,7 +2081,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xCC),
             HatchModel {
-                boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+                boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]].into(),
                 pattern: HatchPattern::Pattern(vec![]),
                 name: "EMPTY".into(),
                 color: [0.5, 0.5, 0.5, 1.0],
@@ -2132,7 +2132,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xDD),
             HatchModel {
-                boundary: vec![[0.0, 0.0], [50.0, 0.0], [25.0, 30.0]],
+                boundary: vec![[0.0, 0.0], [50.0, 0.0], [25.0, 30.0]].into(),
                 pattern: HatchPattern::Pattern(vec![PatFamily {
                     angle_deg: 45.0,
                     x0: 0.0,
@@ -2191,7 +2191,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xEE),
             HatchModel {
-                boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+                boundary: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].into(),
                 pattern: HatchPattern::Pattern(vec![PatFamily {
                     angle_deg: 0.0,
                     x0: 0.0,
@@ -2254,7 +2254,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xFF),
             HatchModel {
-                boundary: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]],
+                boundary: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]].into(),
                 pattern: HatchPattern::Pattern(vec![PatFamily {
                     angle_deg: 0.0,
                     x0: 0.0,
@@ -2654,7 +2654,7 @@ mod tests {
         hatches.insert(
             Handle::new(0xEE),
             HatchModel {
-                boundary: vec![[0.0, 0.0], [50.0, 0.0], [50.0, 30.0], [0.0, 30.0]],
+                boundary: vec![[0.0, 0.0], [50.0, 0.0], [50.0, 30.0], [0.0, 30.0]].into(),
                 pattern: HatchPattern::Gradient {
                     angle_deg: 0.0,
                     color2: [0.0, 0.0, 1.0, 1.0],

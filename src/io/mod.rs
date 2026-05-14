@@ -170,7 +170,11 @@ pub fn open_document_blocking(path: &Path) -> Result<(OpenedDocument, Vec<OpenNo
                 notices,
             ))
         }
-        "pid" => Ok((OpenedDocument::Pid(pid_import::open_pid(path)?), Vec::new())),
+        "pid" => {
+            let bundle = pid_import::open_pid(path)?;
+            let notices = diagnostics::from_pid_import_summary(&bundle.summary);
+            Ok((OpenedDocument::Pid(bundle), notices))
+        }
         _ => Err(OpenError::UnsupportedExtension { ext }),
     }
 }
@@ -181,8 +185,8 @@ pub fn open_document_blocking(path: &Path) -> Result<(OpenedDocument, Vec<OpenNo
 ///
 /// Returns `(document, notices)`. DWG reads surface acadrust's
 /// `NotificationCollection` through [`diagnostics::OpenNotice`]; DXF
-/// emits native advisories for preserved-but-limited content, while PID
-/// currently produces no diagnostics and returns an empty Vec.
+/// emits native advisories for preserved-but-limited content; PID emits
+/// summary-derived advisories via [`diagnostics::from_pid_import_summary`].
 pub fn load_file_native_blocking(
     path: &Path,
 ) -> Result<(NativeCadDocument, Vec<OpenNotice>), OpenError> {
@@ -198,10 +202,7 @@ pub fn load_file_native_blocking(
             let notices = diagnostics::from_native_dxf_document(&native);
             Ok((native, notices))
         }
-        "pid" => Ok((
-            pid_import::load_pid_native(path).map_err(OpenError::from)?,
-            Vec::new(),
-        )),
+        "pid" => pid_import::load_pid_native_with_notices(path).map_err(OpenError::from),
         _ => Err(OpenError::UnsupportedExtension { ext }),
     }
 }

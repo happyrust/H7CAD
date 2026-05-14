@@ -557,6 +557,9 @@ impl H7CAD {
                     tab.scene.viewport_count(),
                     tab.scene.active_viewport.is_some(),
                     self.show_layout_tabs,
+                    self.annotation_scale,
+                    self.scale_popup_open,
+                    tab.scene.current_layout == "Model" || tab.scene.active_viewport.is_some(),
                 ))
                 .width(Fill)
                 .height(Fill)
@@ -575,6 +578,15 @@ impl H7CAD {
 
         let snap_layer: Element<'_, Message> = if self.snap_popup_open {
             crate::ui::snap_popup::snap_popup_overlay(&self.snapper, 4.0)
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+        let scale_layer: Element<'_, Message> = if self.scale_popup_open {
+            crate::ui::scale_popup::scale_popup_overlay(
+                tab.scene.current_layout == "Model",
+                self.annotation_scale,
+                tab.scene.first_viewport_scale(),
+            )
         } else {
             iced::widget::Space::new().width(0).height(0).into()
         };
@@ -617,6 +629,7 @@ impl H7CAD {
             main_ui,
             self.app_menu.view(),
             snap_layer,
+            scale_layer,
             dropdown_layer,
             layout_ctx_layer,
             viewport_ctx_layer

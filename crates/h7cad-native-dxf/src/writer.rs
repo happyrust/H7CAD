@@ -65,6 +65,16 @@ impl From<&str> for DxfWriteError {
     }
 }
 
+/// Requested DXF output representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DxfOutputFormat {
+    /// Plain group-code/value text DXF.
+    Ascii,
+    /// AutoCAD binary DXF. Reading has best-effort support, but writing is
+    /// intentionally not implemented yet.
+    Binary,
+}
+
 pub struct DxfWriter {
     buf: String,
 }
@@ -160,9 +170,23 @@ pub fn write_dxf_strict(doc: &CadDocument) -> Result<String, DxfWriteError> {
     if needs_ensure_image_defs(doc) {
         let mut owned = doc.clone();
         ensure_image_defs(&mut owned);
+        validate_document_for_write(&owned)?;
         write_dxf_string_impl(&owned).map_err(DxfWriteError::from)
     } else {
+        validate_document_for_write(doc)?;
         write_dxf_string_impl(doc).map_err(DxfWriteError::from)
+    }
+}
+
+pub fn write_dxf_bytes_strict(
+    doc: &CadDocument,
+    format: DxfOutputFormat,
+) -> Result<Vec<u8>, DxfWriteError> {
+    match format {
+        DxfOutputFormat::Ascii => write_dxf_strict(doc).map(String::into_bytes),
+        DxfOutputFormat::Binary => Err(DxfWriteError::Unsupported(
+            "binary DXF output is not implemented; save as ASCII DXF".to_string(),
+        )),
     }
 }
 
@@ -192,6 +216,104 @@ fn write_dxf_string_impl(doc: &CadDocument) -> Result<String, String> {
 
     w.pair_str(0, "EOF");
     Ok(w.finish())
+}
+
+fn validate_document_for_write(doc: &CadDocument) -> Result<(), DxfWriteError> {
+    validate_image_def_links(doc)?;
+    validate_layout_block_links(doc)?;
+    validate_block_record_table(doc)?;
+    Ok(())
+}
+
+fn validate_image_def_links(doc: &CadDocument) -> Result<(), DxfWriteError> {
+    let validate_entity = |scope: &str, entity: &Entity| -> Result<(), DxfWriteError> {
+        if let EntityData::Image {
+            image_def_handle, ..
+        } = &entity.data
+        {
+            if *image_def_handle != Handle::NULL && !has_image_def(doc, *image_def_handle) {
+                return Err(DxfWriteError::InvalidDocument(format!(
+                    "IMAGE entity in {scope} references missing IMAGEDEF handle {:X}",
+                    image_def_handle.value()
+                )));
+            }
+        }
+        Ok(())
+    };
+
+    for entity in &doc.entities {
+        validate_entity("ENTITIES", entity)?;
+    }
+    for block_record in doc.block_records.values() {
+        for entity in &block_record.entities {
+            validate_entity(&format!("BLOCK {}", block_record.name), entity)?;
+        }
+    }
+    Ok(())
+}
+
+fn has_image_def(doc: &CadDocument, handle: Handle) -> bool {
+    doc.objects
+        .iter()
+        .any(|object| object.handle == handle && matches!(object.data, ObjectData::ImageDef { .. }))
+}
+
+fn validate_layout_block_links(doc: &CadDocument) -> Result<(), DxfWriteError> {
+    for layout in doc.layouts.values() {
+        if layout.block_record_handle != Handle::NULL
+            && !doc.block_records.contains_key(&layout.block_record_handle)
+        {
+            return Err(DxfWriteError::InvalidDocument(format!(
+                "layout `{}` references missing block record handle {:X}",
+                layout.name,
+                layout.block_record_handle.value()
+            )));
+        }
+    }
+
+    for object in &doc.objects {
+        if let ObjectData::Layout {
+            name,
+            block_record_handle,
+            ..
+        } = &object.data
+        {
+            if *block_record_handle != Handle::NULL
+                && !doc.block_records.contains_key(block_record_handle)
+            {
+                return Err(DxfWriteError::InvalidDocument(format!(
+                    "LAYOUT object `{name}` references missing block record handle {:X}",
+                    block_record_handle.value()
+                )));
+            }
+        }
+    }
+
+    for block_record in doc.block_records.values() {
+        if let Some(layout_handle) = block_record.layout_handle {
+            if !doc.layouts.contains_key(&layout_handle) {
+                return Err(DxfWriteError::InvalidDocument(format!(
+                    "block record `{}` references missing layout handle {:X}",
+                    block_record.name,
+                    layout_handle.value()
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_block_record_table(doc: &CadDocument) -> Result<(), DxfWriteError> {
+    for (name, handle) in &doc.tables.block_record.entries {
+        if *handle != Handle::NULL && !doc.block_records.contains_key(handle) {
+            return Err(DxfWriteError::InvalidDocument(format!(
+                "BLOCK_RECORD table entry `{name}` references missing block record handle {:X}",
+                handle.value()
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -2060,8 +2182,10 @@ fn write_entity_data(w: &mut DxfWriter, entity: &Entity) {
                 w.pair(*code, val);
             }
         }
-        EntityData::Unknown { .. } => {
-            // Cannot faithfully rewrite unknown entities
+        EntityData::Unknown { raw_codes, .. } => {
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
         }
     }
 }
@@ -2381,6 +2505,257 @@ fn write_object(w: &mut DxfWriter, obj: &CadObject) {
             w.pair_i32(91, *row_count);
             w.pair_str(1, name);
         }
+        ObjectData::UnderlayDefinition {
+            definition_type,
+            file_path,
+            page_name,
+            name,
+            raw_codes,
+        } => {
+            w.pair_str(0, definition_type);
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(100, underlay_definition_subclass(definition_type));
+            if !file_path.is_empty() {
+                w.pair_str(1, file_path);
+            }
+            if !page_name.is_empty() {
+                w.pair_str(2, page_name);
+            }
+            if !name.is_empty() {
+                w.pair_str(3, name);
+            }
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
+        ObjectData::RasterVariables {
+            class_version,
+            display_image_frame,
+            image_quality,
+            units,
+        } => {
+            w.pair_str(0, "RASTERVARIABLES");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(100, "AcDbRasterVariables");
+            w.pair_i32(90, *class_version);
+            w.pair_i16(70, *display_image_frame);
+            w.pair_i16(71, *image_quality);
+            w.pair_i16(72, *units);
+        }
+        ObjectData::BookColor {
+            color_name,
+            book_name,
+        } => {
+            w.pair_str(0, "DBCOLOR");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(100, "AcDbColor");
+            if !color_name.is_empty() {
+                w.pair_str(1, color_name);
+            }
+            if !book_name.is_empty() {
+                w.pair_str(2, book_name);
+            }
+        }
+        ObjectData::SpatialFilter {
+            object_type,
+            raw_codes,
+        } => {
+            w.pair_str(0, object_type);
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
+        ObjectData::TableContent { raw_codes } => {
+            w.pair_str(0, "TABLECONTENT");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
+        ObjectData::TableGeometry { raw_codes } => {
+            w.pair_str(0, "TABLEGEOMETRY");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
+        ObjectData::RawKnown {
+            object_type,
+            raw_codes,
+        } => {
+            w.pair_str(0, object_type);
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
+        ObjectData::BlockGripLocationComponent {
+            eval_id,
+            value_98,
+            value_99,
+            eval_value_codes,
+            value_91,
+            expression_name,
+            raw_codes,
+        } => {
+            w.pair_str(0, "BLOCKGRIPLOCATIONCOMPONENT");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(100, "AcDbEvalExpr");
+            w.pair_i32(90, *eval_id);
+            w.pair_i32(98, *value_98);
+            w.pair_i32(99, *value_99);
+            for (code, val) in eval_value_codes {
+                w.pair(*code, val);
+            }
+            w.pair_str(100, "AcDbBlockGripExpr");
+            w.pair_i32(91, *value_91);
+            if !expression_name.is_empty() {
+                w.pair_str(300, expression_name);
+            }
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
+        ObjectData::BlockLinearGrip {
+            eval_id,
+            eval_value_98,
+            eval_value_99,
+            element_name,
+            element_value_98,
+            element_value_99,
+            element_value_1071,
+            grip_value_91,
+            grip_value_92,
+            location,
+            grip_flag_280,
+            grip_value_93,
+            linear_vector,
+            raw_codes,
+        } => {
+            w.pair_str(0, "BLOCKLINEARGRIP");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(100, "AcDbEvalExpr");
+            w.pair_i32(90, *eval_id);
+            w.pair_i32(98, *eval_value_98);
+            w.pair_i32(99, *eval_value_99);
+            w.pair_str(100, "AcDbBlockElement");
+            if !element_name.is_empty() {
+                w.pair_str(300, element_name);
+            }
+            w.pair_i32(98, *element_value_98);
+            w.pair_i32(99, *element_value_99);
+            w.pair_i32(1071, *element_value_1071);
+            w.pair_str(100, "AcDbBlockGrip");
+            w.pair_i32(91, *grip_value_91);
+            w.pair_i32(92, *grip_value_92);
+            w.point3d(1010, *location);
+            w.pair_i16(280, *grip_flag_280);
+            w.pair_i32(93, *grip_value_93);
+            w.pair_str(100, "AcDbBlockLinearGrip");
+            w.pair_f64(140, linear_vector[0]);
+            w.pair_f64(141, linear_vector[1]);
+            w.pair_f64(142, linear_vector[2]);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
+        ObjectData::BlockLinearParameter {
+            eval_id,
+            eval_value_98,
+            eval_value_99,
+            element_name,
+            element_value_98,
+            element_value_99,
+            element_value_1071,
+            parameter_value_280,
+            parameter_value_281,
+            first_point,
+            second_point,
+            value_170,
+            value_91_entries,
+            value_171,
+            value_92,
+            value_301,
+            value_172,
+            value_93,
+            value_302,
+            value_173,
+            value_94,
+            value_303,
+            value_174,
+            value_95,
+            value_304,
+            label,
+            description,
+            label_offset,
+            raw_codes,
+        } => {
+            w.pair_str(0, "BLOCKLINEARPARAMETER");
+            w.pair_handle(5, obj.handle);
+            w.pair_handle(330, obj.owner_handle);
+            w.pair_str(100, "AcDbEvalExpr");
+            w.pair_i32(90, *eval_id);
+            w.pair_i32(98, *eval_value_98);
+            w.pair_i32(99, *eval_value_99);
+            w.pair_str(100, "AcDbBlockElement");
+            if !element_name.is_empty() {
+                w.pair_str(300, element_name);
+            }
+            w.pair_i32(98, *element_value_98);
+            w.pair_i32(99, *element_value_99);
+            w.pair_i32(1071, *element_value_1071);
+            w.pair_str(100, "AcDbBlockParameter");
+            w.pair_i16(280, *parameter_value_280);
+            w.pair_i16(281, *parameter_value_281);
+            w.pair_str(100, "AcDbBlock2PtParameter");
+            w.point3d(1010, *first_point);
+            w.point3d(1011, *second_point);
+            w.pair_i16(170, *value_170);
+            for value_91 in value_91_entries {
+                w.pair_i32(91, *value_91);
+            }
+            w.pair_i16(171, *value_171);
+            w.pair_i32(92, *value_92);
+            if !value_301.is_empty() {
+                w.pair_str(301, value_301);
+            }
+            w.pair_i16(172, *value_172);
+            w.pair_i32(93, *value_93);
+            if !value_302.is_empty() {
+                w.pair_str(302, value_302);
+            }
+            w.pair_i16(173, *value_173);
+            w.pair_i32(94, *value_94);
+            if !value_303.is_empty() {
+                w.pair_str(303, value_303);
+            }
+            w.pair_i16(174, *value_174);
+            w.pair_i32(95, *value_95);
+            if !value_304.is_empty() {
+                w.pair_str(304, value_304);
+            }
+            w.pair_str(100, "AcDbBlockLinearParameter");
+            if !label.is_empty() {
+                w.pair_str(305, label);
+            }
+            if !description.is_empty() {
+                w.pair_str(306, description);
+            }
+            w.pair_f64(140, *label_offset);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
+        }
         ObjectData::WipeoutVariables { frame_mode } => {
             w.pair_str(0, "WIPEOUTVARIABLES");
             w.pair_handle(5, obj.handle);
@@ -2427,11 +2802,26 @@ fn write_object(w: &mut DxfWriter, obj: &CadObject) {
                 w.pair(*code, val);
             }
         }
-        ObjectData::Unknown { object_type } => {
+        ObjectData::Unknown {
+            object_type,
+            raw_codes,
+        } => {
             w.pair_str(0, object_type);
             w.pair_handle(5, obj.handle);
             w.pair_handle(330, obj.owner_handle);
+            for (code, val) in raw_codes {
+                w.pair(*code, val);
+            }
         }
+    }
+}
+
+fn underlay_definition_subclass(definition_type: &str) -> &'static str {
+    match definition_type {
+        "PDFDEFINITION" => "AcDbPdfDefinition",
+        "DWFDEFINITION" => "AcDbDwfDefinition",
+        "DGNDEFINITION" => "AcDbDgnDefinition",
+        _ => "AcDbUnderlayDefinition",
     }
 }
 

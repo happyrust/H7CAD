@@ -107,7 +107,9 @@ pub fn box_hit<'a>(
                 }
                 let sp = world_to_screen(Vec3::new(px, py, pz), view_proj, bounds);
                 if crossing {
-                    if inside(sp) { hit = true; }
+                    if inside(sp) {
+                        hit = true;
+                    }
                     if let Some(p0) = prev {
                         if !hit {
                             hit = segments_intersect(p0, sp, box_tl, box_tr)
@@ -117,13 +119,23 @@ pub fn box_hit<'a>(
                         }
                     }
                 } else {
-                    if !inside(sp) { all_inside = false; }
+                    if !inside(sp) {
+                        all_inside = false;
+                    }
                 }
                 prev = Some(sp);
             }
 
-            let result = if crossing { hit } else { all_inside && prev.is_some() };
-            if result { Some(wire.name.as_str()) } else { None }
+            let result = if crossing {
+                hit
+            } else {
+                all_inside && prev.is_some()
+            };
+            if result {
+                Some(wire.name.as_str())
+            } else {
+                None
+            }
         })
         .collect()
 }
@@ -165,20 +177,34 @@ pub fn poly_hit<'a>(
                 }
                 let sp = world_to_screen(Vec3::new(px, py, pz), view_proj, bounds);
                 if crossing {
-                    if point_in_polygon(sp, poly) { hit = true; }
+                    if point_in_polygon(sp, poly) {
+                        hit = true;
+                    }
                     if !hit {
                         if let Some(p0) = prev {
-                            if segment_crosses_polygon(p0, sp, poly) { hit = true; }
+                            if segment_crosses_polygon(p0, sp, poly) {
+                                hit = true;
+                            }
                         }
                     }
                 } else {
-                    if !point_in_polygon(sp, poly) { all_inside = false; }
+                    if !point_in_polygon(sp, poly) {
+                        all_inside = false;
+                    }
                 }
                 prev = Some(sp);
             }
 
-            let result = if crossing { hit } else { all_inside && prev.is_some() };
-            if result { Some(wire.name.as_str()) } else { None }
+            let result = if crossing {
+                hit
+            } else {
+                all_inside && prev.is_some()
+            };
+            if result {
+                Some(wire.name.as_str())
+            } else {
+                None
+            }
         })
         .collect()
 }
@@ -371,7 +397,7 @@ mod tests {
 
     fn unit_square() -> HatchModel {
         HatchModel {
-            boundary: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            boundary: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]].into(),
             pattern: crate::scene::hatch_model::HatchPattern::Solid,
             name: "SOLID".into(),
             color: [1.0, 1.0, 1.0, 1.0],

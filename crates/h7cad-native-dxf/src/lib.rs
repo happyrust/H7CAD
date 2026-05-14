@@ -6,7 +6,9 @@ use std::fmt;
 
 use h7cad_native_model::CadDocument;
 pub use tokenizer::*;
-pub use writer::{write_dxf_strict, write_dxf_string, DxfWriteError};
+pub use writer::{
+    write_dxf_bytes_strict, write_dxf_strict, write_dxf_string, DxfOutputFormat, DxfWriteError,
+};
 
 // ---------------------------------------------------------------------------
 // DXF Read Error
@@ -941,6 +943,7 @@ fn read_entity(
 
     let mut entity = Entity::new(EntityData::Unknown {
         entity_type: type_name.to_string(),
+        raw_codes: Vec::new(),
     });
 
     let mut codes: Vec<(i16, String)> = Vec::new();
@@ -1051,10 +1054,22 @@ fn read_entity(
         }
         _ => EntityData::Unknown {
             entity_type: type_name.to_string(),
+            raw_codes: codes
+                .iter()
+                .filter(|(code, _)| !is_entity_common_or_xdata_code(*code))
+                .cloned()
+                .collect(),
         },
     };
 
     Ok(Some(entity))
+}
+
+fn is_entity_common_or_xdata_code(code: i16) -> bool {
+    matches!(
+        code,
+        5 | 330 | 8 | 6 | 48 | 62 | 420 | 370 | 60 | 440 | 39 | 210 | 220 | 230
+    ) || code >= 1000
 }
 
 fn read_polyline_sequence(
@@ -1160,6 +1175,7 @@ fn read_insert_attrib_sequence(
             "ATTRIB" => {
                 let mut attr = Entity::new(EntityData::Unknown {
                     entity_type: "ATTRIB".to_string(),
+                    raw_codes: Vec::new(),
                 });
                 let mut codes: Vec<(i16, String)> = Vec::new();
                 while stream.read_next()? {
@@ -1645,6 +1661,99 @@ fn read_objects_section(
                     name,
                 }
             }
+            "PDFDEFINITION" | "DWFDEFINITION" | "DGNDEFINITION" => {
+                let mut file_path = String::new();
+                let mut page_name = String::new();
+                let mut name = String::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        1 => file_path = val.clone(),
+                        2 => page_name = val.clone(),
+                        3 => name = val.clone(),
+                        _ => {}
+                    }
+                }
+                ObjectData::UnderlayDefinition {
+                    definition_type: type_name.clone(),
+                    file_path,
+                    page_name,
+                    name,
+                    raw_codes: codes
+                        .iter()
+                        .filter(|(code, _)| !matches!(*code, 5 | 330 | 100 | 1 | 2 | 3))
+                        .cloned()
+                        .collect(),
+                }
+            }
+            "RASTERVARIABLES" => {
+                let mut class_version = 0;
+                let mut display_image_frame = 0;
+                let mut image_quality = 0;
+                let mut units = 0;
+                for &(code, ref val) in &codes {
+                    match code {
+                        90 => class_version = val.parse().unwrap_or(0),
+                        70 => display_image_frame = val.parse().unwrap_or(0),
+                        71 => image_quality = val.parse().unwrap_or(0),
+                        72 => units = val.parse().unwrap_or(0),
+                        _ => {}
+                    }
+                }
+                ObjectData::RasterVariables {
+                    class_version,
+                    display_image_frame,
+                    image_quality,
+                    units,
+                }
+            }
+            "DBCOLOR" => {
+                let mut color_name = String::new();
+                let mut book_name = String::new();
+                for &(code, ref val) in &codes {
+                    match code {
+                        1 => color_name = val.clone(),
+                        2 => book_name = val.clone(),
+                        _ => {}
+                    }
+                }
+                ObjectData::BookColor {
+                    color_name,
+                    book_name,
+                }
+            }
+            "SPATIAL_FILTER" | "SPATIALFILTER" => ObjectData::SpatialFilter {
+                object_type: type_name.clone(),
+                raw_codes: codes
+                    .iter()
+                    .filter(|(code, _)| !matches!(*code, 5 | 330))
+                    .cloned()
+                    .collect(),
+            },
+            "TABLECONTENT" => ObjectData::TableContent {
+                raw_codes: codes
+                    .iter()
+                    .filter(|(code, _)| !matches!(*code, 5 | 330))
+                    .cloned()
+                    .collect(),
+            },
+            "TABLEGEOMETRY" => ObjectData::TableGeometry {
+                raw_codes: codes
+                    .iter()
+                    .filter(|(code, _)| !matches!(*code, 5 | 330))
+                    .cloned()
+                    .collect(),
+            },
+            "BLOCKLINEARGRIP" => read_block_linear_grip(&codes),
+            "BLOCKLINEARPARAMETER" => read_block_linear_parameter(&codes),
+            "BLOCKGRIPLOCATIONCOMPONENT" => read_block_grip_location_component(&codes),
+            raw_known_type if is_raw_known_object_type(raw_known_type) => ObjectData::RawKnown {
+                object_type: type_name.clone(),
+                raw_codes: codes
+                    .iter()
+                    .filter(|(code, _)| !matches!(*code, 5 | 330))
+                    .cloned()
+                    .collect(),
+            },
             "WIPEOUTVARIABLES" => {
                 let mut frame_mode: i16 = 0;
                 for &(code, ref val) in &codes {
@@ -1719,6 +1828,11 @@ fn read_objects_section(
             }
             _ => ObjectData::Unknown {
                 object_type: type_name.clone(),
+                raw_codes: codes
+                    .iter()
+                    .filter(|(code, _)| !matches!(*code, 5 | 330))
+                    .cloned()
+                    .collect(),
             },
         };
 
@@ -1734,6 +1848,343 @@ fn read_objects_section(
             });
         }
     }
+}
+
+fn read_block_linear_parameter(codes: &[(i16, String)]) -> h7cad_native_model::ObjectData {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Subclass {
+        None,
+        EvalExpr,
+        BlockElement,
+        BlockParameter,
+        Block2PtParameter,
+        BlockLinearParameter,
+    }
+
+    let mut subclass = Subclass::None;
+    let mut eval_id = 0;
+    let mut eval_value_98 = 0;
+    let mut eval_value_99 = 0;
+    let mut element_name = String::new();
+    let mut element_value_98 = 0;
+    let mut element_value_99 = 0;
+    let mut element_value_1071 = 0;
+    let mut parameter_value_280 = 0;
+    let mut parameter_value_281 = 0;
+    let mut first_point = [0.0; 3];
+    let mut second_point = [0.0; 3];
+    let mut value_170 = 0;
+    let mut value_91_entries = Vec::new();
+    let mut value_171 = 0;
+    let mut value_92 = 0;
+    let mut value_301 = String::new();
+    let mut value_172 = 0;
+    let mut value_93 = 0;
+    let mut value_302 = String::new();
+    let mut value_173 = 0;
+    let mut value_94 = 0;
+    let mut value_303 = String::new();
+    let mut value_174 = 0;
+    let mut value_95 = 0;
+    let mut value_304 = String::new();
+    let mut label = String::new();
+    let mut description = String::new();
+    let mut label_offset = 0.0;
+    let mut raw_codes = Vec::new();
+
+    for &(code, ref val) in codes {
+        match (code, val.as_str()) {
+            (5 | 330, _) => {}
+            (100, "AcDbEvalExpr") => subclass = Subclass::EvalExpr,
+            (100, "AcDbBlockElement") => subclass = Subclass::BlockElement,
+            (100, "AcDbBlockParameter") => subclass = Subclass::BlockParameter,
+            (100, "AcDbBlock2PtParameter") => subclass = Subclass::Block2PtParameter,
+            (100, "AcDbBlockLinearParameter") => subclass = Subclass::BlockLinearParameter,
+            (100, _) => raw_codes.push((code, val.clone())),
+            (90, _) if subclass == Subclass::EvalExpr => eval_id = val.parse().unwrap_or(0),
+            (98, _) if subclass == Subclass::EvalExpr => {
+                eval_value_98 = val.parse().unwrap_or(0);
+            }
+            (99, _) if subclass == Subclass::EvalExpr => {
+                eval_value_99 = val.parse().unwrap_or(0);
+            }
+            (300, _) if subclass == Subclass::BlockElement => element_name = val.clone(),
+            (98, _) if subclass == Subclass::BlockElement => {
+                element_value_98 = val.parse().unwrap_or(0);
+            }
+            (99, _) if subclass == Subclass::BlockElement => {
+                element_value_99 = val.parse().unwrap_or(0);
+            }
+            (1071, _) if subclass == Subclass::BlockElement => {
+                element_value_1071 = val.parse().unwrap_or(0);
+            }
+            (280, _) if subclass == Subclass::BlockParameter => {
+                parameter_value_280 = val.parse().unwrap_or(0);
+            }
+            (281, _) if subclass == Subclass::BlockParameter => {
+                parameter_value_281 = val.parse().unwrap_or(0);
+            }
+            (1010, _) if subclass == Subclass::Block2PtParameter => {
+                first_point[0] = val.parse().unwrap_or(0.0);
+            }
+            (1020, _) if subclass == Subclass::Block2PtParameter => {
+                first_point[1] = val.parse().unwrap_or(0.0);
+            }
+            (1030, _) if subclass == Subclass::Block2PtParameter => {
+                first_point[2] = val.parse().unwrap_or(0.0);
+            }
+            (1011, _) if subclass == Subclass::Block2PtParameter => {
+                second_point[0] = val.parse().unwrap_or(0.0);
+            }
+            (1021, _) if subclass == Subclass::Block2PtParameter => {
+                second_point[1] = val.parse().unwrap_or(0.0);
+            }
+            (1031, _) if subclass == Subclass::Block2PtParameter => {
+                second_point[2] = val.parse().unwrap_or(0.0);
+            }
+            (170, _) if subclass == Subclass::Block2PtParameter => {
+                value_170 = val.parse().unwrap_or(0);
+            }
+            (91, _) if subclass == Subclass::Block2PtParameter => {
+                value_91_entries.push(val.parse().unwrap_or(0));
+            }
+            (171, _) if subclass == Subclass::Block2PtParameter => {
+                value_171 = val.parse().unwrap_or(0);
+            }
+            (92, _) if subclass == Subclass::Block2PtParameter => {
+                value_92 = val.parse().unwrap_or(0);
+            }
+            (301, _) if subclass == Subclass::Block2PtParameter => value_301 = val.clone(),
+            (172, _) if subclass == Subclass::Block2PtParameter => {
+                value_172 = val.parse().unwrap_or(0);
+            }
+            (93, _) if subclass == Subclass::Block2PtParameter => {
+                value_93 = val.parse().unwrap_or(0);
+            }
+            (302, _) if subclass == Subclass::Block2PtParameter => value_302 = val.clone(),
+            (173, _) if subclass == Subclass::Block2PtParameter => {
+                value_173 = val.parse().unwrap_or(0);
+            }
+            (94, _) if subclass == Subclass::Block2PtParameter => {
+                value_94 = val.parse().unwrap_or(0);
+            }
+            (303, _) if subclass == Subclass::Block2PtParameter => value_303 = val.clone(),
+            (174, _) if subclass == Subclass::Block2PtParameter => {
+                value_174 = val.parse().unwrap_or(0);
+            }
+            (95, _) if subclass == Subclass::Block2PtParameter => {
+                value_95 = val.parse().unwrap_or(0);
+            }
+            (304, _) if subclass == Subclass::Block2PtParameter => value_304 = val.clone(),
+            (305, _) if subclass == Subclass::BlockLinearParameter => label = val.clone(),
+            (306, _) if subclass == Subclass::BlockLinearParameter => description = val.clone(),
+            (140, _) if subclass == Subclass::BlockLinearParameter => {
+                label_offset = val.parse().unwrap_or(0.0);
+            }
+            _ => raw_codes.push((code, val.clone())),
+        }
+    }
+
+    h7cad_native_model::ObjectData::BlockLinearParameter {
+        eval_id,
+        eval_value_98,
+        eval_value_99,
+        element_name,
+        element_value_98,
+        element_value_99,
+        element_value_1071,
+        parameter_value_280,
+        parameter_value_281,
+        first_point,
+        second_point,
+        value_170,
+        value_91_entries,
+        value_171,
+        value_92,
+        value_301,
+        value_172,
+        value_93,
+        value_302,
+        value_173,
+        value_94,
+        value_303,
+        value_174,
+        value_95,
+        value_304,
+        label,
+        description,
+        label_offset,
+        raw_codes,
+    }
+}
+
+fn read_block_linear_grip(codes: &[(i16, String)]) -> h7cad_native_model::ObjectData {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Subclass {
+        None,
+        EvalExpr,
+        BlockElement,
+        BlockGrip,
+        BlockLinearGrip,
+    }
+
+    let mut subclass = Subclass::None;
+    let mut eval_id = 0;
+    let mut eval_value_98 = 0;
+    let mut eval_value_99 = 0;
+    let mut element_name = String::new();
+    let mut element_value_98 = 0;
+    let mut element_value_99 = 0;
+    let mut element_value_1071 = 0;
+    let mut grip_value_91 = 0;
+    let mut grip_value_92 = 0;
+    let mut location = [0.0; 3];
+    let mut grip_flag_280 = 0;
+    let mut grip_value_93 = 0;
+    let mut linear_vector = [0.0; 3];
+    let mut raw_codes = Vec::new();
+
+    for &(code, ref val) in codes {
+        match (code, val.as_str()) {
+            (5 | 330, _) => {}
+            (100, "AcDbEvalExpr") => subclass = Subclass::EvalExpr,
+            (100, "AcDbBlockElement") => subclass = Subclass::BlockElement,
+            (100, "AcDbBlockGrip") => subclass = Subclass::BlockGrip,
+            (100, "AcDbBlockLinearGrip") => subclass = Subclass::BlockLinearGrip,
+            (100, _) => raw_codes.push((code, val.clone())),
+            (90, _) if subclass == Subclass::EvalExpr => eval_id = val.parse().unwrap_or(0),
+            (98, _) if subclass == Subclass::EvalExpr => {
+                eval_value_98 = val.parse().unwrap_or(0);
+            }
+            (99, _) if subclass == Subclass::EvalExpr => {
+                eval_value_99 = val.parse().unwrap_or(0);
+            }
+            (300, _) if subclass == Subclass::BlockElement => element_name = val.clone(),
+            (98, _) if subclass == Subclass::BlockElement => {
+                element_value_98 = val.parse().unwrap_or(0);
+            }
+            (99, _) if subclass == Subclass::BlockElement => {
+                element_value_99 = val.parse().unwrap_or(0);
+            }
+            (1071, _) if subclass == Subclass::BlockElement => {
+                element_value_1071 = val.parse().unwrap_or(0);
+            }
+            (91, _) if subclass == Subclass::BlockGrip => {
+                grip_value_91 = val.parse().unwrap_or(0);
+            }
+            (92, _) if subclass == Subclass::BlockGrip => {
+                grip_value_92 = val.parse().unwrap_or(0);
+            }
+            (1010, _) if subclass == Subclass::BlockGrip => {
+                location[0] = val.parse().unwrap_or(0.0);
+            }
+            (1020, _) if subclass == Subclass::BlockGrip => {
+                location[1] = val.parse().unwrap_or(0.0);
+            }
+            (1030, _) if subclass == Subclass::BlockGrip => {
+                location[2] = val.parse().unwrap_or(0.0);
+            }
+            (280, _) if subclass == Subclass::BlockGrip => {
+                grip_flag_280 = val.parse().unwrap_or(0);
+            }
+            (93, _) if subclass == Subclass::BlockGrip => {
+                grip_value_93 = val.parse().unwrap_or(0);
+            }
+            (140, _) if subclass == Subclass::BlockLinearGrip => {
+                linear_vector[0] = val.parse().unwrap_or(0.0);
+            }
+            (141, _) if subclass == Subclass::BlockLinearGrip => {
+                linear_vector[1] = val.parse().unwrap_or(0.0);
+            }
+            (142, _) if subclass == Subclass::BlockLinearGrip => {
+                linear_vector[2] = val.parse().unwrap_or(0.0);
+            }
+            _ => raw_codes.push((code, val.clone())),
+        }
+    }
+
+    h7cad_native_model::ObjectData::BlockLinearGrip {
+        eval_id,
+        eval_value_98,
+        eval_value_99,
+        element_name,
+        element_value_98,
+        element_value_99,
+        element_value_1071,
+        grip_value_91,
+        grip_value_92,
+        location,
+        grip_flag_280,
+        grip_value_93,
+        linear_vector,
+        raw_codes,
+    }
+}
+
+fn read_block_grip_location_component(codes: &[(i16, String)]) -> h7cad_native_model::ObjectData {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Subclass {
+        None,
+        EvalExpr,
+        BlockGripExpr,
+    }
+
+    let mut subclass = Subclass::None;
+    let mut eval_id = 0;
+    let mut value_98 = 0;
+    let mut value_99 = 0;
+    let mut eval_value_codes = Vec::new();
+    let mut value_91 = 0;
+    let mut expression_name = String::new();
+    let mut raw_codes = Vec::new();
+
+    for &(code, ref val) in codes {
+        match (code, val.as_str()) {
+            (5 | 330, _) => {}
+            (100, "AcDbEvalExpr") => subclass = Subclass::EvalExpr,
+            (100, "AcDbBlockGripExpr") => subclass = Subclass::BlockGripExpr,
+            (100, _) => raw_codes.push((code, val.clone())),
+            (90, _) if subclass == Subclass::EvalExpr => eval_id = val.parse().unwrap_or(0),
+            (98, _) if subclass == Subclass::EvalExpr => value_98 = val.parse().unwrap_or(0),
+            (99, _) if subclass == Subclass::EvalExpr => value_99 = val.parse().unwrap_or(0),
+            (1 | 70 | 140, _) if subclass == Subclass::EvalExpr => {
+                eval_value_codes.push((code, val.clone()));
+            }
+            (91, _) if subclass == Subclass::BlockGripExpr => {
+                value_91 = val.parse().unwrap_or(0);
+            }
+            (300, _) if subclass == Subclass::BlockGripExpr => expression_name = val.clone(),
+            _ => raw_codes.push((code, val.clone())),
+        }
+    }
+
+    h7cad_native_model::ObjectData::BlockGripLocationComponent {
+        eval_id,
+        value_98,
+        value_99,
+        eval_value_codes,
+        value_91,
+        expression_name,
+        raw_codes,
+    }
+}
+
+fn is_raw_known_object_type(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "ACAD_EVALUATION_GRAPH"
+            | "ACDBASSOCPERSSUBENTMANAGER"
+            | "ACDBDETAILVIEWSTYLE"
+            | "ACDBPERSSUBENTMANAGER"
+            | "ACDBPLACEHOLDER"
+            | "ACDBSECTIONVIEWSTYLE"
+            | "ACDB_BLOCKREPRESENTATION_DATA"
+            | "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION"
+            | "BLOCKSCALEACTION"
+            | "BLOCKVISIBILITYGRIP"
+            | "BLOCKVISIBILITYPARAMETER"
+            | "CELLSTYLEMAP"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2252,8 +2703,12 @@ mod tests {
         let doc = read_dxf(input).unwrap();
         assert_eq!(doc.entities.len(), 1);
         match &doc.entities[0].data {
-            h7cad_native_model::EntityData::Unknown { entity_type } => {
+            h7cad_native_model::EntityData::Unknown {
+                entity_type,
+                raw_codes,
+            } => {
                 assert_eq!(entity_type, "FAKE_ENTITY_XYZ");
+                assert_eq!(raw_codes, &vec![(70, "0".to_string())]);
             }
             _ => panic!("expected Unknown"),
         }
@@ -2550,7 +3005,7 @@ mod tests {
                 h7cad_native_model::EntityData::Camera { .. } => "CAMERA",
                 h7cad_native_model::EntityData::Section { .. } => "SECTION",
                 h7cad_native_model::EntityData::ProxyEntity { .. } => "ACAD_PROXY_ENTITY",
-                h7cad_native_model::EntityData::Unknown { entity_type } => entity_type.as_str(),
+                h7cad_native_model::EntityData::Unknown { entity_type, .. } => entity_type.as_str(),
             };
             *counts.entry(name.to_string()).or_default() += 1;
         }
@@ -2781,11 +3236,31 @@ mod tests {
                 h7cad_native_model::ObjectData::LightList { .. } => "LIGHTLIST",
                 h7cad_native_model::ObjectData::SunStudy { .. } => "SUNSTUDY",
                 h7cad_native_model::ObjectData::DataTable { .. } => "DATATABLE",
+                h7cad_native_model::ObjectData::UnderlayDefinition {
+                    definition_type, ..
+                } => definition_type.as_str(),
+                h7cad_native_model::ObjectData::RasterVariables { .. } => "RASTERVARIABLES",
+                h7cad_native_model::ObjectData::BookColor { .. } => "DBCOLOR",
+                h7cad_native_model::ObjectData::SpatialFilter { object_type, .. } => {
+                    object_type.as_str()
+                }
+                h7cad_native_model::ObjectData::TableContent { .. } => "TABLECONTENT",
+                h7cad_native_model::ObjectData::TableGeometry { .. } => "TABLEGEOMETRY",
+                h7cad_native_model::ObjectData::BlockGripLocationComponent { .. } => {
+                    "BLOCKGRIPLOCATIONCOMPONENT"
+                }
+                h7cad_native_model::ObjectData::BlockLinearGrip { .. } => "BLOCKLINEARGRIP",
+                h7cad_native_model::ObjectData::BlockLinearParameter { .. } => {
+                    "BLOCKLINEARPARAMETER"
+                }
                 h7cad_native_model::ObjectData::WipeoutVariables { .. } => "WIPEOUTVARIABLES",
                 h7cad_native_model::ObjectData::GeoData { .. } => "GEODATA",
                 h7cad_native_model::ObjectData::RenderEnvironment { .. } => "RENDERENVIRONMENT",
                 h7cad_native_model::ObjectData::ProxyObject { .. } => "ACAD_PROXY_OBJECT",
-                h7cad_native_model::ObjectData::Unknown { object_type } => object_type.as_str(),
+                h7cad_native_model::ObjectData::RawKnown { object_type, .. } => {
+                    object_type.as_str()
+                }
+                h7cad_native_model::ObjectData::Unknown { object_type, .. } => object_type.as_str(),
             };
             *type_counts.entry(name.to_string()).or_insert(0u32) += 1;
         }
@@ -2799,14 +3274,18 @@ mod tests {
             "OBJECTS type distribution (AC1018, {} total):",
             doc.objects.len()
         );
+        let unknown_type_names: std::collections::BTreeSet<String> = doc
+            .objects
+            .iter()
+            .filter_map(|object| match &object.data {
+                h7cad_native_model::ObjectData::Unknown { object_type, .. } => {
+                    Some(object_type.clone())
+                }
+                _ => None,
+            })
+            .collect();
         for (name, count) in &type_counts {
-            let is_unknown = matches!(&name.as_str(), &n if {
-                let _doc_objs = &doc.objects;
-                !matches!(n, "DICTIONARY" | "XRECORD" | "GROUP" | "LAYOUT" | "PLOTSETTINGS" |
-                    "DICTIONARYVAR" | "SCALE" | "VISUALSTYLE" | "MATERIAL" |
-                    "IMAGEDEF" | "IMAGEDEF_REACTOR" | "MLINESTYLE" | "MLEADERSTYLE" |
-                    "TABLESTYLE" | "SORTENTSTABLE" | "DIMASSOC")
-            });
+            let is_unknown = unknown_type_names.contains(name);
             eprintln!(
                 "  {}: {}{}",
                 name,

@@ -1280,6 +1280,22 @@ fn pid_overview_sections(pid_state: &super::document::PidTabState) -> Vec<PropSe
                     summary.dynamic_attribute_record_count.to_string(),
                 ),
                 ro_prop(
+                    "Source Geometry Points",
+                    summary.rendered_geom_points.to_string(),
+                ),
+                ro_prop(
+                    "Source Geometry Lines",
+                    summary.rendered_geom_lines.to_string(),
+                ),
+                ro_prop(
+                    "Skipped Probe Geometry",
+                    summary.skipped_probe_only_geometry.to_string(),
+                ),
+                ro_prop(
+                    "Skipped Broad Hints",
+                    summary.skipped_broad_coordinate_hints.to_string(),
+                ),
+                ro_prop(
                     "Unresolved",
                     summary.unresolved_relationship_count.to_string(),
                 ),
@@ -1642,6 +1658,10 @@ mod tests {
             attribute_class_count: 0,
             tagged_text_count: 0,
             dynamic_attribute_record_count: 0,
+            rendered_geom_points: 0,
+            rendered_geom_lines: 0,
+            skipped_probe_only_geometry: 0,
+            skipped_broad_coordinate_hints: 0,
             object_graph_available: true,
         }
     }

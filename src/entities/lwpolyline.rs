@@ -51,6 +51,7 @@ pub fn to_truck_with_normal(
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -141,6 +142,7 @@ pub fn to_truck_with_normal(
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 
