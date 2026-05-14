@@ -457,7 +457,7 @@ pub fn grips_native(entity: &nm::Entity) -> Vec<GripDef> {
             start_angle,
             end_angle,
         } => arc::grips(center, *radius, *start_angle, *end_angle),
-        nm::EntityData::LwPolyline { vertices, .. } => lwpolyline::grips(vertices, 0.0),
+        nm::EntityData::LwPolyline { vertices, closed, .. } => lwpolyline::grips(vertices, *closed, 0.0),
         nm::EntityData::Text { insertion, .. } => text::grips_native(insertion),
         nm::EntityData::MText {
             insertion,

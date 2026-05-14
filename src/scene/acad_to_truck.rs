@@ -301,14 +301,16 @@ pub fn convert_native(entity: &nm::Entity, document: &nm::CadDocument) -> Option
                         document,
                     );
                     match text.object {
-                        TruckObject::Text(strokes) => {
-                            for stroke in strokes {
-                                if stroke.len() < 2 {
-                                    continue;
-                                }
-                                points.push([f32::NAN; 3]);
-                                for [x, y] in stroke {
-                                    points.push([x, y, loc[2] as f32]);
+                        TruckObject::Text(text_strokes) => {
+                            for ts in text_strokes {
+                                for polyline in &ts.strokes {
+                                    if polyline.len() < 2 {
+                                        continue;
+                                    }
+                                    points.push([f32::NAN; 3]);
+                                    for [x, y] in polyline {
+                                        points.push([*x, *y, loc[2] as f32]);
+                                    }
                                 }
                             }
                         }

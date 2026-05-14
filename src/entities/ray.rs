@@ -12,10 +12,16 @@ const DISPLAY_EXTENT: f64 = 1_000_000.0;
 // ── Ray free functions (origin + direction as [f64;3]) ──────────────────
 
 pub fn ray_to_truck(origin: &[f64; 3], direction: &[f64; 3]) -> TruckEntity {
+    let len = (direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]).sqrt();
+    let (nx, ny, nz) = if len > 1e-10 {
+        (direction[0] / len, direction[1] / len, direction[2] / len)
+    } else {
+        (direction[0], direction[1], direction[2])
+    };
     let far = [
-        (origin[0] + direction[0] * DISPLAY_EXTENT) as f32,
-        (origin[1] + direction[1] * DISPLAY_EXTENT) as f32,
-        (origin[2] + direction[2] * DISPLAY_EXTENT) as f32,
+        (origin[0] + nx * DISPLAY_EXTENT) as f32,
+        (origin[1] + ny * DISPLAY_EXTENT) as f32,
+        (origin[2] + nz * DISPLAY_EXTENT) as f32,
     ];
     let start = [origin[0] as f32, origin[1] as f32, origin[2] as f32];
     TruckEntity {

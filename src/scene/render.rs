@@ -569,6 +569,28 @@ pub(super) fn resolve_pattern_native(
     (pat_len, pat)
 }
 
+/// Partition a wire list into (face3d_wires, other_wires).
+fn split_face3d_wires(
+    wires: &[WireModel],
+    document: &acadrust::CadDocument,
+) -> (Vec<WireModel>, Vec<WireModel>) {
+    let mut face3d = Vec::new();
+    let mut others = Vec::new();
+    for w in wires {
+        let is_face3d = w.name.parse::<u64>()
+            .ok()
+            .and_then(|v| document.get_entity(Handle::new(v)))
+            .map(|e| matches!(e, EntityType::Face3D(_)))
+            .unwrap_or(false);
+        if is_face3d {
+            face3d.push(w.clone());
+        } else {
+            others.push(w.clone());
+        }
+    }
+    (face3d, others)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

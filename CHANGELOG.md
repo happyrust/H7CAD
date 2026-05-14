@@ -982,6 +982,61 @@ sample_AC1018.dwg: 11 entities total
 - facade 测试 `dwg_runtime_save_is_unavailable` 仍锁定原 placeholder
   字符串（本轮不动写入路径，placeholder 在 §F5.M6 才会替换）。
 
+### 2026-05-08（四十一）：合并上游 fork `origin/main` 80 个提交（DXF fidelity 回流）
+
+> 把 happyrust/H7CAD `origin/main` 上累积的 80 个提交合并回 local main，
+> 其中包含上游 HakanSeven12/H7CAD 的 v0.2.0 → v0.2.3 release 路径（21 个 commit，
+> OCS→WCS 任意轴扩展、Solid3D / Region / Body Grippable + PropertyEditable、
+> GPU scissor for paper-space viewport wires、annotation scale 系统、
+> Hatch boundary edges OCS→WCS、Polyline2D thickness extrusion 等）；
+> 加 fork 自家两个 commit：`feat: improve DXF fidelity and diagnostics` (8964332)
+> 与 `Merge origin/main into DXF fidelity work.` (361602d)。
+> upstream 之后另有 12 个新 commit 留待下次单独合入。
+
+**合并方式**
+
+- 单一 merge commit `Merge origin/main into local main`（28a787a），
+  无 rebase / cherry-pick，保留 fork 真实历史。
+- `cargo +stable check --workspace` 通过；nightly 不通过的 `pathfinder_simd-0.5.5`
+  问题与本合并无关，是工具链兼容性遗留。
+
+**冲突解决面：16 个文件 / 47 hunks**
+
+| 文件 | hunks | 关键决策 |
+|---|---:|---|
+| `src/scene/tessellate.rs` | 10 | 取 origin：所有 `WireModel` 构造点补 `plinegen` / `vp_scissor` 字段；`dimension_geometry` 透传 `dimexo` / `dimexe`；新增 `TruckObject::SegmentedLines` 分支（`plinegen: false`） |
+| `src/scene/mod.rs` | 8 | 取 HEAD 的 `native_wires_for_model_space` 集成（保留 PID native 渲染路径）；`tessellate_entity` 签名跟 origin 4 参数；删除 dead `paper_boundary_wire`；保留 `Scene::apply_grip` 包装；hatch model 构造 rustfmt 化 |
+| `src/entities/lwpolyline.rs` | 5 | 三方融合：保留 HEAD 的 `arc_midpoint` / `bulge_from_midpoint` 工具与 segment-midpoint 钻石 grip 编辑路径，叠加 origin 的 `to_truck_with_normal` OCS→WCS 重构（含 `to_truck` 旧签名 thin-wrapper） |
+| `src/app/update.rs` | 3 | rustfmt 标准格式（紧凑单行 → 多行 .into_iter() chain） |
+| `src/app/view.rs` | 3 | `properties_el` 共享外层 + HEAD 简洁 else 分支；`overlay::selection_overlay` 多行调用；`col.push` 统一 4 空格缩进 |
+| `src/app/mod.rs` | 3 | 窗口/标题分支 rustfmt 多行（与 origin 对齐） |
+| `src/app/properties.rs` | 2 | 保留 HEAD `let wo = self.tabs[i].scene.world_offset` + grip 偏移路径（PID 大坐标支持的关键）；取 origin 的 R49-VIEWPORT-PAPER-SPACE-SYNC 修复（route through `scene.add_entity`） |
+| `src/io/mod.rs` | 2 | 删除 HEAD 重复的 `load_dxf_native_blocking` 二次定义 + 死代码 `fix_dxf_dimension_rotations`；保留 origin 新增的 `dxf_open_path_surfaces_unknown_entity_notice` test |
+| `src/scene/render.rs` | 2 | 删除 Scene 上已迁移到 `ViewportPane` 的 `shader::Program` impl（origin 重构）；imports rustfmt |
+| `src/entities/arc.rs` | 2 | 取 origin 的 `pt_at` OCS basis 闭包（HEAD 端引用了未定义的 `cx/cy/cz/r` 是上次合并残留 bug）；`grips` 签名单行化 |
+| `src/entities/text.rs` | 2 | rustfmt imports；保留 HEAD `TextStroke.origin = [origin[0], origin[1]]`（origin 退化到 `[0,0]` 占位） |
+| `src/entities/text_support.rs` | 1 | 保留 HEAD 的 `is_backward` / `is_upside_down` flag 解析（origin 简化为 false 占位） |
+| `src/entities/mtext.rs` | 1 | 保留 HEAD `TextStroke.origin = [origin_x, origin_y]`（同上） |
+| `src/entities/spline.rs` | 1 | 取 origin：`key_vertices` 经 `ocs_to_wcs` 提到 WCS（HEAD 端是 OCS 平面坐标，与上层 ctrl_pts WCS 不一致） |
+| `src/entities/ray.rs` | 1 | trivial（删空行） |
+| `src/ui/statusbar.rs` | 1 | 注释文案取 origin（更精确） |
+
+**主动放弃 / 后续任务**
+
+- HEAD 端 `bg_color` 自适应着色（`adapt_to_bg`）随 origin 简化被自动合并丢弃；
+  fork 实现可在后续单独 PR 复活，不在本合并 scope。
+- upstream `HakanSeven12/H7CAD` 后续 12 个 commit（含 `fix(arc)` 简化角度计算、
+  `fix(render)` GPU 内存上限、`feat(render)` PolyfaceMesh / PolygonMesh solid fill、
+  `chore: switch acadrust to GitHub source` 等）尚未合入；冲突面更大（30 文件 /
+  76 hunks，Cargo.toml/Cargo.lock 也变了），留待单独 PR。
+
+**编译验证**
+
+```
+cargo +stable check --workspace --all-targets
+# 0 error, 10 warnings (全部 dead_code，预先存在，非本合并新增)
+```
+
 ### 2026-04-30（四十）：DXF OCS→WCS 任意轴变换（P0.1 系统级显示偏差修复）
 
 > `INTEGRATION_GAPS.md` 列出的"systemic gap：17 种实体的 `normal` 字段被忽略，

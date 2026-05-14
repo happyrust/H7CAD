@@ -400,15 +400,34 @@ impl H7CAD {
             self.tabs[i].selected_grips.clear();
             return;
         }
+        let wo = self.tabs[i].scene.world_offset;
         let (new_handle, new_grips) = {
             let selected = selected_entity_refs(&self.tabs[i].scene);
             if selected.len() == 1 {
                 match selected[0] {
                     SelectedEntityRef::Compat(handle, entity) => {
-                        (Some(handle), dispatch::grips(entity))
+                        let grips = dispatch::grips(entity)
+                            .into_iter()
+                            .map(|mut g| {
+                                g.world.x -= wo[0] as f32;
+                                g.world.y -= wo[1] as f32;
+                                g.world.z -= wo[2] as f32;
+                                g
+                            })
+                            .collect();
+                        (Some(handle), grips)
                     }
                     SelectedEntityRef::Native(handle, entity) => {
-                        (Some(handle), dispatch::grips_native(entity))
+                        let grips = dispatch::grips_native(entity)
+                            .into_iter()
+                            .map(|mut g| {
+                                g.world.x -= wo[0] as f32;
+                                g.world.y -= wo[1] as f32;
+                                g.world.z -= wo[2] as f32;
+                                g
+                            })
+                            .collect();
+                        (Some(handle), grips)
                     }
                 }
             } else {

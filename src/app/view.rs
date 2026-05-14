@@ -448,6 +448,12 @@ impl H7CAD {
             None
         };
 
+        let properties_el: Element<'_, Message> = if self.show_properties {
+            tab.properties.view()
+        } else {
+            Space::new().into()
+        };
+
         let center_row: Element<'_, Message> = if tab.is_pid() {
             let pid_state = tab
                 .pid_state
@@ -509,26 +515,20 @@ impl H7CAD {
                     .height(Fill)
                     .into()
             }
+        } else if let Some(wp) = ws_panel {
+            row![wp, properties_el, viewport_stack]
+                .width(Fill)
+                .height(Fill)
+                .into()
         } else {
-            let properties_el: Element<'_, Message> = if self.show_properties {
-                tab.properties.view()
-            } else {
-                Space::new().into()
-            };
-            if let Some(wp) = ws_panel {
-                row![wp, properties_el, viewport_stack]
-                    .width(Fill)
-                    .height(Fill)
-                    .into()
-            } else {
-                row![properties_el, viewport_stack]
-                    .width(Fill)
-                    .height(Fill)
-                    .into()
-            }
+            row![properties_el, viewport_stack]
+                .width(Fill)
+                .height(Fill)
+                .into()
         };
 
         let center_stack = iced::widget::stack![center_row].width(Fill).height(Fill);
+
 
         let main_ui = container({
             let mut col = column![self.ribbon.view(

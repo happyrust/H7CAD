@@ -330,7 +330,7 @@ pub fn to_truck_native(
         );
         all_strokes.push(TextStroke {
             strokes,
-            origin: [0.0, 0.0],
+            origin: [origin_x as f64, origin_y as f64],
         });
     }
     TruckEntity {

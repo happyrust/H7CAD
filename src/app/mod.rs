@@ -58,13 +58,13 @@ pub(super) struct H7CAD {
     show_ucs_icon: bool,
     /// Show the ViewCube in the top-right of the viewport (NAVVCUBE).
     show_viewcube: bool,
-    /// Show the vertical navigation toolbar (pan/zoom/orbit) in the viewport (NAVBAR).
+    /// Whether the navigation toolbar is shown in the viewport (NAVBAR).
     show_navbar: bool,
     /// Whether the Properties panel is shown on the left (PROPERTIES).
     show_properties: bool,
     /// Show the document file tab bar between the ribbon and viewport (FILETAB).
     show_file_tabs: bool,
-    /// Show the layout tab strip inside the status bar (LAYOUTTAB).
+    /// Whether the layout/paper-space tabs are shown at the bottom (LAYOUTTAB).
     show_layout_tabs: bool,
     /// Underlay frame visibility (FRAMES0 / FRAMES1 / FRAMES2): 0 = hidden,
     /// 1 = on, 2 = on + print.  Mirrored into `Scene.underlay_frames_mode`.

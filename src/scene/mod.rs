@@ -133,17 +133,12 @@ pub struct Scene {
     /// Whether the ViewCube overlay is rendered (mirrors `H7CAD.show_viewcube`).
     pub show_viewcube: bool,
     /// Underlay frame visibility: 0 = hidden, 1 = on, 2 = on + print.
-    /// (FRAMES0 / FRAMES1 / FRAMES2 commands, mirrors `H7CAD.frames_mode`.)
     pub underlay_frames_mode: u8,
-    /// Whether object snap targets Underlay entities (UOSNAP command,
-    /// mirrors `H7CAD.uosnap`).
+    /// Whether object snap targets Underlay entities (UOSNAP).
     pub underlay_snap_enabled: bool,
     /// Scene centroid subtracted from all coordinates before f32 conversion.
-    /// Eliminates f32 precision loss at large world coordinates (e.g. UTM 4,000,000 m).
     pub world_offset: [f64; 3],
-    /// Largest local-space coordinate expected from real geometry, derived from
-    /// EXTMIN/EXTMAX (10× safety margin). Used by fit_all() to ignore garbage
-    /// entity coordinates (origin-stuck entities, bad Ray/XLine direction vectors).
+    /// Largest local-space coordinate expected from real geometry.
     pub local_extent_max: f32,
 }
 
@@ -201,14 +196,10 @@ impl Scene {
         self.geometry_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Compute scene centroid from DXF header extents and store as world_offset.
-    /// Must be called after `self.document` is set so all geometry is offset-corrected.
     pub fn compute_and_set_world_offset(&mut self) {
         let h = &self.document.header;
         let min = h.model_space_extents_min;
         let max = h.model_space_extents_max;
-        // Sentinel: DXF files with no geometry have EXTMIN = 1e20, EXTMAX = -1e20.
-        // Fall back to no offset so the scene stays at the origin.
         let valid = min.x < max.x && min.y < max.y;
         if valid {
             self.world_offset = [
@@ -216,8 +207,6 @@ impl Scene {
                 (min.y + max.y) * 0.5,
                 (min.z + max.z) * 0.5,
             ];
-            // 10× the EXTMIN→EXTMAX half-diagonal gives fit_all() a threshold to
-            // reject origin-stuck/corrupted entities far outside the drawing area.
             let hw = ((max.x - min.x) * 0.5) as f32;
             let hh = ((max.y - min.y) * 0.5) as f32;
             let hz = ((max.z - min.z) * 0.5).max(1.0) as f32;
@@ -617,13 +606,6 @@ impl Scene {
         // ── Ensure sort-order index is current ────────────────────────────
         // Replaces the old O(objects) find_map with one rebuild per epoch,
         // after which every wires_for_block call is an O(1) HashMap lookup.
-        let (mut native_wires, native_handles) =
-            if self.native_render_active_for_block(block_handle) {
-                self.native_wires_for_model_space()
-            } else {
-                (Vec::new(), HashSet::new())
-            };
-
         {
             let needs_rebuild = self
                 .sort_cache
@@ -648,6 +630,13 @@ impl Scene {
                 *self.sort_cache.borrow_mut() = Some((self.geometry_epoch, idx));
             }
         }
+
+        let (mut native_wires, native_handles) =
+            if self.native_render_active_for_block(block_handle) {
+                self.native_wires_for_model_space()
+            } else {
+                (Vec::new(), HashSet::new())
+            };
 
         // Collect visible entities sequentially (filter needs &self).
         let visible: Vec<&EntityType> = self
@@ -3322,6 +3311,20 @@ impl Scene {
         }
         self.bump_geometry();
         new_handles
+    }
+
+    // ── Grip editing ──────────────────────────────────────────────────────
+
+    pub fn apply_grip(
+        &mut self,
+        handle: Handle,
+        grip_id: usize,
+        apply: crate::scene::object::GripApply,
+    ) {
+        if let Some(entity) = self.document.get_entity_mut(handle) {
+            dispatch::apply_grip(entity, grip_id, apply);
+        }
+        self.rebuild_gpu_model_after_grip(handle);
     }
 
     /// Rebuild GPU hatch/solid model after a grip edit changed geometry.
@@ -6959,11 +6962,6 @@ fn clip_polygon_to_rect(
 }
 
 // ── Parallel tessellation free function ──────────────────────────────────────
-//
-// Takes only the `Send + Sync` data needed for tessellation so that
-// `wires_for_block` can dispatch work across rayon's thread pool without
-// requiring `Scene` (which contains `Rc<RefCell<...>>` and is `!Send`) to
-// cross thread boundaries.
 
 fn tessellate_entity(
     document: &acadrust::CadDocument,

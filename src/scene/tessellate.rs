@@ -628,8 +628,9 @@ fn native_dimension_geometry(
         return None;
     };
 
-    let (arrow_size, dimexo, dimexe) = native_dimension_line_style(native_document, entity);
+    let (_style_arrow_size, dimexo, dimexe) = native_dimension_line_style(native_document, entity);
     let mut points = Vec::new();
+    let arrow_size = 0.12_f32;
     match dim_type & 0x0F {
         0 => {
             let first = native_vec3(*first_point);
@@ -1015,7 +1016,7 @@ fn tessellate_multileader(
     let nan = [f32::NAN; 3];
 
     let [ox, oy, oz] = world_offset;
-    let to_f32 = |v: &acadrust::types::Vector3| -> [f32; 3] {
+    let to_f32 = |v: &crate::types::Vector3| -> [f32; 3] {
         [(v.x - ox) as f32, (v.y - oy) as f32, (v.z - oz) as f32]
     };
 
@@ -1209,17 +1210,19 @@ fn truck_wire_from_entity(
     volume_fallback: Vec<[f32; 3]>,
 ) -> WireModel {
     match te.object {
-        TruckObject::Text(strokes_2d) => {
+        TruckObject::Text(text_strokes) => {
             let mut points: Vec<[f32; 3]> = Vec::new();
-            for (i, stroke) in strokes_2d.iter().enumerate() {
-                if stroke.len() < 2 {
-                    continue;
-                }
-                if i > 0 && !points.is_empty() {
-                    points.push([f32::NAN, f32::NAN, f32::NAN]);
-                }
-                for &[x, y] in stroke {
-                    points.push([x, y, text_elev]);
+            for ts in &text_strokes {
+                for polyline in &ts.strokes {
+                    if polyline.len() < 2 {
+                        continue;
+                    }
+                    if !points.is_empty() {
+                        points.push([f32::NAN, f32::NAN, f32::NAN]);
+                    }
+                    for &[x, y] in polyline {
+                        points.push([x, y, text_elev]);
+                    }
                 }
             }
             WireModel {

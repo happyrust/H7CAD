@@ -6483,6 +6483,7 @@ mod tests {
                     confidence: PidGeometryConfidence::Inferred,
                 },
             ],
+            page_dimensions_mm: None,
             warnings: Vec::new(),
         };
 
@@ -6579,6 +6580,7 @@ mod tests {
                 source: PidGraphicProvenance::default(),
                 confidence: PidGeometryConfidence::ProbeOnly,
             }],
+            page_dimensions_mm: None,
             warnings: Vec::new(),
         };
 
@@ -6613,6 +6615,7 @@ mod tests {
                 source: PidGraphicProvenance::default(),
                 confidence: PidGeometryConfidence::Inferred,
             }],
+            page_dimensions_mm: None,
             warnings: Vec::new(),
         };
 

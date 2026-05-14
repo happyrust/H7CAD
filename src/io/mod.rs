@@ -409,13 +409,6 @@ fn load_dwg_native_blocking(
 }
 
 /// Write the document to a DXF file at `path`.
-///
-/// The DXF writer (`h7cad-native-dxf`) emits a single target syntax
-/// regardless of the picked filter label; historic revisions of
-/// `pick_save_path` exposed 8 "DXF Files (2018/.../R13)" entries that
-/// could never actually influence the output (rfd's API does not
-/// return the selected filter). The dialog now advertises a single
-/// "DXF File" option to stay honest.
 pub fn save_dxf(doc: &NativeCadDocument, path: &Path) -> Result<(), String> {
     let text = h7cad_native_dxf::write_dxf(doc)?;
     std::fs::write(path, text).map_err(|e| e.to_string())

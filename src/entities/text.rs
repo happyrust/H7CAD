@@ -254,7 +254,7 @@ pub fn to_truck_native(
     TruckEntity {
         object: TruckObject::Text(vec![TextStroke {
             strokes: strokes_2d,
-            origin: [0.0, 0.0],
+            origin: [origin[0] as f64, origin[1] as f64],
         }]),
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],

@@ -89,8 +89,8 @@ pub fn resolve_text_style_native(
         font_name,
         width_factor: style.map(|s| s.width_factor as f32).unwrap_or(1.0),
         oblique_angle: style.map(|s| s.oblique_angle as f32).unwrap_or(0.0),
-        is_backward: false,
-        is_upside_down: false,
+        is_backward: style.map(|s| s.flags & 0x02 != 0).unwrap_or(false),
+        is_upside_down: style.map(|s| s.flags & 0x04 != 0).unwrap_or(false),
     }
 }
 
